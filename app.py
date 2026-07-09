@@ -5,10 +5,24 @@
 - Supabase 미설정 시 data/sample/*.csv 로 동작한다.
 """
 from modules import auth, ui
-from views import dashboard, login, my_schedule, workspace
+from views import (
+    dashboard, login, my_schedule,
+    schedule_edit, schedule_view,
+    master_users, master_departments, master_teams, master_work_types,
+)
 
 # 페이지 설정 + 공통 스타일 (반드시 다른 st 호출보다 먼저)
 ui.setup_page()
+
+# 업무 화면 라우팅 테이블 (page id → 화면 모듈)
+_PAGES = {
+    "schedule_edit": schedule_edit,
+    "schedule_view": schedule_view,
+    "master_users": master_users,
+    "master_departments": master_departments,
+    "master_teams": master_teams,
+    "master_work_types": master_work_types,
+}
 
 
 def dispatch(page: str, user: dict) -> None:
@@ -19,8 +33,11 @@ def dispatch(page: str, user: dict) -> None:
         # 개인 조회 화면은 관리자 화면에서도 모바일 폭으로 표시
         with ui.centered((1, 1.6, 1)):
             my_schedule.render(user)
+    elif page in _PAGES:
+        _PAGES[page].render(user)
     else:
-        workspace.render(user, page)
+        ui.page_header(page)
+        ui.empty_state("이 화면에 접근할 권한이 없습니다.")
 
 
 def main() -> None:
