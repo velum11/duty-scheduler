@@ -35,6 +35,7 @@ _CSS = f"""
 html, body, .stApp {{
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic",
                "Apple SD Gothic Neo", Arial, sans-serif;
+  font-size: 14px;
 }}
 .stApp {{ background: #F7F8FA; }}
 
@@ -48,24 +49,27 @@ div[data-testid="stSidebarCollapseButton"],
 div[data-testid="collapsedControl"] {{ display: none !important; }}
 
 section[data-testid="stMain"] .block-container {{
-  padding: 0 1.75rem 3rem; max-width: 100%;
+  padding: 0 1.25rem 2rem; max-width: 100%;
 }}
+/* 메인 영역 블록 간격을 좁혀 업무 화면 정보 밀도를 높인다 */
+section[data-testid="stMain"] div[data-testid="stVerticalBlock"] {{ gap: 0.65rem; }}
+section[data-testid="stMain"] div[data-testid="stHorizontalBlock"] {{ gap: 0.6rem; }}
 
 /* ===== 좌측 사이드바 = 1차 아이콘 바(네이비) + 2차 메뉴 패널 ===== */
 section[data-testid="stSidebar"] {{
   width: {_SIDEBAR_W}px !important; min-width: {_SIDEBAR_W}px !important;
   max-width: {_SIDEBAR_W}px !important;
   background: linear-gradient(90deg, #071527 0, #071527 {_RAIL_W}px, #F3F5F8 {_RAIL_W}px);
-  border-right: 1px solid #DDE3EA;
+  border-right: 1px solid #D3DAE3;
 }}
 section[data-testid="stSidebar"] > div:first-child {{ width: {_SIDEBAR_W}px !important; }}
 div[data-testid="stSidebarContent"] {{ padding: 0 !important; }}
 div[data-testid="stSidebarUserContent"] {{ padding: 0 !important; }}
 section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
-section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{ gap: 0.15rem; }}
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{ gap: 0.1rem; }}
 
 /* 1차 아이콘 메뉴 바 */
-.st-key-nav_rail {{ padding-top: 0.9rem; }}
+.st-key-nav_rail {{ padding-top: 0.75rem; }}
 .st-key-nav_rail div.stButton > button {{
   display: flex; justify-content: center; align-items: center;
   width: 42px; height: 42px; min-height: 42px; margin: 0 auto; padding: 0;
@@ -76,78 +80,116 @@ section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{ gap: 0.15
 .st-key-nav_rail div.stButton > button[kind="primary"] {{ background: #12345A; color: #FFFFFF; }}
 .st-key-nav_rail div.stButton > button [data-testid="stIconMaterial"] {{ font-size: 22px; }}
 
-/* 2차 업무 메뉴 패널 */
-.st-key-nav_menu {{ padding: 0.85rem 0.75rem 1rem 0.85rem; }}
+/* 2차 업무 메뉴 패널 — ERP 메뉴 트리 */
+.st-key-nav_menu {{ padding: 0.7rem 0.55rem 1rem 0.55rem; }}
 .nav-appname {{
-  font-size: 0.95rem; font-weight: 700; color: #1E3A6E;
-  padding: 0.1rem 0.4rem 0.65rem; border-bottom: 1px solid #DDE3EA; margin-bottom: 0.7rem;
+  font-size: 0.92rem; font-weight: 700; color: #1E3A6E; letter-spacing: -0.01em;
+  padding: 0.1rem 0.5rem 0.55rem; border-bottom: 1px solid #D3DAE3; margin-bottom: 0.55rem;
 }}
 .nav-group-label {{
-  font-size: 0.7rem; font-weight: 700; color: #6B7280; letter-spacing: 0.05em;
-  margin: 0.15rem 0 0.35rem 0.4rem;
+  font-size: 0.68rem; font-weight: 700; color: #7A8494; letter-spacing: 0.07em;
+  text-transform: uppercase; margin: 0.2rem 0 0.3rem 0.55rem;
 }}
+.st-key-nav_menu div.stButton {{ margin-left: 0.35rem; border-left: 1px solid #DDE3EA; }}
 .st-key-nav_menu div.stButton > button {{
-  width: 100%; min-height: 2.05rem; padding: 0.2rem 0.7rem;
+  width: 100%; min-height: 1.95rem; padding: 0.18rem 0.6rem;
   justify-content: flex-start; text-align: left;
-  border: none; border-radius: 5px;
-  font-size: 0.85rem; font-weight: 500;
+  border: none; border-left: 2px solid transparent; border-radius: 0 4px 4px 0;
+  font-size: 0.83rem; font-weight: 500;
 }}
 .st-key-nav_menu div.stButton > button[kind="secondary"] {{ background: transparent; color: #3A3F45; }}
-.st-key-nav_menu div.stButton > button[kind="secondary"]:hover {{ background: #E4E9F0; color: #1E3A6E; }}
-.st-key-nav_menu div.stButton > button[kind="primary"] {{ background: #1E3A6E; color: #FFFFFF; }}
-
-/* ===== 상단 헤더 ===== */
-.st-key-app_header {{
-  background: #FFFFFF; border-bottom: 1px solid #DDE3EA;
-  margin: 0 -1.75rem 1.15rem; padding: 0.55rem 1.75rem;
+.st-key-nav_menu div.stButton > button[kind="secondary"]:hover {{
+  background: #E7ECF3; color: #1E3A6E; border-left-color: #9FB2CE;
 }}
-.hdr-screen {{ font-size: 1rem; font-weight: 600; color: #26282B; }}
-.hdr-user {{ text-align: right; color: #6B7280; font-size: 0.82rem; }}
+.st-key-nav_menu div.stButton > button[kind="primary"] {{
+  background: #1E3A6E; color: #FFFFFF; font-weight: 600; border-left-color: #0F2A4A;
+}}
+
+/* ===== 상단 헤더 (얇은 업무 시스템 헤더) ===== */
+.st-key-app_header {{
+  background: #FFFFFF; border-bottom: 1px solid #D3DAE3;
+  margin: 0 -1.25rem 0.85rem; padding: 0.4rem 1.25rem 0.38rem;
+}}
+.hdr-screen {{ font-size: 0.92rem; font-weight: 600; color: #26282B; }}
+.hdr-user {{ text-align: right; color: #6B7280; font-size: 0.8rem; }}
 .hdr-user b {{ color: #26282B; font-weight: 600; }}
 .st-key-app_header div.stButton > button,
 .st-key-mobile_header div.stButton > button {{
-  min-height: 1.9rem; padding: 0.1rem 0.85rem;
-  font-size: 0.78rem; color: #4B5563;
+  min-height: 1.75rem; padding: 0.05rem 0.8rem;
+  font-size: 0.76rem; font-weight: 500; color: #4B5563;
   background: #FFFFFF; border: 1px solid #C9D2DE; border-radius: 4px;
 }}
 
 /* 모바일(USER) 상단 헤더 */
 .st-key-mobile_header {{
-  background: #FFFFFF; border-bottom: 1px solid #DDE3EA;
+  background: #FFFFFF; border-bottom: 1px solid #D3DAE3;
   margin-bottom: 0.8rem; padding: 0.55rem 0.2rem;
 }}
 
 /* ===== 페이지 제목 ===== */
-.page-title {{ font-size: 1.45rem; font-weight: 700; color: #26282B; margin: 0.2rem 0 0.05rem; }}
-.page-desc {{ font-size: 0.85rem; color: #6B7280; margin: 0 0 1rem; }}
+.page-title {{ font-size: 1.28rem; font-weight: 700; color: #26282B; margin: 0.15rem 0 0.05rem; letter-spacing: -0.01em; }}
+.page-desc {{ font-size: 0.82rem; color: #6B7280; margin: 0 0 0.7rem; }}
 
 /* ===== 카드 (조회 조건/콘텐츠) ===== */
 div[data-testid="stVerticalBlockBorderWrapper"] {{
-  background: #FFFFFF; border-radius: 6px;
+  background: #FFFFFF; border-radius: 5px;
 }}
+/* 테두리 div 의 padding 을 직접 줄여 조회 조건/카드 영역을 컴팩트하게 */
 div[data-testid="stVerticalBlockBorderWrapper"] > div {{
-  border-color: #DDE3EA !important; border-radius: 6px;
+  border-color: #D3DAE3 !important; border-radius: 5px;
+  padding: 0.75rem 0.9rem !important;
 }}
 
-/* 요약 카드 */
+/* 패널 헤더 (카드 안 섹션 제목) */
+.panel-head {{
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 0.88rem; font-weight: 700; color: #26282B;
+  padding-bottom: 0.45rem; margin: 0 0 0.55rem;
+  border-bottom: 1px solid #EAEDF1;
+}}
+
+/* 요약 카드 — ERP KPI 타일 */
 .sum-card {{
-  background: #FFFFFF; border: 1px solid #DDE3EA; border-radius: 6px;
-  padding: 0.8rem 1rem 0.7rem;
+  background: #FFFFFF; border: 1px solid #D3DAE3; border-left: 3px solid #1E3A6E;
+  border-radius: 4px; padding: 0.6rem 0.9rem 0.55rem;
 }}
-.sum-value {{ font-size: 1.45rem; font-weight: 700; color: #1E3A6E; line-height: 1.25; }}
-.sum-label {{ font-size: 0.75rem; color: #6B7280; margin-top: 0.15rem; }}
+.sum-value {{ font-size: 1.35rem; font-weight: 700; color: #1E3A6E; line-height: 1.2; }}
+.sum-label {{ font-size: 0.72rem; color: #6B7280; margin-top: 0.15rem; letter-spacing: 0.02em; }}
 
-/* 데이터 영역 빈 상태 안내 */
+/* 데이터 그리드 영역 빈 상태 — 큰 빈 박스 대신 목록/그리드 프레임으로 표시 */
 .empty-state {{
-  background: #FFFFFF; border: 1px solid #DDE3EA; border-radius: 6px;
-  padding: 2.8rem 1rem; text-align: center; color: #6B7280; font-size: 0.88rem;
+  background: #FFFFFF; border: 1px solid #D3DAE3; border-radius: 5px; overflow: hidden;
 }}
+.empty-state .es-head {{
+  height: 32px; background: #F1F4F8; border-bottom: 1px solid #D3DAE3;
+  display: flex; align-items: center; padding: 0 0.85rem;
+  font-size: 0.75rem; font-weight: 600; color: #7A8494; letter-spacing: 0.03em;
+}}
+.empty-state .es-body {{
+  padding: 2.1rem 1rem; text-align: center; color: #6B7280; font-size: 0.85rem;
+}}
+
+/* ===== 폼 위젯 (Streamlit 기본 느낌 완화) ===== */
+section[data-testid="stMain"] div[data-testid="stSelectbox"] label,
+section[data-testid="stMain"] div[data-testid="stTextInput"] label,
+section[data-testid="stMain"] div[data-testid="stDateInput"] label,
+section[data-testid="stMain"] div[data-testid="stNumberInput"] label {{
+  font-size: 0.72rem; font-weight: 600; color: #6B7280;
+  margin-bottom: 0.15rem; padding: 0;
+}}
+section[data-testid="stMain"] div[data-baseweb="select"] > div,
+section[data-testid="stMain"] div[data-testid="stTextInput"] input,
+section[data-testid="stMain"] div[data-testid="stNumberInput"] input {{
+  min-height: 2.15rem; border-radius: 4px; border-color: #C9D2DE;
+  background: #FFFFFF; font-size: 0.83rem;
+}}
+section[data-testid="stMain"] div[data-baseweb="select"] div[data-baseweb="select"] {{ font-size: 0.83rem; }}
 
 /* ===== 버튼 (메인 영역) ===== */
 section[data-testid="stMain"] .stButton > button,
 section[data-testid="stMain"] .stDownloadButton > button,
 section[data-testid="stMain"] .stFormSubmitButton > button {{
-  min-height: 2.35rem; font-size: 0.85rem; font-weight: 600; border-radius: 5px;
+  min-height: 2.15rem; font-size: 0.83rem; font-weight: 600; border-radius: 4px;
 }}
 section[data-testid="stMain"] .stButton > button[kind="primary"],
 section[data-testid="stMain"] .stFormSubmitButton > button[kind="primary"] {{
@@ -160,6 +202,12 @@ section[data-testid="stMain"] .stButton > button[kind="secondary"],
 section[data-testid="stMain"] .stDownloadButton > button {{
   background: #FFFFFF; border: 1px solid #C9D2DE; color: #26282B;
 }}
+
+/* ===== 데이터 그리드 (읽기 전용 표) ===== */
+div[data-testid="stDataFrame"] {{
+  border: 1px solid #D3DAE3; border-radius: 4px;
+}}
+div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {{ border: none; }}
 
 /* ===== 근무코드 색상 뱃지 ===== */
 .duty-badge {{
@@ -302,9 +350,25 @@ def summary_cards(items) -> None:
         )
 
 
-def empty_state(message: str) -> None:
-    """데이터 그리드 영역의 조회 전/결과 없음 안내."""
-    st.markdown(f"<div class='empty-state'>{message}</div>", unsafe_allow_html=True)
+def empty_state(message: str, head: str = "데이터 목록") -> None:
+    """데이터 그리드 영역의 조회 전/결과 없음 안내.
+
+    큰 빈 박스 대신 헤더 스트립이 있는 목록/그리드 프레임으로 표시해
+    업무 시스템의 데이터 영역처럼 보이게 한다."""
+    st.markdown(
+        f"<div class='empty-state'><div class='es-head'>{head}</div>"
+        f"<div class='es-body'>{message}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def panel_head(title: str, right: str = "") -> None:
+    """카드 내부 섹션 제목 (하단 구분선 있는 ERP 패널 헤더)."""
+    right_html = f"<span class='duty-name'>{right}</span>" if right else ""
+    st.markdown(
+        f"<div class='panel-head'><span>{title}</span>{right_html}</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def action_bar(*specs):

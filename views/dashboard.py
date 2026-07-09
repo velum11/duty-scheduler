@@ -38,10 +38,7 @@ def render(user: dict) -> None:
 
     # 오늘 근무 현황
     with left, ui.card():
-        st.markdown(
-            f"<b>오늘 근무 현황</b> <span class='duty-name'>{today.month}/{today.day}({ui.weekday_kr(today)})</span>",
-            unsafe_allow_html=True,
-        )
+        ui.panel_head("오늘 근무 현황", f"{today.month}/{today.day}({ui.weekday_kr(today)})")
         today_rows = (
             scheds[scheds["duty_date"] == today.isoformat()] if not scheds.empty else scheds
         )
@@ -71,7 +68,7 @@ def render(user: dict) -> None:
 
     # 이달 근무형태 분포
     with right, ui.card():
-        st.markdown(f"<b>{today.month}월 근무형태 분포</b>", unsafe_allow_html=True)
+        ui.panel_head(f"{today.month}월 근무형태 분포")
         if month_rows.empty:
             st.markdown(
                 "<div class='duty-name' style='padding:1.4rem 0'>이달 등록된 근무가 없습니다.</div>",
