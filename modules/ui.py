@@ -15,6 +15,7 @@ App Shell 구조 (DESIGN.md §2):
 - badge_html / legend_html / weekday_kr / weekend_color / role_label
 """
 from datetime import date
+import json
 
 import streamlit as st
 
@@ -70,6 +71,14 @@ section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{ gap: 0.1r
 
 /* 1차 아이콘 메뉴 바 */
 .st-key-nav_rail {{ padding-top: 0.75rem; }}
+.st-key-nav_rail,
+.st-key-nav_rail div[data-testid="stVerticalBlock"],
+.st-key-nav_rail div.stButton {{
+  overflow: visible !important;
+}}
+.st-key-nav_rail div.stButton {{
+  position: relative;
+}}
 .st-key-nav_rail div.stButton > button {{
   display: flex; justify-content: center; align-items: center;
   width: 42px; height: 42px; min-height: 42px; margin: 0 auto; padding: 0;
@@ -87,8 +96,12 @@ section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{ gap: 0.1r
   padding: 0.1rem 0.5rem 0.55rem; border-bottom: 1px solid #D3DAE3; margin-bottom: 0.55rem;
 }}
 .nav-group-label {{
-  font-size: 0.68rem; font-weight: 700; color: #7A8494; letter-spacing: 0.07em;
-  text-transform: uppercase; margin: 0.2rem 0 0.3rem 0.55rem;
+  display: block;
+  font-size: 0.86rem; font-weight: 700; color: #1E3A6E; letter-spacing: -0.005em;
+  line-height: 1.35; white-space: normal; overflow-wrap: anywhere;
+  padding: 0.48rem 0.55rem 0.42rem;
+  margin: 0.35rem 0.15rem 0.62rem;
+  border-bottom: 1px solid #DDE3EA;
 }}
 .st-key-nav_menu div.stButton {{ margin-left: 0.35rem; border-left: 1px solid #DDE3EA; }}
 .st-key-nav_menu div.stButton > button {{
@@ -236,6 +249,50 @@ def setup_page() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
+def _rail_hover_label_css(groups: list) -> str:
+    """1차 아이콘 메뉴 hover 라벨을 현재 노출 그룹 기준으로 생성한다."""
+    rules = []
+    for g in groups:
+        label = json.dumps(str(g["label"]), ensure_ascii=False)
+        rules.append(
+            f"""
+.st-key-rail_{g["id"]} {{
+  position: relative;
+  overflow: visible !important;
+}}
+.st-key-rail_{g["id"]}::after {{
+  content: {label};
+  position: absolute;
+  left: 52px;
+  top: 50%;
+  transform: translate(-4px, -50%);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 30;
+  max-width: 112px;
+  padding: 0.22rem 0.48rem;
+  border: 1px solid #C9D2DE;
+  border-radius: 4px;
+  background: #FFFFFF;
+  color: #1E3A6E;
+  box-shadow: 0 4px 10px rgba(15, 42, 74, 0.12);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 120ms ease, transform 120ms ease;
+}}
+.st-key-rail_{g["id"]}:hover::after {{
+  opacity: 1;
+  transform: translate(0, -50%);
+}}
+"""
+        )
+    return "<style>" + "\n".join(rules) + "</style>"
+
+
 # ---------- App Shell ----------
 def app_shell(user: dict) -> str:
     """좌측 2단 메뉴(1차 아이콘 바 + 2차 메뉴 패널)와 상단 헤더를 렌더링하고
@@ -250,6 +307,7 @@ def app_shell(user: dict) -> str:
     cur_group = nav.group_of(page)
 
     with st.sidebar:
+        st.markdown(_rail_hover_label_css(groups), unsafe_allow_html=True)
         rail_col, menu_col = st.columns([_RAIL_W, _PANEL_W])
 
         # 1차 아이콘 메뉴 바
@@ -258,7 +316,6 @@ def app_shell(user: dict) -> str:
                 if st.button(
                     g["icon"],
                     key=f"rail_{g['id']}",
-                    help=g["label"],
                     type="primary" if g["id"] == cur_group["id"] else "secondary",
                     width="stretch",
                 ):
