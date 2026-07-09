@@ -17,8 +17,12 @@ from modules import config, sample_data
 # 화면이 사용하는 사용자 자연키 컬럼 (id/외래키는 파사드 내부에서만 사용).
 USER_COLUMNS = ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active"]
 
+# 화면이 사용하는 부서 컬럼 (id 는 파사드 내부 매핑에만 사용).
+DEPT_COLUMNS = ["dept_code", "dept_name", "sort_order", "is_active"]
+
 # 로컬 샘플 모드에서 편집 결과를 담아 세션 동안 유지하는 스토어 키.
 _USERS_STORE = "store_users"
+_DEPTS_STORE = "store_departments"
 
 
 def datasource() -> str:
@@ -47,9 +51,36 @@ def _emp_no_by_id() -> dict:
 
 
 # --- 기준정보 조회 ---
+def _base_departments() -> pd.DataFrame:
+    """샘플 CSV 를 화면용 부서 컬럼(DEPT_COLUMNS)으로 정리한 원본."""
+    df = sample_data.departments()
+    if df.empty:
+        return pd.DataFrame(columns=DEPT_COLUMNS)
+    return df[DEPT_COLUMNS].reset_index(drop=True).copy()
+
+
 def get_departments() -> pd.DataFrame:
-    # departments 는 dept_code 를 이미 보유하므로 그대로 반환한다.
-    return sample_data.departments()
+    """부서 목록(DEPT_COLUMNS).
+
+    로컬 샘플 모드에서는 세션 편집 결과(save_departments)를 우선 반환하므로,
+    부서 관리 화면에서 저장한 내용이 다른 화면에도 그대로 반영된다.
+    Phase 5(Supabase)에서는 이 분기를 실제 조회로 교체한다.
+    """
+    if is_sample_mode():
+        if _DEPTS_STORE not in st.session_state:
+            st.session_state[_DEPTS_STORE] = _base_departments()
+        return st.session_state[_DEPTS_STORE].copy()
+    return _base_departments()
+
+
+def save_departments(df: pd.DataFrame) -> None:
+    """편집된 부서 목록을 저장한다.
+
+    로컬 샘플 모드에서는 세션 상태에 보관해 현재 세션 동안 유지한다(CSV 는 건드리지
+    않는다). Phase 5(Supabase)에서는 여기서 upsert / is_active 소프트삭제로 교체한다.
+    """
+    keep = [c for c in DEPT_COLUMNS if c in df.columns]
+    st.session_state[_DEPTS_STORE] = df[keep].reset_index(drop=True).copy()
 
 
 def get_teams() -> pd.DataFrame:
