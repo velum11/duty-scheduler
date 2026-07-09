@@ -1,0 +1,6 @@
+dept_code,team_code,team_name,sort_order,is_active
+PET1,A,A조,1,true
+PET1,B,B조,2,true
+PET1,C,C조,3,true
+PET2,A,A조,1,true
+PET2,B,B조,2,true

@@ -1,0 +1,4 @@
+dept_code,dept_name,sort_order,is_active
+PET1,PET생산부(본동),1,true
+PET2,PET생산부(원료실),2,true
+MGT,생산관리팀,3,true

@@ -1,0 +1,14 @@
+# 업무용 테마 (DESIGN.md §3.1 팔레트)
+[theme]
+base = "light"
+primaryColor = "#1E3A6E"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F6F8"
+textColor = "#26282B"
+font = "sans serif"
+
+[server]
+runOnSave = true
+
+[client]
+toolbarMode = "minimal"   # Deploy 버튼/개발용 툴바 숨김

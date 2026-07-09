@@ -1,0 +1,10 @@
+emp_no,name,dept_code,team_code,position,role,is_active
+1001,김관리,PET1,A,파트장,ADMIN,true
+1002,이책임,PET1,A,조장,MANAGER,true
+1003,박근무,PET1,A,사원,USER,true
+1004,최근무,PET1,B,사원,USER,true
+1005,정근무,PET2,A,사원,USER,true
+1006,강책임,PET2,A,조장,MANAGER,true
+1007,윤근무,PET1,C,사원,USER,true
+9001,관리자,MGT,,팀장,ADMIN,true
+2001,퇴사자,PET1,B,사원,USER,false
