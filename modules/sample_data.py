@@ -1,8 +1,10 @@
 """로컬 샘플 데이터 로딩 (data/sample/*.csv).
 
 Supabase 미설정 시 이 모듈이 데이터 소스를 대신한다 (Phase 1 은 읽기 전용).
-CSV 는 사람이 직접 편집하기 쉽도록 uuid 대신 코드(dept_code, team_code, code)를
-자연키로 사용한다. Supabase 실연동(Phase 5) 시 db.py 에서 매핑한다.
+CSV 구조는 docs/database.md 의 테이블 구조를 그대로 따른다 — 각 테이블은 `id`
+기본키를 가지고, 참조는 `department_id` / `team_id` / `user_id` 로 연결한다.
+이 모듈은 CSV 를 원형(id 기반) 그대로 로드·타입변환만 하며, 화면이 쓰는 자연키
+컬럼(dept_code / team_code / emp_no 등)으로의 조인은 db.py 파사드에서 처리한다.
 """
 import pandas as pd
 import streamlit as st
@@ -44,7 +46,12 @@ def teams() -> pd.DataFrame:
         return df
     df["is_active"] = _to_bool(df["is_active"])
     df["sort_order"] = _to_int(df["sort_order"])
-    return df.sort_values(["dept_code", "sort_order"]).reset_index(drop=True)
+    df["_dept"] = _to_int(df["department_id"])
+    return (
+        df.sort_values(["_dept", "sort_order"])
+        .drop(columns="_dept")
+        .reset_index(drop=True)
+    )
 
 
 @st.cache_data(show_spinner=False)
@@ -62,6 +69,7 @@ def work_types() -> pd.DataFrame:
     if df.empty:
         return df
     df["is_work"] = _to_bool(df["is_work"])
+    df["affects_allowance"] = _to_bool(df["affects_allowance"])
     df["is_active"] = _to_bool(df["is_active"])
     df["sort_order"] = _to_int(df["sort_order"])
     return df.sort_values("sort_order").reset_index(drop=True)

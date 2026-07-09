@@ -1,6 +1,6 @@
-dept_code,team_code,team_name,sort_order,is_active
-PET1,A,A조,1,true
-PET1,B,B조,2,true
-PET1,C,C조,3,true
-PET2,A,A조,1,true
-PET2,B,B조,2,true
+id,department_id,team_code,team_name,sort_order,is_active
+1,1,A,A조,1,true
+2,1,B,B조,2,true
+3,1,C,C조,3,true
+4,2,A,A조,1,true
+5,2,B,B조,2,true

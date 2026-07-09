@@ -1,11 +1,11 @@
-code,name,start_time,end_time,color,is_work,sort_order,is_active
-주,주간,07:00,15:00,#1E6FD9,true,1,true
-야,야간,23:00,07:00,#7B4FD8,true,2,true
-야-4,야간 4시간,,,#9A7BE3,true,3,true
-야-6,야간 6시간,,,#5A3DB8,true,4,true
-특주,특근(주간),,,#E8862E,true,5,true
-특야,특근(야간),,,#B4541B,true,6,true
-OFF,휴무,,,#9AA0A6,false,7,true
-연차,연차휴가,,,#2E9E5B,false,8,true
-출산휴가,출산휴가,,,#D64596,false,9,true
-자녀결혼,경조(자녀결혼),,,#12A5A5,false,10,true
+id,code,name,category,short_label,start_time,end_time,color,is_work,affects_allowance,description,sort_order,is_active
+1,주,주간,주간,주,07:00,15:00,#1E6FD9,true,false,주간 정규 근무,1,true
+2,야,야간,야간,야,23:00,07:00,#7B4FD8,true,false,야간 정규 근무,2,true
+3,야-4,야간 4시간,야간,야-4,,,#9A7BE3,true,true,야간 근무(4시간),3,true
+4,야-6,야간 6시간,야간,야-6,,,#5A3DB8,true,true,야간 근무(6시간),4,true
+5,특주,특근(주간),주간,특주,,,#E8862E,true,true,특근(주간),5,true
+6,특야,특근(야간),야간,특야,,,#B4541B,true,true,특근(야간),6,true
+7,OFF,휴무,OFF,OFF,,,#9AA0A6,false,false,휴무,7,true
+8,연차,연차휴가,연차,연차,,,#2E9E5B,false,false,연차휴가,8,true
+9,출산휴가,출산휴가,기타,출산,,,#D64596,false,false,출산휴가,9,true
+10,자녀결혼,경조(자녀결혼),경조사,경조,,,#12A5A5,false,false,경조(자녀결혼),10,true
