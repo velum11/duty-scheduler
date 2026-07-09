@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import ALL, grid_height, run_query, save_bar, set_flash, show_flash
+from views.workspace import ALL, grid_height, save_bar, set_flash, show_flash
 
 # 화면 표시 라벨 ↔ 저장 코드 매핑
 _ROLE_TO_LABEL = {"USER": "직원", "MANAGER": "매니저", "ADMIN": "관리자"}
@@ -18,6 +18,7 @@ _LABEL_TO_ROLE = {v: k for k, v in _ROLE_TO_LABEL.items()}
 _VALID_ROLES = set(_ROLE_TO_LABEL)
 
 _COLS = ["사번", "성명", "부서", "조/팀", "직급", "권한", "재직"]
+_STATUS = ["재직", "퇴직", "전체"]
 
 
 def render(user: dict) -> None:
@@ -43,16 +44,17 @@ def render(user: dict) -> None:
             "조", [ALL] + list(team_opts), format_func=lambda c: team_opts.get(c, c),
             key="mu_team",
         )
-        active = c3.selectbox("재직 여부", ["재직만", "전체"], key="mu_active")
-        clicked = c4.button("조회", key="mu_go", type="primary", width="stretch")
+        active = c3.selectbox("재직 여부", _STATUS, key="mu_active")
+        clicked = c4.button("새로고침", key="mu_go", type="primary", width="stretch")
 
-    q = run_query("master_users", clicked, {"dept": dept, "team": team, "active": active})
-    if clicked:
+    # 화면 진입 시 기본 필터로 자동 조회, [새로고침] 시 현재 필터로 재조회.
+    params = {"dept": dept, "team": team, "active": active}
+    q = st.session_state.get("q_master_users")
+    if clicked or q is None:
+        q = params
+        st.session_state["q_master_users"] = q
         _load_editor(q, dept_names)
-    if not q:
-        ui.empty_state("조회 조건을 선택한 후 조회하세요.")
-        return
-    if "mu_work" not in st.session_state:  # rerun 등으로 조건만 남고 편집본이 없을 때
+    elif "mu_work" not in st.session_state:  # rerun 등으로 조건만 남고 편집본이 없을 때
         _load_editor(q, dept_names)
 
     show_flash("master_users")
@@ -75,7 +77,7 @@ def render(user: dict) -> None:
             "조/팀": st.column_config.SelectboxColumn("조/팀", options=[""] + team_codes, width="small"),
             "직급": st.column_config.TextColumn("직급", width="small"),
             "권한": st.column_config.SelectboxColumn("권한", options=list(_LABEL_TO_ROLE), width="small"),
-            "재직": st.column_config.CheckboxColumn("재직", width="small"),
+            "재직": st.column_config.CheckboxColumn("재직", width="small", default=True),
         },
     )
 
@@ -102,8 +104,10 @@ def _to_display(df: pd.DataFrame, dept_names: dict) -> pd.DataFrame:
 def _load_editor(q: dict, dept_names: dict) -> None:
     """조회 조건으로 대상 사용자를 편집기에 적재하고, 원본 사번 집합을 스냅샷한다."""
     df = db.get_users()
-    if q["active"] == "재직만":
+    if q["active"] == "재직":
         df = df[df["is_active"]]
+    elif q["active"] == "퇴직":
+        df = df[~df["is_active"].astype(bool)]
     if q["dept"] != ALL:
         df = df[df["dept_code"] == q["dept"]]
         if q["team"] != ALL:
@@ -111,7 +115,7 @@ def _load_editor(q: dict, dept_names: dict) -> None:
     df = df.sort_values(["dept_code", "team_code", "emp_no"]).reset_index(drop=True)
 
     st.session_state["mu_work"] = _to_display(df, dept_names)
-    st.session_state["mu_loaded_emp"] = [str(e) for e in df["emp_no"]]
+    st.session_state["mu_loaded_emp"] = [(str(e).strip(),) for e in df["emp_no"]]
     st.session_state.pop("mu_editor", None)  # 이전 편집 상태 초기화
 
 
@@ -127,30 +131,21 @@ def _summary_cards(edited: pd.DataFrame) -> None:
 
 
 def _save(edited, q, dept_names, name_to_code, team_set) -> None:
-    """편집 결과를 검증하고, 통과 시 전체 스토어에 병합해 저장한다."""
+    """편집 결과를 검증하고, 사번 기준 upsert 로 병합해 저장한다.
+
+    사용자는 물리 삭제하지 않는다. 그리드에서 지운 행(조회했다가 사라진 사번)은
+    삭제 대신 재직 여부(is_active)를 False(퇴직)로 바꿔 보존한다.
+    """
     records, errors = _validate(edited, dept_names, name_to_code, team_set)
 
-    # 사용자 물리 삭제 방지: 조회로 불러온 사번은 반드시 남아 있어야 한다(소프트 삭제 유도)
+    # 기존 사번은 U, 신규 사번은 C, 지운 사번은 재직=False 소프트 삭제.
     loaded = set(st.session_state.get("mu_loaded_emp", []))
-    kept = {r["emp_no"] for r in records if r["emp_no"]}
-    removed = sorted(loaded - kept)
-    if removed:
-        errors.append(
-            "사용자는 삭제하지 않고 재직 여부를 '퇴직'으로 변경해 관리합니다. "
-            f"삭제된 사번: {', '.join(removed)}"
-        )
-
-    # 전체 스토어에 병합 (조회 대상만 교체, 나머지는 보존)
     store = db.get_users()
-    remaining = store[~store["emp_no"].astype(str).isin(loaded)]
-    merged = pd.concat(
-        [remaining, pd.DataFrame(records, columns=db.USER_COLUMNS)], ignore_index=True,
+    merged, dup, n_c, n_u, n_d = db.upsert_records(
+        store, records, loaded, ["emp_no"], "is_active", db.USER_COLUMNS,
     )
-
-    all_emp = [e for e in merged["emp_no"].astype(str) if e]
-    dup = sorted({e for e in all_emp if all_emp.count(e) > 1})
     if dup:
-        errors.append(f"사번이 중복되었습니다: {', '.join(dup)}")
+        errors.append("사번이 중복되었습니다: " + ", ".join(k[0] for k in dup))
 
     if errors:
         st.error("저장하지 못했습니다.\n\n- " + "\n- ".join(errors))
@@ -159,7 +154,10 @@ def _save(edited, q, dept_names, name_to_code, team_set) -> None:
     db.save_users(merged)
     st.session_state.pop("mu_editor", None)
     _load_editor(q, dept_names)  # 저장된 스토어 기준으로 편집기 새로고침
-    set_flash("master_users", "success", f"사용자 {len(records)}건을 저장했습니다.")
+    set_flash(
+        "master_users", "success",
+        f"사용자를 저장했습니다. (신규 {n_c} · 수정 {n_u} · 퇴직 처리 {n_d})",
+    )
     st.rerun()
 
 

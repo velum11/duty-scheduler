@@ -11,9 +11,10 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import grid_height, run_query, save_bar, set_flash, show_flash
+from views.workspace import grid_height, save_bar, set_flash, show_flash
 
 _COLS = ["부서코드", "부서명", "표시순서", "사용"]
+_STATUS = ["사용 중", "사용 안 함", "전체"]
 
 
 def render(user: dict) -> None:
@@ -22,16 +23,17 @@ def render(user: dict) -> None:
     # 조회 조건 카드
     with ui.card():
         c1, c2 = st.columns([1.4, 0.9], vertical_alignment="bottom")
-        active = c1.selectbox("사용 여부", ["사용 중", "전체"], key="md_active")
-        clicked = c2.button("조회", key="md_go", type="primary", width="stretch")
+        active = c1.selectbox("사용 여부", _STATUS, key="md_active")
+        clicked = c2.button("새로고침", key="md_go", type="primary", width="stretch")
 
-    q = run_query("master_departments", clicked, {"active": active})
-    if clicked:
+    # 화면 진입 시 기본 필터로 자동 조회, [새로고침] 시 현재 필터로 재조회.
+    params = {"active": active}
+    q = st.session_state.get("q_master_departments")
+    if clicked or q is None:
+        q = params
+        st.session_state["q_master_departments"] = q
         _load_editor(q)
-    if not q:
-        ui.empty_state("조회 조건을 선택한 후 조회하세요.")
-        return
-    if "md_work" not in st.session_state:  # rerun 등으로 조건만 남고 편집본이 없을 때
+    elif "md_work" not in st.session_state:  # rerun 등으로 조건만 남고 편집본이 없을 때
         _load_editor(q)
 
     show_flash("master_departments")
@@ -43,6 +45,7 @@ def render(user: dict) -> None:
     sum_ph = st.container()
 
     # 스프레드시트형 편집 그리드 (행 추가 가능)
+    st.caption("셀 이동은 Tab 키를 사용하세요.")
     edited = st.data_editor(
         st.session_state["md_work"],
         key="md_editor",
@@ -56,7 +59,7 @@ def render(user: dict) -> None:
             "표시순서": st.column_config.NumberColumn(
                 "표시순서", width="small", min_value=0, step=1,
             ),
-            "사용": st.column_config.CheckboxColumn("사용", width="small"),
+            "사용": st.column_config.CheckboxColumn("사용", width="small", default=True),
         },
     )
 
@@ -82,10 +85,12 @@ def _load_editor(q: dict) -> None:
     df = db.get_departments()
     if q["active"] == "사용 중":
         df = df[df["is_active"]]
+    elif q["active"] == "사용 안 함":
+        df = df[~df["is_active"].astype(bool)]
     df = df.sort_values("sort_order").reset_index(drop=True)
 
     st.session_state["md_work"] = _to_display(df)
-    st.session_state["md_loaded"] = [str(c) for c in df["dept_code"]]
+    st.session_state["md_loaded"] = [(str(c).strip(),) for c in df["dept_code"]]
     st.session_state.pop("md_editor", None)  # 이전 편집 상태 초기화
 
 
@@ -100,21 +105,17 @@ def _summary_cards(edited: pd.DataFrame, headcount: pd.Series) -> None:
 
 
 def _save(edited: pd.DataFrame, q: dict) -> None:
-    """편집 결과를 검증하고, 통과 시 전체 스토어에 병합해 저장한다."""
+    """편집 결과를 검증하고, 자연키 기준 upsert 로 스토어에 병합해 저장한다."""
     records, errors = _validate(edited)
 
-    # 조회 대상만 교체하고 나머지(미조회 부서)는 보존한다.
+    # 기존 행은 U, 신규 행은 C, 조회했다가 사라진 행은 사용=False 소프트 삭제.
     loaded = set(st.session_state.get("md_loaded", []))
     store = db.get_departments()
-    remaining = store[~store["dept_code"].astype(str).isin(loaded)]
-    merged = pd.concat(
-        [remaining, pd.DataFrame(records, columns=db.DEPT_COLUMNS)], ignore_index=True,
+    merged, dup, n_c, n_u, n_d = db.upsert_records(
+        store, records, loaded, ["dept_code"], "is_active", db.DEPT_COLUMNS,
     )
-
-    all_codes = [c for c in merged["dept_code"].astype(str) if c]
-    dup = sorted({c for c in all_codes if all_codes.count(c) > 1})
     if dup:
-        errors.append(f"부서코드가 중복되었습니다: {', '.join(dup)}")
+        errors.append("부서코드가 중복되었습니다: " + ", ".join(k[0] for k in dup))
 
     if errors:
         st.error("저장하지 못했습니다.\n\n- " + "\n- ".join(errors))
@@ -123,7 +124,10 @@ def _save(edited: pd.DataFrame, q: dict) -> None:
     db.save_departments(merged)
     st.session_state.pop("md_editor", None)
     _load_editor(q)  # 저장된 스토어 기준으로 편집기 새로고침
-    set_flash("master_departments", "success", f"부서 {len(records)}건을 저장했습니다.")
+    set_flash(
+        "master_departments", "success",
+        f"부서를 저장했습니다. (신규 {n_c} · 수정 {n_u} · 미사용 처리 {n_d})",
+    )
     st.rerun()
 
 

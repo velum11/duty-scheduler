@@ -20,9 +20,20 @@ USER_COLUMNS = ["emp_no", "name", "dept_code", "team_code", "position", "role", 
 # 화면이 사용하는 부서 컬럼 (id 는 파사드 내부 매핑에만 사용).
 DEPT_COLUMNS = ["dept_code", "dept_name", "sort_order", "is_active"]
 
+# 화면이 사용하는 조/팀 컬럼 (id/department_id 는 파사드 내부 매핑에만 사용).
+TEAM_COLUMNS = ["dept_code", "team_code", "team_name", "sort_order", "is_active"]
+
+# 화면이 사용하는 근무형태 컬럼 (id 는 파사드 내부 매핑에만 사용).
+WORK_TYPE_COLUMNS = [
+    "code", "name", "category", "short_label", "start_time", "end_time",
+    "color", "is_work", "affects_allowance", "description", "sort_order", "is_active",
+]
+
 # 로컬 샘플 모드에서 편집 결과를 담아 세션 동안 유지하는 스토어 키.
 _USERS_STORE = "store_users"
 _DEPTS_STORE = "store_departments"
+_TEAMS_STORE = "store_teams"
+_WORK_TYPES_STORE = "store_work_types"
 
 
 def datasource() -> str:
@@ -83,13 +94,38 @@ def save_departments(df: pd.DataFrame) -> None:
     st.session_state[_DEPTS_STORE] = df[keep].reset_index(drop=True).copy()
 
 
-def get_teams() -> pd.DataFrame:
+def _base_teams() -> pd.DataFrame:
+    """샘플 CSV(id 기반)를 화면용 조/팀 컬럼(TEAM_COLUMNS)으로 변환한 원본."""
     df = sample_data.teams()
     if df.empty:
-        return df
+        return pd.DataFrame(columns=TEAM_COLUMNS)
     df = df.copy()
     df["dept_code"] = df["department_id"].astype(str).map(_dept_code_by_id()).fillna("")
-    return df
+    return df[TEAM_COLUMNS].reset_index(drop=True).copy()
+
+
+def get_teams() -> pd.DataFrame:
+    """조/팀 목록(TEAM_COLUMNS).
+
+    로컬 샘플 모드에서는 세션 편집 결과(save_teams)를 우선 반환하므로,
+    조 관리 화면에서 저장한 내용이 다른 화면에도 그대로 반영된다.
+    Phase 5(Supabase)에서는 이 분기를 실제 조회로 교체한다.
+    """
+    if is_sample_mode():
+        if _TEAMS_STORE not in st.session_state:
+            st.session_state[_TEAMS_STORE] = _base_teams()
+        return st.session_state[_TEAMS_STORE].copy()
+    return _base_teams()
+
+
+def save_teams(df: pd.DataFrame) -> None:
+    """편집된 조/팀 목록을 저장한다.
+
+    로컬 샘플 모드에서는 세션 상태에 보관해 현재 세션 동안 유지한다(CSV 는 건드리지
+    않는다). Phase 5(Supabase)에서는 여기서 upsert / is_active 소프트삭제로 교체한다.
+    """
+    keep = [c for c in TEAM_COLUMNS if c in df.columns]
+    st.session_state[_TEAMS_STORE] = df[keep].reset_index(drop=True).copy()
 
 
 def _base_users() -> pd.DataFrame:
@@ -127,8 +163,89 @@ def save_users(df: pd.DataFrame) -> None:
     st.session_state[_USERS_STORE] = df[keep].reset_index(drop=True).copy()
 
 
+def _base_work_types() -> pd.DataFrame:
+    """샘플 CSV 를 화면용 근무형태 컬럼(WORK_TYPE_COLUMNS)으로 정리한 원본."""
+    df = sample_data.work_types()
+    if df.empty:
+        return pd.DataFrame(columns=WORK_TYPE_COLUMNS)
+    df = df.copy()
+    for c in WORK_TYPE_COLUMNS:
+        if c not in df.columns:
+            df[c] = ""
+    return df[WORK_TYPE_COLUMNS].reset_index(drop=True).copy()
+
+
 def get_work_types() -> pd.DataFrame:
-    return sample_data.work_types()
+    """근무형태 목록(WORK_TYPE_COLUMNS).
+
+    로컬 샘플 모드에서는 세션 편집 결과(save_work_types)를 우선 반환하므로,
+    근무형태 관리 화면에서 저장한 내용이 다른 화면에도 그대로 반영된다.
+    Phase 5(Supabase)에서는 이 분기를 실제 조회로 교체한다.
+    """
+    if is_sample_mode():
+        if _WORK_TYPES_STORE not in st.session_state:
+            st.session_state[_WORK_TYPES_STORE] = _base_work_types()
+        return st.session_state[_WORK_TYPES_STORE].copy()
+    return _base_work_types()
+
+
+def save_work_types(df: pd.DataFrame) -> None:
+    """편집된 근무형태 목록을 저장한다.
+
+    로컬 샘플 모드에서는 세션 상태에 보관해 현재 세션 동안 유지한다(CSV 는 건드리지
+    않는다). Phase 5(Supabase)에서는 여기서 upsert / is_active 소프트삭제로 교체한다.
+    """
+    keep = [c for c in WORK_TYPE_COLUMNS if c in df.columns]
+    st.session_state[_WORK_TYPES_STORE] = df[keep].reset_index(drop=True).copy()
+
+
+def upsert_records(store, records, loaded_keys, key_cols, status_col, columns):
+    """기준정보 저장 공통 병합.
+
+    편집 그리드 결과(records)를 기존 스토어(store)에 자연키(key_cols) 기준으로
+    upsert 한다. 키가 이미 있으면 수정(U), 없으면 신규(C)로 처리한다. 조회 시
+    적재됐지만(loaded_keys) 편집 결과에서 사라진 행은 물리 삭제하지 않고 상태
+    컬럼(status_col)만 False 로 바꾼다(소프트 삭제).
+
+    반환: (merged_df, dup_keys, n_create, n_update, n_soft_deleted)
+      dup_keys 는 편집 결과 안에서 키가 겹친 경우만(진짜 중복). upsert 이므로
+      기존 스토어 행과 편집 행이 같은 키를 갖는 것은 중복이 아니라 수정이다.
+    """
+    def key_of(rec):
+        return tuple(str(rec[c]).strip() for c in key_cols)
+
+    store_map, order = {}, []
+    for _, r in store.iterrows():
+        k = key_of(r)
+        store_map[k] = r.to_dict()
+        order.append(k)
+
+    rec_keys = [key_of(rec) for rec in records]
+    dup = sorted({k for k in rec_keys if rec_keys.count(k) > 1})
+
+    n_create = n_update = 0
+    edited = set()
+    for rec, k in zip(records, rec_keys):
+        edited.add(k)
+        if k in store_map:
+            n_update += 1
+        else:
+            n_create += 1
+            order.append(k)
+        store_map[k] = rec
+
+    n_soft = 0
+    for k in loaded_keys:
+        if k in edited or k not in store_map:
+            continue
+        row = dict(store_map[k])
+        if row.get(status_col) is not False:
+            row[status_col] = False
+            n_soft += 1
+        store_map[k] = row
+
+    merged = pd.DataFrame([store_map[k] for k in order], columns=columns)
+    return merged, dup, n_create, n_update, n_soft
 
 
 def get_schedules() -> pd.DataFrame:
