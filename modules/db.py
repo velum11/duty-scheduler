@@ -10,8 +10,15 @@ user_id)이다. 화면은 자연키(dept_code / team_code / emp_no / duty_date)�
 DataFrame 을 훼손하지 않도록 항상 copy 후 컬럼을 추가한다.
 """
 import pandas as pd
+import streamlit as st
 
 from modules import config, sample_data
+
+# 화면이 사용하는 사용자 자연키 컬럼 (id/외래키는 파사드 내부에서만 사용).
+USER_COLUMNS = ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active"]
+
+# 로컬 샘플 모드에서 편집 결과를 담아 세션 동안 유지하는 스토어 키.
+_USERS_STORE = "store_users"
 
 
 def datasource() -> str:
@@ -54,14 +61,39 @@ def get_teams() -> pd.DataFrame:
     return df
 
 
-def get_users() -> pd.DataFrame:
+def _base_users() -> pd.DataFrame:
+    """샘플 CSV(id 기반)를 화면용 자연키 컬럼(USER_COLUMNS)으로 변환한 원본."""
     df = sample_data.users()
     if df.empty:
-        return df
+        return pd.DataFrame(columns=USER_COLUMNS)
     df = df.copy()
     df["dept_code"] = df["department_id"].astype(str).map(_dept_code_by_id()).fillna("")
     df["team_code"] = df["team_id"].astype(str).map(_team_code_by_id()).fillna("")
-    return df
+    return df[USER_COLUMNS].reset_index(drop=True)
+
+
+def get_users() -> pd.DataFrame:
+    """사용자 목록(USER_COLUMNS).
+
+    로컬 샘플 모드에서는 세션 편집 결과(save_users)를 우선 반환하므로,
+    사용자 관리 화면에서 저장한 내용이 다른 화면에도 그대로 반영된다.
+    Phase 5(Supabase)에서는 이 분기를 실제 조회로 교체한다.
+    """
+    if is_sample_mode():
+        if _USERS_STORE not in st.session_state:
+            st.session_state[_USERS_STORE] = _base_users()
+        return st.session_state[_USERS_STORE].copy()
+    return _base_users()
+
+
+def save_users(df: pd.DataFrame) -> None:
+    """편집된 사용자 목록을 저장한다.
+
+    로컬 샘플 모드에서는 세션 상태에 보관해 현재 세션 동안 유지한다(CSV 는 건드리지
+    않는다). Phase 5(Supabase)에서는 여기서 upsert / is_active 소프트삭제로 교체한다.
+    """
+    keep = [c for c in USER_COLUMNS if c in df.columns]
+    st.session_state[_USERS_STORE] = df[keep].reset_index(drop=True).copy()
 
 
 def get_work_types() -> pd.DataFrame:

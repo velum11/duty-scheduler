@@ -32,6 +32,28 @@ def grid_height(nrows: int) -> int:
     return min(38 * nrows + 40, 560)
 
 
+# ---------- 편집 화면 공통 (기준정보 등록/수정) ----------
+def set_flash(page_id: str, kind: str, text: str) -> None:
+    """저장 결과 메시지를 다음 rerun 에서 1회 표시하도록 세션에 담는다.
+
+    kind 는 st 의 메서드명("success" / "warning" / "error")."""
+    st.session_state[f"flash_{page_id}"] = (kind, text)
+
+
+def show_flash(page_id: str) -> None:
+    msg = st.session_state.pop(f"flash_{page_id}", None)
+    if msg:
+        kind, text = msg
+        getattr(st, kind)(text)
+
+
+def save_bar(page_id: str) -> bool:
+    """편집 그리드 하단 [저장] 액션. 클릭 여부를 반환한다."""
+    (save,) = ui.action_bar("save")
+    with save:
+        return st.button("저장", key=f"{page_id}_save", type="primary", width="stretch")
+
+
 def master_download(view: pd.DataFrame, name: str, key: str) -> None:
     """하단 액션 버튼 영역 (기준정보 공통)."""
     (dl,) = ui.action_bar("download")
