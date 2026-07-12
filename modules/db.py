@@ -29,11 +29,15 @@ WORK_TYPE_COLUMNS = [
     "color", "is_work", "affects_allowance", "description", "sort_order", "is_active",
 ]
 
+# 화면이 사용하는 근무표 자연키 컬럼 (id/user_id/work_date 는 파사드 내부에서만 사용).
+SCHEDULE_COLUMNS = ["emp_no", "duty_date", "work_type_code", "note"]
+
 # 로컬 샘플 모드에서 편집 결과를 담아 세션 동안 유지하는 스토어 키.
 _USERS_STORE = "store_users"
 _DEPTS_STORE = "store_departments"
 _TEAMS_STORE = "store_teams"
 _WORK_TYPES_STORE = "store_work_types"
+_SCHEDULES_STORE = "store_schedules"
 
 
 def datasource() -> str:
@@ -248,14 +252,47 @@ def upsert_records(store, records, loaded_keys, key_cols, status_col, columns):
     return merged, dup, n_create, n_update, n_soft
 
 
-def get_schedules() -> pd.DataFrame:
+def _base_schedules() -> pd.DataFrame:
+    """샘플 CSV(id 기반)를 화면용 근무표 자연키 컬럼(SCHEDULE_COLUMNS)으로 변환한 원본.
+
+    저장 계층은 세로형(long) — 사번 | 근무일자 | 근무형태 (docs/database.md §5.4).
+    사용자를 찾을 수 없는(user_id 미매핑) 행은 제외한다.
+    """
     df = sample_data.work_schedules()
     if df.empty:
-        return df
+        return pd.DataFrame(columns=SCHEDULE_COLUMNS)
     df = df.copy()
     df["emp_no"] = df["user_id"].astype(str).map(_emp_no_by_id()).fillna("")
-    df["duty_date"] = df["work_date"]
-    return df
+    df["duty_date"] = df["work_date"].astype(str)
+    df["note"] = df["note"].fillna("").astype(str) if "note" in df.columns else ""
+    df = df[df["emp_no"] != ""]
+    return df[SCHEDULE_COLUMNS].reset_index(drop=True).copy()
+
+
+def get_schedules() -> pd.DataFrame:
+    """근무표 목록(SCHEDULE_COLUMNS, 세로형 long format).
+
+    로컬 샘플 모드에서는 세션 편집 결과(save_schedules)를 우선 반환하므로,
+    근무표 등록/수정 화면에서 저장한 내용이 조회·대시보드·내 근무표 화면에도
+    그대로 반영된다. Phase 5(Supabase)에서는 이 분기를 실제 조회로 교체한다.
+    """
+    if is_sample_mode():
+        if _SCHEDULES_STORE not in st.session_state:
+            st.session_state[_SCHEDULES_STORE] = _base_schedules()
+        return st.session_state[_SCHEDULES_STORE].copy()
+    return _base_schedules()
+
+
+def save_schedules(df: pd.DataFrame) -> None:
+    """근무표 전체(세로형 long format, SCHEDULE_COLUMNS)를 저장한다.
+
+    화면(schedule_edit)에서 (선택 직원 × 선택 월) 범위만 교체해 만든 전체
+    스냅샷을 넘겨받아 세션 스토어에 그대로 보관한다. 로컬 샘플 모드에서는 현재
+    세션 동안만 유지하며 CSV 는 건드리지 않는다. Phase 5(Supabase)에서는 여기서
+    범위 삭제 후 batch upsert 로 교체한다.
+    """
+    keep = [c for c in SCHEDULE_COLUMNS if c in df.columns]
+    st.session_state[_SCHEDULES_STORE] = df[keep].reset_index(drop=True).copy()
 
 
 # --- 조회 헬퍼 ---
