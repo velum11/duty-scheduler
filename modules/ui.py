@@ -40,10 +40,9 @@ html, body, .stApp {{
 }}
 .stApp {{ background: #F7F8FA; }}
 
-/* Streamlit 기본 장식 숨김: 헤더/툴바/푸터/사이드바 접기 */
+/* Streamlit 기본 장식 숨김 — stToolbar 는 사이드바 펼침 버튼을 포함하므로 숨기지 않는다 */
 #MainMenu, footer, .stAppDeployButton,
-header[data-testid="stHeader"],
-div[data-testid="stToolbar"], div[data-testid="stDecoration"],
+div[data-testid="stDecoration"],
 div[data-testid="stStatusWidget"] {{ display: none !important; }}
 
 section[data-testid="stMain"] .block-container {{

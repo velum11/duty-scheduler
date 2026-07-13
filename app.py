@@ -4,14 +4,15 @@
 - Supabase 미설정 시 data/sample/*.csv 로 동작한다.
 """
 from modules import auth, ui
+
+# 페이지 설정과 공통 CSS를 components.v2 등록보다 먼저 적용한다.
+ui.setup_page()
+
 from views import (
     dashboard, login, my_schedule,
     schedule_edit, schedule_view,
     master_users, master_departments, master_teams, master_work_types,
 )
-
-# 페이지 설정 + 공통 스타일 (반드시 다른 st 호출보다 먼저)
-ui.setup_page()
 
 # 업무 화면 라우팅 테이블 (page id → 화면 모듈)
 _PAGES = {

@@ -1,6 +1,7 @@
 """모바일 우선 개인 근무표 조회 화면."""
 import calendar
 from datetime import date
+from functools import partial
 from html import escape
 
 import pandas as pd
@@ -12,7 +13,8 @@ from modules import db, ui
 _MONTH_KEY = "my_schedule_month"
 _GROUP_ORDER = ("주간", "야간", "OFF", "휴가")
 
-_MONTH_PICKER = st.components.v2.component(
+_MONTH_PICKER = partial(
+    st.components.v2.component,
     "duty_month_wheel_picker",
     html="<div id='duty-month-wheel'></div>",
     css="""
@@ -190,7 +192,7 @@ def _calendar_html(rows: pd.DataFrame, year: int, month: int, work_types: dict) 
 
 
 def _month_navigation(year: int, month: int) -> None:
-    result = _MONTH_PICKER(
+    result = _MONTH_PICKER()(
         key="my_schedule_wheel_picker",
         data={"year": year, "month": month},
         on_month_change_change=lambda: None,
