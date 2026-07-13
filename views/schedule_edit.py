@@ -227,20 +227,9 @@ def _save(edited: pd.DataFrame, q: dict) -> None:
         st.error(head + "\n\n- " + "\n- ".join(shown) + more)
         return
 
-    # (선택 직원 × 선택 월) 범위만 교체하고 나머지 근무표는 보존한다.
+    # (선택 직원 × 선택 월) 범위만 repository 계층에서 교체한다.
     emp_nos = [str(e).strip() for e in edited["사번"] if str(e).strip()]
-    prefix = f"{q['year']:04d}-{q['month']:02d}"
-    store = db.get_schedules()
-    if store.empty:
-        others = pd.DataFrame(columns=db.SCHEDULE_COLUMNS)
-    else:
-        in_scope = store["emp_no"].isin(emp_nos) & store["duty_date"].str.startswith(prefix)
-        others = store[~in_scope]
-
-    merged = pd.concat(
-        [others, pd.DataFrame(records, columns=db.SCHEDULE_COLUMNS)], ignore_index=True,
-    )
-    db.save_schedules(merged)
+    db.replace_month_schedules(emp_nos, q["year"], q["month"], records)
 
     st.session_state.pop("se_editor", None)
     _load_grid(q)  # 저장된 스토어 기준으로 편집기 새로고침

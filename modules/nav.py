@@ -5,7 +5,7 @@ App Shell 코드를 바꾸지 않고 이 목록에 그룹/하위 메뉴 dict 만
 렌더링(1차 아이콘 바, 2차 메뉴 패널, 헤더)은 modules/ui.py 의 app_shell 이 담당한다.
 
 권한별 표시 (DESIGN.md §6.2):
-- USER    내 근무표
+- USER    대시보드 / 월간 근무표 / 내 근무표 (전용 App Shell)
 - MANAGER 대시보드 / 근무표
 - ADMIN   대시보드 / 근무표 / 기준정보
 """
@@ -15,6 +15,24 @@ _MY_SCHEDULE = {
     "label": "내 근무표",
     "desc": "본인 근무를 월 단위로 확인합니다.",
 }
+
+USER_MENU = [
+    {
+        "id": "dashboard",
+        "label": "대시보드",
+        "icon": ":material/home:",
+    },
+    {
+        "id": "schedule_view",
+        "label": "월간 근무표",
+        "icon": ":material/calendar_month:",
+    },
+    {
+        "id": "my_schedule",
+        "label": "내 근무표",
+        "icon": ":material/person:",
+    },
+]
 
 MENU_GROUPS = [
     {
@@ -97,8 +115,15 @@ def visible_groups(role: str) -> list:
 
 def default_page(role: str) -> str:
     """role 의 첫 화면 page id."""
+    if role == "USER":
+        return "my_schedule"
     groups = visible_groups(role)
     return groups[0]["children"][0]["id"]
+
+
+def user_menu() -> list:
+    """USER 전용 App Shell의 평면 메뉴 목록."""
+    return USER_MENU
 
 
 def group_of(page_id: str, role: str = None) -> dict:
@@ -120,6 +145,8 @@ def page_desc(page_id: str) -> str:
 
 def allowed(page_id: str, role: str) -> bool:
     """role 이 해당 화면에 접근 가능한지 (앱 레벨 차단용)."""
+    if role == "USER":
+        return any(item["id"] == page_id for item in USER_MENU)
     return any(
         child["id"] == page_id
         for group in visible_groups(role)

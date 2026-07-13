@@ -28,7 +28,7 @@ docs/
 - 직원별 내 근무표 조회
 - 엑셀 복사/붙여넣기 기반 스프레드시트 입력
 - Supabase 저장
-- Supabase 미설정 시 로컬 샘플 데이터 실행
+- 명시적 데이터 모드 선택(`sample` 또는 `supabase`)
 
 관리자와 매니저 화면은 `DESIGN.md` 기준의 SAP/ERP 스타일 App Shell을 사용합니다.
 
@@ -55,7 +55,7 @@ docs/
 - 내 근무표 기본 조회
 - App Shell 적용 준비 구조
 
-Supabase 설정이 없어도 `data/sample/*.csv` 파일을 사용하여 앱이 실행되어야 합니다.
+로컬 실행은 `DUTY_DATA_MODE=sample` 또는 `[app].data_mode="sample"`을 명시해야 합니다.
 
 ---
 
@@ -77,6 +77,7 @@ pip install -r requirements.txt
 ### 3. 앱 실행
 
 ```powershell
+$env:DUTY_DATA_MODE = "sample"
 python -m streamlit run app.py
 ```
 
@@ -214,7 +215,21 @@ Supabase 연결 정보는 코드에 직접 작성하지 않습니다.
 .streamlit/secrets.toml.example
 ```
 
-Supabase 설정이 없으면 앱은 로컬 샘플 데이터를 사용해야 합니다.
+데이터 모드와 Supabase 접속정보는 다음처럼 설정합니다.
+
+```toml
+[app]
+data_mode = "supabase"
+
+[supabase]
+url = "https://...supabase.co"
+service_role_key = "..."
+test_project = false
+```
+
+환경변수 `DUTY_DATA_MODE`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`도 사용할 수
+있습니다. Supabase 모드의 연결 실패는 sample 모드로 자동 전환되지 않습니다.
+`service_role_key`는 서버 측 secrets에만 두며 브라우저로 전달하지 않습니다.
 
 ---
 

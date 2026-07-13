@@ -2,8 +2,11 @@
 
 이 문서는 `생산 근무표 관리` 시스템의 Supabase PostgreSQL 기준 데이터 구조를 정의한다.
 
-Supabase 접속 정보는 `.streamlit/secrets.toml` 또는 `.env`에서 읽으며, 코드에 직접 작성하지 않는다.  
-Supabase 설정이 없을 경우 앱은 `data/sample/` CSV를 사용해 로컬 샘플 모드로 실행한다.
+데이터 모드는 `sample` 또는 `supabase`로 명시하며, 접속 정보는
+`.streamlit/secrets.toml` 또는 환경변수에서 읽고 코드에 직접 작성하지 않는다.
+Supabase 모드의 연결 실패는 sample 모드로 자동 전환하지 않는다. 현재 실행 스키마는
+`supabase/migrations/001_initial_schema.sql`, 설정과 검증 절차는
+`docs/supabase-setup.md`를 기준으로 한다.
 
 ---
 

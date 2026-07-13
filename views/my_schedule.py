@@ -92,21 +92,6 @@ def _shift_month(year: int, month: int, offset: int) -> tuple[int, int]:
     return year, month
 
 
-def _work_group(code: str, work_type: dict) -> str | None:
-    category = str(work_type.get("category") or "").strip()
-    name = str(work_type.get("name") or "")
-    label = f"{code} {category} {name}"
-    if code == "OFF" or category.upper() == "OFF":
-        return "OFF"
-    if "야간" in category or code.startswith("야") or "특야" in code:
-        return "야간"
-    if "주간" in category or code.startswith("주") or "특주" in code:
-        return "주간"
-    if not bool(work_type.get("is_work")) or any(word in label for word in ("휴가", "연차", "경조")):
-        return "휴가"
-    return None
-
-
 def _group_counts(rows: pd.DataFrame, work_types: pd.DataFrame) -> list[tuple[str, int]]:
     type_map = {
         str(row["code"]): row.to_dict()
@@ -114,7 +99,7 @@ def _group_counts(rows: pd.DataFrame, work_types: pd.DataFrame) -> list[tuple[st
     }
     totals = {group: 0 for group in _GROUP_ORDER}
     for code, count in rows["work_type_code"].value_counts().items():
-        group = _work_group(str(code), type_map.get(str(code), {}))
+        group = db.classify_work_group(str(code), type_map.get(str(code), {}))
         if group:
             totals[group] += int(count)
     return [(group, count) for group, count in totals.items() if count]
@@ -241,5 +226,3 @@ def render(user: dict) -> None:
             ) + "</div>",
             unsafe_allow_html=True,
         )
-    with st.expander("근무코드 안내", expanded=False):
-        st.markdown(ui.legend_html(work_types), unsafe_allow_html=True)

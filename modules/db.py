@@ -1,8 +1,7 @@
-"""데이터 접근 계층 (data source facade).
+"""데이터 접근 계층 (sample/Supabase facade).
 
-Phase 1: 항상 로컬 샘플 데이터(sample_data)를 사용한다.
-Phase 5: supabase_configured() 가 True 면 이 함수들을 Supabase 쿼리로 교체한다.
-         화면/로직 코드는 db 함수만 호출하므로, 데이터 소스 전환 시 이 파일만 바뀐다.
+데이터 모드는 설정에서 명시적으로 선택하며, Supabase 오류를 sample 모드로 숨기지 않는다.
+화면/로직 코드는 이 모듈의 자연키 기반 함수만 호출한다.
 
 저장 계층(CSV/Supabase)은 docs/database.md 대로 id 기반(department_id / team_id /
 user_id)이다. 화면은 자연키(dept_code / team_code / emp_no / duty_date)를 쓰므로,
@@ -12,7 +11,12 @@ DataFrame 을 훼손하지 않도록 항상 copy 후 컬럼을 추가한다.
 import pandas as pd
 import streamlit as st
 
-from modules import config, sample_data
+from modules import config, sample_data, supabase_repository
+
+DATA_SOURCE_ERRORS = (
+    config.DataSourceConfigurationError,
+    supabase_repository.SupabaseDataError,
+)
 
 # 화면이 사용하는 사용자 자연키 컬럼 (id/외래키는 파사드 내부에서만 사용).
 USER_COLUMNS = ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active"]
@@ -42,7 +46,7 @@ _SCHEDULES_STORE = "store_schedules"
 
 def datasource() -> str:
     """현재 데이터 소스 이름. 'supabase' 또는 'sample'."""
-    return "supabase" if config.supabase_configured() else "sample"
+    return config.data_mode()
 
 
 def is_sample_mode() -> bool:
@@ -74,7 +78,7 @@ def _base_departments() -> pd.DataFrame:
     return df[DEPT_COLUMNS].reset_index(drop=True).copy()
 
 
-def get_departments() -> pd.DataFrame:
+def get_departments(is_active: bool | None = None) -> pd.DataFrame:
     """부서 목록(DEPT_COLUMNS).
 
     로컬 샘플 모드에서는 세션 편집 결과(save_departments)를 우선 반환하므로,
@@ -85,7 +89,10 @@ def get_departments() -> pd.DataFrame:
         if _DEPTS_STORE not in st.session_state:
             st.session_state[_DEPTS_STORE] = _base_departments()
         return st.session_state[_DEPTS_STORE].copy()
-    return _base_departments()
+    df = supabase_repository.get_departments()
+    if is_active is not None:
+        df = df[df["is_active"].astype(bool) == bool(is_active)]
+    return df.reset_index(drop=True)
 
 
 def save_departments(df: pd.DataFrame) -> None:
@@ -95,7 +102,11 @@ def save_departments(df: pd.DataFrame) -> None:
     않는다). Phase 5(Supabase)에서는 여기서 upsert / is_active 소프트삭제로 교체한다.
     """
     keep = [c for c in DEPT_COLUMNS if c in df.columns]
-    st.session_state[_DEPTS_STORE] = df[keep].reset_index(drop=True).copy()
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_DEPTS_STORE] = normalized
+        return
+    supabase_repository.upsert_departments(normalized.to_dict("records"))
 
 
 def _base_teams() -> pd.DataFrame:
@@ -108,7 +119,7 @@ def _base_teams() -> pd.DataFrame:
     return df[TEAM_COLUMNS].reset_index(drop=True).copy()
 
 
-def get_teams() -> pd.DataFrame:
+def get_teams(dept_code: str | None = None, is_active: bool | None = None) -> pd.DataFrame:
     """조/팀 목록(TEAM_COLUMNS).
 
     로컬 샘플 모드에서는 세션 편집 결과(save_teams)를 우선 반환하므로,
@@ -119,7 +130,12 @@ def get_teams() -> pd.DataFrame:
         if _TEAMS_STORE not in st.session_state:
             st.session_state[_TEAMS_STORE] = _base_teams()
         return st.session_state[_TEAMS_STORE].copy()
-    return _base_teams()
+    df = supabase_repository.get_teams()
+    if dept_code is not None:
+        df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
+    if is_active is not None:
+        df = df[df["is_active"].astype(bool) == bool(is_active)]
+    return df.reset_index(drop=True)
 
 
 def save_teams(df: pd.DataFrame) -> None:
@@ -129,7 +145,11 @@ def save_teams(df: pd.DataFrame) -> None:
     않는다). Phase 5(Supabase)에서는 여기서 upsert / is_active 소프트삭제로 교체한다.
     """
     keep = [c for c in TEAM_COLUMNS if c in df.columns]
-    st.session_state[_TEAMS_STORE] = df[keep].reset_index(drop=True).copy()
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_TEAMS_STORE] = normalized
+        return
+    supabase_repository.upsert_teams(normalized.to_dict("records"))
 
 
 def _base_users() -> pd.DataFrame:
@@ -143,7 +163,11 @@ def _base_users() -> pd.DataFrame:
     return df[USER_COLUMNS].reset_index(drop=True)
 
 
-def get_users() -> pd.DataFrame:
+def get_users(
+    dept_code: str | None = None,
+    team_code: str | None = None,
+    is_active: bool | None = None,
+) -> pd.DataFrame:
     """사용자 목록(USER_COLUMNS).
 
     로컬 샘플 모드에서는 세션 편집 결과(save_users)를 우선 반환하므로,
@@ -154,7 +178,14 @@ def get_users() -> pd.DataFrame:
         if _USERS_STORE not in st.session_state:
             st.session_state[_USERS_STORE] = _base_users()
         return st.session_state[_USERS_STORE].copy()
-    return _base_users()
+    df = supabase_repository.get_users()
+    if dept_code is not None:
+        df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
+    if team_code is not None:
+        df = df[df["team_code"].astype(str) == str(team_code).strip()]
+    if is_active is not None:
+        df = df[df["is_active"].astype(bool) == bool(is_active)]
+    return df.reset_index(drop=True)
 
 
 def save_users(df: pd.DataFrame) -> None:
@@ -164,7 +195,11 @@ def save_users(df: pd.DataFrame) -> None:
     않는다). Phase 5(Supabase)에서는 여기서 upsert / is_active 소프트삭제로 교체한다.
     """
     keep = [c for c in USER_COLUMNS if c in df.columns]
-    st.session_state[_USERS_STORE] = df[keep].reset_index(drop=True).copy()
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_USERS_STORE] = normalized
+        return
+    supabase_repository.upsert_users(normalized.to_dict("records"))
 
 
 def _base_work_types() -> pd.DataFrame:
@@ -179,7 +214,7 @@ def _base_work_types() -> pd.DataFrame:
     return df[WORK_TYPE_COLUMNS].reset_index(drop=True).copy()
 
 
-def get_work_types() -> pd.DataFrame:
+def get_work_types(active_only: bool = False) -> pd.DataFrame:
     """근무형태 목록(WORK_TYPE_COLUMNS).
 
     로컬 샘플 모드에서는 세션 편집 결과(save_work_types)를 우선 반환하므로,
@@ -190,7 +225,10 @@ def get_work_types() -> pd.DataFrame:
         if _WORK_TYPES_STORE not in st.session_state:
             st.session_state[_WORK_TYPES_STORE] = _base_work_types()
         return st.session_state[_WORK_TYPES_STORE].copy()
-    return _base_work_types()
+    df = supabase_repository.get_work_types()
+    if active_only:
+        df = df[df["is_active"].astype(bool)]
+    return df.reset_index(drop=True)
 
 
 def save_work_types(df: pd.DataFrame) -> None:
@@ -200,7 +238,11 @@ def save_work_types(df: pd.DataFrame) -> None:
     않는다). Phase 5(Supabase)에서는 여기서 upsert / is_active 소프트삭제로 교체한다.
     """
     keep = [c for c in WORK_TYPE_COLUMNS if c in df.columns]
-    st.session_state[_WORK_TYPES_STORE] = df[keep].reset_index(drop=True).copy()
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_WORK_TYPES_STORE] = normalized
+        return
+    supabase_repository.upsert_work_types(normalized.to_dict("records"))
 
 
 def upsert_records(store, records, loaded_keys, key_cols, status_col, columns):
@@ -280,7 +322,7 @@ def get_schedules() -> pd.DataFrame:
         if _SCHEDULES_STORE not in st.session_state:
             st.session_state[_SCHEDULES_STORE] = _base_schedules()
         return st.session_state[_SCHEDULES_STORE].copy()
-    return _base_schedules()
+    return supabase_repository.get_schedules()
 
 
 def save_schedules(df: pd.DataFrame) -> None:
@@ -292,7 +334,32 @@ def save_schedules(df: pd.DataFrame) -> None:
     범위 삭제 후 batch upsert 로 교체한다.
     """
     keep = [c for c in SCHEDULE_COLUMNS if c in df.columns]
-    st.session_state[_SCHEDULES_STORE] = df[keep].reset_index(drop=True).copy()
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_SCHEDULES_STORE] = normalized
+        return
+    supabase_repository.upsert_schedules(normalized.to_dict("records"))
+
+
+def replace_month_schedules(emp_nos, year: int, month: int, records) -> None:
+    """선택 직원·월 범위만 전달받은 근무표로 교체한다."""
+    normalized_emp_nos = [str(emp_no).strip() for emp_no in emp_nos if str(emp_no).strip()]
+    normalized = pd.DataFrame(records, columns=SCHEDULE_COLUMNS)
+    if is_sample_mode():
+        store = get_schedules()
+        month_start = pd.Timestamp(year=int(year), month=int(month), day=1)
+        next_month = month_start + pd.offsets.MonthBegin(1)
+        duty_dates = pd.to_datetime(store["duty_date"], errors="coerce")
+        in_scope = (
+            store["emp_no"].astype(str).str.strip().isin(normalized_emp_nos)
+            & duty_dates.ge(month_start)
+            & duty_dates.lt(next_month)
+        )
+        save_schedules(pd.concat([store[~in_scope], normalized], ignore_index=True))
+        return
+    supabase_repository.replace_month_schedules(
+        normalized_emp_nos, int(year), int(month), normalized.to_dict("records")
+    )
 
 
 # --- 조회 헬퍼 ---
@@ -330,14 +397,36 @@ def work_types_map() -> dict:
     for _, r in df.iterrows():
         out[r["code"]] = {
             "name": r["name"],
+            "category": r.get("category", ""),
             "color": r["color"] or "#9AA0A6",
             "is_work": bool(r["is_work"]),
         }
     return out
 
 
+def classify_work_group(code: str, work_type: dict) -> str | None:
+    """근무코드를 개인 화면 공통 집계 그룹으로 분류한다."""
+    code = str(code or "").strip()
+    category = str(work_type.get("category") or "").strip()
+    name = str(work_type.get("name") or "")
+    label = f"{code} {category} {name}"
+    if code == "OFF" or category.upper() == "OFF":
+        return "OFF"
+    if "야간" in category or code.startswith("야") or "특야" in code:
+        return "야간"
+    if "주간" in category or code.startswith("주") or "특주" in code:
+        return "주간"
+    if not bool(work_type.get("is_work")) or any(
+        word in label for word in ("휴가", "연차", "경조")
+    ):
+        return "휴가"
+    return None
+
+
 def get_user_schedules(emp_no: str) -> pd.DataFrame:
     """특정 사번의 근무표 레코드(long format). 컬럼: emp_no, duty_date, work_type_code, note."""
+    if not is_sample_mode():
+        return supabase_repository.get_user_schedules(str(emp_no).strip())
     df = get_schedules()
     if df.empty:
         return df
@@ -353,6 +442,8 @@ def get_month_schedules(emp_nos, year: int, month: int) -> pd.DataFrame:
     if isinstance(emp_nos, str):
         emp_nos = [emp_nos]
     emp_nos = {str(emp_no).strip() for emp_no in emp_nos if str(emp_no).strip()}
+    if not is_sample_mode():
+        return supabase_repository.get_month_schedules(emp_nos, int(year), int(month))
     df = get_schedules()
     if df.empty or not emp_nos:
         return df.iloc[0:0].copy()
@@ -368,3 +459,90 @@ def get_month_schedules(emp_nos, year: int, month: int) -> pd.DataFrame:
         & duty_dates.ge(month_start)
         & duty_dates.lt(next_month)
     ].copy()
+
+
+# --- Supabase 운영·검증 API ---
+def test_connection() -> dict[str, int]:
+    if is_sample_mode():
+        raise config.DataSourceConfigurationError("연결 테스트는 supabase 모드에서만 실행할 수 있습니다.")
+    return supabase_repository.test_connection()
+
+
+def upsert_department(record: dict) -> None:
+    supabase_repository.upsert_departments([record])
+
+
+def upsert_team(record: dict) -> None:
+    supabase_repository.upsert_teams([record])
+
+
+def upsert_user(record: dict) -> None:
+    supabase_repository.upsert_users([record])
+
+
+def upsert_work_type(record: dict) -> None:
+    supabase_repository.upsert_work_types([record])
+
+
+def upsert_schedule(record: dict) -> None:
+    supabase_repository.upsert_schedules([record])
+
+
+def delete_schedule(emp_no: str, duty_date: str) -> None:
+    supabase_repository.delete_schedule(str(emp_no).strip(), str(duty_date).strip())
+
+
+def deactivate_department(dept_code: str) -> None:
+    supabase_repository.deactivate_department(str(dept_code).strip())
+
+
+def deactivate_team(dept_code: str, team_code: str) -> None:
+    supabase_repository.deactivate_team(str(dept_code).strip(), str(team_code).strip())
+
+
+def deactivate_user(emp_no: str) -> None:
+    supabase_repository.deactivate_user(str(emp_no).strip())
+
+
+def deactivate_work_type(code: str) -> None:
+    supabase_repository.deactivate_work_type(str(code).strip())
+
+
+def cleanup_test_records(dept_code: str, team_code: str, emp_no: str, work_type_codes) -> None:
+    """의존성 역순으로 TEST_* 레코드만 물리 삭제한다."""
+    supabase_repository.hard_delete_test_user(emp_no)
+    for code in work_type_codes:
+        supabase_repository.hard_delete_test_work_type(str(code).strip())
+    supabase_repository.hard_delete_test_team(dept_code, team_code)
+    supabase_repository.hard_delete_test_department(dept_code)
+
+
+def hard_delete_test_user(emp_no: str) -> None:
+    supabase_repository.hard_delete_test_user(str(emp_no).strip())
+
+
+def hard_delete_test_work_type(code: str) -> None:
+    supabase_repository.hard_delete_test_work_type(str(code).strip())
+
+
+def hard_delete_test_team(dept_code: str, team_code: str) -> None:
+    supabase_repository.hard_delete_test_team(str(dept_code).strip(), str(team_code).strip())
+
+
+def hard_delete_test_department(dept_code: str) -> None:
+    supabase_repository.hard_delete_test_department(str(dept_code).strip())
+
+
+def reset_supabase_client() -> None:
+    supabase_repository.reset_client()
+
+
+def sample_seed_frames() -> dict[str, pd.DataFrame]:
+    """샘플 CSV를 화면 자연키 형식으로 변환해 seed 순서대로 반환한다."""
+    return {
+        "departments": _base_departments(),
+        "teams": _base_teams(),
+        "work_types": _base_work_types(),
+        "users": _base_users(),
+        "work_schedules": _base_schedules(),
+    }

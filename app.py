@@ -1,9 +1,12 @@
-"""생산 근무표 관리 — 진입점 (로그인 게이트 + App Shell + 화면 라우팅).
+"""생산 근무표 관리 — 진입점 (로그인 게이트 + 역할별 App Shell + 화면 라우팅).
 
-- 모든 로그인 사용자: 좌측 1차 아이콘 바 + 2차 메뉴 패널 + 메인 콘텐츠
-- Supabase 미설정 시 data/sample/*.csv 로 동작한다.
+- ADMIN/MANAGER: 좌측 2단 메뉴 App Shell
+- USER: 상단 정보 + 반응형 3개 메뉴 App Shell
+- 설정에서 sample 또는 Supabase 데이터 모드를 명시적으로 선택한다.
 """
-from modules import auth, ui
+import streamlit as st
+
+from modules import auth, db, nav, ui
 
 # 페이지 설정과 공통 CSS를 components.v2 등록보다 먼저 적용한다.
 ui.setup_page()
@@ -27,6 +30,11 @@ _PAGES = {
 
 def dispatch(page: str, user: dict) -> None:
     """선택된 메뉴 page id 에 맞는 화면을 렌더링한다."""
+    role = str(user.get("role", "")).strip().upper()
+    if not nav.allowed(page, role):
+        page = nav.default_page(role)
+        st.session_state.nav_page = page
+
     if page == "dashboard":
         dashboard.render(user)
     elif page == "my_schedule":
@@ -39,18 +47,20 @@ def dispatch(page: str, user: dict) -> None:
 
 
 def main() -> None:
-    user = auth.get_current_user()
+    try:
+        user = auth.get_current_user()
 
-    # 로그인 게이트
-    if not user:
-        login.render()
-        return
+        # 로그인 게이트
+        if not user:
+            login.render()
+            return
 
-    # 모든 로그인 사용자는 공통 App Shell 안에서 화면을 렌더링한다.
-    # 개인 근무표의 폭은 dispatch에서만 별도로 제어한다.
-    page = ui.app_shell(user)
-    dispatch(page, user)
-    ui.sample_mode_banner()
+        role = str(user.get("role", "")).strip().upper()
+        page = ui.user_app_shell(user) if role == "USER" else ui.app_shell(user)
+        dispatch(page, user)
+        ui.sample_mode_banner()
+    except db.DATA_SOURCE_ERRORS as exc:
+        st.error(str(exc))
 
 
 main()
