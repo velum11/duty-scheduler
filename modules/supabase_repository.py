@@ -100,20 +100,61 @@ def _clean_int(value) -> int:
         return 0
 
 
-def _frame(rows: list[dict], columns: list[str]) -> pd.DataFrame:
+def _frame(
+    rows: list[dict],
+    columns: list[str],
+    table: str,
+    nullable_columns: Iterable[str] = (),
+) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=columns)
     frame = pd.DataFrame(rows)
-    for column in columns:
-        if column not in frame.columns:
-            frame[column] = ""
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise SupabaseDataError(
+            f"Supabase {table} 응답에 필수 컬럼이 없습니다: {', '.join(missing)}"
+        )
+    nullable = set(nullable_columns)
+    null_columns = [
+        column for column in columns
+        if column not in nullable and frame[column].isna().any()
+    ]
+    if null_columns:
+        raise SupabaseDataError(
+            f"Supabase {table} 필수 컬럼에 NULL 값이 있습니다: {', '.join(null_columns)}"
+        )
     return frame[columns].reset_index(drop=True)
+
+
+def _required(row: dict, table: str, column: str):
+    if column not in row:
+        raise SupabaseDataError(f"Supabase {table} 응답에 필수 컬럼이 없습니다: {column}")
+    value = row[column]
+    if value is None:
+        raise SupabaseDataError(f"Supabase {table}.{column} 필수값이 NULL입니다.")
+    return value
+
+
+def _optional(row: dict, table: str, column: str):
+    if column not in row:
+        raise SupabaseDataError(f"Supabase {table} 응답에 필수 컬럼이 없습니다: {column}")
+    return row[column]
+
+
+def _mapped(mapping: dict, key, relation: str):
+    value = mapping.get(str(key))
+    if value is None:
+        raise SupabaseDataError(f"Supabase FK 매핑을 찾을 수 없습니다: {relation}={key}")
+    return value
 
 
 def _department_maps() -> tuple[dict[str, int], dict[str, str]]:
     rows = _select_all("departments", "id,dept_code")
-    by_code = {str(row["dept_code"]): row["id"] for row in rows}
-    by_id = {str(row["id"]): str(row["dept_code"]) for row in rows}
+    by_code = {
+        str(_required(row, "departments", "dept_code")): _required(row, "departments", "id")
+        for row in rows
+    }
+    by_id = {str(value): key for key, value in by_code.items()}
     return by_code, by_id
 
 
@@ -123,10 +164,13 @@ def _team_maps() -> tuple[dict[tuple[str, str], int], dict[str, str]]:
     by_key: dict[tuple[str, str], int] = {}
     by_id: dict[str, str] = {}
     for row in rows:
-        dept_code = dept_by_id.get(str(row["department_id"]), "")
-        team_code = str(row["team_code"])
-        by_key[(dept_code, team_code)] = row["id"]
-        by_id[str(row["id"])] = team_code
+        dept_code = _mapped(
+            dept_by_id, _required(row, "teams", "department_id"), "teams.department_id"
+        )
+        team_code = str(_required(row, "teams", "team_code"))
+        team_id = _required(row, "teams", "id")
+        by_key[(dept_code, team_code)] = team_id
+        by_id[str(team_id)] = team_code
     return by_key, by_id
 
 
@@ -137,8 +181,11 @@ def _user_maps(emp_nos: Iterable[str] | None = None) -> tuple[dict[str, int], di
         return query.in_("emp_no", normalized) if normalized else query
 
     rows = _select_all("users", "id,emp_no", filtered if normalized else None)
-    by_emp = {str(row["emp_no"]): row["id"] for row in rows}
-    by_id = {str(row["id"]): str(row["emp_no"]) for row in rows}
+    by_emp = {
+        str(_required(row, "users", "emp_no")): _required(row, "users", "id")
+        for row in rows
+    }
+    by_id = {str(value): key for key, value in by_emp.items()}
     return by_emp, by_id
 
 
@@ -161,7 +208,11 @@ def get_departments() -> pd.DataFrame:
         "dept_code,dept_name,sort_order,is_active",
         lambda query: query.order("sort_order").order("dept_code"),
     )
-    frame = _frame(rows, ["dept_code", "dept_name", "sort_order", "is_active"])
+    frame = _frame(
+        rows,
+        ["dept_code", "dept_name", "sort_order", "is_active"],
+        "departments",
+    )
     if not frame.empty:
         frame["sort_order"] = frame["sort_order"].map(_clean_int)
         frame["is_active"] = frame["is_active"].map(_clean_bool)
@@ -194,13 +245,21 @@ def get_teams() -> pd.DataFrame:
     natural = []
     for row in rows:
         natural.append({
-            "dept_code": dept_by_id.get(str(row["department_id"]), ""),
-            "team_code": str(row.get("team_code") or ""),
-            "team_name": str(row.get("team_name") or ""),
-            "sort_order": _clean_int(row.get("sort_order")),
-            "is_active": _clean_bool(row.get("is_active")),
+            "dept_code": _mapped(
+                dept_by_id,
+                _required(row, "teams", "department_id"),
+                "teams.department_id",
+            ),
+            "team_code": str(_required(row, "teams", "team_code")),
+            "team_name": str(_required(row, "teams", "team_name")),
+            "sort_order": _clean_int(_required(row, "teams", "sort_order")),
+            "is_active": _clean_bool(_required(row, "teams", "is_active")),
         })
-    return _frame(natural, ["dept_code", "team_code", "team_name", "sort_order", "is_active"])
+    return _frame(
+        natural,
+        ["dept_code", "team_code", "team_name", "sort_order", "is_active"],
+        "teams",
+    )
 
 
 def upsert_teams(records: list[dict]) -> None:
@@ -235,16 +294,26 @@ def get_users() -> pd.DataFrame:
     )
     natural = []
     for row in rows:
+        team_id = _optional(row, "users", "team_id")
         natural.append({
-            "emp_no": str(row.get("emp_no") or ""),
-            "name": str(row.get("name") or ""),
-            "dept_code": dept_by_id.get(str(row.get("department_id")), ""),
-            "team_code": team_by_id.get(str(row.get("team_id")), "") if row.get("team_id") else "",
-            "position": str(row.get("position") or ""),
-            "role": str(row.get("role") or "").strip().upper(),
-            "is_active": _clean_bool(row.get("is_active")),
+            "emp_no": str(_required(row, "users", "emp_no")),
+            "name": str(_required(row, "users", "name")),
+            "dept_code": _mapped(
+                dept_by_id,
+                _required(row, "users", "department_id"),
+                "users.department_id",
+            ),
+            "team_code": _mapped(team_by_id, team_id, "users.team_id")
+            if team_id is not None else "",
+            "position": str(_required(row, "users", "position")),
+            "role": str(_required(row, "users", "role")).strip().upper(),
+            "is_active": _clean_bool(_required(row, "users", "is_active")),
         })
-    return _frame(natural, ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active"])
+    return _frame(
+        natural,
+        ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active"],
+        "users",
+    )
 
 
 def upsert_users(records: list[dict]) -> None:
@@ -289,7 +358,12 @@ def get_work_types() -> pd.DataFrame:
         ",".join(columns),
         lambda query: query.order("sort_order").order("code"),
     )
-    frame = _frame(rows, columns)
+    frame = _frame(
+        rows,
+        columns,
+        "work_types",
+        nullable_columns=("start_time", "end_time", "color"),
+    )
     if not frame.empty:
         for column in ("start_time", "end_time"):
             frame[column] = frame[column].fillna("").astype(str).str.slice(0, 5)
@@ -337,15 +411,22 @@ def _schedule_rows(query_builder=None) -> pd.DataFrame:
     )
     natural = []
     for row in rows:
-        emp_no = emp_by_id.get(str(row.get("user_id")), "")
-        if emp_no:
-            natural.append({
-                "emp_no": emp_no,
-                "duty_date": str(row.get("work_date") or ""),
-                "work_type_code": str(row.get("work_type_code") or ""),
-                "note": str(row.get("note") or ""),
-            })
-    return _frame(natural, ["emp_no", "duty_date", "work_type_code", "note"])
+        emp_no = _mapped(
+            emp_by_id,
+            _required(row, "work_schedules", "user_id"),
+            "work_schedules.user_id",
+        )
+        natural.append({
+            "emp_no": emp_no,
+            "duty_date": str(_required(row, "work_schedules", "work_date")),
+            "work_type_code": str(_required(row, "work_schedules", "work_type_code")),
+            "note": str(row.get("note") or ""),
+        })
+    return _frame(
+        natural,
+        ["emp_no", "duty_date", "work_type_code", "note"],
+        "work_schedules",
+    )
 
 
 def get_schedules() -> pd.DataFrame:
@@ -356,7 +437,7 @@ def get_user_schedules(emp_no: str) -> pd.DataFrame:
     user_by_emp, _ = _user_maps([emp_no])
     user_id = user_by_emp.get(str(emp_no).strip())
     if user_id is None:
-        return _frame([], ["emp_no", "duty_date", "work_type_code", "note"])
+        return _frame([], ["emp_no", "duty_date", "work_type_code", "note"], "work_schedules")
     return _schedule_rows(
         lambda query: query.eq("user_id", user_id).order("work_date")
     )
@@ -367,7 +448,7 @@ def get_month_schedules(emp_nos: Iterable[str], year: int, month: int) -> pd.Dat
     user_by_emp, _ = _user_maps(normalized)
     user_ids = list(user_by_emp.values())
     if not user_ids:
-        return _frame([], ["emp_no", "duty_date", "work_type_code", "note"])
+        return _frame([], ["emp_no", "duty_date", "work_type_code", "note"], "work_schedules")
     start = date(int(year), int(month), 1)
     next_month = date(start.year + (start.month == 12), 1 if start.month == 12 else start.month + 1, 1)
     return _schedule_rows(

@@ -8,6 +8,8 @@ user_id)이다. 화면은 자연키(dept_code / team_code / emp_no / duty_date)�
 이 파사드에서 기준정보를 조인해 자연키 컬럼을 덧붙여 반환한다. 원본(캐시된)
 DataFrame 을 훼손하지 않도록 항상 copy 후 컬럼을 추가한다.
 """
+import hashlib
+
 import pandas as pd
 import streamlit as st
 
@@ -51,6 +53,53 @@ def datasource() -> str:
 
 def is_sample_mode() -> bool:
     return datasource() == "sample"
+
+
+def frame_signature(df: pd.DataFrame, columns) -> str:
+    """화면 편집 스냅샷이 원본 DB 데이터와 같은지 비교할 안정적인 서명."""
+    required = list(columns)
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise ValueError(f"DataFrame 필수 컬럼이 없습니다: {', '.join(missing)}")
+    payload = df[required].reset_index(drop=True).to_json(
+        orient="split", date_format="iso", force_ascii=False
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _changed_records(
+    current: pd.DataFrame,
+    desired: pd.DataFrame,
+    key_columns,
+    columns,
+) -> list[dict]:
+    """자연키 기준으로 신규 또는 실제 값이 바뀐 행만 반환한다."""
+    keys = list(key_columns)
+    compare_columns = list(columns)
+
+    def normalized(value):
+        if value is None or pd.isna(value):
+            return None
+        if isinstance(value, bool):
+            return bool(value)
+        if isinstance(value, int):
+            return int(value)
+        return str(value).strip()
+
+    def key_of(record):
+        return tuple(normalized(record[column]) for column in keys)
+
+    current_by_key = {
+        key_of(row): tuple(normalized(row[column]) for column in compare_columns)
+        for _, row in current.iterrows()
+    }
+    changed = []
+    for _, row in desired.iterrows():
+        record = row[compare_columns].to_dict()
+        values = tuple(normalized(record[column]) for column in compare_columns)
+        if current_by_key.get(key_of(record)) != values:
+            changed.append(record)
+    return changed
 
 
 # --- id -> 자연키 매핑 (내부) ---
@@ -106,7 +155,10 @@ def save_departments(df: pd.DataFrame) -> None:
     if is_sample_mode():
         st.session_state[_DEPTS_STORE] = normalized
         return
-    supabase_repository.upsert_departments(normalized.to_dict("records"))
+    changed = _changed_records(
+        supabase_repository.get_departments(), normalized, ["dept_code"], DEPT_COLUMNS
+    )
+    supabase_repository.upsert_departments(changed)
 
 
 def _base_teams() -> pd.DataFrame:
@@ -149,7 +201,13 @@ def save_teams(df: pd.DataFrame) -> None:
     if is_sample_mode():
         st.session_state[_TEAMS_STORE] = normalized
         return
-    supabase_repository.upsert_teams(normalized.to_dict("records"))
+    changed = _changed_records(
+        supabase_repository.get_teams(),
+        normalized,
+        ["dept_code", "team_code"],
+        TEAM_COLUMNS,
+    )
+    supabase_repository.upsert_teams(changed)
 
 
 def _base_users() -> pd.DataFrame:
@@ -199,7 +257,10 @@ def save_users(df: pd.DataFrame) -> None:
     if is_sample_mode():
         st.session_state[_USERS_STORE] = normalized
         return
-    supabase_repository.upsert_users(normalized.to_dict("records"))
+    changed = _changed_records(
+        supabase_repository.get_users(), normalized, ["emp_no"], USER_COLUMNS
+    )
+    supabase_repository.upsert_users(changed)
 
 
 def _base_work_types() -> pd.DataFrame:
@@ -242,7 +303,10 @@ def save_work_types(df: pd.DataFrame) -> None:
     if is_sample_mode():
         st.session_state[_WORK_TYPES_STORE] = normalized
         return
-    supabase_repository.upsert_work_types(normalized.to_dict("records"))
+    changed = _changed_records(
+        supabase_repository.get_work_types(), normalized, ["code"], WORK_TYPE_COLUMNS
+    )
+    supabase_repository.upsert_work_types(changed)
 
 
 def upsert_records(store, records, loaded_keys, key_cols, status_col, columns):

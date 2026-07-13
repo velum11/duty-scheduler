@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import grid_height, save_bar, set_flash, show_flash
+from views.workspace import editor_has_changes, grid_height, save_bar, set_flash, show_flash
 
 _COLS = [
     "코드", "명칭", "분류", "약칭", "시작", "종료", "색상",
@@ -22,6 +22,8 @@ _STATUS = ["사용 중", "사용 안 함", "전체"]
 
 def render(user: dict) -> None:
     ui.page_header("master_work_types")
+    source_work_types = db.get_work_types()
+    source_signature = db.frame_signature(source_work_types, db.WORK_TYPE_COLUMNS)
 
     # 조회 조건 카드
     with ui.card():
@@ -35,9 +37,15 @@ def render(user: dict) -> None:
     if clicked or q is None:
         q = params
         st.session_state["q_master_work_types"] = q
-        _load_editor(q)
-    elif "mw_work" not in st.session_state:  # rerun 등으로 조건만 남고 편집본이 없을 때
-        _load_editor(q)
+        _load_editor(q, source_work_types)
+    elif (
+        "mw_work" not in st.session_state
+        or (
+            st.session_state.get("mw_source_signature") != source_signature
+            and not editor_has_changes("mw_editor")
+        )
+    ):
+        _load_editor(q, source_work_types)
 
     show_flash("master_work_types")
 
@@ -105,9 +113,11 @@ def _to_display(df: pd.DataFrame) -> pd.DataFrame:
     })
 
 
-def _load_editor(q: dict) -> None:
+def _load_editor(q: dict, source: pd.DataFrame | None = None) -> None:
     """조회 조건으로 대상 근무형태를 편집기에 적재하고, 원본 코드 집합을 스냅샷한다."""
-    df = db.get_work_types()
+    source = db.get_work_types() if source is None else source
+    st.session_state["mw_source_signature"] = db.frame_signature(source, db.WORK_TYPE_COLUMNS)
+    df = source.copy()
     if q["active"] == "사용 중":
         df = df[df["is_active"]]
     elif q["active"] == "사용 안 함":

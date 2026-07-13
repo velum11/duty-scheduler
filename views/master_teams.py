@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import ALL, grid_height, save_bar, set_flash, show_flash
+from views.workspace import ALL, editor_has_changes, grid_height, save_bar, set_flash, show_flash
 
 _COLS = ["부서", "조코드", "조명", "표시순서", "사용"]
 _STATUS = ["사용 중", "사용 안 함", "전체"]
@@ -21,6 +21,8 @@ def render(user: dict) -> None:
     ui.page_header("master_teams")
 
     depts = db.get_departments()
+    source_teams = db.get_teams()
+    source_signature = db.frame_signature(source_teams, db.TEAM_COLUMNS)
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
     name_to_code = {v: k for k, v in dept_names.items()}
 
@@ -40,9 +42,15 @@ def render(user: dict) -> None:
     if clicked or q is None:
         q = params
         st.session_state["q_master_teams"] = q
-        _load_editor(q, dept_names)
-    elif "mt_work" not in st.session_state:  # rerun 등으로 조건만 남고 편집본이 없을 때
-        _load_editor(q, dept_names)
+        _load_editor(q, dept_names, source_teams)
+    elif (
+        "mt_work" not in st.session_state
+        or (
+            st.session_state.get("mt_source_signature") != source_signature
+            and not editor_has_changes("mt_editor")
+        )
+    ):
+        _load_editor(q, dept_names, source_teams)
 
     show_flash("master_teams")
 
@@ -89,9 +97,11 @@ def _to_display(df: pd.DataFrame, dept_names: dict) -> pd.DataFrame:
     })
 
 
-def _load_editor(q: dict, dept_names: dict) -> None:
+def _load_editor(q: dict, dept_names: dict, source: pd.DataFrame | None = None) -> None:
     """조회 조건으로 대상 조/팀을 편집기에 적재하고, 원본 (부서,조코드) 집합을 스냅샷한다."""
-    df = db.get_teams()
+    source = db.get_teams() if source is None else source
+    st.session_state["mt_source_signature"] = db.frame_signature(source, db.TEAM_COLUMNS)
+    df = source.copy()
     if q["dept"] != ALL:
         df = df[df["dept_code"] == q["dept"]]
     if q.get("active") == "사용 중":

@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import ALL, grid_height, save_bar, set_flash, show_flash
+from views.workspace import ALL, editor_has_changes, grid_height, save_bar, set_flash, show_flash
 
 # 화면 표시 라벨 ↔ 저장 코드 매핑
 _ROLE_TO_LABEL = {"USER": "직원", "MANAGER": "매니저", "ADMIN": "관리자"}
@@ -26,6 +26,8 @@ def render(user: dict) -> None:
 
     depts = db.get_departments()
     teams = db.get_teams()
+    source_users = db.get_users()
+    source_signature = db.frame_signature(source_users, db.USER_COLUMNS)
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
     name_to_code = {v: k for k, v in dept_names.items()}
     team_set = set(zip(teams["dept_code"], teams["team_code"]))
@@ -53,9 +55,15 @@ def render(user: dict) -> None:
     if clicked or q is None:
         q = params
         st.session_state["q_master_users"] = q
-        _load_editor(q, dept_names)
-    elif "mu_work" not in st.session_state:  # rerun 등으로 조건만 남고 편집본이 없을 때
-        _load_editor(q, dept_names)
+        _load_editor(q, dept_names, source_users)
+    elif (
+        "mu_work" not in st.session_state
+        or (
+            st.session_state.get("mu_source_signature") != source_signature
+            and not editor_has_changes("mu_editor")
+        )
+    ):
+        _load_editor(q, dept_names, source_users)
 
     show_flash("master_users")
 
@@ -101,9 +109,11 @@ def _to_display(df: pd.DataFrame, dept_names: dict) -> pd.DataFrame:
     })
 
 
-def _load_editor(q: dict, dept_names: dict) -> None:
+def _load_editor(q: dict, dept_names: dict, source: pd.DataFrame | None = None) -> None:
     """조회 조건으로 대상 사용자를 편집기에 적재하고, 원본 사번 집합을 스냅샷한다."""
-    df = db.get_users()
+    source = db.get_users() if source is None else source
+    st.session_state["mu_source_signature"] = db.frame_signature(source, db.USER_COLUMNS)
+    df = source.copy()
     if q["active"] == "재직":
         df = df[df["is_active"]]
     elif q["active"] == "퇴직":

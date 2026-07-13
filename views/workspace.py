@@ -19,6 +19,14 @@ from modules import db, ui
 ALL = "(전체)"
 
 
+def editor_has_changes(key: str) -> bool:
+    """data_editor의 미저장 추가·수정·삭제가 있는지 확인한다."""
+    state = st.session_state.get(key)
+    if not isinstance(state, dict):
+        return False
+    return any(state.get(field) for field in ("edited_rows", "added_rows", "deleted_rows"))
+
+
 # ---------- 조회 상태 (명시적 [조회] 버튼으로만 갱신) ----------
 def run_query(page_id: str, clicked: bool, params: dict):
     """[조회] 클릭 시 조건을 세션에 저장하고, 저장된 조건을 반환한다."""
