@@ -1,7 +1,7 @@
 """공통 UI — App Shell + 화면 공통 컴포넌트 (DESIGN.md 구현).
 
 App Shell 구조 (DESIGN.md §2):
-  좌측 1차 아이콘 메뉴 바(네이비 60px) + 좌측 2차 업무 메뉴 패널(248px)
+  좌측 1차 메뉴 바(네이비 112px) + 좌측 2차 업무 메뉴 패널(196px)
   + 우측 메인 콘텐츠(상단 헤더 → 페이지 제목 → 조회 조건 → 요약 카드 → 그리드).
 
 구현 방식: Streamlit 사이드바 하나를 CSS gradient 로 좌/우 영역으로 나누고,
@@ -15,7 +15,6 @@ App Shell 구조 (DESIGN.md §2):
 - badge_html / legend_html / weekday_kr / weekend_color / role_label
 """
 from datetime import date
-import json
 
 import streamlit as st
 
@@ -25,9 +24,9 @@ _WEEKDAY = ["월", "화", "수", "목", "금", "토", "일"]
 
 _ROLE_LABEL = {"ADMIN": "관리자", "MANAGER": "매니저", "USER": "직원"}
 
-# 사이드바 폭: 1차 아이콘 바 60px + 2차 메뉴 패널 248px
-_RAIL_W = 60
-_PANEL_W = 248
+# 전체 폭은 유지하고 1차 메뉴명을 표시할 공간만 내부에서 재배분한다.
+_RAIL_W = 112
+_PANEL_W = 196
 _SIDEBAR_W = _RAIL_W + _PANEL_W
 
 _CSS = f"""
@@ -76,14 +75,15 @@ section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{ gap: 0.1r
   position: relative;
 }}
 .st-key-nav_rail div.stButton > button {{
-  display: flex; justify-content: center; align-items: center;
-  width: 42px; height: 42px; min-height: 42px; margin: 0 auto; padding: 0;
+  display: flex; justify-content: flex-start; align-items: center; gap: 0.35rem;
+  width: calc(100% - 12px); height: 42px; min-height: 42px; margin: 0 auto; padding: 0 0.55rem;
   border: none; border-radius: 8px;
   background: transparent; color: #8FA3BE;
+  font-size: 0.74rem; font-weight: 600; white-space: nowrap; overflow: hidden;
 }}
 .st-key-nav_rail div.stButton > button:hover {{ background: #0F2A4A; color: #FFFFFF; }}
 .st-key-nav_rail div.stButton > button[kind="primary"] {{ background: #12345A; color: #FFFFFF; }}
-.st-key-nav_rail div.stButton > button [data-testid="stIconMaterial"] {{ font-size: 22px; }}
+.st-key-nav_rail div.stButton > button [data-testid="stIconMaterial"] {{ font-size: 20px; flex: 0 0 auto; }}
 
 /* 2차 업무 메뉴 패널 — ERP 메뉴 트리 */
 .st-key-nav_menu {{ padding: 0.7rem 0.55rem 1rem 0.55rem; }}
@@ -236,57 +236,15 @@ div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {{ border: n
 
 # ---------- 페이지 설정 ----------
 def setup_page() -> None:
+    user = st.session_state.get("user") or {}
+    role = str(user.get("role", "")).strip().upper()
     st.set_page_config(
         page_title=config.APP_NAME,
         page_icon="🏭",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="collapsed" if role == "USER" else "expanded",
     )
     st.markdown(_CSS, unsafe_allow_html=True)
-
-
-def _rail_hover_label_css(groups: list) -> str:
-    """1차 아이콘 메뉴 hover 라벨을 현재 노출 그룹 기준으로 생성한다."""
-    rules = []
-    for g in groups:
-        label = json.dumps(str(g["label"]), ensure_ascii=False)
-        rules.append(
-            f"""
-.st-key-rail_{g["id"]} {{
-  position: relative;
-  overflow: visible !important;
-}}
-.st-key-rail_{g["id"]}::after {{
-  content: {label};
-  position: absolute;
-  left: 52px;
-  top: 50%;
-  transform: translate(-4px, -50%);
-  opacity: 0;
-  pointer-events: none;
-  z-index: 30;
-  max-width: 112px;
-  padding: 0.22rem 0.48rem;
-  border: 1px solid #C9D2DE;
-  border-radius: 4px;
-  background: #FFFFFF;
-  color: #1E3A6E;
-  box-shadow: 0 4px 10px rgba(15, 42, 74, 0.12);
-  font-size: 0.76rem;
-  font-weight: 600;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: opacity 120ms ease, transform 120ms ease;
-}}
-.st-key-rail_{g["id"]}:hover::after {{
-  opacity: 1;
-  transform: translate(0, -50%);
-}}
-"""
-        )
-    return "<style>" + "\n".join(rules) + "</style>"
 
 
 # ---------- App Shell ----------
@@ -300,18 +258,19 @@ def app_shell(user: dict) -> str:
     if page not in valid_pages:
         page = nav.default_page(user["role"])
         st.session_state.nav_page = page
-    cur_group = nav.group_of(page)
+    cur_group = nav.group_of(page, user["role"])
 
     with st.sidebar:
-        st.markdown(_rail_hover_label_css(groups), unsafe_allow_html=True)
         rail_col, menu_col = st.columns([_RAIL_W, _PANEL_W])
 
         # 1차 아이콘 메뉴 바
         with rail_col, st.container(key="nav_rail"):
             for g in groups:
                 if st.button(
-                    g["icon"],
+                    g["label"],
                     key=f"rail_{g['id']}",
+                    icon=g["icon"],
+                    help=g["label"],
                     type="primary" if g["id"] == cur_group["id"] else "secondary",
                     width="stretch",
                 ):

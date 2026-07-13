@@ -5,15 +5,21 @@ App Shell 코드를 바꾸지 않고 이 목록에 그룹/하위 메뉴 dict 만
 렌더링(1차 아이콘 바, 2차 메뉴 패널, 헤더)은 modules/ui.py 의 app_shell 이 담당한다.
 
 권한별 표시 (DESIGN.md §6.2):
-- USER    내 정보 (모바일 화면 — App Shell 미적용)
-- MANAGER 홈 / 근무표 관리 / 내 정보
-- ADMIN   전체 메뉴
+- USER    내 근무표
+- MANAGER 대시보드 / 근무표
+- ADMIN   대시보드 / 근무표 / 기준정보
 """
+
+_MY_SCHEDULE = {
+    "id": "my_schedule",
+    "label": "내 근무표",
+    "desc": "본인 근무를 월 단위로 확인합니다.",
+}
 
 MENU_GROUPS = [
     {
         "id": "home",
-        "label": "홈",
+        "label": "대시보드",
         "icon": ":material/home:",
         "roles": ("MANAGER", "ADMIN"),
         "children": [
@@ -26,20 +32,21 @@ MENU_GROUPS = [
     },
     {
         "id": "schedule",
-        "label": "근무표 관리",
+        "label": "근무표",
         "icon": ":material/calendar_month:",
         "roles": ("MANAGER", "ADMIN"),
         "children": [
             {
                 "id": "schedule_edit",
-                "label": "근무표 등록/수정",
+                "label": "근무표 편성",
                 "desc": "부서와 조를 선택하여 월별 근무표를 관리합니다.",
             },
             {
                 "id": "schedule_view",
-                "label": "전체 근무표 조회",
+                "label": "월간 근무표",
                 "desc": "부서와 조를 선택하여 월별 근무표를 조회합니다.",
             },
+            _MY_SCHEDULE,
         ],
     },
     {
@@ -72,16 +79,10 @@ MENU_GROUPS = [
     },
     {
         "id": "my",
-        "label": "내 정보",
+        "label": "내 근무표",
         "icon": ":material/person:",
-        "roles": ("USER", "MANAGER", "ADMIN"),
-        "children": [
-            {
-                "id": "my_schedule",
-                "label": "내 근무표",
-                "desc": "본인 근무를 월 단위로 확인합니다.",
-            },
-        ],
+        "roles": ("USER",),
+        "children": [_MY_SCHEDULE],
     },
 ]
 
@@ -100,8 +101,12 @@ def default_page(role: str) -> str:
     return groups[0]["children"][0]["id"]
 
 
-def group_of(page_id: str) -> dict:
-    """page id 가 속한 메뉴 그룹 dict."""
+def group_of(page_id: str, role: str = None) -> dict:
+    """page id 가 속한 메뉴 그룹 dict. 중복 page는 role 기준으로 찾는다."""
+    if role:
+        for group in visible_groups(role):
+            if any(child["id"] == page_id for child in group["children"]):
+                return group
     return _PAGES[page_id][0]
 
 
@@ -115,4 +120,8 @@ def page_desc(page_id: str) -> str:
 
 def allowed(page_id: str, role: str) -> bool:
     """role 이 해당 화면에 접근 가능한지 (앱 레벨 차단용)."""
-    return page_id in _PAGES and role in _PAGES[page_id][0]["roles"]
+    return any(
+        child["id"] == page_id
+        for group in visible_groups(role)
+        for child in group["children"]
+    )

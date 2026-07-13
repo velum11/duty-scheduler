@@ -132,6 +132,7 @@ def login(emp_no: str):
     if user is None or not user.get("is_active", False):
         return None, "등록되지 않은 사번입니다. 관리자에게 문의하세요."
     token = _issue_token(emp_no)
+    st.session_state.pop("nav_page", None)
     st.session_state.user = user
     st.session_state.auth_token = token
     _cookie_set(token)
@@ -141,7 +142,7 @@ def login(emp_no: str):
 def logout() -> None:
     _revoke_token(st.session_state.get("auth_token"))
     _cookie_clear()
-    for k in ("user", "auth_token"):
+    for k in ("user", "auth_token", "nav_page"):
         st.session_state.pop(k, None)
 
 

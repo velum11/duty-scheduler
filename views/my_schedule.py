@@ -224,7 +224,7 @@ def render(user: dict) -> None:
         return
 
     st.markdown(_styles(), unsafe_allow_html=True)
-    st.markdown("<div class='my-page-title'>개인 근무표</div>", unsafe_allow_html=True)
+    st.markdown("<div class='my-page-title'>내 근무표</div>", unsafe_allow_html=True)
     st.markdown(_employee_line(user, dept, team), unsafe_allow_html=True)
     _month_navigation(year, month)
     ui.panel_head(f"{year}년 {month}월 근무내역")
