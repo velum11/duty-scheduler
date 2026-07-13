@@ -44,10 +44,7 @@ html, body, .stApp {{
 #MainMenu, footer, .stAppDeployButton,
 header[data-testid="stHeader"],
 div[data-testid="stToolbar"], div[data-testid="stDecoration"],
-div[data-testid="stStatusWidget"],
-div[data-testid="stSidebarHeader"],
-div[data-testid="stSidebarCollapseButton"],
-div[data-testid="collapsedControl"] {{ display: none !important; }}
+div[data-testid="stStatusWidget"] {{ display: none !important; }}
 
 section[data-testid="stMain"] .block-container {{
   padding: 0 1.25rem 2rem; max-width: 100%;

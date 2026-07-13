@@ -342,3 +342,29 @@ def get_user_schedules(emp_no: str) -> pd.DataFrame:
     if df.empty:
         return df
     return df[df["emp_no"].astype(str).str.strip() == str(emp_no).strip()].copy()
+
+
+def get_month_schedules(emp_nos, year: int, month: int) -> pd.DataFrame:
+    """사번 목록의 지정 월 근무내역을 long format으로 반환한다.
+
+    전체 근무표와 개인 근무표가 같은 월 조건과 원본 데이터를 사용하도록
+    조회 범위를 이 함수에서 일관되게 제한한다.
+    """
+    if isinstance(emp_nos, str):
+        emp_nos = [emp_nos]
+    emp_nos = {str(emp_no).strip() for emp_no in emp_nos if str(emp_no).strip()}
+    df = get_schedules()
+    if df.empty or not emp_nos:
+        return df.iloc[0:0].copy()
+
+    # 기존 개인 조회처럼 날짜를 실제 datetime으로 해석한다. 문자열 접두어 비교는
+    # date/datetime 또는 ISO가 아닌 문자열로 저장된 기존 행을 누락시킬 수 있다.
+    month_start = pd.Timestamp(year=int(year), month=int(month), day=1)
+    next_month = month_start + pd.offsets.MonthBegin(1)
+    duty_dates = pd.to_datetime(df["duty_date"], errors="coerce")
+    emp_values = df["emp_no"].astype(str).str.strip()
+    return df[
+        emp_values.isin(emp_nos)
+        & duty_dates.ge(month_start)
+        & duty_dates.lt(next_month)
+    ].copy()

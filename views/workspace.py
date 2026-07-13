@@ -193,13 +193,7 @@ def _build_month_grid(q: dict):
         users = users[emp_match | name_match]
     users = users.sort_values(["dept_code", "team_code", "emp_no"])
 
-    scheds = db.get_schedules()
-    prefix = f"{q['year']:04d}-{q['month']:02d}"
-    if not scheds.empty:
-        scheds = scheds[
-            scheds["duty_date"].str.startswith(prefix)
-            & scheds["emp_no"].isin(users["emp_no"])
-        ]
+    scheds = db.get_month_schedules(users["emp_no"], q["year"], q["month"])
 
     lookup = {(r["emp_no"], r["duty_date"]): r["work_type_code"] for _, r in scheds.iterrows()}
     ndays = calendar.monthrange(q["year"], q["month"])[1]
