@@ -83,7 +83,10 @@ def schedule_screen(user: dict, page_id: str) -> None:
 
     # 조회 조건 카드
     with ui.card():
-        c1, c2, c3, c4, c5 = st.columns([1, 1, 1.6, 1.2, 0.9], vertical_alignment="bottom")
+        c1, c2, c3, c4, c5, c6 = st.columns(
+            [0.9, 0.9, 1.5, 1.1, 1.6, 0.8],
+            vertical_alignment="bottom",
+        )
         year = c1.selectbox("연도", years, index=years.index(today.year), key=f"{page_id}_y")
         month = c2.selectbox(
             "월", list(range(1, 13)), index=today.month - 1,
@@ -106,9 +109,24 @@ def schedule_screen(user: dict, page_id: str) -> None:
             "조", [ALL] + list(team_names), format_func=lambda c: team_names.get(c, c),
             key=f"{page_id}_t",
         )
-        clicked = c5.button("조회", key=f"{page_id}_go", type="primary", width="stretch")
+        keyword = c5.text_input(
+            "사번 또는 성명",
+            key=f"{page_id}_kw",
+            placeholder="전체",
+        )
+        clicked = c6.button("조회", key=f"{page_id}_go", type="primary", width="stretch")
 
-    q = run_query(page_id, clicked, {"year": year, "month": month, "dept": dept, "team": team})
+    q = run_query(
+        page_id,
+        clicked,
+        {
+            "year": year,
+            "month": month,
+            "dept": dept,
+            "team": team,
+            "keyword": keyword.strip(),
+        },
+    )
     if not q:
         ui.empty_state("조회 조건을 선택한 후 조회하세요.", head="월별 근무표")
         return
@@ -131,6 +149,7 @@ def schedule_screen(user: dict, page_id: str) -> None:
 
     # 데이터 그리드 (근무코드 색상, 읽기 전용)
     day_cols = [c for c in grid.columns if c[0].isdigit()]
+    ui.panel_head("월간 근무표", f"조회 결과 {len(grid)}건")
     styled = grid.style.map(lambda v: _cell_style(v, wt), subset=day_cols)
     st.dataframe(styled, width="stretch", hide_index=True, height=grid_height(len(grid)))
     st.markdown(ui.legend_html(wt), unsafe_allow_html=True)
@@ -163,6 +182,15 @@ def _build_month_grid(q: dict):
         users = users[users["dept_code"] == q["dept"]]
         if q["team"] != ALL:
             users = users[users["team_code"] == q["team"]]
+    keyword = str(q.get("keyword", "")).strip()
+    if keyword:
+        emp_match = users["emp_no"].astype(str).str.contains(
+            keyword, case=False, na=False, regex=False,
+        )
+        name_match = users["name"].astype(str).str.contains(
+            keyword, case=False, na=False, regex=False,
+        )
+        users = users[emp_match | name_match]
     users = users.sort_values(["dept_code", "team_code", "emp_no"])
 
     scheds = db.get_schedules()
@@ -183,7 +211,7 @@ def _build_month_grid(q: dict):
             "사번": u["emp_no"],
             "성명": u["name"],
             "부서": db.dept_name(u["dept_code"]),
-            "조/팀": db.team_name(u["dept_code"], u["team_code"]),
+            "조": db.team_name(u["dept_code"], u["team_code"]),
         }
         for d in days:
             row[f"{d.day}({ui.weekday_kr(d)})"] = lookup.get((u["emp_no"], d.isoformat()), "")
