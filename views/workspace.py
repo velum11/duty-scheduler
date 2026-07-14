@@ -97,19 +97,63 @@ def master_data_editor(data, **kwargs):
         return st.data_editor(data, height=master_editor_height(), **kwargs)
 
 
-_EXPAND_CLIPBOARD_ROWS = JsCode(
+# AG Grid community 는 다중 셀 clipboard 분배(processDataFromClipboard)가 없다
+# (Enterprise 전용). 네이티브 paste 이벤트의 clipboardData 를 직접 파싱해
+# 탭(열)/줄바꿈(행) 2차원 배열로 포커스 셀부터 분배한다. 권한 프롬프트가 없고
+# Excel/한셀 등 표 형태 클립보드와 그대로 호환된다.
+_NATIVE_PASTE_HANDLER = JsCode(
     """
     function(params) {
-      // 셀이 편집 중이 아닐 때 AG Grid가 탭/줄바꿈 데이터를 2차원 배열로 전달한다.
-      // 붙여넣기 범위의 마지막 행이 현재 그리드 밖으로 나가는 만큼만 행을 추가한다.
-      const rowsToAdd = params.startRowIndex + params.data.length
-        - params.api.getDisplayedRowCount();
-      if (rowsToAdd > 0) {
-        params.api.applyTransaction({
-          add: Array.from({length: rowsToAdd}, () => ({})),
+      const api = params.api;
+      document.addEventListener('paste', function(event) {
+        if (api.getEditingCells().length > 0) { return; }  // 셀 편집 중 = 단일 셀 입력
+        const focused = api.getFocusedCell();
+        if (!focused) { return; }
+        const text = (event.clipboardData || window.clipboardData).getData('text/plain');
+        if (!text) { return; }
+        event.preventDefault();
+        const lines = text.replace(/\\r/g, '').split('\\n');
+        while (lines.length && lines[lines.length - 1] === '') { lines.pop(); }
+        const table = lines.map(function(line) { return line.split('\\t'); });
+        const missing = focused.rowIndex + table.length - api.getDisplayedRowCount();
+        if (missing > 0) {
+          api.applyTransaction({
+            add: Array.from({ length: missing }, function() { return {}; }),
+          });
+        }
+        const columns = api.getAllDisplayedColumns();
+        const start = columns.findIndex(function(column) {
+          return column.getColId() === focused.column.getColId();
         });
+        table.forEach(function(values, rowOffset) {
+          const node = api.getDisplayedRowAtIndex(focused.rowIndex + rowOffset);
+          if (!node) { return; }
+          values.forEach(function(value, columnOffset) {
+            const column = columns[start + columnOffset];
+            if (!column) { return; }
+            // 체크박스 컬럼은 Excel 의 TRUE/1/사용 등 텍스트를 boolean 으로 변환한다.
+            // (기존 행은 boolean 타입으로 추론되어 문자열이 false 로 캐스팅됨)
+            if (column.getColDef().cellEditor === 'agCheckboxCellEditor') {
+              const flag = String(value).trim().toLowerCase();
+              value = ['true', '1', 'y', 'yes', 't', 'on', '사용', '재직'].indexOf(flag) >= 0;
+            }
+            node.setDataValue(column.getColId(), value);
+          });
+        });
+      });
+    }
+    """
+)
+
+# 마지막 행에서 편집을 마치면 즉시 새 빈 행을 붙여, 서버 rerun 을 기다리지 않고
+# 연속으로 신규 행을 입력할 수 있게 한다 (서버측에서 빈 버퍼 행은 저장에서 제외).
+_APPEND_ROW_ON_LAST_EDIT = JsCode(
+    """
+    function(params) {
+      const api = params.api;
+      if (params.rowIndex === api.getDisplayedRowCount() - 1) {
+        api.applyTransaction({ add: [{}] });
       }
-      return params.data;
     }
     """
 )
@@ -161,9 +205,8 @@ def editable_aggrid(
         stopEditingWhenCellsLoseFocus=True,
         enterNavigatesVertically=True,
         enterNavigatesVerticallyAfterEdit=True,
-        processDataFromClipboard=_EXPAND_CLIPBOARD_ROWS,
-        clipboardDelimiter="\t",
-        suppressLastEmptyLineOnPaste=True,
+        onGridReady=_NATIVE_PASTE_HANDLER,
+        onCellEditingStopped=_APPEND_ROW_ON_LAST_EDIT,
         suppressRowClickSelection=True,
     )
     for name, kind in columns.items():
@@ -176,7 +219,9 @@ def editable_aggrid(
         gridOptions=builder.build(),
         key=key,
         height=height or master_editor_height(),
-        update_on=["cellValueChanged", "pasteEnd"],
+        # 붙여넣기는 setDataValue 로 셀마다 cellValueChanged 를 발생시키므로
+        # 짧은 debounce 로 한 번의 rerun 으로 묶는다.
+        update_on=[("cellValueChanged", 300)],
         data_return_mode=DataReturnMode.AS_INPUT,
         allow_unsafe_jscode=True,
         theme="streamlit",
@@ -184,7 +229,21 @@ def editable_aggrid(
         show_search=False,
     )
     result = response.data
-    return result.copy() if isinstance(result, pd.DataFrame) else frame
+    if not isinstance(result, pd.DataFrame):
+        return frame
+    # JS 쪽 행 추가(applyTransaction)로 생긴 undefined 필드는 NaN 으로 돌아온다.
+    # 그대로 두면 str(nan)="nan" 이 빈 행 검사를 통과하므로 열 타입별로 정규화한다.
+    result = result.copy()
+    for name, kind in columns.items():
+        if name not in result.columns:
+            continue
+        if kind == "bool":
+            result[name] = result[name].fillna(False).map(grid_bool)
+        elif kind == "number":
+            result[name] = pd.to_numeric(result[name], errors="coerce").fillna(0).astype("int64")
+        else:
+            result[name] = result[name].fillna("").astype("string")
+    return result
 
 
 def normalize_editor_text(df: pd.DataFrame, columns) -> pd.DataFrame:
