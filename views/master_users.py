@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import ALL, master_data_editor, save_bar, set_flash, show_flash
+from views.workspace import ALL, grid_bool, master_data_editor, save_bar, set_flash, show_flash
 
 # 화면 표시 라벨 ↔ 저장 코드 매핑
 _ROLE_TO_LABEL = {"USER": "직원", "MANAGER": "매니저", "ADMIN": "관리자"}
@@ -21,6 +21,14 @@ _COLS = ["사번", "성명", "부서", "조/팀", "직급", "권한", "재직"]
 _STATUS = ["재직", "퇴직", "전체"]
 
 
+def _dept_labels(dept_names: dict[str, str]) -> dict[str, str]:
+    """부서명 중복에도 안전한 편집기 표시값(code -> label)."""
+    return {
+        code: f"{name} ({code})"
+        for code, name in dept_names.items()
+    }
+
+
 def render(user: dict) -> None:
     ui.page_header("master_users")
 
@@ -28,7 +36,8 @@ def render(user: dict) -> None:
     teams = db.get_teams()
     source_users = db.get_users()
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
-    name_to_code = {v: k for k, v in dept_names.items()}
+    dept_labels = _dept_labels(dept_names)
+    label_to_code = {label: code for code, label in dept_labels.items()}
     team_set = set(zip(teams["dept_code"], teams["team_code"]))
     team_codes = sorted(teams["team_code"].unique().tolist())
 
@@ -63,7 +72,8 @@ def render(user: dict) -> None:
     # 요약 카드 (편집 중인 내용 기준으로 갱신)
     sum_ph = st.container()
 
-    # 스프레드시트형 편집 그리드 (행 추가 가능, 사용자 물리 삭제는 저장 시 차단)
+    # Streamlit 내장 편집기는 동적 행 추가와 엑셀 범위 붙여넣기를 같은 앱 컨텍스트에서
+    # 처리한다. 사용자 관리는 복수 행 붙여넣기가 핵심이므로 외부 그리드 대신 사용한다.
     edited = master_data_editor(
         st.session_state["mu_work"],
         key="mu_editor",
@@ -73,7 +83,7 @@ def render(user: dict) -> None:
         column_config={
             "사번": st.column_config.TextColumn("사번", width="small"),
             "성명": st.column_config.TextColumn("성명", width="small"),
-            "부서": st.column_config.SelectboxColumn("부서", options=list(dept_names.values())),
+            "부서": st.column_config.SelectboxColumn("부서", options=list(dept_labels.values())),
             "조/팀": st.column_config.SelectboxColumn("조/팀", options=[""] + team_codes, width="small"),
             "직급": st.column_config.TextColumn("직급", width="small"),
             "권한": st.column_config.SelectboxColumn("권한", options=list(_LABEL_TO_ROLE), width="small"),
@@ -85,7 +95,7 @@ def render(user: dict) -> None:
         _summary_cards(edited)
 
     if save_bar("mu"):
-        _save(edited, q, dept_names, name_to_code, team_set)
+        _save(edited, q, dept_names, label_to_code, team_set)
 
 
 def _to_display(df: pd.DataFrame, dept_names: dict) -> pd.DataFrame:
@@ -93,7 +103,7 @@ def _to_display(df: pd.DataFrame, dept_names: dict) -> pd.DataFrame:
     return pd.DataFrame({
         "사번": df["emp_no"].astype(str),
         "성명": df["name"].astype(str),
-        "부서": df["dept_code"].map(dept_names).fillna(""),
+        "부서": df["dept_code"].map(_dept_labels(dept_names)).fillna(""),
         "조/팀": df["team_code"].astype(str),
         "직급": df["position"].astype(str),
         "권한": df["role"].map(_ROLE_TO_LABEL).fillna(""),
@@ -122,26 +132,34 @@ def _load_editor(q: dict, dept_names: dict, source: pd.DataFrame | None = None) 
 
 
 def _summary_cards(edited: pd.DataFrame) -> None:
-    roles = edited["권한"].map(_LABEL_TO_ROLE)
+    # 붙여넣기용 빈 행은 화면 요약과 저장 대상에서 제외한다.
+    rows = edited[
+        edited[["사번", "성명", "부서", "조/팀", "직급"]]
+        .fillna("")
+        .astype(str)
+        .apply(lambda row: row.str.strip().ne("").any(), axis=1)
+    ].copy()
+    roles = rows["권한"].map(_LABEL_TO_ROLE)
     ui.summary_cards([
-        ("조회 인원", f"{len(edited)}명"),
-        ("재직", f"{int(edited['재직'].fillna(False).astype(bool).sum())}명"),
-        ("부서", f"{edited['부서'].replace('', pd.NA).nunique()}개"),
+        ("조회 인원", f"{len(rows)}명"),
+        ("재직", f"{int(rows['재직'].fillna(False).astype(bool).sum())}명"),
+        ("부서", f"{rows['부서'].replace('', pd.NA).nunique()}개"),
         ("매니저 이상", f"{int(roles.isin(['MANAGER', 'ADMIN']).sum())}명"),
     ])
     st.write("")
 
 
-def _save(edited, q, dept_names, name_to_code, team_set) -> None:
+def _save(edited, q, dept_names, label_to_code, team_set) -> None:
     """편집 결과를 검증하고, 사번 기준 upsert 로 병합해 저장한다.
 
     사용자는 물리 삭제하지 않는다. 그리드에서 지운 행(조회했다가 사라진 사번)은
     삭제 대신 재직 여부(is_active)를 False(퇴직)로 바꿔 보존한다.
     """
-    records, errors = _validate(edited, dept_names, name_to_code, team_set)
+    records, errors = _validate(edited, dept_names, label_to_code, team_set)
 
     # 기존 사번은 U, 신규 사번은 C, 지운 사번은 재직=False 소프트 삭제.
-    loaded = set(st.session_state.get("mu_loaded_emp", []))
+    # 붙여넣기/필터로 보이지 않는 기존 행을 자동 비활성화하지 않는다.
+    loaded = set()
     store = db.get_users()
     merged, dup, n_c, n_u, n_d = db.upsert_records(
         store, records, loaded, ["emp_no"], "is_active", db.USER_COLUMNS,
@@ -163,7 +181,7 @@ def _save(edited, q, dept_names, name_to_code, team_set) -> None:
     st.rerun()
 
 
-def _validate(edited, dept_names, name_to_code, team_set):
+def _validate(edited, dept_names, label_to_code, team_set):
     """표시 형태 → 저장 형태 변환 + 행별 기본 검증. (records, errors) 반환."""
     records, errors = [], []
     for i, (_, row) in enumerate(edited.iterrows(), start=1):
@@ -172,7 +190,7 @@ def _validate(edited, dept_names, name_to_code, team_set):
         dept_label = str(row["부서"] or "").strip()
         team_code = str(row["조/팀"] or "").strip()
         role = _LABEL_TO_ROLE.get(str(row["권한"] or "").strip(), "")
-        dept_code = name_to_code.get(dept_label, "")
+        dept_code = label_to_code.get(dept_label, "")
 
         # 완전히 빈 행(새 행 자동 추가분)은 조용히 건너뛴다
         if not any([emp_no, name, dept_label, team_code, str(row["직급"] or "").strip()]):
@@ -183,7 +201,7 @@ def _validate(edited, dept_names, name_to_code, team_set):
             errors.append(f"{i}행: 사번을 입력하세요.")
         if not name:
             errors.append(f"{tag}: 성명을 입력하세요.")
-        if dept_code not in dept_names:
+        if not dept_code:
             errors.append(f"{tag}: 부서를 선택하세요.")
         elif team_code and (dept_code, team_code) not in team_set:
             errors.append(f"{tag}: 선택한 부서에 없는 조/팀입니다.")
@@ -197,6 +215,6 @@ def _validate(edited, dept_names, name_to_code, team_set):
             "team_code": team_code,
             "position": str(row["직급"] or "").strip(),
             "role": role,
-            "is_active": bool(row["재직"]),
+            "is_active": grid_bool(row["재직"]),
         })
     return records, errors

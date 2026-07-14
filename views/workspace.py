@@ -13,6 +13,7 @@ from datetime import date
 
 import pandas as pd
 import streamlit as st
+from st_aggrid import AgGrid, DataReturnMode, GridOptionsBuilder, JsCode
 
 from modules import db, ui
 
@@ -96,12 +97,109 @@ def master_data_editor(data, **kwargs):
         return st.data_editor(data, height=master_editor_height(), **kwargs)
 
 
+_EXPAND_CLIPBOARD_ROWS = JsCode(
+    """
+    function(params) {
+      // 셀이 편집 중이 아닐 때 AG Grid가 탭/줄바꿈 데이터를 2차원 배열로 전달한다.
+      // 붙여넣기 범위의 마지막 행이 현재 그리드 밖으로 나가는 만큼만 행을 추가한다.
+      const rowsToAdd = params.startRowIndex + params.data.length
+        - params.api.getDisplayedRowCount();
+      if (rowsToAdd > 0) {
+        params.api.applyTransaction({
+          add: Array.from({length: rowsToAdd}, () => ({})),
+        });
+      }
+      return params.data;
+    }
+    """
+)
+
+
+def editable_aggrid(
+    data: pd.DataFrame,
+    key: str,
+    columns: dict,
+    height: int | None = None,
+    blank_rows: int = 1,
+) -> pd.DataFrame:
+    """Excel 범위 붙여넣기용 빈 행을 포함하는 기준정보 편집 그리드.
+
+    AgGrid 커스텀 컴포넌트의 런타임 행 추가는 브라우저/버전별로 불안정할 수 있다.
+    따라서 붙여넣기 대상이 될 빈 행을 미리 확보한다. 저장 검증은 완전히 빈 행을
+    건너뛰므로 버퍼 행은 데이터로 저장되지 않는다.
+    """
+    frame = data.copy().reset_index(drop=True)
+    for name, kind in columns.items():
+        if name not in frame:
+            frame[name] = False if kind == "bool" else 0 if kind == "number" else ""
+        elif kind == "text":
+            frame[name] = frame[name].fillna("").astype("string")
+    text_columns = [name for name, kind in columns.items() if kind != "bool" and kind != "number"]
+    # 이전 rerun 에서 반환된 빈 버퍼는 제거하고, 필요한 수만큼 다시 붙인다.
+    # 이렇게 해야 반복 rerun 에도 빈 행이 누적되지 않는다.
+    while not frame.empty and not any(
+        str(frame.iloc[-1][name]).strip() for name in text_columns
+    ):
+        frame = frame.iloc[:-1].reset_index(drop=True)
+
+    empty_row = {
+        name: False if kind == "bool" else 0 if kind == "number" else ""
+        for name, kind in columns.items()
+    }
+    if blank_rows > 0:
+        frame = pd.concat(
+            [frame, pd.DataFrame([empty_row] * blank_rows)],
+            ignore_index=True,
+        )
+
+    builder = GridOptionsBuilder.from_dataframe(frame)
+    builder.configure_default_column(editable=True, resizable=True, sortable=False, filter=False)
+    builder.configure_grid_options(
+        # 단일 클릭에서 편집을 시작하면 Ctrl+V가 브라우저 텍스트 입력으로 처리되어
+        # 여러 행/열이 한 셀에 들어간다. 클릭은 선택만, 편집은 더블 클릭/Enter로 한다.
+        singleClickEdit=False,
+        stopEditingWhenCellsLoseFocus=True,
+        enterNavigatesVertically=True,
+        enterNavigatesVerticallyAfterEdit=True,
+        processDataFromClipboard=_EXPAND_CLIPBOARD_ROWS,
+        clipboardDelimiter="\t",
+        suppressLastEmptyLineOnPaste=True,
+        suppressRowClickSelection=True,
+    )
+    for name, kind in columns.items():
+        if kind == "bool":
+            builder.configure_column(name, checkboxSelection=False, cellEditor="agCheckboxCellEditor")
+        elif isinstance(kind, (list, tuple)):
+            builder.configure_column(name, cellEditor="agSelectCellEditor", cellEditorParams={"values": list(kind)})
+    response = AgGrid(
+        frame,
+        gridOptions=builder.build(),
+        key=key,
+        height=height or master_editor_height(),
+        update_on=["cellValueChanged", "pasteEnd"],
+        data_return_mode=DataReturnMode.AS_INPUT,
+        allow_unsafe_jscode=True,
+        theme="streamlit",
+        show_toolbar=False,
+        show_search=False,
+    )
+    result = response.data
+    return result.copy() if isinstance(result, pd.DataFrame) else frame
+
+
 def normalize_editor_text(df: pd.DataFrame, columns) -> pd.DataFrame:
     """data_editor의 텍스트 셀을 빈 문자열 기반 string dtype으로 정규화한다."""
     frame = df.copy()
     for column in columns:
         frame[column] = frame[column].fillna("").astype("string")
     return frame
+
+
+def grid_bool(value) -> bool:
+    """Excel 붙여넣기에서 들어오는 boolean 텍스트를 명시적으로 정규화한다."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y", "사용", "재직"}
+    return bool(value)
 
 
 def set_flash(page_id: str, kind: str, text: str) -> None:
