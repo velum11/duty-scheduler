@@ -12,7 +12,7 @@ from typing import Iterable
 import pandas as pd
 from supabase import Client, create_client
 
-from modules import config
+from modules import config, validators
 
 PAGE_SIZE = 1000
 WRITE_BATCH_SIZE = 500
@@ -411,6 +411,149 @@ def upsert_work_types(records: list[dict]) -> None:
         })
     if payload:
         _upsert("work_types", payload, "code")
+
+
+def get_shift_groups() -> pd.DataFrame:
+    """근무조 기준정보 (자연키: dept_code, shift_code)."""
+    _, dept_by_id = _department_maps()
+    rows = _select_all(
+        "shift_groups",
+        "department_id,shift_code,shift_name,sort_order,is_active",
+        lambda query: query.order("department_id").order("sort_order").order("shift_code"),
+    )
+    natural = []
+    for row in rows:
+        natural.append({
+            "dept_code": _mapped(
+                dept_by_id,
+                _required(row, "shift_groups", "department_id"),
+                "shift_groups.department_id",
+            ),
+            "shift_code": str(_required(row, "shift_groups", "shift_code")),
+            "shift_name": str(_required(row, "shift_groups", "shift_name")),
+            "sort_order": _clean_int(_required(row, "shift_groups", "sort_order")),
+            "is_active": _clean_bool(_required(row, "shift_groups", "is_active")),
+        })
+    return _frame(
+        natural,
+        ["dept_code", "shift_code", "shift_name", "sort_order", "is_active"],
+        "shift_groups",
+    )
+
+
+def upsert_shift_groups(records: list[dict]) -> None:
+    dept_by_code, _ = _department_maps()
+    payload = []
+    for row in records:
+        dept_code = _clean_text(row.get("dept_code"))
+        if dept_code not in dept_by_code:
+            raise SupabaseDataError(f"근무조의 부서코드를 찾을 수 없습니다: {dept_code}")
+        shift_code = _clean_text(row.get("shift_code"))
+        shift_name = _clean_text(row.get("shift_name"))
+        if not shift_code or not shift_name:
+            raise SupabaseDataError("근무조 코드와 근무조명은 비어 있을 수 없습니다.")
+        payload.append({
+            "department_id": dept_by_code[dept_code],
+            "shift_code": shift_code,
+            "shift_name": shift_name,
+            "sort_order": _clean_int(row.get("sort_order")),
+            "is_active": _clean_bool(row.get("is_active")),
+        })
+    if payload:
+        _upsert("shift_groups", payload, "department_id,shift_code")
+
+
+def get_month_assignments(year: int, month: int, emp_nos: Iterable[str] | None = None) -> pd.DataFrame:
+    """대상 월의 직원별 편성 스냅샷 (자연키 계약: SCHEDULE_ASSIGNMENT_COLUMNS)."""
+    _, dept_by_id = _department_maps()
+    _, team_by_id = _team_maps()
+    schedule_month = validators.normalize_schedule_month((int(year), int(month)))
+
+    normalized = sorted({str(value).strip() for value in (emp_nos or []) if str(value).strip()})
+    user_by_emp, emp_by_id = _user_maps(normalized or None)
+    if normalized and not user_by_emp:
+        return _frame(
+            [],
+            ["emp_no", "schedule_month", "dept_code", "team_code", "shift_group_code"],
+            "schedule_assignments",
+        )
+
+    def builder(query):
+        query = query.eq("schedule_month", schedule_month)
+        if normalized:
+            query = query.in_("user_id", list(user_by_emp.values()))
+        return query.order("user_id")
+
+    rows = _select_all(
+        "schedule_assignments",
+        "user_id,schedule_month,department_id,team_id,shift_group_code",
+        builder,
+    )
+    natural = []
+    for row in rows:
+        team_id = _optional(row, "schedule_assignments", "team_id")
+        shift_code = _optional(row, "schedule_assignments", "shift_group_code")
+        natural.append({
+            "emp_no": _mapped(
+                emp_by_id,
+                _required(row, "schedule_assignments", "user_id"),
+                "schedule_assignments.user_id",
+            ),
+            "schedule_month": str(_required(row, "schedule_assignments", "schedule_month")),
+            "dept_code": _mapped(
+                dept_by_id,
+                _required(row, "schedule_assignments", "department_id"),
+                "schedule_assignments.department_id",
+            ),
+            "team_code": _mapped(team_by_id, team_id, "schedule_assignments.team_id")
+            if team_id is not None else "",
+            "shift_group_code": str(shift_code or ""),
+        })
+    return _frame(
+        natural,
+        ["emp_no", "schedule_month", "dept_code", "team_code", "shift_group_code"],
+        "schedule_assignments",
+    )
+
+
+def upsert_month_assignments(records: list[dict]) -> None:
+    """직원·월 편성 upsert. 자연키 입력을 검증 후 id 관계값으로 변환해 저장한다.
+
+    검증(팀-부서 소속, 부서의 활성 조, 월 정규화, 직원·월 중복)은
+    modules/validators 순수 함수를 사용한다.
+    """
+    dept_by_code, _ = _department_maps()
+    team_by_key, _ = _team_maps()
+    user_by_emp, _ = _user_maps()
+    shift_groups = get_shift_groups()
+    shift_keys = {
+        (str(row["dept_code"]), str(row["shift_code"]))
+        for _, row in shift_groups.iterrows()
+        if bool(row["is_active"])
+    }
+
+    normalized, errors = validators.validate_assignment_records(
+        records,
+        emp_nos=set(user_by_emp),
+        dept_codes=set(dept_by_code),
+        team_keys=set(team_by_key),
+        shift_keys=shift_keys,
+    )
+    if errors:
+        raise SupabaseDataError("월 편성 검증 실패:\n- " + "\n- ".join(errors))
+
+    payload = []
+    for row in normalized:
+        team_id = team_by_key[(row["dept_code"], row["team_code"])] if row["team_code"] else None
+        payload.append({
+            "user_id": user_by_emp[row["emp_no"]],
+            "schedule_month": row["schedule_month"],
+            "department_id": dept_by_code[row["dept_code"]],
+            "team_id": team_id,
+            "shift_group_code": row["shift_group_code"],
+        })
+    if payload:
+        _upsert("schedule_assignments", payload, "user_id,schedule_month")
 
 
 def _schedule_rows(query_builder=None) -> pd.DataFrame:

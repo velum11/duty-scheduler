@@ -13,7 +13,7 @@ import hashlib
 import pandas as pd
 import streamlit as st
 
-from modules import config, sample_data, supabase_repository
+from modules import config, sample_data, supabase_repository, validators
 
 DATA_SOURCE_ERRORS = (
     config.DataSourceConfigurationError,
@@ -38,6 +38,20 @@ WORK_TYPE_COLUMNS = [
 # 화면이 사용하는 근무표 자연키 컬럼 (id/user_id/work_date 는 파사드 내부에서만 사용).
 SCHEDULE_COLUMNS = ["emp_no", "duty_date", "work_type_code", "note"]
 
+# 화면이 사용하는 근무조 기준정보 컬럼 (id/department_id 는 파사드 내부 매핑에만 사용).
+SHIFT_GROUP_COLUMNS = ["dept_code", "shift_code", "shift_name", "sort_order", "is_active"]
+
+# 화면이 사용하는 직원별 월 편성 컬럼 (docs/database.md §5.1).
+# schedule_month 는 해당 월 1일 ISO 문자열('YYYY-MM-01')로 정규화한다.
+SCHEDULE_ASSIGNMENT_COLUMNS = [
+    "emp_no", "schedule_month", "dept_code", "team_code", "shift_group_code",
+]
+
+# 편성 정보가 붙은 일별 근무 계약 (get_month_roster 반환값의 근무 프레임).
+SCHEDULE_ASSIGNED_COLUMNS = SCHEDULE_COLUMNS + [
+    "schedule_month", "dept_code", "team_code", "shift_group_code",
+]
+
 _BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance"}
 _INTEGER_COLUMNS = {"sort_order"}
 
@@ -47,6 +61,8 @@ _DEPTS_STORE = "store_departments"
 _TEAMS_STORE = "store_teams"
 _WORK_TYPES_STORE = "store_work_types"
 _SCHEDULES_STORE = "store_schedules"
+_SHIFT_GROUPS_STORE = "store_shift_groups"
+_ASSIGNMENTS_STORE = "store_schedule_assignments"
 
 
 def datasource() -> str:
@@ -445,6 +461,140 @@ def replace_month_schedules(emp_nos, year: int, month: int, records) -> None:
     )
 
 
+# --- 근무조 기준정보 / 직원별 월 편성 (docs/database.md §4.5·§5.1) ---
+def _base_shift_groups() -> pd.DataFrame:
+    """샘플 CSV(id 기반)를 화면용 근무조 컬럼(SHIFT_GROUP_COLUMNS)으로 변환한 원본."""
+    df = sample_data.shift_groups()
+    if df.empty:
+        return _typed_empty_frame(SHIFT_GROUP_COLUMNS)
+    df = df.copy()
+    df["dept_code"] = df["department_id"].astype(str).map(_dept_code_by_id()).fillna("")
+    return df[SHIFT_GROUP_COLUMNS].reset_index(drop=True).copy()
+
+
+def get_shift_groups(dept_code: str | None = None, is_active: bool | None = None) -> pd.DataFrame:
+    """근무조 목록(SHIFT_GROUP_COLUMNS). 선택지 제공·유효성 검사 전용 기준정보."""
+    if is_sample_mode():
+        if _SHIFT_GROUPS_STORE not in st.session_state:
+            st.session_state[_SHIFT_GROUPS_STORE] = _base_shift_groups()
+        df = st.session_state[_SHIFT_GROUPS_STORE].copy()
+    else:
+        df = supabase_repository.get_shift_groups()
+    if dept_code is not None:
+        df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
+    if is_active is not None:
+        df = df[df["is_active"].astype(bool) == bool(is_active)]
+    return _empty_contract(df.reset_index(drop=True), SHIFT_GROUP_COLUMNS)
+
+
+def _base_assignments() -> pd.DataFrame:
+    """샘플 CSV(id 기반)를 화면용 월 편성 컬럼(SCHEDULE_ASSIGNMENT_COLUMNS)으로 변환한 원본."""
+    df = sample_data.schedule_assignments()
+    if df.empty:
+        return _typed_empty_frame(SCHEDULE_ASSIGNMENT_COLUMNS)
+    df = df.copy()
+    df["emp_no"] = df["user_id"].astype(str).map(_emp_no_by_id()).fillna("")
+    df["dept_code"] = df["department_id"].astype(str).map(_dept_code_by_id()).fillna("")
+    df["team_code"] = df["team_id"].astype(str).map(_team_code_by_id()).fillna("")
+    df["schedule_month"] = df["schedule_month"].map(
+        lambda value: validators.normalize_schedule_month(value) if str(value).strip() else ""
+    )
+    df["shift_group_code"] = df["shift_group_code"].fillna("").astype(str)
+    df = df[df["emp_no"] != ""]
+    return df[SCHEDULE_ASSIGNMENT_COLUMNS].reset_index(drop=True).copy()
+
+
+def _assignments_store() -> pd.DataFrame:
+    if _ASSIGNMENTS_STORE not in st.session_state:
+        st.session_state[_ASSIGNMENTS_STORE] = _base_assignments()
+    return st.session_state[_ASSIGNMENTS_STORE]
+
+
+def get_month_assignments(year: int, month: int, emp_nos=None) -> pd.DataFrame:
+    """대상 월의 직원별 편성 스냅샷(SCHEDULE_ASSIGNMENT_COLUMNS).
+
+    편성은 근무표 작성 당시 값이므로 users 의 현재 소속으로 재계산하지 않는다.
+    """
+    if isinstance(emp_nos, str):
+        emp_nos = [emp_nos]
+    normalized = {str(e).strip() for e in (emp_nos or []) if str(e).strip()}
+    if not is_sample_mode():
+        return supabase_repository.get_month_assignments(
+            int(year), int(month), sorted(normalized) or None
+        )
+    schedule_month = validators.normalize_schedule_month((int(year), int(month)))
+    df = _assignments_store().copy()
+    if df.empty:
+        return _typed_empty_frame(SCHEDULE_ASSIGNMENT_COLUMNS)
+    df = df[df["schedule_month"].astype(str) == schedule_month]
+    if normalized:
+        df = df[df["emp_no"].astype(str).str.strip().isin(normalized)]
+    return _empty_contract(df.reset_index(drop=True), SCHEDULE_ASSIGNMENT_COLUMNS)
+
+
+def upsert_month_assignments(records) -> None:
+    """직원·월 편성을 upsert 한다 (직원별 월 편성 1건).
+
+    검증은 modules/validators 순수 함수로 수행한다: 사번·부서 존재, 팀-부서 소속,
+    부서의 활성 조, 대상 월 정규화, 같은 직원·월 중복. 검증 실패 시 ValueError
+    (supabase 모드는 SupabaseDataError) 를 던지고 아무것도 저장하지 않는다.
+    편성 저장은 users 를 변경하지 않는다.
+    """
+    records = list(records)
+    if not is_sample_mode():
+        supabase_repository.upsert_month_assignments(records)
+        return
+    users = get_users()
+    depts = get_departments()
+    teams = get_teams()
+    shift_groups = get_shift_groups()
+    normalized, errors = validators.validate_assignment_records(
+        records,
+        emp_nos=set(users["emp_no"].astype(str).str.strip()),
+        dept_codes=set(depts["dept_code"].astype(str)),
+        team_keys=set(zip(teams["dept_code"].astype(str), teams["team_code"].astype(str))),
+        shift_keys={
+            (str(d), str(s))
+            for d, s, a in zip(
+                shift_groups["dept_code"], shift_groups["shift_code"], shift_groups["is_active"]
+            )
+            if bool(a)
+        },
+    )
+    if errors:
+        raise ValueError("월 편성 검증 실패:\n- " + "\n- ".join(errors))
+    store = _assignments_store()
+    by_key = {
+        (str(r["emp_no"]), str(r["schedule_month"])): r for r in store.to_dict("records")
+    }
+    for record in normalized:
+        by_key[(record["emp_no"], record["schedule_month"])] = record
+    st.session_state[_ASSIGNMENTS_STORE] = pd.DataFrame(
+        list(by_key.values()), columns=SCHEDULE_ASSIGNMENT_COLUMNS
+    )
+
+
+def get_month_roster(emp_nos, year: int, month: int):
+    """대상 월의 (편성, 편성정보가 붙은 일별 근무) 를 함께 반환한다.
+
+    반환: (assignments, schedules)
+      - assignments: SCHEDULE_ASSIGNMENT_COLUMNS
+      - schedules: SCHEDULE_ASSIGNED_COLUMNS — 일별 근무에 해당 월 편성의
+        schedule_month/dept_code/team_code/shift_group_code 를 붙인 long format.
+        편성이 없는 근무 행은 빈 문자열로 채운다 (backfill 이전 데이터 호환).
+    """
+    assignments = get_month_assignments(year, month, emp_nos)
+    schedules = get_month_schedules(emp_nos, int(year), int(month))
+    merged = schedules.merge(
+        assignments[["emp_no", "schedule_month", "dept_code", "team_code", "shift_group_code"]],
+        on="emp_no",
+        how="left",
+    )
+    for column in ("schedule_month", "dept_code", "team_code", "shift_group_code"):
+        merged[column] = merged[column].fillna("").astype(str)
+    return assignments, merged[SCHEDULE_ASSIGNED_COLUMNS].reset_index(drop=True)
+
+
 # --- 조회 헬퍼 ---
 def find_user_by_emp_no(emp_no: str):
     """사번으로 사용자 1명을 dict 로 반환. 없으면 None."""
@@ -569,6 +719,10 @@ def upsert_work_type(record: dict) -> None:
 
 def upsert_schedule(record: dict) -> None:
     supabase_repository.upsert_schedules([record])
+
+
+def upsert_shift_group(record: dict) -> None:
+    supabase_repository.upsert_shift_groups([record])
 
 
 def delete_schedule(emp_no: str, duty_date: str) -> None:

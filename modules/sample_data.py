@@ -81,3 +81,28 @@ def work_schedules() -> pd.DataFrame:
     if df.empty:
         return df
     return df.reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def shift_groups() -> pd.DataFrame:
+    """근무조 기준정보 (선택 CSV — 없으면 빈 DataFrame)."""
+    df = _read("shift_groups")
+    if df.empty:
+        return df
+    df["is_active"] = _to_bool(df["is_active"])
+    df["sort_order"] = _to_int(df["sort_order"])
+    df["_dept"] = _to_int(df["department_id"])
+    return (
+        df.sort_values(["_dept", "sort_order"])
+        .drop(columns="_dept")
+        .reset_index(drop=True)
+    )
+
+
+@st.cache_data(show_spinner=False)
+def schedule_assignments() -> pd.DataFrame:
+    """직원별 월 편성 스냅샷 (선택 CSV — 없으면 빈 DataFrame)."""
+    df = _read("schedule_assignments")
+    if df.empty:
+        return df
+    return df.reset_index(drop=True)
