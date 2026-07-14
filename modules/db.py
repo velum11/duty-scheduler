@@ -38,6 +38,9 @@ WORK_TYPE_COLUMNS = [
 # 화면이 사용하는 근무표 자연키 컬럼 (id/user_id/work_date 는 파사드 내부에서만 사용).
 SCHEDULE_COLUMNS = ["emp_no", "duty_date", "work_type_code", "note"]
 
+_BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance"}
+_INTEGER_COLUMNS = {"sort_order"}
+
 # 로컬 샘플 모드에서 편집 결과를 담아 세션 동안 유지하는 스토어 키.
 _USERS_STORE = "store_users"
 _DEPTS_STORE = "store_departments"
@@ -53,6 +56,22 @@ def datasource() -> str:
 
 def is_sample_mode() -> bool:
     return datasource() == "sample"
+
+
+def _typed_empty_frame(columns) -> pd.DataFrame:
+    """빈 기준정보도 화면 필터가 가능한 컬럼/dtype 계약으로 반환한다."""
+    return pd.DataFrame({
+        column: pd.Series(
+            dtype="bool" if column in _BOOLEAN_COLUMNS
+            else "int64" if column in _INTEGER_COLUMNS
+            else "object"
+        )
+        for column in columns
+    })
+
+
+def _empty_contract(df: pd.DataFrame, columns) -> pd.DataFrame:
+    return _typed_empty_frame(columns) if df.empty else df
 
 
 def frame_signature(df: pd.DataFrame, columns) -> str:
@@ -123,7 +142,7 @@ def _base_departments() -> pd.DataFrame:
     """샘플 CSV 를 화면용 부서 컬럼(DEPT_COLUMNS)으로 정리한 원본."""
     df = sample_data.departments()
     if df.empty:
-        return pd.DataFrame(columns=DEPT_COLUMNS)
+        return _typed_empty_frame(DEPT_COLUMNS)
     return df[DEPT_COLUMNS].reset_index(drop=True).copy()
 
 
@@ -137,11 +156,11 @@ def get_departments(is_active: bool | None = None) -> pd.DataFrame:
     if is_sample_mode():
         if _DEPTS_STORE not in st.session_state:
             st.session_state[_DEPTS_STORE] = _base_departments()
-        return st.session_state[_DEPTS_STORE].copy()
+        return _empty_contract(st.session_state[_DEPTS_STORE].copy(), DEPT_COLUMNS)
     df = supabase_repository.get_departments()
     if is_active is not None:
         df = df[df["is_active"].astype(bool) == bool(is_active)]
-    return df.reset_index(drop=True)
+    return _empty_contract(df.reset_index(drop=True), DEPT_COLUMNS)
 
 
 def save_departments(df: pd.DataFrame) -> None:
@@ -165,7 +184,7 @@ def _base_teams() -> pd.DataFrame:
     """샘플 CSV(id 기반)를 화면용 조/팀 컬럼(TEAM_COLUMNS)으로 변환한 원본."""
     df = sample_data.teams()
     if df.empty:
-        return pd.DataFrame(columns=TEAM_COLUMNS)
+        return _typed_empty_frame(TEAM_COLUMNS)
     df = df.copy()
     df["dept_code"] = df["department_id"].astype(str).map(_dept_code_by_id()).fillna("")
     return df[TEAM_COLUMNS].reset_index(drop=True).copy()
@@ -181,13 +200,13 @@ def get_teams(dept_code: str | None = None, is_active: bool | None = None) -> pd
     if is_sample_mode():
         if _TEAMS_STORE not in st.session_state:
             st.session_state[_TEAMS_STORE] = _base_teams()
-        return st.session_state[_TEAMS_STORE].copy()
+        return _empty_contract(st.session_state[_TEAMS_STORE].copy(), TEAM_COLUMNS)
     df = supabase_repository.get_teams()
     if dept_code is not None:
         df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
     if is_active is not None:
         df = df[df["is_active"].astype(bool) == bool(is_active)]
-    return df.reset_index(drop=True)
+    return _empty_contract(df.reset_index(drop=True), TEAM_COLUMNS)
 
 
 def save_teams(df: pd.DataFrame) -> None:
@@ -214,7 +233,7 @@ def _base_users() -> pd.DataFrame:
     """샘플 CSV(id 기반)를 화면용 자연키 컬럼(USER_COLUMNS)으로 변환한 원본."""
     df = sample_data.users()
     if df.empty:
-        return pd.DataFrame(columns=USER_COLUMNS)
+        return _typed_empty_frame(USER_COLUMNS)
     df = df.copy()
     df["dept_code"] = df["department_id"].astype(str).map(_dept_code_by_id()).fillna("")
     df["team_code"] = df["team_id"].astype(str).map(_team_code_by_id()).fillna("")
@@ -235,7 +254,7 @@ def get_users(
     if is_sample_mode():
         if _USERS_STORE not in st.session_state:
             st.session_state[_USERS_STORE] = _base_users()
-        return st.session_state[_USERS_STORE].copy()
+        return _empty_contract(st.session_state[_USERS_STORE].copy(), USER_COLUMNS)
     df = supabase_repository.get_users()
     if dept_code is not None:
         df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
@@ -243,7 +262,7 @@ def get_users(
         df = df[df["team_code"].astype(str) == str(team_code).strip()]
     if is_active is not None:
         df = df[df["is_active"].astype(bool) == bool(is_active)]
-    return df.reset_index(drop=True)
+    return _empty_contract(df.reset_index(drop=True), USER_COLUMNS)
 
 
 def save_users(df: pd.DataFrame) -> None:
@@ -267,7 +286,7 @@ def _base_work_types() -> pd.DataFrame:
     """샘플 CSV 를 화면용 근무형태 컬럼(WORK_TYPE_COLUMNS)으로 정리한 원본."""
     df = sample_data.work_types()
     if df.empty:
-        return pd.DataFrame(columns=WORK_TYPE_COLUMNS)
+        return _typed_empty_frame(WORK_TYPE_COLUMNS)
     df = df.copy()
     for c in WORK_TYPE_COLUMNS:
         if c not in df.columns:
@@ -285,11 +304,11 @@ def get_work_types(active_only: bool = False) -> pd.DataFrame:
     if is_sample_mode():
         if _WORK_TYPES_STORE not in st.session_state:
             st.session_state[_WORK_TYPES_STORE] = _base_work_types()
-        return st.session_state[_WORK_TYPES_STORE].copy()
+        return _empty_contract(st.session_state[_WORK_TYPES_STORE].copy(), WORK_TYPE_COLUMNS)
     df = supabase_repository.get_work_types()
     if active_only:
         df = df[df["is_active"].astype(bool)]
-    return df.reset_index(drop=True)
+    return _empty_contract(df.reset_index(drop=True), WORK_TYPE_COLUMNS)
 
 
 def save_work_types(df: pd.DataFrame) -> None:

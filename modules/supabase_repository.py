@@ -17,6 +17,8 @@ from modules import config
 PAGE_SIZE = 1000
 WRITE_BATCH_SIZE = 500
 REQUIRED_TABLES = ("departments", "teams", "users", "work_types", "work_schedules")
+_BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance"}
+_INTEGER_COLUMNS = {"sort_order"}
 
 
 class SupabaseDataError(RuntimeError):
@@ -107,7 +109,16 @@ def _frame(
     nullable_columns: Iterable[str] = (),
 ) -> pd.DataFrame:
     if not rows:
-        return pd.DataFrame(columns=columns)
+        # Empty object-typed boolean columns make ``df[df["is_active"]]``
+        # behave like a column selection. Keep the view contract and dtypes.
+        return pd.DataFrame({
+            column: pd.Series(
+                dtype="bool" if column in _BOOLEAN_COLUMNS
+                else "int64" if column in _INTEGER_COLUMNS
+                else "object"
+            )
+            for column in columns
+        })
     frame = pd.DataFrame(rows)
     missing = [column for column in columns if column not in frame.columns]
     if missing:
