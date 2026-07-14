@@ -37,7 +37,7 @@ USER_MENU = [
 MENU_GROUPS = [
     {
         "id": "home",
-        "label": "대시보드",
+        "label": "홈",
         "icon": ":material/home:",
         "roles": ("MANAGER", "ADMIN"),
         "children": [

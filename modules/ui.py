@@ -1,15 +1,16 @@
 """공통 UI — App Shell + 화면 공통 컴포넌트 (DESIGN.md 구현).
 
 App Shell 구조 (DESIGN.md §2):
-  좌측 1차 메뉴 바(네이비 112px) + 좌측 2차 업무 메뉴 패널(196px)
-  + 우측 메인 콘텐츠(상단 헤더 → 페이지 제목 → 조회 조건 → 요약 카드 → 그리드).
+  단일 다크 사이드바(232px: 브랜드 헤더 + 접이식 그룹 메뉴 + 하단 사용자 카드)
+  + 우측 메인 콘텐츠(브레드크럼 → 페이지 제목 → 조회 조건 → 요약 카드 → 그리드).
 
-구현 방식: Streamlit 사이드바 하나를 CSS gradient 로 좌/우 영역으로 나누고,
-내부를 컬럼 2개(아이콘 바 / 메뉴 패널)로 구성한다. CSS 는 이 모듈에서만 관리한다.
+구현 방식: st.sidebar 에 헤더/메뉴/사용자 카드를 렌더링하고 _SHELL_CSS 로 스타일링한다.
+숨김 상태(st.session_state.sb_hidden)에서는 사이드바를 렌더링하지 않고
+본문 브레드크럼 좌측에 열기 버튼(▤)을 표시한다. CSS 는 이 모듈에서만 관리한다.
 
 공개 API:
 - setup_page      페이지 설정 + 전역 CSS (다른 st 호출보다 먼저)
-- app_shell       ADMIN/MANAGER 사이드바 2단 메뉴 + 상단 헤더
+- app_shell       ADMIN/MANAGER 단일 다크 사이드바 + 본문 브레드크럼
 - user_app_shell  USER 상단 정보 + 반응형 3개 메뉴
 - page_header / page_title / card / summary_cards / empty_state / action_bar
 - badge_html / legend_html / weekday_kr / weekend_color / role_label
@@ -23,12 +24,8 @@ from modules import auth, config, db, nav
 
 _WEEKDAY = ["월", "화", "수", "목", "금", "토", "일"]
 
-_ROLE_LABEL = {"ADMIN": "관리자", "MANAGER": "매니저", "USER": "직원"}
-
-# 전체 폭은 유지하고 1차 메뉴명을 표시할 공간만 내부에서 재배분한다.
-_RAIL_W = 112
-_PANEL_W = 196
-_SIDEBAR_W = _RAIL_W + _PANEL_W
+# 권한 표시명 (CLAUDE.md §6)
+_ROLE_LABEL = {"ADMIN": "관리자", "MANAGER": "조장", "USER": "조원"}
 
 _CSS = f"""
 <style>
@@ -51,94 +48,6 @@ section[data-testid="stMain"] .block-container {{
 /* 메인 영역 블록 간격을 좁혀 업무 화면 정보 밀도를 높인다 */
 section[data-testid="stMain"] div[data-testid="stVerticalBlock"] {{ gap: 0.65rem; }}
 section[data-testid="stMain"] div[data-testid="stHorizontalBlock"] {{ gap: 0.6rem; }}
-
-/* ===== 좌측 사이드바 = 1차 아이콘 바(네이비) + 2차 메뉴 패널 ===== */
-section[data-testid="stSidebar"] {{
-  width: {_SIDEBAR_W}px !important; min-width: {_SIDEBAR_W}px !important;
-  max-width: {_SIDEBAR_W}px !important;
-  background: linear-gradient(90deg, #071527 0, #071527 {_RAIL_W}px, #F3F5F8 {_RAIL_W}px);
-  border-right: 1px solid #D3DAE3;
-}}
-section[data-testid="stSidebar"] > div:first-child {{ width: {_SIDEBAR_W}px !important; }}
-div[data-testid="stSidebarContent"] {{ padding: 0 !important; }}
-div[data-testid="stSidebarUserContent"] {{ padding: 0 !important; }}
-section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
-section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{ gap: 0.1rem; }}
-
-/* 1차 아이콘 메뉴 바 — 네이비 배경에 녹아드는 텍스트 메뉴 (독립 카드/알약이 아님) */
-.st-key-nav_rail {{ padding-top: 0.75rem; }}
-.st-key-nav_rail div.stButton > button {{
-  display: flex; justify-content: flex-start; align-items: center; gap: 0.4rem;
-  width: calc(100% - 12px); height: 40px; min-height: 40px; margin: 0 auto; padding: 0 0.55rem;
-  border: none !important; border-radius: 6px; box-shadow: none !important;
-  background: transparent !important; color: #9FB2CD !important;
-  font-size: 0.74rem; font-weight: 600; white-space: nowrap; overflow: hidden;
-}}
-.st-key-nav_rail div.stButton > button:hover {{
-  background: rgba(255, 255, 255, 0.10) !important; color: #FFFFFF !important;
-}}
-.st-key-nav_rail div.stButton > button[kind="primary"] {{
-  background: #1E3A6E !important; color: #FFFFFF !important;
-}}
-.st-key-nav_rail div.stButton > button:focus,
-.st-key-nav_rail div.stButton > button:focus-visible {{
-  outline: none !important; box-shadow: none !important;
-}}
-.st-key-nav_rail div.stButton > button [data-testid="stIconMaterial"] {{ font-size: 20px; flex: 0 0 auto; }}
-
-/* 2차 업무 메뉴 패널 — ERP 메뉴 트리 */
-.st-key-nav_menu {{ padding: 0.7rem 0.55rem 1rem 0.55rem; }}
-.nav-appname {{
-  font-size: 0.92rem; font-weight: 700; color: #1E3A6E; letter-spacing: -0.01em;
-  padding: 0.1rem 0.5rem 0.55rem; border-bottom: 1px solid #D3DAE3; margin-bottom: 0.55rem;
-}}
-.nav-group-label {{
-  display: block;
-  font-size: 0.86rem; font-weight: 700; color: #1E3A6E; letter-spacing: -0.005em;
-  line-height: 1.35; white-space: normal; overflow-wrap: anywhere;
-  padding: 0.48rem 0.55rem 0.42rem;
-  margin: 0.35rem 0.15rem 0.62rem;
-  border-bottom: 1px solid #DDE3EA;
-}}
-.st-key-nav_menu div.stButton {{ margin-left: 0.35rem; border-left: 1px solid #DDE3EA; }}
-.st-key-nav_menu div.stButton > button {{
-  width: 100%; min-height: 1.95rem; padding: 0.18rem 0.6rem;
-  justify-content: flex-start; text-align: left;
-  border: none !important; border-left: 2px solid transparent !important; border-radius: 0 4px 4px 0;
-  box-shadow: none !important; font-size: 0.83rem; font-weight: 500;
-}}
-/* 2차 비활성 — 흰색 카드/버튼이 아닌 일반 텍스트 메뉴 */
-.st-key-nav_menu div.stButton > button[kind="secondary"] {{
-  background: transparent !important; color: #3A3F45 !important;
-}}
-.st-key-nav_menu div.stButton > button[kind="secondary"]:hover {{
-  background: #E7ECF3 !important; color: #1E3A6E !important; border-left-color: #9FB2CE !important;
-}}
-/* 2차 활성 — 1차(진한 네이비)보다 가벼운 옅은 파랑 + 왼쪽 강조선 */
-.st-key-nav_menu div.stButton > button[kind="primary"] {{
-  background: #E8EEF7 !important; color: #1E3A6E !important; font-weight: 700;
-  border-left-color: #1E3A6E !important;
-}}
-.st-key-nav_menu div.stButton > button:focus,
-.st-key-nav_menu div.stButton > button:focus-visible {{
-  outline: none !important; box-shadow: none !important;
-}}
-
-/* ===== 상단 헤더 (얇은 업무 시스템 헤더) ===== */
-.st-key-app_header {{
-  background: #FFFFFF; border-bottom: 1px solid #D3DAE3;
-  margin: 0 -1.25rem 0.85rem; padding: 0.4rem 1.25rem 0.38rem;
-}}
-.hdr-screen {{ font-size: 0.92rem; font-weight: 600; color: #26282B; }}
-.hdr-user {{ text-align: right; color: #6B7280; font-size: 0.8rem; }}
-.hdr-user b {{ color: #26282B; font-weight: 600; }}
-.st-key-app_header div.stButton {{ display: flex; justify-content: flex-end; }}
-.st-key-app_header div.stButton > button {{
-  min-height: 1.75rem; padding: 0.1rem 0.7rem; gap: 0.3rem;
-  font-size: 0.76rem; font-weight: 500; color: #4B5563; white-space: nowrap;
-  background: #FFFFFF; border: 1px solid #C9D2DE; border-radius: 4px;
-}}
-.st-key-app_header div.stButton > button [data-testid="stIconMaterial"] {{ font-size: 16px; }}
 
 /* ===== 페이지 제목 ===== */
 .page-title {{ font-size: 1.28rem; font-weight: 700; color: #26282B; margin: 0.15rem 0 0.05rem; letter-spacing: -0.01em; }}
@@ -238,6 +147,184 @@ div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {{ border: n
 </style>
 """
 
+# ADMIN/MANAGER App Shell 전용 CSS — 단일 다크 사이드바 + 크림 본문.
+# app_shell 에서만 주입하므로 USER 화면/로그인 화면에는 영향이 없다.
+# 색·크기 값은 아래 :root 디자인 토큰(--sb-* 등)에서만 관리한다.
+_SHELL_CSS = """
+<style>
+:root {
+  --sb-w: 232px;            /* 사이드바 폭 */
+  --sb-bg: #1B1B1D;         /* 사이드바 배경 (다크 차콜) */
+  --sb-item: #C9C7C0;       /* 메뉴 기본 글자 */
+  --sb-item-dim: #8A8880;   /* 그룹 라벨·보조 글자 */
+  --sb-active-bg: #2B2B2E;  /* 활성 항목 배경 */
+  --sb-hover-bg: #242427;   /* hover 배경 */
+  --gold: #C9A26B;          /* 액센트 (로고·활성 도트·권한 표기) */
+  --content-bg: #F1EEE9;    /* 본문 배경 (크림) */
+  --card: #FFFFFF;          /* 카드 배경 */
+  --line: #E7E3DB;          /* 경계선 */
+}
+
+/* 본문 배경 — ADMIN/MANAGER 화면만 크림으로 (전역 CSS 의 #F7F8FA 를 덮어쓴다) */
+.stApp { background: var(--content-bg); }
+
+/* ===== 사이드바 골격 ===== */
+section[data-testid="stSidebar"] {
+  width: var(--sb-w) !important; min-width: var(--sb-w) !important;
+  max-width: var(--sb-w) !important;
+  background: var(--sb-bg); border-right: none;
+  transition: width 0.28s ease;
+}
+section[data-testid="stSidebar"] > div:first-child { width: var(--sb-w) !important; }
+/* 기존 «/» 접기 토글 제거 — 숨김/열기는 ▤ 버튼 + st.session_state.sb_hidden 으로 제어 */
+div[data-testid="stSidebarHeader"] { display: none !important; }
+div[data-testid="stSidebarContent"] {
+  padding: 0 !important; display: flex; flex-direction: column; height: 100%;
+}
+/* 사용자 카드를 맨 아래 고정하기 위한 세로 flex 체인
+   (UserContent > 무명 래퍼 > stVerticalBlock > stLayoutWrapper > 컨테이너 구조) */
+div[data-testid="stSidebarUserContent"] {
+  padding: 0 !important; flex: 1; display: flex; flex-direction: column;
+}
+div[data-testid="stSidebarUserContent"] > div {
+  flex: 1; display: flex; flex-direction: column;
+}
+div[data-testid="stSidebarUserContent"] > div > div[data-testid="stVerticalBlock"] { flex: 1; }
+section[data-testid="stSidebar"] div[data-testid="stLayoutWrapper"]:has(> .st-key-sb_user) {
+  margin-top: auto;
+}
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] { gap: 2px; }
+section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] {
+  gap: 0.3rem !important; flex-wrap: nowrap;
+}
+section[data-testid="stSidebar"] div[data-testid="stColumn"] { min-width: 0 !important; }
+section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+
+/* ===== 사이드바 버튼 공통 ===== */
+section[data-testid="stSidebar"] div.stButton > button {
+  width: 100%; border: none !important; box-shadow: none !important;
+  border-radius: 8px; justify-content: flex-start; text-align: left;
+  transition: background-color 130ms ease;
+}
+/* 내부 래퍼까지 좌측 정렬 (라벨이 가운데로 몰리는 것 방지) */
+section[data-testid="stSidebar"] div.stButton > button > div,
+section[data-testid="stSidebar"] div.stButton > button > div > span {
+  justify-content: flex-start; text-align: left;
+}
+section[data-testid="stSidebar"] div.stButton > button > div { flex: 1 1 auto; min-width: 0; }
+section[data-testid="stSidebar"] div.stButton > button:focus,
+section[data-testid="stSidebar"] div.stButton > button:focus-visible { outline: none !important; }
+section[data-testid="stSidebar"] div.stButton > button[kind="secondary"],
+section[data-testid="stSidebar"] div.stButton > button[kind="tertiary"] {
+  background: transparent !important; color: var(--sb-item) !important;
+}
+section[data-testid="stSidebar"] div.stButton > button:hover {
+  background: var(--sb-hover-bg) !important; color: #FFFFFF !important;
+}
+section[data-testid="stSidebar"] div.stButton > button[kind="primary"] {
+  background: var(--sb-active-bg) !important; color: #FFFFFF !important; font-weight: 600;
+}
+
+/* ===== 사이드바 헤더 (로고 마크 + 앱명 2줄 + 숨김 버튼) ===== */
+.st-key-sb_head { padding: 16px 12px 10px 16px; }
+.sb-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sb-logo {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #D5B27C, #B8905A);
+  color: #1B1B1D; font-size: 15px; font-weight: 800;
+}
+.sb-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sb-title-ko {
+  color: #F0EEE9; font-size: 14px; font-weight: 700; line-height: 1.1; white-space: nowrap;
+}
+.sb-title-en { color: var(--sb-item-dim); font-size: 9.5px; letter-spacing: 0.18em; line-height: 1; }
+.st-key-sb_hide div.stButton > button {
+  width: 30px; min-height: 30px; height: 30px; padding: 0; justify-content: center;
+  color: var(--sb-item-dim) !important;
+}
+.st-key-sb_hide div.stButton > button:hover {
+  color: #FFFFFF !important; background: var(--sb-hover-bg) !important;
+}
+.st-key-sb_hide div.stButton > button [data-testid="stIconMaterial"] { font-size: 17px; }
+/* 아이콘 전용 버튼은 내부 래퍼도 가운데 정렬 */
+.st-key-sb_hide div.stButton > button > div, .st-key-sb_hide div.stButton > button > div > span,
+.st-key-sb_show div.stButton > button > div, .st-key-sb_show div.stButton > button > div > span,
+.st-key-sb_user div.stButton > button > div, .st-key-sb_user div.stButton > button > div > span {
+  justify-content: center; text-align: center;
+}
+
+/* ===== 메뉴 ===== */
+.st-key-sb_nav { padding: 4px 10px 8px; }
+/* 단독 항목 (예: 대시보드) — 아이콘 16px + 글자 13.5px */
+div[class*="st-key-sbs_"] div.stButton > button {
+  height: 38px; min-height: 38px; padding: 0 10px;
+  font-size: 13.5px; font-weight: 500; gap: 9px;
+}
+div[class*="st-key-sbs_"] div.stButton > button [data-testid="stIconMaterial"] { font-size: 16px; }
+/* 그룹 라벨 — 정적 텍스트 (클릭 대상 아님) */
+.sb-group-label {
+  display: block; padding: 16px 10px 6px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  color: var(--sb-item-dim); line-height: 1.2;
+}
+/* 하위 항목 — 좌측 4px 도트 불릿 (활성 시 골드) */
+div[class*="st-key-sbi_"] div.stButton > button {
+  height: 36px; min-height: 36px; padding: 0 10px 0 16px;
+  font-size: 13.5px; font-weight: 500;
+}
+div[class*="st-key-sbi_"] div.stButton > button::before {
+  content: ""; flex: 0 0 auto; width: 4px; height: 4px; border-radius: 50%;
+  background: #5E5C55; margin-right: 12px;
+}
+div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before { background: var(--gold); }
+
+/* ===== 하단 사용자 카드 (맨 아래 고정) ===== */
+.st-key-sb_user {
+  margin: 10px 12px 12px; margin-top: auto;
+  background: #242427; border-radius: 10px; padding: 9px 10px;
+}
+.sb-uline { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.sb-ava {
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #D5B27C, #B8905A);
+  color: #1B1B1D; font-size: 12.5px; font-weight: 700;
+}
+.sb-uinfo { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sb-uname {
+  color: #FFFFFF; font-size: 12.5px; font-weight: 600; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sb-urole { color: var(--gold); font-size: 10px; letter-spacing: 0.08em; line-height: 1.2; }
+.st-key-sb_user div.stButton { display: flex; justify-content: flex-end; }
+.st-key-sb_user div.stButton > button {
+  width: 28px; min-height: 28px; height: 28px; padding: 0; justify-content: center;
+  color: var(--sb-item-dim) !important;
+}
+.st-key-sb_user div.stButton > button:hover {
+  color: #FFFFFF !important; background: var(--sb-hover-bg) !important;
+}
+.st-key-sb_user div.stButton > button [data-testid="stIconMaterial"] { font-size: 16px; }
+
+/* ===== 본문 상단 (브레드크럼, 52px) ===== */
+.st-key-app_header {
+  min-height: 52px; display: flex; flex-direction: column; justify-content: center;
+}
+.st-key-app_header div[data-testid="stHorizontalBlock"] { align-items: center; }
+.crumb { font-size: 11px; font-weight: 600; color: #9A968C; letter-spacing: 0.06em; }
+.crumb .crumb-sep { margin: 0 6px; color: #C9C3B8; font-weight: 400; }
+/* 숨김 상태에서 브레드크럼 좌측에 표시되는 사이드바 열기 버튼 */
+.st-key-sb_show div.stButton > button {
+  width: 30px; min-height: 30px; height: 30px; padding: 0; justify-content: center;
+  border: none !important; background: transparent !important; box-shadow: none !important;
+  color: #9A968C !important;
+}
+.st-key-sb_show div.stButton > button:hover { color: #4B463D !important; }
+.st-key-sb_show div.stButton > button [data-testid="stIconMaterial"] { font-size: 17px; }
+</style>
+"""
+
 _USER_SHELL_CSS = """
 <style>
 .st-key-user_app_header {
@@ -319,8 +406,8 @@ def setup_page() -> None:
 
 # ---------- App Shell ----------
 def app_shell(user: dict) -> str:
-    """좌측 2단 메뉴(1차 아이콘 바 + 2차 메뉴 패널)와 상단 헤더를 렌더링하고
-    선택된 page id 를 반환한다. (ADMIN/MANAGER PC 화면 전용)"""
+    """단일 다크 사이드바(브랜드 헤더 + 접이식 그룹 메뉴 + 하단 사용자 카드)와
+    본문 브레드크럼을 렌더링하고 선택된 page id 를 반환한다. (ADMIN/MANAGER PC 전용)"""
     groups = nav.visible_groups(user["role"])
     valid_pages = {c["id"] for g in groups for c in g["children"]}
 
@@ -328,46 +415,105 @@ def app_shell(user: dict) -> str:
     if page not in valid_pages:
         page = nav.default_page(user["role"])
         st.session_state.nav_page = page
-    cur_group = nav.group_of(page, user["role"])
 
-    with st.sidebar:
-        rail_col, menu_col = st.columns([_RAIL_W, _PANEL_W])
+    st.session_state.setdefault("sb_hidden", False)
 
-        # 1차 아이콘 메뉴 바
-        with rail_col, st.container(key="nav_rail"):
-            for g in groups:
-                if st.button(
-                    g["label"],
-                    key=f"rail_{g['id']}",
-                    icon=g["icon"],
-                    type="primary" if g["id"] == cur_group["id"] else "secondary",
-                    width="stretch",
-                ):
-                    st.session_state.nav_page = g["children"][0]["id"]
-                    st.rerun()
+    st.markdown(_SHELL_CSS, unsafe_allow_html=True)
 
-        # 2차 업무 메뉴 패널
-        with menu_col, st.container(key="nav_menu"):
-            st.markdown(
-                f"<div class='nav-appname'>{config.APP_NAME}</div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f"<div class='nav-group-label'>{cur_group['label']}</div>",
-                unsafe_allow_html=True,
-            )
-            for child in cur_group["children"]:
+    if not st.session_state.sb_hidden:
+        with st.sidebar:
+            _sidebar_brand()
+            _sidebar_nav(groups, page)
+            _sidebar_user_card(user)
+
+    _breadcrumb_header(user, page)
+    return page
+
+
+def _sidebar_brand() -> None:
+    """사이드바 헤더: 골드 로고 마크 + 앱명 2줄 + 숨김(▤) 버튼."""
+    with st.container(key="sb_head"):
+        brand, toggle = st.columns([5, 1], vertical_alignment="center")
+        brand.markdown(
+            "<div class='sb-brand'><span class='sb-logo'>W</span>"
+            "<span class='sb-title'><span class='sb-title-ko'>생산 근무표</span>"
+            "<span class='sb-title-en'>WORKFORCE</span></span></div>",
+            unsafe_allow_html=True,
+        )
+        with toggle:
+            if st.button("", icon=":material/view_sidebar:", key="sb_hide",
+                         type="tertiary", help="사이드바 숨기기"):
+                st.session_state.sb_hidden = True
+                st.rerun()
+
+
+def _sidebar_nav(groups: list, page: str) -> None:
+    """메뉴 렌더링 — 하위 1개 그룹은 단독 항목, 나머지는 그룹 라벨 + 도트 하위 항목."""
+    with st.container(key="sb_nav"):
+        for g in groups:
+            if len(g["children"]) == 1:
+                child = g["children"][0]
                 if st.button(
                     child["label"],
-                    key=f"menu_{child['id']}",
+                    key=f"sbs_{child['id']}",
+                    icon=g.get("icon"),
+                    type="primary" if child["id"] == page else "secondary",
+                    width="stretch",
+                ):
+                    st.session_state.nav_page = child["id"]
+                    st.rerun()
+                continue
+
+            st.markdown(
+                f"<div class='sb-group-label'>{escape(g['label'])}</div>",
+                unsafe_allow_html=True,
+            )
+            for child in g["children"]:
+                if st.button(
+                    child["label"],
+                    key=f"sbi_{child['id']}",
                     type="primary" if child["id"] == page else "secondary",
                     width="stretch",
                 ):
                     st.session_state.nav_page = child["id"]
                     st.rerun()
 
-    _header(user, nav.page_label(page))
-    return page
+
+def _sidebar_user_card(user: dict) -> None:
+    """사이드바 맨 아래 고정 사용자 카드: 아바타 + 이름/사번 + 로그아웃."""
+    name = str(user.get("name", "")) or "?"
+    emp_no = str(user.get("emp_no", ""))
+    with st.container(key="sb_user"):
+        info, btn = st.columns([4.6, 1], vertical_alignment="center")
+        info.markdown(
+            f"<div class='sb-uline'><span class='sb-ava'>{escape(name[:1])}</span>"
+            f"<span class='sb-uinfo'><span class='sb-uname'>{escape(name)}</span>"
+            f"<span class='sb-urole'>{escape(emp_no)}</span></span></div>",
+            unsafe_allow_html=True,
+        )
+        with btn:
+            if st.button("", icon=":material/logout:", key="btn_logout",
+                         type="tertiary", help="로그아웃"):
+                auth.logout()
+                st.rerun()
+
+
+def _breadcrumb_header(user: dict, page: str) -> None:
+    """본문 상단 브레드크럼(그룹명). 사이드바 숨김 시 열기(▤) 버튼 표시."""
+    cur_group = nav.group_of(page, user["role"])
+    crumb_html = f"<span class='crumb'>{escape(cur_group['label'])}</span>"
+
+    with st.container(key="app_header"):
+        if st.session_state.get("sb_hidden"):
+            btn, text = st.columns([0.45, 11], vertical_alignment="center")
+            with btn:
+                if st.button("", icon=":material/view_sidebar:", key="sb_show",
+                             type="tertiary", help="사이드바 열기"):
+                    st.session_state.sb_hidden = False
+                    st.rerun()
+            text.markdown(crumb_html, unsafe_allow_html=True)
+        else:
+            st.markdown(crumb_html, unsafe_allow_html=True)
 
 
 def user_app_shell(user: dict) -> str:
@@ -395,25 +541,6 @@ def user_app_shell(user: dict) -> str:
                     st.session_state.nav_page = item["id"]
                     st.rerun()
     return page
-
-
-def _header(user: dict, screen_name: str) -> None:
-    """상단 헤더: 현재 화면명 | 사용자명 · 부서 · 조 · 권한 [로그아웃] (DESIGN.md §9)."""
-    dept = db.dept_name(user.get("dept_code", ""))
-    team = db.team_name(user.get("dept_code", ""), user.get("team_code", ""))
-    who = " · ".join(x for x in (dept, team, role_label(user["role"])) if x)
-
-    with st.container(key="app_header"):
-        left, right, btn = st.columns([5, 4, 1.3], vertical_alignment="center")
-        left.markdown(f"<div class='hdr-screen'>{screen_name}</div>", unsafe_allow_html=True)
-        right.markdown(
-            f"<div class='hdr-user'><b>{user['name']}</b> · {who}</div>",
-            unsafe_allow_html=True,
-        )
-        with btn:
-            if st.button("LogOut", key="btn_logout", icon=":material/logout:", width="content"):
-                auth.logout()
-                st.rerun()
 
 
 def _user_header(user: dict) -> None:
