@@ -41,6 +41,45 @@ def grid_height(nrows: int) -> int:
 
 
 # ---------- 편집 화면 공통 (기준정보 등록/수정) ----------
+def master_editor_height() -> int:
+    """기준정보 편집기의 작은 화면용 안전한 최소 높이."""
+    return 360
+
+
+def master_editor_container():
+    """뷰포트에 맞춰 확장되는 기준정보 편집기 컨테이너."""
+    st.markdown(
+        """
+        <style>
+        .st-key-master_editor div[data-testid="stDataFrame"],
+        .st-key-master_editor div[data-testid="stDataFrameResizable"] {
+          height: clamp(360px, calc(100dvh - 27rem), 760px) !important;
+          min-height: 360px;
+        }
+        .st-key-master_editor div[data-testid="stDataFrame"] > div {
+          height: 100% !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    return st.container(key="master_editor")
+
+
+def master_data_editor(data, **kwargs):
+    """공통 반응형 컨테이너 안에 기준정보 data_editor를 배치한다."""
+    with master_editor_container():
+        return st.data_editor(data, height=master_editor_height(), **kwargs)
+
+
+def normalize_editor_text(df: pd.DataFrame, columns) -> pd.DataFrame:
+    """data_editor의 텍스트 셀을 빈 문자열 기반 string dtype으로 정규화한다."""
+    frame = df.copy()
+    for column in columns:
+        frame[column] = frame[column].fillna("").astype("string")
+    return frame
+
+
 def set_flash(page_id: str, kind: str, text: str) -> None:
     """저장 결과 메시지를 다음 rerun 에서 1회 표시하도록 세션에 담는다.
 

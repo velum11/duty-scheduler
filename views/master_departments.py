@@ -11,7 +11,10 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import editor_has_changes, grid_height, save_bar, set_flash, show_flash
+from views.workspace import (
+    master_data_editor, normalize_editor_text,
+    save_bar, set_flash, show_flash,
+)
 
 _COLS = ["부서코드", "부서명", "표시순서", "사용"]
 _STATUS = ["사용 중", "사용 안 함", "전체"]
@@ -20,7 +23,6 @@ _STATUS = ["사용 중", "사용 안 함", "전체"]
 def render(user: dict) -> None:
     ui.page_header("master_departments")
     source_departments = db.get_departments()
-    source_signature = db.frame_signature(source_departments, db.DEPT_COLUMNS)
 
     # 조회 조건 카드
     with ui.card():
@@ -31,17 +33,11 @@ def render(user: dict) -> None:
     # 화면 진입 시 기본 필터로 자동 조회, [새로고침] 시 현재 필터로 재조회.
     params = {"active": active}
     q = st.session_state.get("q_master_departments")
-    if clicked or q is None:
+    if clicked or q is None or q != params:
         q = params
         st.session_state["q_master_departments"] = q
         _load_editor(q, source_departments)
-    elif (
-        "md_work" not in st.session_state
-        or (
-            st.session_state.get("md_source_signature") != source_signature
-            and not editor_has_changes("md_editor")
-        )
-    ):
+    elif "md_work" not in st.session_state:
         _load_editor(q, source_departments)
 
     show_flash("master_departments")
@@ -54,22 +50,23 @@ def render(user: dict) -> None:
 
     # 스프레드시트형 편집 그리드 (행 추가 가능)
     st.caption("셀 이동은 Tab 키를 사용하세요.")
-    edited = st.data_editor(
+    edited = master_data_editor(
         st.session_state["md_work"],
         key="md_editor",
         num_rows="dynamic",
         width="stretch",
         hide_index=True,
-        height=grid_height(len(st.session_state["md_work"]) + 1),
         column_config={
-            "부서코드": st.column_config.TextColumn("부서코드", width="small"),
-            "부서명": st.column_config.TextColumn("부서명"),
+            "부서코드": st.column_config.TextColumn("부서코드", width="small", default=""),
+            "부서명": st.column_config.TextColumn("부서명", default=""),
             "표시순서": st.column_config.NumberColumn(
                 "표시순서", width="small", min_value=0, step=1,
             ),
             "사용": st.column_config.CheckboxColumn("사용", width="small", default=True),
         },
     )
+
+    edited = normalize_editor_text(edited, ["부서코드", "부서명"])
 
     with sum_ph:
         _summary_cards(edited, headcount)
@@ -81,8 +78,8 @@ def render(user: dict) -> None:
 def _to_display(df: pd.DataFrame) -> pd.DataFrame:
     """저장 형태 → 편집기 표시 형태."""
     return pd.DataFrame({
-        "부서코드": df["dept_code"].astype(str),
-        "부서명": df["dept_name"].astype(str),
+        "부서코드": df["dept_code"].fillna("").astype("string"),
+        "부서명": df["dept_name"].fillna("").astype("string"),
         "표시순서": df["sort_order"].astype(int),
         "사용": df["is_active"].astype(bool),
     })
@@ -91,7 +88,6 @@ def _to_display(df: pd.DataFrame) -> pd.DataFrame:
 def _load_editor(q: dict, source: pd.DataFrame | None = None) -> None:
     """조회 조건으로 대상 부서를 편집기에 적재하고, 원본 부서코드 집합을 스냅샷한다."""
     source = db.get_departments() if source is None else source
-    st.session_state["md_source_signature"] = db.frame_signature(source, db.DEPT_COLUMNS)
     df = source.copy()
     if q["active"] == "사용 중":
         df = df[df["is_active"]]

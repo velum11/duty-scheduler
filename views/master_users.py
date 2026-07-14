@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import ALL, editor_has_changes, grid_height, save_bar, set_flash, show_flash
+from views.workspace import ALL, master_data_editor, save_bar, set_flash, show_flash
 
 # 화면 표시 라벨 ↔ 저장 코드 매핑
 _ROLE_TO_LABEL = {"USER": "직원", "MANAGER": "매니저", "ADMIN": "관리자"}
@@ -27,7 +27,6 @@ def render(user: dict) -> None:
     depts = db.get_departments()
     teams = db.get_teams()
     source_users = db.get_users()
-    source_signature = db.frame_signature(source_users, db.USER_COLUMNS)
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
     name_to_code = {v: k for k, v in dept_names.items()}
     team_set = set(zip(teams["dept_code"], teams["team_code"]))
@@ -52,17 +51,11 @@ def render(user: dict) -> None:
     # 화면 진입 시 기본 필터로 자동 조회, [새로고침] 시 현재 필터로 재조회.
     params = {"dept": dept, "team": team, "active": active}
     q = st.session_state.get("q_master_users")
-    if clicked or q is None:
+    if clicked or q is None or q != params:
         q = params
         st.session_state["q_master_users"] = q
         _load_editor(q, dept_names, source_users)
-    elif (
-        "mu_work" not in st.session_state
-        or (
-            st.session_state.get("mu_source_signature") != source_signature
-            and not editor_has_changes("mu_editor")
-        )
-    ):
+    elif "mu_work" not in st.session_state:
         _load_editor(q, dept_names, source_users)
 
     show_flash("master_users")
@@ -71,13 +64,12 @@ def render(user: dict) -> None:
     sum_ph = st.container()
 
     # 스프레드시트형 편집 그리드 (행 추가 가능, 사용자 물리 삭제는 저장 시 차단)
-    edited = st.data_editor(
+    edited = master_data_editor(
         st.session_state["mu_work"],
         key="mu_editor",
         num_rows="dynamic",
         width="stretch",
         hide_index=True,
-        height=grid_height(len(st.session_state["mu_work"]) + 1),
         column_config={
             "사번": st.column_config.TextColumn("사번", width="small"),
             "성명": st.column_config.TextColumn("성명", width="small"),

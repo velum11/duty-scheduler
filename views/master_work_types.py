@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import editor_has_changes, grid_height, save_bar, set_flash, show_flash
+from views.workspace import master_data_editor, save_bar, set_flash, show_flash
 
 _COLS = [
     "코드", "명칭", "분류", "약칭", "시작", "종료", "색상",
@@ -23,7 +23,6 @@ _STATUS = ["사용 중", "사용 안 함", "전체"]
 def render(user: dict) -> None:
     ui.page_header("master_work_types")
     source_work_types = db.get_work_types()
-    source_signature = db.frame_signature(source_work_types, db.WORK_TYPE_COLUMNS)
 
     # 조회 조건 카드
     with ui.card():
@@ -34,17 +33,11 @@ def render(user: dict) -> None:
     # 화면 진입 시 기본 필터로 자동 조회, [새로고침] 시 현재 필터로 재조회.
     params = {"active": active}
     q = st.session_state.get("q_master_work_types")
-    if clicked or q is None:
+    if clicked or q is None or q != params:
         q = params
         st.session_state["q_master_work_types"] = q
         _load_editor(q, source_work_types)
-    elif (
-        "mw_work" not in st.session_state
-        or (
-            st.session_state.get("mw_source_signature") != source_signature
-            and not editor_has_changes("mw_editor")
-        )
-    ):
+    elif "mw_work" not in st.session_state:
         _load_editor(q, source_work_types)
 
     show_flash("master_work_types")
@@ -53,13 +46,12 @@ def render(user: dict) -> None:
     sum_ph = st.container()
 
     # 스프레드시트형 편집 그리드 (행 추가 가능)
-    edited = st.data_editor(
+    edited = master_data_editor(
         st.session_state["mw_work"],
         key="mw_editor",
         num_rows="dynamic",
         width="stretch",
         hide_index=True,
-        height=grid_height(len(st.session_state["mw_work"]) + 1),
         column_config={
             "코드": st.column_config.TextColumn("코드", width="small"),
             "명칭": st.column_config.TextColumn("명칭", width="small"),
@@ -116,7 +108,6 @@ def _to_display(df: pd.DataFrame) -> pd.DataFrame:
 def _load_editor(q: dict, source: pd.DataFrame | None = None) -> None:
     """조회 조건으로 대상 근무형태를 편집기에 적재하고, 원본 코드 집합을 스냅샷한다."""
     source = db.get_work_types() if source is None else source
-    st.session_state["mw_source_signature"] = db.frame_signature(source, db.WORK_TYPE_COLUMNS)
     df = source.copy()
     if q["active"] == "사용 중":
         df = df[df["is_active"]]

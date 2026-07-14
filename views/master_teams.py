@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import ALL, editor_has_changes, grid_height, save_bar, set_flash, show_flash
+from views.workspace import ALL, master_data_editor, normalize_editor_text, save_bar, set_flash, show_flash
 
 _COLS = ["부서", "조코드", "조명", "표시순서", "사용"]
 _STATUS = ["사용 중", "사용 안 함", "전체"]
@@ -22,7 +22,6 @@ def render(user: dict) -> None:
 
     depts = db.get_departments()
     source_teams = db.get_teams()
-    source_signature = db.frame_signature(source_teams, db.TEAM_COLUMNS)
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
     name_to_code = {v: k for k, v in dept_names.items()}
 
@@ -39,17 +38,11 @@ def render(user: dict) -> None:
     # 화면 진입 시 기본 필터로 자동 조회, [새로고침] 시 현재 필터로 재조회.
     params = {"dept": dept, "active": active}
     q = st.session_state.get("q_master_teams")
-    if clicked or q is None:
+    if clicked or q is None or q != params:
         q = params
         st.session_state["q_master_teams"] = q
         _load_editor(q, dept_names, source_teams)
-    elif (
-        "mt_work" not in st.session_state
-        or (
-            st.session_state.get("mt_source_signature") != source_signature
-            and not editor_has_changes("mt_editor")
-        )
-    ):
+    elif "mt_work" not in st.session_state:
         _load_editor(q, dept_names, source_teams)
 
     show_flash("master_teams")
@@ -61,23 +54,24 @@ def render(user: dict) -> None:
     sum_ph = st.container()
 
     # 스프레드시트형 편집 그리드 (행 추가 가능)
-    edited = st.data_editor(
+    edited = master_data_editor(
         st.session_state["mt_work"],
         key="mt_editor",
         num_rows="dynamic",
         width="stretch",
         hide_index=True,
-        height=grid_height(len(st.session_state["mt_work"]) + 1),
         column_config={
-            "부서": st.column_config.SelectboxColumn("부서", options=list(dept_names.values())),
-            "조코드": st.column_config.TextColumn("조코드", width="small"),
-            "조명": st.column_config.TextColumn("조명", width="small"),
+            "부서": st.column_config.SelectboxColumn("부서", options=list(dept_names.values()), default=""),
+            "조코드": st.column_config.TextColumn("조코드", width="small", default=""),
+            "조명": st.column_config.TextColumn("조명", width="small", default=""),
             "표시순서": st.column_config.NumberColumn(
                 "표시순서", width="small", min_value=0, step=1,
             ),
             "사용": st.column_config.CheckboxColumn("사용", width="small", default=True),
         },
     )
+
+    edited = normalize_editor_text(edited, ["부서", "조코드", "조명"])
 
     with sum_ph:
         _summary_cards(edited, name_to_code, headcount)
@@ -89,9 +83,9 @@ def render(user: dict) -> None:
 def _to_display(df: pd.DataFrame, dept_names: dict) -> pd.DataFrame:
     """저장 형태(코드) → 편집기 표시 형태(라벨)."""
     return pd.DataFrame({
-        "부서": df["dept_code"].map(dept_names).fillna(""),
-        "조코드": df["team_code"].astype(str),
-        "조명": df["team_name"].astype(str),
+        "부서": df["dept_code"].map(dept_names).fillna("").astype("string"),
+        "조코드": df["team_code"].fillna("").astype("string"),
+        "조명": df["team_name"].fillna("").astype("string"),
         "표시순서": df["sort_order"].astype(int),
         "사용": df["is_active"].astype(bool),
     })
@@ -100,7 +94,6 @@ def _to_display(df: pd.DataFrame, dept_names: dict) -> pd.DataFrame:
 def _load_editor(q: dict, dept_names: dict, source: pd.DataFrame | None = None) -> None:
     """조회 조건으로 대상 조/팀을 편집기에 적재하고, 원본 (부서,조코드) 집합을 스냅샷한다."""
     source = db.get_teams() if source is None else source
-    st.session_state["mt_source_signature"] = db.frame_signature(source, db.TEAM_COLUMNS)
     df = source.copy()
     if q["dept"] != ALL:
         df = df[df["dept_code"] == q["dept"]]
