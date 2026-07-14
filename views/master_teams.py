@@ -1,29 +1,39 @@
-"""기준정보 — 조 관리 화면.
+"""기준정보 — 조 관리 화면 (폼 기반 입력).
 
-조회 조건으로 대상을 불러온 뒤 스프레드시트형 편집기(st.data_editor)로 등록/수정한다.
-[저장] 을 눌렀을 때만 검증 후 반영하며(자동 저장 없음), 로컬 샘플 모드에서는
-세션 상태(db.save_teams)에 저장해 현재 세션 동안 유지된다.
+한글 IME 조합 입력이 st.data_editor 셀과 충돌하는 문제를 피하려고, 목록은 읽기 전용
+그리드(행 선택)로 조회만 하고 등록·수정은 st.form + st.text_input 으로 처리한다.
+form 안의 입력 위젯은 [저장] 제출 전까지 rerun 을 일으키지 않으므로 한글 조합이
+중간에 확정·손실되지 않는다(`B조`가 `BWH`로 확정되던 문제 방지).
 
-부서 조건으로 일부만 조회했더라도 저장 시 미조회 조/팀은 그대로 보존한다
-(조회 대상만 교체 후 병합). 조/팀 코드는 부서 안에서 유일해야 한다.
+- 부서는 st.selectbox 로 선택하고, 조코드·조명은 직접 입력한다.
+- 목록에서 행을 선택하면 해당 조를 폼에 불러온다.
+- [저장] 을 눌렀을 때만 db 파사드(save_teams)로 반영하며 부서-조 관계를 유지한다.
+- [삭제] 는 기존 CRUD 정책(사용여부 소프트삭제)을 유지한다.
+현재 master_teams / Repository 계약과 화면 명칭은 이번 작업에서 변경하지 않는다.
 """
 import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views.workspace import ALL, master_data_editor, normalize_editor_text, save_bar, set_flash, show_flash
+from views.workspace import ALL, list_height, pick_row, set_flash, show_flash
 
-_COLS = ["부서", "조코드", "조명", "표시순서", "사용"]
 _STATUS = ["사용 중", "사용 안 함", "전체"]
+
+# 폼 위젯 key (rerun 사이에 안정적으로 유지)
+_F_DEPT, _F_CODE, _F_NAME = "mt_f_dept", "mt_f_code", "mt_f_name"
+_F_ORDER, _F_ACTIVE = "mt_f_order", "mt_f_active"
 
 
 def render(user: dict) -> None:
     ui.page_header("master_teams")
 
     depts = db.get_departments()
-    source_teams = db.get_teams()
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
-    name_to_code = {v: k for k, v in dept_names.items()}
+    if not dept_names:
+        ui.empty_state("등록된 부서가 없습니다. 먼저 부서 관리에서 부서를 등록하세요.", head="조 목록")
+        return
+
+    source = db.get_teams()
 
     # 조회 조건 카드
     with ui.card():
@@ -33,160 +43,177 @@ def render(user: dict) -> None:
             key="mt_dept",
         )
         active = c2.selectbox("사용 여부", _STATUS, key="mt_active")
-        clicked = c3.button("새로고침", key="mt_go", type="primary", width="stretch")
+        refresh = c3.button("새로고침", key="mt_go", type="primary", width="stretch")
 
-    # 화면 진입 시 기본 필터로 자동 조회, [새로고침] 시 현재 필터로 재조회.
+    # 목록 적재: 필터 변경 / 새로고침 / 최초 진입 시에만 DB 재조회.
     params = {"dept": dept, "active": active}
-    q = st.session_state.get("q_master_teams")
-    if clicked or q is None or q != params:
-        q = params
-        st.session_state["q_master_teams"] = q
-        _load_editor(q, dept_names, source_teams)
-    elif "mt_work" not in st.session_state:
-        _load_editor(q, dept_names, source_teams)
+    if refresh or st.session_state.get("q_master_teams") != params or "mt_list" not in st.session_state:
+        st.session_state["q_master_teams"] = params
+        _load_list(source, dept, active)
+
+    if "mt_editing" not in st.session_state:  # 폼 상태 최초 1회 초기화(신규 모드)
+        _seed_new(dept_names)
 
     show_flash("master_teams")
 
+    list_df = st.session_state["mt_list"]
     users = db.get_users()
     headcount = users[users["is_active"]].groupby(["dept_code", "team_code"]).size()
+    _summary_cards(list_df, dept_names, headcount)
 
-    # 요약 카드 (편집 중인 내용 기준으로 갱신)
-    sum_ph = st.container()
+    # 목록 (읽기 전용, 단일 행 선택)
+    ui.panel_head("조 목록", f"{len(list_df)}건")
+    nonce = st.session_state.setdefault("mt_nonce", 0)
+    picked = pick_row(_to_display(list_df, dept_names), f"mt_grid_{nonce}", list_height(len(list_df)))
 
-    # 스프레드시트형 편집 그리드 (행 추가 가능)
-    edited = master_data_editor(
-        st.session_state["mt_work"],
-        key="mt_editor",
-        num_rows="dynamic",
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "부서": st.column_config.SelectboxColumn("부서", options=list(dept_names.values()), default=""),
-            "조코드": st.column_config.TextColumn("조코드", width="small", default=""),
-            "조명": st.column_config.TextColumn("조명", width="small", default=""),
-            "표시순서": st.column_config.NumberColumn(
-                "표시순서", width="small", min_value=0, step=1,
-            ),
-            "사용": st.column_config.CheckboxColumn("사용", width="small", default=True),
-        },
-    )
+    editing = st.session_state.get("mt_editing")
+    b1, b2, _sp = st.columns([1, 1, 6])
+    new_clicked = b1.button("신규", key="mt_new", width="stretch")
+    del_clicked = b2.button("삭제", key="mt_del", width="stretch", disabled=editing is None)
 
-    edited = normalize_editor_text(edited, ["부서", "조코드", "조명"])
+    if new_clicked:
+        _seed_new(dept_names)
+        st.session_state["mt_nonce"] = nonce + 1
+        st.rerun()
+    if del_clicked and editing is not None:
+        _delete(editing)
 
-    with sum_ph:
-        _summary_cards(edited, name_to_code, headcount)
+    # 선택이 바뀐 경우에만 폼에 적재 (입력 중 원본으로 덮어쓰지 않음).
+    if picked is not None:
+        row = list_df.iloc[picked]
+        key = (str(row["dept_code"]), str(row["team_code"]))
+        if editing != key:
+            _seed_from_row(row)
 
-    if save_bar("mt"):
-        _save(edited, q, dept_names, name_to_code)
+    _form(dept_names)
 
 
 def _to_display(df: pd.DataFrame, dept_names: dict) -> pd.DataFrame:
-    """저장 형태(코드) → 편집기 표시 형태(라벨)."""
     return pd.DataFrame({
-        "부서": df["dept_code"].map(dept_names).fillna("").astype("string"),
-        "조코드": df["team_code"].fillna("").astype("string"),
-        "조명": df["team_name"].fillna("").astype("string"),
+        "부서": df["dept_code"].map(dept_names).fillna(df["dept_code"]).astype(str),
+        "조코드": df["team_code"].astype(str),
+        "조명": df["team_name"].astype(str),
         "표시순서": df["sort_order"].astype(int),
-        "사용": df["is_active"].astype(bool),
+        "사용": df["is_active"].map(lambda v: "사용" if bool(v) else "미사용"),
     })
 
 
-def _load_editor(q: dict, dept_names: dict, source: pd.DataFrame | None = None) -> None:
-    """조회 조건으로 대상 조/팀을 편집기에 적재하고, 원본 (부서,조코드) 집합을 스냅샷한다."""
-    source = db.get_teams() if source is None else source
+def _load_list(source: pd.DataFrame, dept: str, active: str) -> None:
     df = source.copy()
-    if q["dept"] != ALL:
-        df = df[df["dept_code"] == q["dept"]]
-    if q.get("active") == "사용 중":
-        df = df[df["is_active"].astype(bool)]
-    elif q.get("active") == "사용 안 함":
+    if dept != ALL:
+        df = df[df["dept_code"] == dept]
+    if active == "사용 중":
+        df = df[df["is_active"]]
+    elif active == "사용 안 함":
         df = df[~df["is_active"].astype(bool)]
-    df = df.sort_values(["dept_code", "sort_order"]).reset_index(drop=True)
-
-    st.session_state["mt_work"] = _to_display(df, dept_names)
-    st.session_state["mt_loaded"] = [
-        (str(d).strip(), str(t).strip()) for d, t in zip(df["dept_code"], df["team_code"])
-    ]
-    st.session_state.pop("mt_editor", None)  # 이전 편집 상태 초기화
+    st.session_state["mt_list"] = df.sort_values(["dept_code", "sort_order"]).reset_index(drop=True)
 
 
-def _summary_cards(edited: pd.DataFrame, name_to_code: dict, headcount: pd.Series) -> None:
-    codes = edited["부서"].map(name_to_code)
-    total = 0
-    for dept_code, team_code in zip(codes, edited["조코드"].astype(str)):
-        total += int(headcount.get((dept_code, team_code), 0))
-    ui.summary_cards([
-        ("조", f"{len(edited)}개"),
-        ("사용 중", f"{int(edited['사용'].fillna(False).astype(bool).sum())}개"),
-        ("부서", f"{codes.replace('', pd.NA).nunique()}개"),
-        ("소속 인원", f"{total}명"),
-    ])
-    st.write("")
+def _seed_new(dept_names: dict) -> None:
+    q = st.session_state.get("q_master_teams", {})
+    default_dept = q["dept"] if q.get("dept") and q["dept"] != ALL else next(iter(dept_names))
+    st.session_state["mt_editing"] = None
+    st.session_state[_F_DEPT] = default_dept
+    st.session_state[_F_CODE] = ""
+    st.session_state[_F_NAME] = ""
+    st.session_state[_F_ORDER] = 0
+    st.session_state[_F_ACTIVE] = True
 
 
-def _save(edited, q, dept_names, name_to_code) -> None:
-    """편집 결과를 검증하고, 자연키(부서+조코드) 기준 upsert 로 병합해 저장한다."""
-    records, errors = _validate(edited, dept_names, name_to_code)
+def _seed_from_row(row) -> None:
+    st.session_state["mt_editing"] = (str(row["dept_code"]), str(row["team_code"]))
+    st.session_state[_F_DEPT] = str(row["dept_code"])
+    st.session_state[_F_CODE] = str(row["team_code"])
+    st.session_state[_F_NAME] = str(row["team_name"])
+    st.session_state[_F_ORDER] = int(row["sort_order"])
+    st.session_state[_F_ACTIVE] = bool(row["is_active"])
 
-    # 기존 행은 U, 신규 행은 C, 조회했다가 사라진 행은 사용=False 소프트 삭제.
-    # 조/팀 코드는 부서 안에서 유일해야 하므로 (부서, 조코드)를 자연키로 쓴다.
-    loaded = set(st.session_state.get("mt_loaded", []))
-    store = db.get_teams()
-    merged, dup, n_c, n_u, n_d = db.upsert_records(
-        store, records, loaded, ["dept_code", "team_code"], "is_active", db.TEAM_COLUMNS,
-    )
-    if dup:
-        labels = ", ".join(f"{dept_names.get(d, d)}/{t}" for d, t in dup)
-        errors.append(f"같은 부서에 조/팀 코드가 중복되었습니다: {labels}")
 
+def _form(dept_names: dict) -> None:
+    editing = st.session_state.get("mt_editing")
+    head = "조 등록" if editing is None else f"조 수정 — {dept_names.get(editing[0], editing[0])} / {editing[1]}"
+    with ui.card():
+        ui.panel_head(head)
+        with st.form("mt_form", clear_on_submit=False):
+            c1, c2 = st.columns(2)
+            c1.selectbox("부서", list(dept_names), format_func=lambda c: dept_names.get(c, c), key=_F_DEPT)
+            c2.text_input("조코드", key=_F_CODE, placeholder="예: A")
+            c3, c4 = st.columns(2)
+            c3.text_input("조명", key=_F_NAME, placeholder="예: A조")
+            c4.number_input("표시순서", key=_F_ORDER, min_value=0, step=1)
+            st.checkbox("사용", key=_F_ACTIVE)
+            submitted = st.form_submit_button("저장", type="primary", width="stretch")
+    if submitted:
+        _save(dept_names)
+
+
+def _save(dept_names: dict) -> None:
+    dept_code = str(st.session_state.get(_F_DEPT, "")).strip()
+    code = str(st.session_state.get(_F_CODE, "")).strip()
+    name = str(st.session_state.get(_F_NAME, "")).strip()
+    order = int(st.session_state.get(_F_ORDER, 0) or 0)
+    active = bool(st.session_state.get(_F_ACTIVE, True))
+
+    errors = []
+    if dept_code not in dept_names:
+        errors.append("부서를 선택하세요.")
+    if not code:
+        errors.append("조코드를 입력하세요.")
+    if not name:
+        errors.append("조명을 입력하세요.")
     if errors:
         st.error("저장하지 못했습니다.\n\n- " + "\n- ".join(errors))
         return
 
+    store = db.get_teams()
+    merged = _merged(store, {
+        "dept_code": dept_code, "team_code": code, "team_name": name,
+        "sort_order": order, "is_active": active,
+    })
     db.save_teams(merged)
-    st.session_state.pop("mt_editor", None)
-    _load_editor(q, dept_names)  # 저장된 스토어 기준으로 편집기 새로고침
-    set_flash(
-        "master_teams", "success",
-        f"조/팀을 저장했습니다. (신규 {n_c} · 수정 {n_u} · 미사용 처리 {n_d})",
-    )
+    st.session_state["mt_editing"] = (dept_code, code)  # 저장된 행을 폼에 유지
+    _reload_after_write()
+    set_flash("master_teams", "success", f"조를 저장했습니다. ({dept_names.get(dept_code, dept_code)} / {code})")
     st.rerun()
 
 
-def _validate(edited, dept_names, name_to_code):
-    """표시 형태 → 저장 형태 변환 + 행별 기본 검증. (records, errors) 반환."""
-    records, errors = [], []
-    for i, (_, row) in enumerate(edited.iterrows(), start=1):
-        dept_label = str(row["부서"] or "").strip()
-        team_code = str(row["조코드"] or "").strip()
-        team_name = str(row["조명"] or "").strip()
-        dept_code = name_to_code.get(dept_label, "")
+def _delete(editing: tuple) -> None:
+    dept_code, code = editing
+    store = db.get_teams()
+    match = store[(store["dept_code"].astype(str) == dept_code) & (store["team_code"].astype(str) == code)]
+    if match.empty:
+        set_flash("master_teams", "warning", "이미 삭제된 조입니다.")
+    else:
+        record = match.iloc[0].to_dict()
+        record["is_active"] = False
+        db.save_teams(_merged(store, record))
+        set_flash("master_teams", "success", f"조를 삭제(비활성) 처리했습니다. ({dept_code} / {code})")
+    dept_names = {r["dept_code"]: r["dept_name"] for _, r in db.get_departments().iterrows()}
+    _seed_new(dept_names)
+    _reload_after_write()
+    st.rerun()
 
-        # 완전히 빈 행(새 행 자동 추가분)은 조용히 건너뛴다
-        if not any([dept_label, team_code, team_name]):
-            continue
 
-        tag = f"{i}행" + (f"({team_code})" if team_code else "")
-        if not team_code:
-            errors.append(f"{i}행: 조/팀 코드를 입력하세요.")
-        if not team_name:
-            errors.append(f"{tag}: 조/팀명을 입력하세요.")
-        if not dept_label:
-            errors.append(f"{tag}: 부서를 선택하세요.")
-        elif dept_code not in dept_names:
-            errors.append(f"{tag}: 부서 기준정보에 없는 부서입니다.")
+def _merged(store: pd.DataFrame, record: dict) -> pd.DataFrame:
+    by_key = {(str(r["dept_code"]), str(r["team_code"])): r for r in store.to_dict("records")}
+    by_key[(str(record["dept_code"]), str(record["team_code"]))] = record
+    return pd.DataFrame(list(by_key.values()), columns=db.TEAM_COLUMNS)
 
-        try:
-            so = row["표시순서"]
-            sort_order = 0 if pd.isna(so) else int(so)
-        except (TypeError, ValueError):
-            sort_order = 0
 
-        records.append({
-            "dept_code": dept_code,
-            "team_code": team_code,
-            "team_name": team_name,
-            "sort_order": sort_order,
-            "is_active": bool(row["사용"]),
-        })
-    return records, errors
+def _reload_after_write() -> None:
+    params = st.session_state.get("q_master_teams", {"dept": ALL, "active": "사용 중"})
+    _load_list(db.get_teams(), params.get("dept", ALL), params.get("active", "사용 중"))
+    st.session_state["mt_nonce"] = st.session_state.get("mt_nonce", 0) + 1
+
+
+def _summary_cards(df: pd.DataFrame, dept_names: dict, headcount: pd.Series) -> None:
+    total = 0
+    for dept_code, team_code in zip(df["dept_code"].astype(str), df["team_code"].astype(str)):
+        total += int(headcount.get((dept_code, team_code), 0))
+    ui.summary_cards([
+        ("조", f"{len(df)}개"),
+        ("사용 중", f"{int(df['is_active'].fillna(False).astype(bool).sum())}개"),
+        ("부서", f"{df['dept_code'].replace('', pd.NA).nunique()}개"),
+        ("소속 인원", f"{total}명"),
+    ])
+    st.write("")

@@ -40,6 +40,30 @@ def grid_height(nrows: int) -> int:
     return min(38 * nrows + 40, 560)
 
 
+# ---------- 폼 기반 기준정보 (한글 IME 안전) ----------
+def list_height(nrows: int) -> int:
+    """읽기 전용 목록 그리드 높이 (내부 스크롤)."""
+    return min(38 * max(nrows, 1) + 40, 420)
+
+
+def pick_row(display_df: pd.DataFrame, key: str, height: int):
+    """읽기 전용 목록 그리드에서 단일 행 선택. 선택 위치(int) 또는 None 반환.
+
+    st.data_editor 셀 직접 입력(한글 IME 충돌)을 피하려고 목록은 조회·선택 전용으로
+    쓰고, 실제 입력은 st.form 위젯에서 받는다. key 를 바꾸면 선택이 초기화된다."""
+    event = st.dataframe(
+        display_df,
+        key=key,
+        on_select="rerun",
+        selection_mode="single-row",
+        hide_index=True,
+        width="stretch",
+        height=height,
+    )
+    rows = event.selection["rows"]
+    return rows[0] if rows else None
+
+
 # ---------- 편집 화면 공통 (기준정보 등록/수정) ----------
 def master_editor_height() -> int:
     """기준정보 편집기의 작은 화면용 안전한 최소 높이."""
