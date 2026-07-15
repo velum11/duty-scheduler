@@ -246,6 +246,207 @@ def editable_aggrid(
     return result
 
 
+# 첫 열 렌더러 — 기존 행은 선택 체크박스, 신규 행은 − 제거 버튼.
+# 선택 상태(_sel)는 사용자가 체크박스를 누를 때만 setDataValue 로 명시 기록되므로,
+# 체크박스가 없는 신규 행에는 선택값이 실릴 수 없다(팬텀 선택 원천 차단).
+# − 클릭은 _removed 플래그만 세팅하고, 실제 제거는 Python 이 권위 상태에서 처리한다.
+# ag-grid-react 는 cellRenderer 함수가 문자열을 반환하면 이스케이프해 표시하고,
+# DOM 엘리먼트를 반환하면 React 자식으로 처리하려다 실패한다(React #31). 따라서
+# AG Grid 컴포넌트 인터페이스(class + getGui)로 DOM 을 직접 만든다. 클릭 처리는
+# onCellClicked 에서 e.node / e.event.target 로 수행한다.
+_ROW_ACTION_RENDERER = JsCode(
+    """
+    (class {
+      init(params) {
+        const d = params.data || {};
+        const eGui = document.createElement('div');
+        eGui.className = 'md-act';
+        if (d._row_state === 'existing') {
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.className = 'md-act-cb';
+          cb.checked = (d._sel === true || d._sel === 'true' || d._sel === 1);
+          eGui.appendChild(cb);
+        } else {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'md-act-rm';
+          btn.title = '이 신규 행 삭제';
+          btn.textContent = '\\u2212';
+          eGui.appendChild(btn);
+        }
+        this.eGui = eGui;
+      }
+      getGui() { return this.eGui; }
+      refresh() { return false; }
+    })
+    """
+)
+
+# 첫 열 클릭 처리 — 기존 행 체크박스는 _sel, 신규 행 − 버튼은 _removed 를 명시 기록한다.
+_ROW_ACTION_CLICK = JsCode(
+    """
+    function(e) {
+      if (!e.colDef || e.colDef.field !== '_action') { return; }
+      const t = e.event && e.event.target;
+      if (!t || !t.classList) { return; }
+      if (t.classList.contains('md-act-rm')) {
+        e.node.setDataValue('_removed', '1');
+      } else if (t.classList.contains('md-act-cb')) {
+        e.node.setDataValue('_sel', !!t.checked);
+      }
+    }
+    """
+)
+
+# 그리드 내부(iframe) 스타일 — 헤더/셀 가운데 정렬, 문자 셀 좌측 여백,
+# 가로·세로 얇은 구분선, − 버튼/체크박스 정렬. 사이드바 계열 색만 사용(네이비 없음).
+_MASTER_GRID_CSS = {
+    ".ag-root-wrapper": {"border": "1px solid #CFC8BB"},
+    ".ag-header": {"border-bottom": "1px solid #CFC8BB"},
+    ".ag-header-cell": {"border-right": "1px solid rgba(30, 30, 30, 0.12)"},
+    ".ag-header-cell-label": {"justify-content": "center"},
+    ".ag-cell": {
+        "border-right": "1px solid rgba(30, 30, 30, 0.10)",
+        "display": "flex",
+        "align-items": "center",
+        "line-height": "normal",
+    },
+    ".ag-row": {"border-bottom": "1px solid rgba(30, 30, 30, 0.08)"},
+    ".md-c-left": {"justify-content": "flex-start", "padding-left": "10px"},
+    ".md-c-center": {"justify-content": "center", "padding-left": "0", "padding-right": "0"},
+    ".md-act": {
+        "display": "flex", "align-items": "center", "justify-content": "center",
+        "width": "100%", "height": "100%",
+    },
+    ".md-act-cb": {"cursor": "pointer", "margin": "0"},
+    ".md-act-rm": {
+        "width": "20px", "height": "20px", "padding": "0", "line-height": "1",
+        "border": "1px solid #E0CFC9", "border-radius": "4px",
+        "background": "#FFFFFF", "color": "#9A3B2E", "cursor": "pointer",
+        "font-size": "15px", "font-weight": "700",
+    },
+    ".md-act-rm:hover": {"background": "#F7EFEC", "border-color": "#C77B6B"},
+}
+
+_META_COLUMNS = ["_row_id", "_row_state", "_sel", "_removed"]
+
+
+def selectable_master_grid(
+    frame: pd.DataFrame,
+    key: str,
+    columns: dict,
+    height: int,
+    order: list[str] | None = None,
+) -> pd.DataFrame:
+    """행 상태 계약(_row_id/_row_state/_sel/_removed)을 갖춘 기준정보 편집 그리드.
+
+    - 첫 열: 기존 행=선택 체크박스, 신규 행=− 제거 버튼 (_row_state 기반)
+    - 선택은 _sel 데이터로 명시 기록 → 신규 행에는 선택이 실릴 수 없다(팬텀 차단)
+    - Excel 여러 행·열 붙여넣기 지원(공용 paste handler 재사용)
+    - 반환: 그리드 현재 데이터(메타 컬럼 포함). 구조 변경(붙여넣기/− 제거)의
+      권위 반영은 호출부가 담당한다.
+
+    columns: {표시명: "text"|"bool"} (표시 순서는 order 로 지정).
+    """
+    frame = frame.copy().reset_index(drop=True)
+    for meta, default in (("_row_id", ""), ("_row_state", "new"), ("_sel", False), ("_removed", "")):
+        if meta not in frame:
+            frame[meta] = default
+    frame["_sel"] = frame["_sel"].map(grid_bool)
+    frame["_removed"] = ""
+    frame["_action"] = ""
+    for name, kind in columns.items():
+        if name not in frame:
+            frame[name] = False if kind == "bool" else ""
+        elif kind == "bool":
+            frame[name] = frame[name].map(grid_bool)
+        else:
+            frame[name] = frame[name].fillna("").astype("string")
+
+    order = order or list(columns)
+    align_center = {"width": None}
+    column_defs = [{
+        "field": "_action",
+        "headerName": "선택",
+        "pinned": "left",
+        "width": 66, "minWidth": 56, "maxWidth": 74,
+        "editable": False, "sortable": False, "filter": False, "resizable": False,
+        "suppressMovable": True,
+        "cellRenderer": _ROW_ACTION_RENDERER,
+        "headerClass": "md-h-center", "cellClass": "md-c-center",
+    }]
+    # 폭/정렬 기본값 — 문자 열은 flex 로 남는 폭 배분, 숫자/불리언은 좁은 고정
+    widths = {
+        "부서코드": {"flex": 1, "minWidth": 120, "cellClass": "md-c-left"},
+        "부서명": {"flex": 2, "minWidth": 200, "cellClass": "md-c-left"},
+        "표시순서": {"width": 108, "minWidth": 92, "maxWidth": 140, "cellClass": "md-c-center"},
+        "사용": {"width": 82, "minWidth": 72, "maxWidth": 108, "cellClass": "md-c-center"},
+    }
+    for name in order:
+        kind = columns[name]
+        col = {
+            "field": name, "headerName": name, "editable": True,
+            "sortable": False, "filter": False, "resizable": True,
+            "headerClass": "md-h-center",
+            "cellClass": widths.get(name, {}).get("cellClass", "md-c-left"),
+        }
+        for k, v in widths.get(name, {}).items():
+            if k != "cellClass":
+                col[k] = v
+        if kind == "bool":
+            col["cellEditor"] = "agCheckboxCellEditor"
+        column_defs.append(col)
+    for meta in _META_COLUMNS:
+        column_defs.append({"field": meta, "hide": True, "editable": False, "suppressColumnsToolPanel": True})
+
+    grid_options = {
+        "columnDefs": column_defs,
+        "defaultColDef": {"resizable": True, "sortable": False, "filter": False},
+        "singleClickEdit": False,
+        "stopEditingWhenCellsLoseFocus": True,
+        "enterNavigatesVertically": True,
+        "enterNavigatesVerticallyAfterEdit": True,
+        "suppressRowClickSelection": True,
+        "suppressDragLeaveHidesColumns": True,
+        "onGridReady": _NATIVE_PASTE_HANDLER,
+        "onCellClicked": _ROW_ACTION_CLICK,
+        # 자동 빈 행 추가는 쓰지 않는다 — 신규 행은 [＋ 행 추가]/붙여넣기로만 생성.
+    }
+
+    ordered = ["_action"] + order + _META_COLUMNS
+    response = AgGrid(
+        frame[ordered],
+        gridOptions=grid_options,
+        key=key,
+        height=height,
+        update_on=[("cellValueChanged", 200)],
+        data_return_mode=DataReturnMode.AS_INPUT,
+        allow_unsafe_jscode=True,
+        theme="streamlit",
+        custom_css=_MASTER_GRID_CSS,
+        show_toolbar=False,
+        show_search=False,
+    )
+    result = response.data
+    if not isinstance(result, pd.DataFrame):
+        return frame
+    result = result.copy()
+    for name, kind in columns.items():
+        if name not in result.columns:
+            continue
+        if kind == "bool":
+            result[name] = result[name].map(grid_bool)
+        else:
+            result[name] = result[name].fillna("").astype("string")
+    for meta in ("_row_id", "_row_state", "_removed"):
+        if meta not in result.columns:
+            result[meta] = ""
+        result[meta] = result[meta].fillna("").astype(str)
+    result["_sel"] = result["_sel"].map(grid_bool) if "_sel" in result.columns else False
+    return result
+
+
 def normalize_editor_text(df: pd.DataFrame, columns) -> pd.DataFrame:
     """data_editor의 텍스트 셀을 빈 문자열 기반 string dtype으로 정규화한다."""
     frame = df.copy()

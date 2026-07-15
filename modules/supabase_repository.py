@@ -679,6 +679,13 @@ def deactivate_department(dept_code: str) -> None:
     _execute(query, "비활성화", "departments")
 
 
+def delete_department(dept_code: str) -> None:
+    """부서를 물리 삭제한다. 참조 여부 판단은 호출부(화면)가 담당하며, 참조가 있으면
+    DB FK 제약으로도 삭제가 거부된다(안전장치)."""
+    query = client().table("departments").delete().eq("dept_code", dept_code)
+    _execute(query, "삭제", "departments")
+
+
 def deactivate_team(dept_code: str, team_code: str) -> None:
     dept_by_code, _ = _department_maps()
     department_id = dept_by_code.get(dept_code)

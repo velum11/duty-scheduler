@@ -733,6 +733,46 @@ def deactivate_department(dept_code: str) -> None:
     supabase_repository.deactivate_department(str(dept_code).strip())
 
 
+def delete_department(dept_code: str) -> None:
+    """부서를 물리 삭제한다(참조 없는 부서 전용 — 참조 확인은 호출부가 담당).
+
+    로컬 샘플 모드에서는 세션 스토어에서 제거하고, Supabase 모드에서는 물리 삭제한다.
+    """
+    code = str(dept_code).strip()
+    if is_sample_mode():
+        if _DEPTS_STORE in st.session_state:
+            store = st.session_state[_DEPTS_STORE]
+            st.session_state[_DEPTS_STORE] = (
+                store[store["dept_code"].astype(str) != code].reset_index(drop=True)
+            )
+        return
+    supabase_repository.delete_department(code)
+
+
+def department_reference_counts(dept_code: str) -> dict:
+    """부서를 참조하는 사용자/조/편성 조 건수를 반환한다(활성·비활성 모두 포함).
+
+    아직 생성되지 않은 테이블(예: migration 002 미적용 시 shift_groups)은
+    조회 실패를 참조 0 으로 안전하게 처리한다.
+    """
+    code = str(dept_code).strip()
+
+    def _count(loader) -> int:
+        try:
+            frame = loader()
+        except Exception:
+            return 0
+        if frame.empty or "dept_code" not in frame:
+            return 0
+        return int((frame["dept_code"].astype(str).str.strip() == code).sum())
+
+    return {
+        "users": _count(get_users),
+        "teams": _count(get_teams),
+        "shift_groups": _count(get_shift_groups),
+    }
+
+
 def deactivate_team(dept_code: str, team_code: str) -> None:
     supabase_repository.deactivate_team(str(dept_code).strip(), str(team_code).strip())
 
