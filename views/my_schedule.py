@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
+from views.workspace import work_type_display
 
 
 _MONTH_KEY = "my_schedule_month"
@@ -144,7 +145,8 @@ def _employee_line(user: dict, dept: str, team: str) -> str:
 """
 
 
-def _calendar_html(rows: pd.DataFrame, year: int, month: int, work_types: dict) -> str:
+def _calendar_html(rows: pd.DataFrame, year: int, month: int, work_types: dict,
+                   display_of: dict, color_of: dict) -> str:
     first_weekday, days_in_month = calendar.monthrange(year, month)
     duty_by_date = {
         row["d"]: str(row["work_type_code"])
@@ -155,7 +157,8 @@ def _calendar_html(rows: pd.DataFrame, year: int, month: int, work_types: dict) 
     for day in range(1, days_in_month + 1):
         duty_date = date(year, month, day)
         code = duty_by_date.get(duty_date, "")
-        color = str(work_types.get(code, {}).get("color") or "#9AA0A6")
+        label = display_of.get(code, code)  # 셀은 약칭으로 표시
+        color = str(color_of.get(code) or work_types.get(code, {}).get("color") or "#9AA0A6")
         classes = ["my-day"]
         if code:
             classes.append("has-duty")
@@ -166,7 +169,7 @@ def _calendar_html(rows: pd.DataFrame, year: int, month: int, work_types: dict) 
         elif duty_date.weekday() == 6:
             classes.append("is-sun")
         duty = (
-            f"<span class='my-duty' style='background:{escape(color)}'>{escape(code)}</span>"
+            f"<span class='my-duty' style='background:{escape(color)}'>{escape(label)}</span>"
             if code else "<span class='my-duty is-empty'>&nbsp;</span>"
         )
         cells.append(f"<div class='{' '.join(classes)}'><span class='my-date'>{day}</span>{duty}</div>")
@@ -197,15 +200,22 @@ def _month_navigation(year: int, month: int) -> None:
             st.rerun()
 def render(user: dict) -> None:
     year, month = _month_value()
+    # 기준정보 조회 실패(repository 오류)와 정상 빈 월을 구분한다:
+    #  - repository 오류 → 명확한 오류 메시지 후 중단 (빈 월로 위장하지 않음)
+    #  - 근무내역 없음 → 정상 빈 달력 렌더링
     try:
         rows = db.get_month_schedules(str(user["emp_no"]).strip(), year, month).copy()
         work_type_df = db.get_work_types()
         work_types = db.work_types_map()
+        display_of, color_of = work_type_display()
         dept = db.dept_name(user.get("dept_code", ""))
         team = db.team_name(user.get("dept_code", ""), user.get("team_code", ""))
         rows["d"] = pd.to_datetime(rows["duty_date"], errors="coerce").dt.date
-    except Exception:
-        st.error("근무표 또는 기준정보를 불러오지 못했습니다. 잠시 후 다시 조회하세요.")
+    except Exception as exc:
+        st.error(
+            "근무표 또는 기준정보를 불러오지 못했습니다(일시적 연결 문제일 수 있습니다). "
+            "잠시 후 다시 조회하세요.\n\n" + str(exc)
+        )
         return
 
     st.markdown(_styles(), unsafe_allow_html=True)
@@ -215,7 +225,7 @@ def render(user: dict) -> None:
     ui.panel_head(f"{year}년 {month}월 근무내역")
     if rows.empty:
         st.caption("해당 월에 저장된 근무내역이 없습니다.")
-    st.markdown(_calendar_html(rows, year, month, work_types), unsafe_allow_html=True)
+    st.markdown(_calendar_html(rows, year, month, work_types, display_of, color_of), unsafe_allow_html=True)
 
     groups = _group_counts(rows, work_type_df) if not rows.empty else []
     if groups:

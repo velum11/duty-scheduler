@@ -20,6 +20,37 @@ from modules import db, ui
 ALL = "(전체)"
 
 
+def work_type_display() -> tuple[dict, dict]:
+    """근무형태 표시 계약 — (display_of, color_of).
+
+    - display_of: 내부 코드 -> 화면 표시값(약칭). 약칭이 비었거나 같은 약칭이 여러
+      코드에 걸리면(왕복 모호) 코드를 그대로 표시한다.
+    - color_of: 표시값과 코드 양쪽을 색상(#RRGGBB)에 매핑 — 셀이 약칭으로 바뀌어도
+      같은 코드는 같은 색을 유지한다(색은 코드에 귀속).
+    조회 화면(월간·개인)이 셀을 약칭·색상으로 일관 표시하도록 공통으로 쓴다.
+    """
+    wt = db.get_work_types()
+    active = wt[wt["is_active"]] if not wt.empty else wt
+    label_codes: dict[str, set] = {}
+    for _, r in active.iterrows():
+        code = str(r["code"]).strip()
+        label = str(r["short_label"]).strip()
+        if code and label:
+            label_codes.setdefault(label, set()).add(code)
+    display_of, color_of = {}, {}
+    for _, r in active.iterrows():
+        code = str(r["code"]).strip()
+        label = str(r["short_label"]).strip()
+        color = str(r["color"] or "").strip()
+        disp = label if label and len(label_codes.get(label, set())) == 1 else code
+        if code:
+            display_of[code] = disp
+            if color.startswith("#"):
+                color_of[code] = color
+                color_of[disp] = color
+    return display_of, color_of
+
+
 def editor_has_changes(key: str) -> bool:
     """data_editor의 미저장 추가·수정·삭제가 있는지 확인한다."""
     state = st.session_state.get(key)
@@ -633,7 +664,8 @@ def schedule_screen(user: dict, page_id: str) -> None:
         ui.empty_state("조회 조건을 선택한 후 조회하세요.", head="월별 근무표")
         return
 
-    grid, month_rows = _build_month_grid(q)
+    display_of, color_of = work_type_display()
+    grid, month_rows = _build_month_grid(q, display_of)
     if grid.empty:
         ui.empty_state("조회 조건에 해당하는 직원이 없습니다.", head="월별 근무표")
         return
@@ -649,18 +681,18 @@ def schedule_screen(user: dict, page_id: str) -> None:
     ])
     st.write("")
 
-    # 데이터 그리드 (근무코드 색상, 읽기 전용)
+    # 데이터 그리드 (근무 약칭 + 지정 색상, 읽기 전용)
     day_cols = [c for c in grid.columns if c[0].isdigit()]
     ui.panel_head("월간 근무표", f"조회 결과 {len(grid)}건")
-    styled = grid.style.map(lambda v: _cell_style(v, wt), subset=day_cols)
+    styled = grid.style.map(lambda v: _cell_style(v, color_of), subset=day_cols)
     st.dataframe(styled, width="stretch", hide_index=True, height=grid_height(len(grid)))
-    st.markdown(ui.legend_html(wt), unsafe_allow_html=True)
+    st.markdown(_label_legend_html(display_of, color_of), unsafe_allow_html=True)
 
     # 사용자별 집계 (전체 근무표 조회)
     if page_id == "schedule_view" and not month_rows.empty:
         st.write("")
         ui.panel_head("직원별 근무형태 집계")
-        agg = _build_agg(grid, month_rows, wt)
+        agg = _build_agg(grid, month_rows, wt, display_of)
         st.dataframe(agg, width="stretch", hide_index=True, height=grid_height(len(agg)))
 
     # 하단 액션
@@ -676,8 +708,12 @@ def schedule_screen(user: dict, page_id: str) -> None:
         )
 
 
-def _build_month_grid(q: dict):
-    """해당 월/부서/조의 가로형 근무표 DataFrame 과 세로형 원본 레코드를 반환."""
+def _build_month_grid(q: dict, display_of: dict | None = None):
+    """해당 월/부서/조의 가로형 근무표 DataFrame 과 세로형 원본 레코드를 반환.
+
+    날짜 셀은 내부 코드가 아니라 근무형태 약칭(display_of)으로 표시한다.
+    """
+    display_of = display_of or {}
     users = db.get_users()
     users = users[users["is_active"]]
     if q["dept"] != ALL:
@@ -710,13 +746,15 @@ def _build_month_grid(q: dict):
             "조": db.team_name(u["dept_code"], u["team_code"]),
         }
         for d in days:
-            row[f"{d.day}({ui.weekday_kr(d)})"] = lookup.get((u["emp_no"], d.isoformat()), "")
+            code = lookup.get((u["emp_no"], d.isoformat()), "")
+            row[f"{d.day}({ui.weekday_kr(d)})"] = display_of.get(code, code) if code else ""
         rows.append(row)
     return pd.DataFrame(rows), scheds
 
 
-def _build_agg(grid: pd.DataFrame, month_rows: pd.DataFrame, wt: dict) -> pd.DataFrame:
-    """직원별 근무형태 집계표: 성명 | 코드별 건수 | 계."""
+def _build_agg(grid: pd.DataFrame, month_rows: pd.DataFrame, wt: dict, display_of: dict | None = None) -> pd.DataFrame:
+    """직원별 근무형태 집계표: 성명 | 약칭별 건수 | 계 (열 머리글은 약칭)."""
+    display_of = display_of or {}
     codes = [c for c in wt if c in set(month_rows["work_type_code"])]
     pivot = (
         month_rows.groupby(["emp_no", "work_type_code"]).size().unstack(fill_value=0)
@@ -728,15 +766,28 @@ def _build_agg(grid: pd.DataFrame, month_rows: pd.DataFrame, wt: dict) -> pd.Dat
         total = 0
         for c in codes:
             n = int(counts[c]) if counts is not None and c in counts else 0
-            row[c] = n
+            row[display_of.get(c, c)] = n
             total += n
         row["계"] = total
         rows.append(row)
     return pd.DataFrame(rows)
 
 
-def _cell_style(value, wt: dict) -> str:
-    info = wt.get(str(value).strip())
-    if not info:
+def _cell_style(value, color_of: dict) -> str:
+    """날짜 셀 배경색 — 약칭/코드 어느 쪽으로 표시돼도 같은 색을 입힌다."""
+    color = color_of.get(str(value).strip())
+    if not color:
         return ""
-    return f"background-color:{info['color']}26; color:#1F2328; font-weight:600"
+    return f"background-color:{color}26; color:#1F2328; font-weight:600"
+
+
+def _label_legend_html(display_of: dict, color_of: dict) -> str:
+    """근무 약칭 범례 (표 하단). 셀 표시값(약칭)과 색을 그대로 보여준다."""
+    seen, badges = set(), []
+    for code, disp in display_of.items():
+        if disp in seen:
+            continue
+        seen.add(disp)
+        color = color_of.get(disp) or color_of.get(code) or "#9AA0A6"
+        badges.append(ui.badge_html(disp, color))
+    return f"<div class='duty-legend'>{''.join(badges)}</div>"

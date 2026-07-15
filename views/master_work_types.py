@@ -1,173 +1,350 @@
-"""기준정보 — 근무형태 관리 화면.
+"""기준정보 — 근무형태 관리: 부서 관리와 동일한 스프레드시트형 직접 편집 화면.
 
-조회 조건으로 대상을 불러온 뒤 스프레드시트형 편집기(st.data_editor)로 등록/수정한다.
-[저장] 을 눌렀을 때만 검증 후 반영하며(자동 저장 없음), 로컬 샘플 모드에서는
-세션 상태(db.save_work_types)에 저장해 현재 세션 동안 유지된다.
-
-'사용 중'만 조회했더라도 저장 시 미조회 근무형태(미사용 등)는 그대로 보존한다
-(조회 대상만 교체 후 병합). 색상 값은 비어 있어도 저장할 수 있다.
+행 상태 계약(_row_id/_row_state/_sel)으로 기존 저장 행과 미저장 신규 행을 분리한다.
+색상 열은 HEX 텍스트 대신 색상표(네이티브 컬러 피커)로 입력하며, 저장 형식은 기존과
+동일한 #RRGGBB 를 유지한다. [삭제]는 근무표에서 사용 중인 코드는 미사용 처리,
+참조 없는 코드는 실제 삭제한다.
 """
 import pandas as pd
 import streamlit as st
+from st_aggrid import JsCode
 
 from modules import db, ui
-from views.workspace import master_data_editor, save_bar, set_flash, show_flash
+from views.workspace import grid_bool, selectable_master_grid, set_flash, show_flash
 
-_COLS = [
-    "코드", "명칭", "분류", "약칭", "시작", "종료", "색상",
-    "실근무", "특근수당", "설명", "표시순서", "사용",
-]
 _STATUS = ["사용 중", "사용 안 함", "전체"]
+_USER_COLS = ["코드", "명칭", "분류", "약칭", "시작", "종료", "색상", "실근무", "특근수당", "설명", "표시순서", "사용"]
+_BOOL_COLS = {"실근무", "특근수당", "사용"}
+_ROW_COLS = ["_row_id", "_row_state", "_sel", *_USER_COLS]
+_GRID_COLUMNS = {c: ("bool" if c in _BOOL_COLS else "text") for c in _USER_COLS}
+
+# 색상 열 — 스와치 + HEX 표시(렌더러) / 네이티브 컬러 피커(에디터, 더블클릭). 저장은 #RRGGBB.
+_COLOR_RENDERER = JsCode(
+    """
+    (class {
+      init(p) {
+        const v = String(p.value == null ? '' : p.value).trim();
+        const valid = /^#([0-9a-fA-F]{6})$/.test(v);
+        const g = document.createElement('div');
+        g.style.display='flex'; g.style.alignItems='center'; g.style.height='100%'; g.style.gap='6px'; g.style.paddingLeft='6px';
+        const sw = document.createElement('span');
+        sw.style.width='16px'; sw.style.height='16px'; sw.style.borderRadius='3px'; sw.style.border='1px solid rgba(0,0,0,0.2)';
+        sw.style.background = valid ? v : 'transparent';
+        g.appendChild(sw);
+        const t = document.createElement('span'); t.textContent = v; t.style.fontSize='11px'; t.style.color='#3D3A34';
+        g.appendChild(t);
+        this.eGui = g;
+      }
+      getGui() { return this.eGui; }
+      refresh() { return false; }
+    })
+    """
+)
+_COLOR_EDITOR = JsCode(
+    """
+    (class {
+      init(p) {
+        const v = String(p.value == null ? '' : p.value).trim();
+        this.value = /^#([0-9a-fA-F]{6})$/.test(v) ? v : '#9AA0A6';
+        const g = document.createElement('div');
+        g.style.display='flex'; g.style.alignItems='center'; g.style.height='100%'; g.style.gap='6px'; g.style.paddingLeft='6px';
+        const input = document.createElement('input');
+        input.type='color'; input.value=this.value;
+        input.style.width='28px'; input.style.height='22px'; input.style.border='none'; input.style.background='transparent'; input.style.cursor='pointer';
+        const hex = document.createElement('span'); hex.textContent=this.value; hex.style.fontSize='11px'; hex.style.color='#3D3A34';
+        input.addEventListener('input', () => { this.value = input.value; hex.textContent = input.value; });
+        g.appendChild(input); g.appendChild(hex);
+        this.eGui = g; this.eInput = input;
+      }
+      getGui() { return this.eGui; }
+      afterGuiAttached() { this.eInput.focus(); }
+      getValue() { return String(this.value || '').toUpperCase(); }
+      isPopup() { return false; }
+    })
+    """
+)
+
+_CSS = """
+<style>
+.st-key-mw_screen .md-title { font-size: 1.18rem; font-weight: 700; color: #26241F; letter-spacing: -0.01em; margin: 0; line-height: 2rem; }
+.st-key-mw_bar div[data-testid="stHorizontalBlock"] { align-items: center; }
+.st-key-mw_bar div.stButton > button { min-height: 2rem; height: 2rem; padding: 0 0.7rem; border-radius: 5px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; gap: 0.3rem; }
+.st-key-mw_bar div.stButton > button [data-testid="stIconMaterial"] { font-size: 16px; }
+.st-key-mw_save button[kind="primary"] { background: #1B1B1D !important; border: 1px solid #1B1B1D !important; color: #FFFFFF !important; }
+.st-key-mw_save button[kind="primary"]:hover { background: #000000 !important; border-color: #000000 !important; }
+.st-key-mw_add button { background: #FFFFFF !important; border: 1px solid #D8D2C7 !important; color: #3D3A34 !important; }
+.st-key-mw_add button:hover { background: #F1EEE9 !important; border-color: #C9A26B !important; }
+.st-key-mw_del button { background: #FFFFFF !important; border: 1px solid #E0CFC9 !important; color: #9A3B2E !important; }
+.st-key-mw_del button:hover:not(:disabled) { background: #F7EFEC !important; border-color: #C77B6B !important; }
+.st-key-mw_del button:disabled { color: #B8B4AC !important; border-color: #E7E3DB !important; }
+.st-key-mw_tools { margin: 0.15rem 0 0.35rem; }
+.st-key-mw_tools div[data-testid="stHorizontalBlock"] { align-items: flex-end; }
+.st-key-mw_tools div.stButton > button { min-height: 2rem; height: 2rem; padding: 0 0.7rem; border-radius: 5px; font-size: 0.78rem; font-weight: 600; background: #FFFFFF; border: 1px solid #D8D2C7; color: #3D3A34; }
+.st-key-mw_tools div.stButton > button:hover { background: #F1EEE9; border-color: #C9A26B; }
+.st-key-mw_grid iframe { height: clamp(400px, calc(100vh - 250px), 720px) !important; min-height: 400px; }
+.st-key-mw_screen .md-count { font-size: 0.76rem; color: #8A8880; margin: 0.4rem 0 0; }
+.st-key-mw_screen .md-count b { color: #3D3A34; font-weight: 600; }
+</style>
+"""
 
 
 def render(user: dict) -> None:
-    ui.page_header("master_work_types")
-    source_work_types = db.get_work_types()
+    st.markdown(_CSS, unsafe_allow_html=True)
 
-    # 조회 조건 카드
-    with ui.card():
-        c1, c2 = st.columns([1.4, 0.9], vertical_alignment="bottom")
-        active = c1.selectbox("사용 여부", _STATUS, key="mw_active")
-        clicked = c2.button("새로고침", key="mw_go", type="primary", width="stretch")
+    with st.container(key="mw_screen"):
+        bar = st.container(key="mw_bar")
 
-    # 화면 진입 시 기본 필터로 자동 조회, [새로고침] 시 현재 필터로 재조회.
-    params = {"active": active}
-    q = st.session_state.get("q_master_work_types")
-    if clicked or q is None or q != params:
-        q = params
-        st.session_state["q_master_work_types"] = q
-        _load_editor(q, source_work_types)
-    elif "mw_work" not in st.session_state:
-        _load_editor(q, source_work_types)
+        with st.container(key="mw_tools"):
+            f1, f2, _sp, f3 = st.columns([1.3, 2.4, 4.3, 1.0], vertical_alignment="bottom")
+            active = f1.selectbox("사용 여부", _STATUS, key="mw_active", label_visibility="collapsed")
+            search = f2.text_input("검색", key="mw_search", placeholder="코드·명칭·약칭 검색", label_visibility="collapsed")
+            refresh = f3.button("새로고침", key="mw_go", width="stretch")
 
-    show_flash("master_work_types")
+        params = {"active": active, "search": search.strip()}
+        if refresh or st.session_state.get("q_master_work_types") != params or "mw_rows" not in st.session_state:
+            st.session_state["q_master_work_types"] = params
+            st.session_state.pop("mw_del_plan", None)
+            _load_editor(params)
 
-    # 요약 카드 (편집 중인 내용 기준으로 갱신)
-    sum_ph = st.container()
+        show_flash("master_work_types")
 
-    # 스프레드시트형 편집 그리드 (행 추가 가능)
-    edited = master_data_editor(
-        st.session_state["mw_work"],
-        key="mw_editor",
-        num_rows="dynamic",
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "코드": st.column_config.TextColumn("코드", width="small"),
-            "명칭": st.column_config.TextColumn("명칭", width="small"),
-            "분류": st.column_config.TextColumn("분류", width="small"),
-            "약칭": st.column_config.TextColumn("약칭", width="small"),
-            "시작": st.column_config.TextColumn("시작", width="small"),
-            "종료": st.column_config.TextColumn("종료", width="small"),
-            "색상": st.column_config.TextColumn("색상", width="small"),
-            "실근무": st.column_config.CheckboxColumn("실근무", width="small"),
-            "특근수당": st.column_config.CheckboxColumn("특근수당", width="small"),
-            "설명": st.column_config.TextColumn("설명"),
-            "표시순서": st.column_config.NumberColumn(
-                "표시순서", width="small", min_value=0, step=1,
-            ),
-            "사용": st.column_config.CheckboxColumn("사용", width="small", default=True),
-        },
-    )
+        plan = st.session_state.get("mw_del_plan")
+        if plan:
+            _confirm_bar(plan, params)
 
-    with sum_ph:
-        _summary_cards(edited)
+        nonce = st.session_state.setdefault("mw_nonce", 0)
+        col_config = {
+            "코드": {"width": 96, "minWidth": 80, "cellClass": "md-c-left"},
+            "명칭": {"width": 110, "minWidth": 90, "cellClass": "md-c-left"},
+            "분류": {"width": 84, "minWidth": 70, "cellClass": "md-c-left"},
+            "약칭": {"width": 72, "minWidth": 56, "cellClass": "md-c-center"},
+            "시작": {"width": 78, "minWidth": 64, "cellClass": "md-c-center"},
+            "종료": {"width": 78, "minWidth": 64, "cellClass": "md-c-center"},
+            "색상": {"width": 118, "minWidth": 100, "cellClass": "md-c-left",
+                    "cellRenderer": _COLOR_RENDERER, "cellEditor": _COLOR_EDITOR},
+            "실근무": {"width": 78, "minWidth": 64, "cellClass": "md-c-center"},
+            "특근수당": {"width": 88, "minWidth": 72, "cellClass": "md-c-center"},
+            "설명": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left"},
+            "표시순서": {"width": 96, "minWidth": 80, "cellClass": "md-c-center"},
+            "사용": {"width": 74, "minWidth": 64, "cellClass": "md-c-center"},
+        }
+        with st.container(key="mw_grid"):
+            grid_df = selectable_master_grid(
+                st.session_state["mw_rows"], key=f"mw_grid_{nonce}",
+                columns=_GRID_COLUMNS, order=_USER_COLS, height=560,
+                col_config=col_config, select_all_header=True,
+            )
 
-    # 색상 범례 (색상이 지정된 코드만)
-    legend = [
-        (str(r["코드"]).strip(), str(r["색상"]).strip())
-        for _, r in edited.iterrows()
-        if str(r["코드"] or "").strip() and str(r["색상"] or "").strip()
-    ]
-    if legend:
-        badges = "".join(ui.badge_html(code, color) for code, color in legend)
-        st.markdown(f"<div class='duty-legend'>{badges}</div>", unsafe_allow_html=True)
+        live = _live(grid_df)
+        existing = live[live["_row_state"] == "existing"]
+        new_rows = live[live["_row_state"] != "existing"]
+        sel_count = int((existing["_sel"].map(grid_bool)).sum()) if not existing.empty else 0
+        new_txt = f" · 신규 <b>{len(new_rows)}</b>건" if len(new_rows) else ""
+        st.markdown(
+            f"<div class='md-count'>총 <b>{len(existing)}</b>건{new_txt} · 선택 <b>{sel_count}</b>건</div>",
+            unsafe_allow_html=True,
+        )
 
-    if save_bar("mw"):
-        _save(edited, q)
+        with bar:
+            title, b_add, b_del, b_save = st.columns([6, 1.5, 1.3, 1.3], vertical_alignment="center")
+            title.markdown("<div class='md-title'>근무형태 관리</div>", unsafe_allow_html=True)
+            b_add.button("행 추가", key="mw_add", icon=":material/add:", width="stretch",
+                         on_click=lambda: st.session_state.update(mw_add_req=True))
+            b_del.button("삭제", key="mw_del", icon=":material/delete:", width="stretch",
+                         disabled=sel_count == 0, on_click=lambda: st.session_state.update(mw_del_req=True))
+            b_save.button("저장", key="mw_save", type="primary", width="stretch",
+                          on_click=lambda: st.session_state.update(mw_save_req=True))
 
-
-def _to_display(df: pd.DataFrame) -> pd.DataFrame:
-    """저장 형태 → 편집기 표시 형태."""
-    return pd.DataFrame({
-        "코드": df["code"].astype(str),
-        "명칭": df["name"].astype(str),
-        "분류": df["category"].astype(str),
-        "약칭": df["short_label"].astype(str),
-        "시작": df["start_time"].astype(str),
-        "종료": df["end_time"].astype(str),
-        "색상": df["color"].astype(str),
-        "실근무": df["is_work"].astype(bool),
-        "특근수당": df["affects_allowance"].astype(bool),
-        "설명": df["description"].astype(str),
-        "표시순서": df["sort_order"].astype(int),
-        "사용": df["is_active"].astype(bool),
-    })
+    if st.session_state.pop("mw_save_req", False):
+        _save(grid_df, params)
+    if st.session_state.pop("mw_del_req", False):
+        _handle_delete(grid_df, params)
+    if st.session_state.pop("mw_add_req", False):
+        _add_row(grid_df)
+    if _normalize(grid_df):
+        st.rerun()
 
 
-def _load_editor(q: dict, source: pd.DataFrame | None = None) -> None:
-    """조회 조건으로 대상 근무형태를 편집기에 적재하고, 원본 코드 집합을 스냅샷한다."""
-    source = db.get_work_types() if source is None else source
-    df = source.copy()
+# ---------- 행 상태 헬퍼 ----------
+def _live(grid_df: pd.DataFrame) -> pd.DataFrame:
+    if "_removed" not in grid_df.columns:
+        return grid_df
+    return grid_df[grid_df["_removed"].fillna("").astype(str).str.strip() != "1"]
+
+
+def _next_rid() -> str:
+    n = st.session_state.get("mw_rid", 0) + 1
+    st.session_state["mw_rid"] = n
+    return f"n:{n}"
+
+
+def _next_order(rows: pd.DataFrame) -> int:
+    orders = pd.to_numeric(rows.get("표시순서"), errors="coerce").dropna()
+    return int(orders.max()) + 1 if len(orders) else 1
+
+
+def _new_row(order_val: int) -> dict:
+    row = {"_row_id": _next_rid(), "_row_state": "new", "_sel": False}
+    for c in _USER_COLS:
+        row[c] = (c == "사용") if c in _BOOL_COLS else ""
+    row["색상"] = "#9AA0A6"
+    row["표시순서"] = str(order_val)
+    return row
+
+
+def _add_row(grid_df: pd.DataFrame) -> None:
+    live = _live(grid_df)
+    st.session_state["mw_rows"] = pd.concat(
+        [live[_ROW_COLS], pd.DataFrame([_new_row(_next_order(live))])], ignore_index=True,
+    )[_ROW_COLS]
+    st.session_state["mw_nonce"] = st.session_state.get("mw_nonce", 0) + 1
+    st.rerun()
+
+
+def _normalize(grid_df: pd.DataFrame) -> bool:
+    if grid_df is None or grid_df.empty or "_row_id" not in grid_df.columns:
+        return False
+    removed = grid_df["_removed"].fillna("").astype(str).str.strip() == "1" if "_removed" in grid_df else pd.Series(False, index=grid_df.index)
+    live = grid_df[~removed].copy()
+    rid = live["_row_id"].fillna("").astype(str).str.strip()
+    needs_id = rid == ""
+    changed = bool(removed.any() or needs_id.any())
+    if not changed:
+        return False
+    live["_row_id"] = rid
+    for idx in live.index[needs_id]:
+        live.at[idx, "_row_id"] = _next_rid()
+        live.at[idx, "_row_state"] = "new"
+        live.at[idx, "_sel"] = False
+    live["_row_state"] = live["_row_state"].fillna("").astype(str).replace("", "new")
+    st.session_state["mw_rows"] = live[_ROW_COLS].reset_index(drop=True)
+    st.session_state["mw_nonce"] = st.session_state.get("mw_nonce", 0) + 1
+    return True
+
+
+# ---------- 삭제 (기존 저장 행 전용) ----------
+def _handle_delete(grid_df: pd.DataFrame, params: dict) -> None:
+    live = _live(grid_df)
+    sel = live[(live["_row_state"] == "existing") & live["_sel"].map(grid_bool)]
+    codes = sorted({str(c).strip() for c in sel["코드"] if str(c).strip()})
+    if not codes:
+        set_flash("master_work_types", "warning", "삭제할 기존 근무형태를 선택하세요.")
+        st.rerun()
+    plan = {"delete": [], "deactivate": []}
+    for code in codes:
+        refs = db.work_type_reference_counts(code)
+        item = {"code": code, "refs": refs}
+        (plan["deactivate"] if sum(refs.values()) > 0 else plan["delete"]).append(item)
+    st.session_state["mw_del_plan"] = plan
+    st.rerun()
+
+
+def _confirm_bar(plan: dict, params: dict) -> None:
+    lines = []
+    if plan["delete"]:
+        lines.append("삭제 가능: " + ", ".join(it["code"] for it in plan["delete"]))
+    for it in plan["deactivate"]:
+        lines.append(f"미사용 처리: {it['code']} — 근무표 {it['refs'].get('schedules', 0)}건 사용 중")
+    st.warning("선택한 근무형태를 다음과 같이 처리합니다.\n\n- " + "\n- ".join(lines))
+    c1, c2, _sp = st.columns([1.4, 1.0, 6], vertical_alignment="center")
+    if c1.button("실행", key="mw_del_ok", type="primary", width="stretch"):
+        _execute_delete(plan, params)
+    if c2.button("취소", key="mw_del_cancel", width="stretch"):
+        st.session_state.pop("mw_del_plan", None)
+        st.rerun()
+
+
+def _execute_delete(plan: dict, params: dict) -> None:
+    n_del = 0
+    for it in plan["delete"]:
+        db.delete_work_type(it["code"])
+        n_del += 1
+    deact = plan["deactivate"]
+    n_deact = 0
+    if deact:
+        store = db.get_work_types().copy()
+        codes = [it["code"] for it in deact]
+        mask = store["code"].astype(str).isin(codes)
+        n_deact = int(mask.sum())
+        store.loc[mask, "is_active"] = False
+        db.save_work_types(store[db.WORK_TYPE_COLUMNS])
+    st.session_state.pop("mw_del_plan", None)
+    _load_editor(params)
+    parts = []
+    if n_del:
+        parts.append(f"{n_del}개 삭제")
+    if n_deact:
+        parts.append(f"{n_deact}개 미사용 처리")
+    msg = "근무형태를 " + ", ".join(parts) + "했습니다." if parts else "처리할 근무형태가 없습니다."
+    set_flash("master_work_types", "success" if (n_del or n_deact) else "warning", msg)
+    st.rerun()
+
+
+# ---------- 적재 / 저장 ----------
+def _load_editor(q: dict) -> None:
+    df = db.get_work_types().copy()
     if q["active"] == "사용 중":
         df = df[df["is_active"]]
     elif q["active"] == "사용 안 함":
         df = df[~df["is_active"].astype(bool)]
+    term = str(q.get("search", "")).strip()
+    if term:
+        hit = (
+            df["code"].astype(str).str.contains(term, case=False, na=False, regex=False)
+            | df["name"].astype(str).str.contains(term, case=False, na=False, regex=False)
+            | df["short_label"].astype(str).str.contains(term, case=False, na=False, regex=False)
+        )
+        df = df[hit]
     df = df.sort_values("sort_order").reset_index(drop=True)
 
-    st.session_state["mw_work"] = _to_display(df)
-    st.session_state["mw_loaded"] = [(str(c).strip(),) for c in df["code"]]
-    st.session_state.pop("mw_editor", None)  # 이전 편집 상태 초기화
+    order = pd.to_numeric(df["sort_order"], errors="coerce").fillna(0).astype("int64")
+    if df.empty:
+        st.session_state["mw_rows"] = pd.DataFrame(columns=_ROW_COLS)
+    else:
+        st.session_state["mw_rows"] = pd.DataFrame({
+            "_row_id": "e:" + df["code"].astype(str),
+            "_row_state": "existing", "_sel": False,
+            "코드": df["code"].fillna("").astype("string"),
+            "명칭": df["name"].fillna("").astype("string"),
+            "분류": df["category"].fillna("").astype("string"),
+            "약칭": df["short_label"].fillna("").astype("string"),
+            "시작": df["start_time"].fillna("").astype("string"),
+            "종료": df["end_time"].fillna("").astype("string"),
+            "색상": df["color"].fillna("").astype("string"),
+            "실근무": df["is_work"].fillna(False).astype(bool),
+            "특근수당": df["affects_allowance"].fillna(False).astype(bool),
+            "설명": df["description"].fillna("").astype("string"),
+            "표시순서": order.astype(str).astype("string"),
+            "사용": df["is_active"].fillna(True).astype(bool),
+        })[_ROW_COLS]
+    st.session_state["mw_nonce"] = st.session_state.get("mw_nonce", 0) + 1
 
 
-def _summary_cards(edited: pd.DataFrame) -> None:
-    is_work = edited["실근무"].fillna(False).astype(bool)
-    ui.summary_cards([
-        ("근무형태", f"{len(edited)}개"),
-        ("사용 중", f"{int(edited['사용'].fillna(False).astype(bool).sum())}개"),
-        ("실근무 코드", f"{int(is_work.sum())}개"),
-        ("휴무·휴가 코드", f"{int((~is_work).sum())}개"),
-    ])
-    st.write("")
-
-
-def _save(edited: pd.DataFrame, q: dict) -> None:
-    """편집 결과를 검증하고, 자연키 기준 upsert 로 스토어에 병합해 저장한다."""
-    records, errors = _validate(edited)
-
-    # 기존 행은 U, 신규 행은 C, 조회했다가 사라진 행은 사용=False 소프트 삭제.
-    loaded = set(st.session_state.get("mw_loaded", []))
+def _save(grid_df, q) -> None:
+    live = _live(grid_df)
+    records, errors = _validate(live)
     store = db.get_work_types()
-    merged, dup, n_c, n_u, n_d = db.upsert_records(
-        store, records, loaded, ["code"], "is_active", db.WORK_TYPE_COLUMNS,
+    merged, dup, n_c, n_u, _n_d = db.upsert_records(
+        store, records, set(), ["code"], "is_active", db.WORK_TYPE_COLUMNS,
     )
     if dup:
         errors.append("근무형태 코드가 중복되었습니다: " + ", ".join(k[0] for k in dup))
-
     if errors:
         st.error("저장하지 못했습니다.\n\n- " + "\n- ".join(errors))
         return
-
     db.save_work_types(merged)
-    st.session_state.pop("mw_editor", None)
-    _load_editor(q)  # 저장된 스토어 기준으로 편집기 새로고침
-    set_flash(
-        "master_work_types", "success",
-        f"근무형태를 저장했습니다. (신규 {n_c} · 수정 {n_u} · 미사용 처리 {n_d})",
-    )
+    _load_editor(q)
+    set_flash("master_work_types", "success", f"근무형태를 저장했습니다. (신규 {n_c} · 수정 {n_u})")
     st.rerun()
 
 
-def _validate(edited: pd.DataFrame):
-    """표시 형태 → 저장 형태 변환 + 행별 기본 검증. (records, errors) 반환."""
+def _validate(live: pd.DataFrame):
     records, errors = [], []
-    for i, (_, row) in enumerate(edited.iterrows(), start=1):
-        code = str(row["코드"] or "").strip()
-        name = str(row["명칭"] or "").strip()
-        category = str(row["분류"] or "").strip()
-        short_label = str(row["약칭"] or "").strip()
-
-        # 완전히 빈 행(새 행 자동 추가분)은 조용히 건너뛴다
+    for i, (_, row) in enumerate(live.iterrows(), start=1):
+        code = str(row.get("코드") or "").strip()
+        name = str(row.get("명칭") or "").strip()
+        category = str(row.get("분류") or "").strip()
+        short_label = str(row.get("약칭") or "").strip()
         if not any([code, name, category, short_label]):
             continue
 
@@ -177,28 +354,25 @@ def _validate(edited: pd.DataFrame):
         if not name:
             errors.append(f"{tag}: 근무형태명을 입력하세요.")
         if not short_label:
-            errors.append(f"{tag}: 약칭(short_label)을 입력하세요.")
+            errors.append(f"{tag}: 약칭을 입력하세요.")
         if not category:
-            errors.append(f"{tag}: 분류(category)를 입력하세요.")
+            errors.append(f"{tag}: 분류를 입력하세요.")
 
         try:
-            so = row["표시순서"]
-            sort_order = 0 if pd.isna(so) else int(so)
+            order_val = int(row.get("표시순서")) if str(row.get("표시순서")).strip() != "" else 0
         except (TypeError, ValueError):
-            sort_order = 0
+            order_val = 0
+            errors.append(f"{tag}: 표시순서는 숫자여야 합니다.")
 
         records.append({
-            "code": code,
-            "name": name,
-            "category": category,
-            "short_label": short_label,
-            "start_time": str(row["시작"] or "").strip(),
-            "end_time": str(row["종료"] or "").strip(),
-            "color": str(row["색상"] or "").strip(),
-            "is_work": bool(row["실근무"]),
-            "affects_allowance": bool(row["특근수당"]),
-            "description": str(row["설명"] or "").strip(),
-            "sort_order": sort_order,
-            "is_active": bool(row["사용"]),
+            "code": code, "name": name, "category": category, "short_label": short_label,
+            "start_time": str(row.get("시작") or "").strip(),
+            "end_time": str(row.get("종료") or "").strip(),
+            "color": str(row.get("색상") or "").strip(),
+            "is_work": grid_bool(row.get("실근무")),
+            "affects_allowance": grid_bool(row.get("특근수당")),
+            "description": str(row.get("설명") or "").strip(),
+            "sort_order": order_val,
+            "is_active": grid_bool(row.get("사용")),
         })
     return records, errors

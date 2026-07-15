@@ -711,6 +711,17 @@ def deactivate_team(dept_code: str, team_code: str) -> None:
     _execute(query, "비활성화", "teams")
 
 
+def delete_team(dept_code: str, team_code: str) -> None:
+    """조를 물리 삭제한다. 참조 여부 판단은 호출부(화면)가 담당하며, 참조가 있으면
+    DB FK 제약으로도 삭제가 거부된다(안전장치)."""
+    dept_by_code, _ = _department_maps()
+    department_id = dept_by_code.get(dept_code)
+    if department_id is None:
+        return
+    query = client().table("teams").delete().eq("department_id", department_id).eq("team_code", team_code)
+    _execute(query, "삭제", "teams")
+
+
 def deactivate_user(emp_no: str) -> None:
     query = client().table("users").update({"is_active": False}).eq("emp_no", emp_no)
     _execute(query, "비활성화", "users")
@@ -719,6 +730,13 @@ def deactivate_user(emp_no: str) -> None:
 def deactivate_work_type(code: str) -> None:
     query = client().table("work_types").update({"is_active": False}).eq("code", code)
     _execute(query, "비활성화", "work_types")
+
+
+def delete_work_type(code: str) -> None:
+    """근무형태를 물리 삭제한다. 참조 여부 판단은 호출부(화면)가 담당하며, 근무표가
+    참조 중이면 DB FK 제약으로도 삭제가 거부된다(안전장치)."""
+    query = client().table("work_types").delete().eq("code", code)
+    _execute(query, "삭제", "work_types")
 
 
 def hard_delete_test_user(emp_no: str) -> None:

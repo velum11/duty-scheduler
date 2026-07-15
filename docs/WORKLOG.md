@@ -21,7 +21,38 @@
 
 ## 로그
 
-## 2026-07-15 16:20 · [터미널] · 근무표 편성 — 조 스냅샷 저장·표시 수정 + UI 정리 (XPS)
+## 2026-07-15 18:05 · [터미널] · [무인작업 완료] Phase 5 브라우저 read-only 검증 + Phase 6 최종 감사
+- Phase 5(브라우저 read-only, ADMIN 로그인, 저장/삭제 클릭 없음): 조 관리·근무형태 관리 신형 통일 그리드 렌더 확인. 근무형태 색상 열은 스와치(코드별 색)+HEX 표시, 셀 더블클릭 시 네이티브 컬러 피커가 현재 HEX(#1e6fd9)를 로드(Escape로 취소, 저장 안 함). [＋행추가]로 신규 −행+기본 색 스와치 생성 확인 후 −로 제거해 원상 복귀(Supabase 쓰기 없음).
+- Phase 6 자체 감사: `git diff --check` 클린(LF/CRLF 경고만). schedule_edit.py·migrations·validators.py·db/ 무변경 확인. diff 추가라인의 유일한 Supabase 쓰기 표현은 delete_team/delete_work_type 함수 본문(기능 코드, 이번 세션 실행 안 함)과 on_click 상태 람다뿐. print는 테스트 스크립트에만. compileall OK.
+- 테스트 전량 재확인: test_schedule_contracts 52 · test_schedule_save_units 15 · test_master_and_views 23 · test_master_forms 14 = 104 전부 통과. test_supabase_crud(라이브 쓰기 유발)는 규칙상 미실행.
+- Supabase read-only 카운트 재검증(세션 전후 동일): users 21 · departments 5 · teams 6 · work_types 6 · work_schedules 2027-07 = 558 · 2026-07 = 0 · 총 558. 쓰기 전무 확인.
+- 상태: 커밋/푸시 대기(사용자 지시 전까지 커밋 안 함). 미커밋 8개 수정 + 신규 scripts/test_master_and_views.py.
+
+## 2026-07-15 17:50 · [터미널] · [무인작업 체크포인트] Phase 4·5 코드 완료 — 기준정보 통일 + 테스트
+- Phase 4: `views/master_teams.py`·`views/master_work_types.py` 를 부서 관리와 동일한 `selectable_master_grid`(행 상태 계약, 상단 행추가/삭제/저장, 3상태 전체선택, 반응형 표, 신규 −행/기존 체크박스 분리)로 전면 통일. 조 관리: 부서 표시명↔dept_code 변환·부서내 조코드 중복 차단·소속 사용자 있는 조 미사용 처리/없으면 삭제. 근무형태: 색상 열을 **네이티브 컬러 피커(cellEditor)+스와치 렌더러**로 변경(저장 #RRGGBB 유지), 근무표 사용 중 코드 미사용 처리/없으면 삭제. db/repo에 delete_team·team_reference_counts·delete_work_type·work_type_reference_counts 추가(부서 패턴 미러링). validators.validate_assignment_records 는 이전 커밋에서 require_shift 옵션화됨(무관).
+- Phase 5: 신규 `scripts/test_master_and_views.py`(23건: work_type_display·월간 필터/약칭/빈월/월분리·조/근무형태 validate·db 참조/삭제). `scripts/test_master_forms.py` 를 구형 폼 UI 테스트에서 신형 AG Grid 스모크(4화면 렌더 무예외)+신 시그니처 검증+라우팅(6페이지)으로 갱신(14건). 회귀: test_schedule_contracts 52, test_schedule_save_units 15 통과. 총 52+15+23+14 전부 통과. compile OK.
+- 주의: test_master_forms 구버전은 4f9fe3b(부서 재설계, 승인됨)부터 이미 obsolete(제거된 폼 위젯 테스트)였고 이번 조 관리 재설계로 team 시그니처도 바뀜 → 신형에 맞게 재작성(실패 은폐 아님, UI 변경 반영).
+- 미검증(진행 중): (a) 새 조/근무형태 화면 브라우저 read-only 렌더, (b) 월간 필터/개인 데이터 표시 — 단위/AppTest 로 결정적 검증했고 브라우저는 Supabase 쓰기 없는 read-only 렌더만 확인 예정. 실제 저장/삭제는 sample 모드/AppTest 로만(Supabase 쓰기 금지 준수).
+- 다음: Phase 5 브라우저 read-only 렌더 → Phase 6 최종 감사(diff/write호출/스키마/schedule_edit 무변경/테이블 행수 재확인).
+
+## 2026-07-15 17:34 · [터미널] · [무인작업 체크포인트] Phase 2·3 완료 — 월간/개인 약칭·색상 표시
+- Phase 2(월간 근무표, views/workspace.py): `work_type_display()` 신설(코드→약칭 display_of, 약칭·코드 양쪽→색상 color_of, 약칭 비거나 모호하면 코드 표시). `_build_month_grid`가 셀을 약칭으로 표시, `_cell_style`는 color_of 기준, 집계표 열 머리글도 약칭, 범례를 `_label_legend_html`로 약칭 표시. 필터·연월 로직은 미변경.
+- Phase 3(개인 근무표, views/my_schedule.py): `_calendar_html`이 셀을 약칭+색상으로 표시(work_type_display 재사용). 광범위 try/except 를 유지하되 repository 오류 메시지에 원인 노출(빈 월과 구분 명확화).
+- 브라우저 검증: 월간 2027-07 재조회 → 셀이 주/야/OFF/연차(색상 포함)로 표시 확인(스크린샷). 개인: USER(2008082501) 로그인·전용 App Shell·달력 렌더 정상(2026-07 빈 달력, 오류 없음). **미완 검증**: (a) 월간 부서·조 필터, (b) 개인 2027-07 데이터 표시 — Streamlit 셀렉트박스/wheel picker 가 브라우저 자동화 커밋을 거부(제품 결함 아님). → Phase 5 에서 sample 모드 단위/AppTest 로 결정적 검증 예정.
+- compile OK. schedule_edit.py 미변경. Supabase 쓰기 없음(read-only 조회만).
+- 다음: Phase 4(master_teams·master_work_types 를 selectable_master_grid 로 통일, work_types 색상표) → Phase 5 테스트 → Phase 6 감사.
+
+## 2026-07-15 17:11 · [터미널] · [무인작업 체크포인트] Phase 1 감사 완료 — 월간/개인 조회 원인 특정
+- 기준: 커밋 5ecda99, 작업 트리 clean, sample 테스트 통과, compile OK. Supabase read-only 프로브 결과: work_schedules 558행(전부 2027-07)/users 21/dept 5/teams 6/work_types 6, schedule_assignments 없음.
+- 연결도(read-only 코드 추적): 로그인 사번→auth.get_current_user→app.py dispatch→(schedule_view→workspace.schedule_screen / my_schedule.render)→db.get_month_schedules(emp_nos,y,m)→supabase_repository._user_maps(emp_no→user_id)+work_schedules 범위조회(work_date gte/lt)→SCHEDULE_COLUMNS(emp_no/duty_date/work_type_code/note)→표/달력. work_types는 code/short_label/color 보유.
+- **핵심 진단: 저장·조회·연결은 정상. "안 보임"은 UI 계층 이슈**. repository 프로브에서 2027-07 전체 558행/18명, 개인(2008082501) 31행 정상 반환.
+  1) 두 화면 모두 날짜 셀에 내부 코드(DAY/NIGHT..)를 그대로 표시 — 요구사항의 약칭(주/야/OFF..) 표시 위반. (월간 workspace._build_month_grid, 개인 my_schedule._calendar_html)
+  2) 기본 연·월이 today(2026-07)라 첫 진입 시 빈 월 → 사용자가 "조회 안 됨"으로 오인 가능(정상 빈 월). 데이터는 2027-07 선택 시 표시.
+  3) 월간 schedule_screen 은 상단에서 db.get_schedules()(전체 조회)를 매 렌더 호출 — 일시 소켓 오류 시 화면 전체가 예외로 죽을 수 있음(try/except 없음).
+  4) 개인 my_schedule.render 는 전체를 광범위 try/except 로 감싸 모든 예외를 "불러오지 못했습니다"로 뭉갬 — repository 오류와 정상 빈 월 구분 불가(요구 Phase3 #12 위반).
+- 기준정보 현황: master_departments=신형 그리드(selectable_master_grid). master_users=editable_aggrid(안정). master_teams=editable_aggrid+요약카드+신규 폼 버튼(구형). master_work_types=st.data_editor+요약카드+색상 텍스트+범례(구형). → Phase4 대상은 teams·work_types 를 부서 관리와 동일한 selectable_master_grid 로 통일 + work_types 색상 컬럼을 색상표로.
+- schedule_edit.py 는 이번 무인작업에서 read-only 참조만(수정 금지 준수).
+- 다음: Phase 2(월간 조회 약칭·색상·견고성) → Phase 3(개인 조회 약칭·오류 구분) → Phase 4(teams/work_types 통일) → Phase 5 테스트 → Phase 6 감사.
 - 요청: ① 저장한 조가 유실되고 전원 A조로 조회되는 오류 수정 ② 통계 카드·하단 범례 제거, 날짜 셀 근무 색상, 표 중심 레이아웃 정리.
 - 원인: 조 유실은 코드 fallback 이 아니라 저장처 부재 — 조 스냅샷의 설계 저장처(schedule_assignments, migration 002)가 Supabase 에 미적용이고, 재조회 표시가 users 마스터 조(전원 A조)로 대체되고 있었음.
 - 변경: `validators.validate_assignment_records(require_shift=)` 옵션화(기본 True 계약 유지), `db/supabase_repository.upsert_month_assignments(require_shift=)` 전달(False 면 shift_groups 조회 생략·NULL 저장). `views/schedule_edit.py` — 저장 시 행별 부서·조 스냅샷을 upsert_month_assignments(require_shift=False)로 저장 시도(002 이전엔 실패 허용) + 세션 스냅샷 캐시(se_assign_cache), 재조회 표시 우선순위 영속 편성→세션 스냅샷→users 마스터. UI: 통계 카드/범례 제거, 메타 한 줄(대상 월·표시·신규·선택·입력·삭제 예정), 날짜 셀 색상은 work_types.color 를 코드·약칭에 매핑한 cellStyle(연한 배경+진한 글자, DESIGN.md §15 계열). 단위 테스트 15건(조 스냅샷 왕복·A조 fallback 부재·조 변경 유지·users 무변경·기본 계약 유지 포함).

@@ -804,12 +804,68 @@ def deactivate_team(dept_code: str, team_code: str) -> None:
     supabase_repository.deactivate_team(str(dept_code).strip(), str(team_code).strip())
 
 
+def delete_team(dept_code: str, team_code: str) -> None:
+    """조를 물리 삭제한다(참조 없는 조 전용 — 참조 확인은 호출부가 담당)."""
+    dc, tc = str(dept_code).strip(), str(team_code).strip()
+    if is_sample_mode():
+        if _TEAMS_STORE in st.session_state:
+            store = st.session_state[_TEAMS_STORE]
+            keep = ~(
+                (store["dept_code"].astype(str) == dc)
+                & (store["team_code"].astype(str) == tc)
+            )
+            st.session_state[_TEAMS_STORE] = store[keep].reset_index(drop=True)
+        return
+    supabase_repository.delete_team(dc, tc)
+
+
+def team_reference_counts(dept_code: str, team_code: str) -> dict:
+    """조를 참조하는 사용자 수를 반환한다(활성·비활성 모두 포함)."""
+    dc, tc = str(dept_code).strip(), str(team_code).strip()
+    try:
+        users = get_users()
+    except Exception:
+        return {"users": 0}
+    if users.empty:
+        return {"users": 0}
+    mask = (
+        (users["dept_code"].astype(str).str.strip() == dc)
+        & (users["team_code"].astype(str).str.strip() == tc)
+    )
+    return {"users": int(mask.sum())}
+
+
 def deactivate_user(emp_no: str) -> None:
     supabase_repository.deactivate_user(str(emp_no).strip())
 
 
 def deactivate_work_type(code: str) -> None:
     supabase_repository.deactivate_work_type(str(code).strip())
+
+
+def delete_work_type(code: str) -> None:
+    """근무형태를 물리 삭제한다(근무표 참조 없는 코드 전용 — 확인은 호출부가 담당)."""
+    c = str(code).strip()
+    if is_sample_mode():
+        if _WORK_TYPES_STORE in st.session_state:
+            store = st.session_state[_WORK_TYPES_STORE]
+            st.session_state[_WORK_TYPES_STORE] = (
+                store[store["code"].astype(str) != c].reset_index(drop=True)
+            )
+        return
+    supabase_repository.delete_work_type(c)
+
+
+def work_type_reference_counts(code: str) -> dict:
+    """근무형태 코드를 참조하는 근무표(work_schedules) 건수를 반환한다."""
+    c = str(code).strip()
+    try:
+        scheds = get_schedules()
+    except Exception:
+        return {"schedules": 0}
+    if scheds.empty or "work_type_code" not in scheds:
+        return {"schedules": 0}
+    return {"schedules": int((scheds["work_type_code"].astype(str).str.strip() == c).sum())}
 
 
 def cleanup_test_records(dept_code: str, team_code: str, emp_no: str, work_type_codes) -> None:
