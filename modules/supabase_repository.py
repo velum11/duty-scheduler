@@ -49,10 +49,20 @@ def reset_client() -> None:
     client.cache_clear()
 
 
+# Windows 비동기 소켓의 일시 오류 표식 (예: WinError 10035 — 즉시 완료 실패).
+# 이런 오류는 영구 장애가 아니므로 1회에 한해 재시도한다 (무한 재시도 금지).
+_TRANSIENT_MARKERS = ("10035", "10054", "ConnectionResetError", "ReadError", "ConnectError")
+
+
 def _execute(query, action: str, table: str):
     try:
         return query.execute()
     except Exception as exc:
+        if any(marker in repr(exc) for marker in _TRANSIENT_MARKERS):
+            try:
+                return query.execute()  # 일시적 소켓 오류 1회 재시도
+            except Exception as retry_exc:
+                raise _sanitized_error(action, table, retry_exc) from retry_exc
         raise _sanitized_error(action, table, exc) from exc
 
 

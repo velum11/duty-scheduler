@@ -418,6 +418,12 @@ def app_shell(user: dict) -> str:
 
     st.session_state.setdefault("sb_hidden", False)
 
+    # 이동 가드 안전장치: 가드 소유 화면이 아닌 곳에 남은 가드는 정리한다.
+    guard = st.session_state.get("nav_guard")
+    if guard and guard.get("owner") != page:
+        st.session_state.pop("nav_guard", None)
+        st.session_state.pop("nav_pending", None)
+
     st.markdown(_SHELL_CSS, unsafe_allow_html=True)
 
     if not st.session_state.sb_hidden:
@@ -447,6 +453,36 @@ def _sidebar_brand() -> None:
                 st.rerun()
 
 
+# ---------- 이동 가드 (미저장 변경 보호 — 기능 전용, 시각 요소 없음) ----------
+# 화면이 st.session_state["nav_guard"] = {"owner": <page_id>} 를 설정해 두면,
+# 사이드바 메뉴 이동·로그아웃은 즉시 수행되지 않고 nav_pending 으로 보류된다.
+# 확인 대화(계속 편집 / 저장하지 않고 이동)는 가드 소유 화면이 렌더링하며,
+# 이동 확정 시 apply_nav(pending) 을 호출한다.
+def apply_nav(action: dict) -> None:
+    """보류된 이동을 실제로 수행한다 (가드 소유 화면의 확인 후에도 사용)."""
+    kind = action.get("type")
+    if kind == "logout":
+        auth.logout()
+    elif kind == "page":
+        st.session_state.nav_page = action.get("target")
+
+
+def request_nav(action: dict) -> None:
+    """이동 요청 공통 처리 — 가드가 있으면 보류, 없으면 즉시 수행 후 rerun.
+
+    가드 보류 시에는 st.rerun 을 던지지 않고 현재 rerun 을 계속 진행한다.
+    (여기서 중단하면 본문 위젯이 렌더되지 않아 세션 위젯 상태가 사라지고,
+    조회 조건이 기본값으로 리셋되며 pending 이 덮어써질 수 있다.)
+    """
+    if action.get("type") == "page" and action.get("target") == st.session_state.get("nav_page"):
+        return  # 현재 화면 재클릭은 이동이 아니므로 가드를 묻지 않는다
+    if st.session_state.get("nav_guard"):
+        st.session_state["nav_pending"] = action
+        return  # 본문(가드 소유 화면)이 이 rerun 에서 확인 대화를 렌더링한다
+    apply_nav(action)
+    st.rerun()
+
+
 def _sidebar_nav(groups: list, page: str) -> None:
     """메뉴 렌더링 — 하위 1개 그룹은 단독 항목, 나머지는 그룹 라벨 + 도트 하위 항목."""
     with st.container(key="sb_nav"):
@@ -460,8 +496,7 @@ def _sidebar_nav(groups: list, page: str) -> None:
                     type="primary" if child["id"] == page else "secondary",
                     width="stretch",
                 ):
-                    st.session_state.nav_page = child["id"]
-                    st.rerun()
+                    request_nav({"type": "page", "target": child["id"]})
                 continue
 
             st.markdown(
@@ -475,8 +510,7 @@ def _sidebar_nav(groups: list, page: str) -> None:
                     type="primary" if child["id"] == page else "secondary",
                     width="stretch",
                 ):
-                    st.session_state.nav_page = child["id"]
-                    st.rerun()
+                    request_nav({"type": "page", "target": child["id"]})
 
 
 def _sidebar_user_card(user: dict) -> None:
@@ -494,8 +528,7 @@ def _sidebar_user_card(user: dict) -> None:
         with btn:
             if st.button("", icon=":material/logout:", key="btn_logout",
                          type="tertiary", help="로그아웃"):
-                auth.logout()
-                st.rerun()
+                request_nav({"type": "logout"})
 
 
 def _breadcrumb_header(user: dict, page: str) -> None:

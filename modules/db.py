@@ -440,6 +440,29 @@ def save_schedules(df: pd.DataFrame) -> None:
     supabase_repository.upsert_schedules(normalized.to_dict("records"))
 
 
+def upsert_month_schedules(records) -> None:
+    """근무표 레코드를 (직원, 일자) 키로 upsert 만 한다 — 삭제 없음.
+
+    빈 셀 때문에 기존 근무를 자동 삭제하지 않는다는 원칙(CLAUDE.md §5)에 맞춰
+    근무표 편성 화면의 [저장]은 이 경로를 사용한다. 기존 근무의 삭제는
+    replace_month_schedules(명시적 범위 교체)로만 수행한다.
+    """
+    normalized = pd.DataFrame(list(records), columns=SCHEDULE_COLUMNS)
+    if normalized.empty:
+        return
+    if is_sample_mode():
+        store = get_schedules()
+        by_key = {
+            (str(r["emp_no"]).strip(), str(r["duty_date"])): r
+            for r in store.to_dict("records")
+        }
+        for r in normalized.to_dict("records"):
+            by_key[(str(r["emp_no"]).strip(), str(r["duty_date"]))] = r
+        save_schedules(pd.DataFrame(list(by_key.values()), columns=SCHEDULE_COLUMNS))
+        return
+    supabase_repository.upsert_schedules(normalized.to_dict("records"))
+
+
 def replace_month_schedules(emp_nos, year: int, month: int, records) -> None:
     """선택 직원·월 범위만 전달받은 근무표로 교체한다."""
     normalized_emp_nos = [str(emp_no).strip() for emp_no in emp_nos if str(emp_no).strip()]

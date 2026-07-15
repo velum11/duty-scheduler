@@ -283,6 +283,66 @@ _ROW_ACTION_RENDERER = JsCode(
     """
 )
 
+# 선택 열 헤더의 전체 선택 체크박스 (3상태: 해제/indeterminate/체크).
+# 대상은 "현재 필터 결과에 표시되는 기존(existing) 행"뿐이다 — 신규 행(− 버튼),
+# 제거 표시된 행은 제외한다. Community 기능(forEachNodeAfterFilter)만 사용한다.
+_SELECT_ALL_HEADER = JsCode(
+    """
+    (class {
+      init(params) {
+        this.params = params;
+        const eGui = document.createElement('div');
+        eGui.className = 'md-act';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'md-act-cb';
+        cb.title = '표시된 기존 행 전체 선택';
+        eGui.appendChild(cb);
+        this.eGui = eGui;
+        this.cb = cb;
+        this.refreshState = this.refreshState.bind(this);
+        cb.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const target = cb.checked;  // 클릭 후 상태 기준으로 전체 적용
+          params.api.forEachNodeAfterFilter((node) => {
+            const d = node.data || {};
+            if (d._row_state === 'existing' && String(d._removed || '') !== '1') {
+              node.setDataValue('_sel', target);
+            }
+          });
+          // _sel 은 숨김 컬럼이라 setDataValue 만으로는 _action 셀이 다시 그려지지
+          // 않는다 — 행 체크박스 표시를 동기화하기 위해 강제 리렌더한다.
+          params.api.refreshCells({ columns: ['_action'], force: true });
+          this.refreshState();
+        });
+        params.api.addEventListener('cellValueChanged', this.refreshState);
+        params.api.addEventListener('modelUpdated', this.refreshState);
+        params.api.addEventListener('filterChanged', this.refreshState);
+        setTimeout(this.refreshState, 0);
+      }
+      refreshState() {
+        let total = 0, sel = 0;
+        this.params.api.forEachNodeAfterFilter((node) => {
+          const d = node.data || {};
+          if (d._row_state === 'existing' && String(d._removed || '') !== '1') {
+            total += 1;
+            if (d._sel === true || d._sel === 'true' || d._sel === 1) { sel += 1; }
+          }
+        });
+        this.cb.disabled = total === 0;
+        this.cb.checked = total > 0 && sel === total;
+        this.cb.indeterminate = sel > 0 && sel < total;
+      }
+      getGui() { return this.eGui; }
+      destroy() {
+        this.params.api.removeEventListener('cellValueChanged', this.refreshState);
+        this.params.api.removeEventListener('modelUpdated', this.refreshState);
+        this.params.api.removeEventListener('filterChanged', this.refreshState);
+      }
+    })
+    """
+)
+
 # 첫 열 클릭 처리 — 기존 행 체크박스는 _sel, 신규 행 − 버튼은 _removed 를 명시 기록한다.
 _ROW_ACTION_CLICK = JsCode(
     """
@@ -338,6 +398,8 @@ def selectable_master_grid(
     columns: dict,
     height: int,
     order: list[str] | None = None,
+    col_config: dict | None = None,
+    select_all_header: bool = False,
 ) -> pd.DataFrame:
     """행 상태 계약(_row_id/_row_state/_sel/_removed)을 갖춘 기준정보 편집 그리드.
 
@@ -348,6 +410,10 @@ def selectable_master_grid(
       권위 반영은 호출부가 담당한다.
 
     columns: {표시명: "text"|"bool"} (표시 순서는 order 로 지정).
+    col_config: {표시명: AG Grid 컬럼 속성 dict} — 폭·고정(pinned)·editable(JsCode 허용)
+      등 화면별 설정을 기본값 위에 덮어쓴다 (미지정 화면은 기존 동작 유지).
+    select_all_header: True 면 선택 열 헤더에 3상태 전체 선택 체크박스를 표시한다
+      (표시 중인 기존 행만 대상 — 기본 False 로 기존 화면 무변경).
     """
     frame = frame.copy().reset_index(drop=True)
     for meta, default in (("_row_id", ""), ("_row_state", "new"), ("_sel", False), ("_removed", "")):
@@ -366,7 +432,7 @@ def selectable_master_grid(
 
     order = order or list(columns)
     align_center = {"width": None}
-    column_defs = [{
+    action_col = {
         "field": "_action",
         "headerName": "선택",
         "pinned": "left",
@@ -375,7 +441,10 @@ def selectable_master_grid(
         "suppressMovable": True,
         "cellRenderer": _ROW_ACTION_RENDERER,
         "headerClass": "md-h-center", "cellClass": "md-c-center",
-    }]
+    }
+    if select_all_header:
+        action_col["headerComponent"] = _SELECT_ALL_HEADER
+    column_defs = [action_col]
     # 폭/정렬 기본값 — 문자 열은 flex 로 남는 폭 배분, 숫자/불리언은 좁은 고정
     widths = {
         "부서코드": {"flex": 1, "minWidth": 120, "cellClass": "md-c-left"},
@@ -383,17 +452,21 @@ def selectable_master_grid(
         "표시순서": {"width": 108, "minWidth": 92, "maxWidth": 140, "cellClass": "md-c-center"},
         "사용": {"width": 82, "minWidth": 72, "maxWidth": 108, "cellClass": "md-c-center"},
     }
+    overrides = col_config or {}
     for name in order:
         kind = columns[name]
+        base = widths.get(name, {})
+        override = overrides.get(name, {})
         col = {
             "field": name, "headerName": name, "editable": True,
             "sortable": False, "filter": False, "resizable": True,
             "headerClass": "md-h-center",
-            "cellClass": widths.get(name, {}).get("cellClass", "md-c-left"),
+            "cellClass": override.get("cellClass", base.get("cellClass", "md-c-left")),
         }
-        for k, v in widths.get(name, {}).items():
-            if k != "cellClass":
-                col[k] = v
+        for source in (base, override):
+            for k, v in source.items():
+                if k != "cellClass":
+                    col[k] = v
         if kind == "bool":
             col["cellEditor"] = "agCheckboxCellEditor"
         column_defs.append(col)
