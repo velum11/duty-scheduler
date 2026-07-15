@@ -555,17 +555,20 @@ def get_month_assignments(year: int, month: int, emp_nos=None) -> pd.DataFrame:
     return _empty_contract(df.reset_index(drop=True), SCHEDULE_ASSIGNMENT_COLUMNS)
 
 
-def upsert_month_assignments(records) -> None:
+def upsert_month_assignments(records, require_shift: bool = True) -> None:
     """직원·월 편성을 upsert 한다 (직원별 월 편성 1건).
 
     검증은 modules/validators 순수 함수로 수행한다: 사번·부서 존재, 팀-부서 소속,
     부서의 활성 조, 대상 월 정규화, 같은 직원·월 중복. 검증 실패 시 ValueError
     (supabase 모드는 SupabaseDataError) 를 던지고 아무것도 저장하지 않는다.
     편성 저장은 users 를 변경하지 않는다.
+
+    require_shift=False 면 근무조 코드 없이 부서·팀 스냅샷만 저장한다
+    (근무표 편성 화면 — 근무조 입력이 아직 없는 경로).
     """
     records = list(records)
     if not is_sample_mode():
-        supabase_repository.upsert_month_assignments(records)
+        supabase_repository.upsert_month_assignments(records, require_shift=require_shift)
         return
     users = get_users()
     depts = get_departments()
@@ -583,6 +586,7 @@ def upsert_month_assignments(records) -> None:
             )
             if bool(a)
         },
+        require_shift=require_shift,
     )
     if errors:
         raise ValueError("월 편성 검증 실패:\n- " + "\n- ".join(errors))

@@ -526,21 +526,26 @@ def get_month_assignments(year: int, month: int, emp_nos: Iterable[str] | None =
     )
 
 
-def upsert_month_assignments(records: list[dict]) -> None:
+def upsert_month_assignments(records: list[dict], require_shift: bool = True) -> None:
     """직원·월 편성 upsert. 자연키 입력을 검증 후 id 관계값으로 변환해 저장한다.
 
     검증(팀-부서 소속, 부서의 활성 조, 월 정규화, 직원·월 중복)은
-    modules/validators 순수 함수를 사용한다.
+    modules/validators 순수 함수를 사용한다. require_shift=False 면 근무조 코드
+    없이 부서·팀 스냅샷만 저장하며, 이때는 shift_groups 조회도 생략한다
+    (근무표 편성 화면 — migration 002 이전에는 테이블 자체가 없을 수 있다).
     """
     dept_by_code, _ = _department_maps()
     team_by_key, _ = _team_maps()
     user_by_emp, _ = _user_maps()
-    shift_groups = get_shift_groups()
-    shift_keys = {
-        (str(row["dept_code"]), str(row["shift_code"]))
-        for _, row in shift_groups.iterrows()
-        if bool(row["is_active"])
-    }
+    if require_shift:
+        shift_groups = get_shift_groups()
+        shift_keys = {
+            (str(row["dept_code"]), str(row["shift_code"]))
+            for _, row in shift_groups.iterrows()
+            if bool(row["is_active"])
+        }
+    else:
+        shift_keys = set()
 
     normalized, errors = validators.validate_assignment_records(
         records,
@@ -548,6 +553,7 @@ def upsert_month_assignments(records: list[dict]) -> None:
         dept_codes=set(dept_by_code),
         team_keys=set(team_by_key),
         shift_keys=shift_keys,
+        require_shift=require_shift,
     )
     if errors:
         raise SupabaseDataError("월 편성 검증 실패:\n- " + "\n- ".join(errors))
@@ -560,7 +566,7 @@ def upsert_month_assignments(records: list[dict]) -> None:
             "schedule_month": row["schedule_month"],
             "department_id": dept_by_code[row["dept_code"]],
             "team_id": team_id,
-            "shift_group_code": row["shift_group_code"],
+            "shift_group_code": row["shift_group_code"] or None,
         })
     if payload:
         _upsert("schedule_assignments", payload, "user_id,schedule_month")

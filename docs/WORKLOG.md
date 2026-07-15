@@ -21,6 +21,13 @@
 
 ## 로그
 
+## 2026-07-15 16:20 · [터미널] · 근무표 편성 — 조 스냅샷 저장·표시 수정 + UI 정리 (XPS)
+- 요청: ① 저장한 조가 유실되고 전원 A조로 조회되는 오류 수정 ② 통계 카드·하단 범례 제거, 날짜 셀 근무 색상, 표 중심 레이아웃 정리.
+- 원인: 조 유실은 코드 fallback 이 아니라 저장처 부재 — 조 스냅샷의 설계 저장처(schedule_assignments, migration 002)가 Supabase 에 미적용이고, 재조회 표시가 users 마스터 조(전원 A조)로 대체되고 있었음.
+- 변경: `validators.validate_assignment_records(require_shift=)` 옵션화(기본 True 계약 유지), `db/supabase_repository.upsert_month_assignments(require_shift=)` 전달(False 면 shift_groups 조회 생략·NULL 저장). `views/schedule_edit.py` — 저장 시 행별 부서·조 스냅샷을 upsert_month_assignments(require_shift=False)로 저장 시도(002 이전엔 실패 허용) + 세션 스냅샷 캐시(se_assign_cache), 재조회 표시 우선순위 영속 편성→세션 스냅샷→users 마스터. UI: 통계 카드/범례 제거, 메타 한 줄(대상 월·표시·신규·선택·입력·삭제 예정), 날짜 셀 색상은 work_types.color 를 코드·약칭에 매핑한 cellStyle(연한 배경+진한 글자, DESIGN.md §15 계열). 단위 테스트 15건(조 스냅샷 왕복·A조 fallback 부재·조 변경 유지·users 무변경·기본 계약 유지 포함).
+- 파일: views/schedule_edit.py, modules/validators.py, modules/db.py, modules/supabase_repository.py, scripts/test_schedule_save_units.py, docs/WORKLOG.md
+- 비고: 커밋 안 함. Supabase 종단(2027-07, 기존 데이터 무접촉): 박시우(2026060101) B조 저장→재조회·월 이동 후 재진입 모두 B조 유지, 셀 색상 일관, 임시 2건 정리 완료. **주의: 프롬프트의 '0행 사고 상태'와 달리 현재 work_schedules 에 558건이 존재하며 전부 2027-07** (2026-07 은 여전히 0). 직전 커밋 시점(총 0행) 이후 이 터미널 밖에서 유입 — 2026-07 복구 시도 중 연도가 2027 로 들어갔을 가능성. 사용자 확인 필요. Supabase 모드의 조 영속 저장은 migration 002 적용 시 자동 활성화(세션 내에서는 유지됨).
+
 ## 2026-07-15 15:15 · [터미널] · 근무표 편성 — 혼합 저장·삭제만 저장·전체 선택 수정
 - 요청: ① 삭제 예정+동일 사번 재등록 시 저장 차단 해제(교체 처리) ② 삭제만 저장 시 users 조회 의존 제거(WinError 10035 표면적 축소) ③ 선택 헤더 3상태 전체 선택 ④ 필터 결과만 전체 선택.
 - 변경: `views/schedule_edit.py` — `classify_save_targets`(delete_only/replace_after_delete)로 최종 사번별 상태 분류, 저장 파이프라인 재구성(검증 전체 통과 후 삭제→교체(replace_month_schedules)→변경분 upsert, 단계 실패 시 단계 보고+초안 유지), 삭제만 저장 경로는 users/근무형태/부서·조 조회 생략, users 매핑 세션 캐시(조회 시점 갱신·rerun 반복 조회 제거), `표시 M·신규 N·선택 K` 카운트 표시, 새로고침 버튼 on_click 플래그 전환(클릭 소실 경합 해결). `views/workspace.py` — `_SELECT_ALL_HEADER`(3상태, forEachNodeAfterFilter로 표시 중 기존 행만, 신규/제거 행 제외, refreshCells로 행 체크 표시 동기화), `selectable_master_grid(select_all_header=)` opt-in(부서 관리 무영향). `scripts/test_schedule_save_units.py` 신규(분류·약칭 계약 10건).

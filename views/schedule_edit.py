@@ -21,6 +21,7 @@ dirty tracking: 원본 스냅샷과 현재 편집 상태를 정규화 비교해 
 사이드바 이동·로그아웃(modules/ui.request_nav 가드)·조회 조건 변경 시 확인을 거친다.
 """
 import calendar
+import json
 from datetime import date
 
 import pandas as pd
@@ -136,10 +137,7 @@ def render(user: dict) -> None:
     day_cols = [c for c, _ in st.session_state["se_days"]]
     row_cols = _META + _FIXED + day_cols
 
-    # 요약 카드 placeholder (그리드 반환값 기준으로 아래에서 채움)
-    sum_ph = st.container()
-
-    # 표 작업 영역: dirty 표시 + [행 추가] [행 삭제]
+    # 표 작업 영역: 메타 정보 한 줄 + [행 추가] [행 삭제] (통계 카드 없음)
     bar_l, bar_add, bar_del = st.columns([7, 1.5, 1.5], vertical_alignment="center")
     with bar_add:
         st.button(
@@ -160,8 +158,20 @@ def render(user: dict) -> None:
         "부서": {"pinned": "left", "width": 116, "minWidth": 96, "cellClass": "md-c-left"},
         "조": {"pinned": "left", "width": 88, "minWidth": 72, "cellClass": "md-c-left"},
     }
+    # 날짜 셀 색상 — work_types 기준정보의 색상을 약칭(표시값)·코드에 매핑한다.
+    # 범례 없이 셀 색만으로 근무를 식별할 수 있게 하되, 연한 배경 + 진한 본문색으로
+    # 가독성을 우선한다 (DESIGN.md §15 조회 화면 규칙과 동일 계열).
+    day_style = JsCode(
+        "function(p) {"
+        f"  const colors = {json.dumps(st.session_state.get('se_colors', {}), ensure_ascii=False)};"
+        "  const v = String(p.value == null ? '' : p.value).trim();"
+        "  const c = colors[v];"
+        "  if (!c) { return { textAlign: 'center' }; }"
+        "  return { backgroundColor: c + '26', color: '#1F2328', fontWeight: 600, textAlign: 'center' };"
+        "}"
+    )
     for c in day_cols:
-        col_config[c] = {"width": 58, "minWidth": 50, "cellClass": "md-c-center"}
+        col_config[c] = {"width": 58, "minWidth": 50, "cellClass": "md-c-center", "cellStyle": day_style}
 
     # 그리드에 넘기는 데이터(se_feed)는 remount 시점 값으로 고정한다 — 매 rerun
     # 편집 결과를 되돌려주면 컴포넌트 재전송이 버튼 클릭 rerun 을 삼킬 수 있다.
@@ -185,24 +195,32 @@ def render(user: dict) -> None:
 
     live = _live(grid_df)
 
-    # 표시/선택 건수 — 기존 행만 선택 대상 (신규 행 제외)
+    # 메타 정보 한 줄 — 통계 카드·범례 대신 표 위 요약 텍스트로 정리
     existing_live = live[live["_row_state"] == "existing"] if not live.empty else live
     n_exist = len(existing_live)
     n_new = len(live) - n_exist
     n_sel = int(existing_live["_sel"].map(grid_bool).sum()) if n_exist else 0
+    n_del = len(st.session_state.get("se_deleted", []))
+    filled = 0
+    if not live.empty and day_cols:
+        filled = int(live[day_cols].apply(
+            lambda col: col.map(lambda v: bool(str(v).strip()) if pd.notna(v) else False)
+        ).sum().sum())
+    meta = (
+        f"대상 월 <b style='color:#3D3A34'>{q['year']}-{q['month']:02d}</b>"
+        f" · 표시 <b style='color:#3D3A34'>{n_exist}</b>명"
+        f" · 신규 <b style='color:#3D3A34'>{n_new}</b>명"
+        f" · 선택 <b style='color:#3D3A34'>{n_sel}</b>명"
+        f" · 입력 <b style='color:#3D3A34'>{filled}</b>건"
+    )
+    if n_del:
+        meta += f" · 삭제 예정 <b style='color:#9A3B2E'>{n_del}</b>명"
     with bar_l:
         st.markdown(
-            f"<div style='color:#8A8880; font-size:0.78rem; line-height:2rem;'>"
-            f"표시 <b style='color:#3D3A34'>{n_exist}</b>명 · 신규 <b style='color:#3D3A34'>{n_new}</b>명"
-            f" · 선택 <b style='color:#3D3A34'>{n_sel}</b>명</div>",
+            f"<div style='color:#8A8880; font-size:0.78rem; line-height:2rem;'>{meta}</div>",
             unsafe_allow_html=True,
         )
 
-    with sum_ph:
-        _summary_cards(q, live, day_cols)
-        st.write("")
-
-    st.markdown(ui.legend_html(db.work_types_map()), unsafe_allow_html=True)
     ui.sample_mode_banner()
 
     # dirty 판정: 원본 스냅샷과 현재 편집 상태(정규화)를 비교
@@ -487,6 +505,26 @@ def _resolve_work(value: str, codes: set, label_codes: dict):
     return next(iter(matched)) if len(matched) == 1 else "AMBIG"
 
 
+def _day_color_map(display_of: dict) -> dict:
+    """날짜 셀 색상 맵 — work_types 기준정보의 색상을 표시값과 코드에 매핑한다.
+
+    약칭이 바뀌거나 재조회돼도 같은 코드는 같은 색을 유지한다(색은 코드에 귀속).
+    """
+    wt = db.get_work_types()
+    active = wt[wt["is_active"]] if not wt.empty else wt
+    colors = {}
+    for _, r in active.iterrows():
+        code = str(r["code"]).strip()
+        color = str(r["color"] or "").strip()
+        if not code or not color.startswith("#"):
+            continue
+        colors[code] = color                      # 코드 그대로 표시되는 fallback 셀
+        display = display_of.get(code)
+        if display:
+            colors[display] = color               # 약칭 표시 셀
+    return colors
+
+
 def _load_grid(q: dict) -> None:
     """선택 범위(부서·조 재직 직원)의 해당 월 '저장된' 근무표 행만 적재한다.
 
@@ -513,23 +551,29 @@ def _load_grid(q: dict) -> None:
         columns=db.SCHEDULE_COLUMNS
     )
     display_of, _, _ = _label_maps()
+    st.session_state["se_colors"] = _day_color_map(display_of)
     lookup = {
         (str(r["emp_no"]).strip(), str(r["duty_date"])): str(r["work_type_code"]).strip()
         for _, r in scheds.iterrows()
     }
     with_rows = {emp for emp, _iso in lookup}
+    # 부서·조는 편성 스냅샷을 우선 표시한다 (없으면 users 의 현재 소속).
+    snaps = _assignment_snapshots(q, sorted(with_rows))
 
     rows = []
     for _, u in scope.iterrows():
         emp = str(u["emp_no"]).strip()
         if emp not in with_rows:
             continue  # 저장된 행이 있는 직원만 표시 (전체 자동 나열 금지)
+        dept_code, team_code = snaps.get(
+            emp, (str(u["dept_code"]).strip(), str(u["team_code"]).strip())
+        )
         row = {
             "_row_id": f"e:{emp}", "_row_state": "existing", "_sel": False,
             "사번": emp,
             "성명": str(u["name"]),
-            "부서": db.dept_name(u["dept_code"]),
-            "조": db.team_name(u["dept_code"], u["team_code"]),
+            "부서": db.dept_name(dept_code),
+            "조": db.team_name(dept_code, team_code),
         }
         for col, iso in days:
             code = lookup.get((emp, iso), "")
@@ -568,19 +612,29 @@ def _canon(rows: pd.DataFrame, deleted: list, day_cols: list):
     return (tuple(out), dele)
 
 
-def _summary_cards(q: dict, live: pd.DataFrame, day_cols: list) -> None:
-    filled = 0
-    if not live.empty and day_cols:
-        filled = int(live[day_cols].apply(
-            lambda col: col.map(lambda v: bool(str(v).strip()) if pd.notna(v) else False)
-        ).sum().sum())
-    n_del = len(st.session_state.get("se_deleted", []))
-    ui.summary_cards([
-        ("입력 인원", f"{len(live)}명"),
-        ("대상 월", f"{q['year']}-{q['month']:02d}"),
-        ("입력 일수", f"{filled}건"),
-        ("삭제 예정", f"{n_del}명"),
-    ])
+def _assignment_snapshots(q: dict, emp_nos: list) -> dict:
+    """대상 월의 부서·조 편성 스냅샷 맵 {emp_no: (dept_code, team_code)}.
+
+    우선순위: 영속 저장(schedule_assignments — migration 002 적용 시)
+    → 세션 스냅샷(이번 세션에서 저장 성공한 편성값) 순으로 합친다.
+    영속 테이블이 없으면(002 이전) 조회 실패를 무시하고 세션 값만 쓴다.
+    """
+    snaps = {}
+    month_key = f"{q['year']:04d}-{q['month']:02d}"
+    cache = st.session_state.get("se_assign_cache", {})
+    for (mk, emp), value in cache.items():
+        if mk == month_key:
+            snaps[emp] = (value["dept_code"], value["team_code"])
+    if emp_nos:
+        try:
+            assigns = db.get_month_assignments(q["year"], q["month"], emp_nos)
+            for _, r in assigns.iterrows():
+                snaps[str(r["emp_no"]).strip()] = (
+                    str(r["dept_code"]).strip(), str(r["team_code"]).strip(),
+                )
+        except Exception:
+            pass  # 002 이전에는 테이블이 없다 — 세션 스냅샷/마스터 기본값 사용
+    return snaps
 
 
 # ---------- 저장 ----------
@@ -622,6 +676,7 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
 
     # 2) 신규·수정 입력 검증 (삭제만 저장하는 경로에서는 참조 조회를 건너뛴다)
     records_plain, records_replace, errors = [], {}, []
+    assign_rows = []  # 행별 부서·조 편성 스냅샷 (검증 통과 시 저장)
     assign_edited = False
     if content_rows:
         display_of, codes, label_codes = _label_maps()
@@ -683,6 +738,14 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
                 or team_code != str(master["team_code"]).strip()
             ):
                 assign_edited = True
+            if dept_code is not None:
+                assign_rows.append({
+                    "emp_no": emp,
+                    "schedule_month": (q["year"], q["month"]),
+                    "dept_code": dept_code,
+                    "team_code": team_code,
+                    "shift_group_code": "",  # 근무조 입력은 아직 없음 (002 계약상 NULL 허용)
+                })
 
             rid = str(row.get("_row_id", ""))
             is_replace = emp in replace_set
@@ -746,6 +809,25 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
         )
         return
 
+    # 부서·조 편성 스냅샷 저장 — 근무 저장과 분리해 처리한다.
+    # 002 이전에는 저장 테이블이 없어 실패할 수 있으며, 이 경우 근무 저장은 유효하므로
+    # 실패로 처리하지 않고 세션 스냅샷으로 화면 표시만 유지한다 (users 는 변경하지 않음).
+    assign_persisted = False
+    if assign_rows:
+        try:
+            db.upsert_month_assignments(assign_rows, require_shift=False)
+            assign_persisted = True
+        except Exception:
+            assign_persisted = False
+        month_key = f"{q['year']:04d}-{q['month']:02d}"
+        cache = st.session_state.setdefault("se_assign_cache", {})
+        for rec in assign_rows:
+            cache[(month_key, rec["emp_no"])] = {
+                "dept_code": rec["dept_code"], "team_code": rec["team_code"],
+            }
+        for emp in delete_only:  # 월 근무를 삭제한 직원의 세션 스냅샷은 정리
+            cache.pop((month_key, emp), None)
+
     n_saved = len(records_plain) + sum(len(v) for v in records_replace.values())
     _load_grid(q)  # 6~8) 재조회 → 신규 행 existing 전환, dirty/삭제 예정/선택 초기화
 
@@ -754,11 +836,16 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
         parts.append(f"{len(delete_only)}명 월 근무 삭제")
     if replace_after_delete:
         parts.append(f"{len(replace_after_delete)}명 월 근무 교체")
+    if assign_rows and assign_persisted:
+        parts.append(f"편성 {len(assign_rows)}명 저장")
     notes = []
     if cleared:
         notes.append(f"빈 칸으로 지운 {cleared}개 셀은 삭제되지 않고 기존 근무가 유지됩니다.")
-    if assign_edited:
-        notes.append("부서·조 편성값은 migration 002 적용 후 저장됩니다 (이번 저장에는 근무만 반영).")
+    if assign_rows and not assign_persisted and assign_edited:
+        notes.append(
+            "부서·조 편성값은 migration 002 적용 후 DB에 저장됩니다 "
+            "(이번 세션 화면에는 그대로 유지)."
+        )
     msg = "근무표를 저장했습니다. (" + " · ".join(parts) + ")"
     if notes:
         msg += "\n\n" + "\n".join(f"- {n}" for n in notes)

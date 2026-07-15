@@ -49,6 +49,7 @@ def validate_assignment_records(
     dept_codes: set,
     team_keys: set,
     shift_keys: set,
+    require_shift: bool = True,
 ):
     """월 편성 레코드 목록을 검증·정규화한다. (normalized, errors) 반환.
 
@@ -57,9 +58,11 @@ def validate_assignment_records(
     - dept_codes: 유효한 부서코드 집합
     - team_keys: (dept_code, team_code) 유효 조합 집합
     - shift_keys: (dept_code, shift_code) 활성 조 조합 집합
+    - require_shift: 근무조 코드 필수 여부. 기본 True(002 신규 저장 계약).
+      근무표 편성 화면처럼 근무조 입력이 아직 없는 경로는 False 로
+      부서·팀 스냅샷만 저장할 수 있다 (DB 는 NULL 허용 — docs/database.md §5.1).
 
-    팀은 users 정책과 동일하게 미지정('')을 허용하고, 조 코드는 신규 저장 시
-    필수다 (DB는 backfill 호환을 위해 NULL 허용 — docs/database.md §5.1).
+    팀은 users 정책과 동일하게 미지정('')을 허용한다.
     """
     normalized, errors = [], []
     seen = set()
@@ -85,7 +88,8 @@ def validate_assignment_records(
         elif team_code and (dept_code, team_code) not in team_keys:
             errors.append(f"{tag}: 선택한 부서에 없는 팀입니다: {team_code}")
         if not shift_code:
-            errors.append(f"{tag}: 조 코드를 입력하세요.")
+            if require_shift:
+                errors.append(f"{tag}: 조 코드를 입력하세요.")
         elif dept_code in dept_codes and (dept_code, shift_code) not in shift_keys:
             errors.append(f"{tag}: 선택한 부서의 활성 조가 아닙니다: {shift_code}")
 
