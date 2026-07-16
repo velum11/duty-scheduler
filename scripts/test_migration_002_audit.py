@@ -144,6 +144,9 @@ norm, errs = validators.validate_assignment_records(
 )
 check("require_shift=False: 조/팀 미지정 무오류(NULL 허용 정합)", not errs)
 check("require_shift=False: schedule_month 월 1일로 정규화", norm[0]["schedule_month"] == "2027-07-01")
+check("팀 미지정('')이 그대로 보존됨(users 조 자동 대입/A조 fallback 저장 없음)",
+      norm[0]["team_code"] == "")
+check("근무조 미지정('')도 그대로 보존됨", norm[0]["shift_group_code"] == "")
 
 # require_shift=True(기본 002 계약): 조 코드 필수
 _, errs_req = validators.validate_assignment_records(

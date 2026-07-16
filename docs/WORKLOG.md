@@ -21,6 +21,26 @@
 
 ## 로그
 
+## 2026-07-16 11:05 · [터미널] · [3차 미션 완료] migration 002 적용 확인 + A조→B조 편성 스냅샷 종단 검증
+- 요청: 사용자가 SQL Editor 로 002 수동 실행("Success. No rows returned") 후, 스키마·무변경·편성 영속을 검증하고 테스트 데이터 정리. 재개 기준: 기준선 1147(2026-07=589 승인·ADMIN 31건 보존), live 는 일반 직원 A→B/C 만, NULL-조는 자동 테스트.
+- **적용 확인**: shift_groups·schedule_assignments·work_schedules.schedule_assignment_id 3종 생성. 신규 테이블 0건·연결컬럼 NOT NULL 0건(자동 백필 없음). 컬럼 계약(OpenAPI): user/dept/month NOT NULL, team_id·shift_group_code nullable, schedule_month date. FK 5종(SA→users/departments/teams복합, WS→SA복합, SG→departments) PostgREST 임베딩으로 존재 증명. UNIQUE(user_id,schedule_month)는 앱 upsert(on_conflict) 성공으로 행동 증명. 사용자 주의사항: 클립보드 과정에서 한글 주석/COMMENT 문자열 일부 깨졌을 수 있음 — 기능 무관(코멘트만), DDL 정상.
+- **기존 데이터 무변경**: work_schedules 1147(2026-07=589·2027-07=558)·users 21·departments 5·teams 6·work_types 6 전부 불변, 기존 컬럼 타입 불변.
+- **종단 검증(테스트 월 2027-01, 고중수 2008110301·user_id 31)**: ⚠️ 편차 기록 — 계획상 2028-01 이었으나 편성 화면 연도 선택지가 `today±1`(2025~2027)라 UI 진입 불가 → 빈 월 재확인(0/0) 후 **2027-01 로 조정**(뷰 수정은 미션 금지). ADMIN 로그인 → 사번 입력(성명·부서·조 자동조회: A조) → 조를 **B조**로 수정 → 1일=주·2일=야 입력 → 저장. 메시지 "근무 2건 저장 · **편성 1명 저장**"(성공, 002 이전의 '적용 후 저장' 경고 없음 = assign_persisted). DB: SA 1건(user 31·2027-01-01·dept 17·**team_id 24=B조**·shift NULL), **users.team_id 23=A조 유지**, WS 2건(DAY/NIGHT)만 추가. **새로고침(재로그인 필요=완전 새 세션)·월 이동(2027-02 빈 월 격리 확인)→복귀·서버 프로세스 재시작+재로그인** 모두 B조·주/야 유지 — 세션 캐시 소멸 상태이므로 DB 영속 확정.
+- **NULL-조 자동 테스트**: audit 테스트에 2건 보강(팀 미지정 '' 보존 = users 조 자동 대입/A조 fallback 저장 없음, 근무조 '' 보존) → 39건. 기존: NULL 허용 정합·조 없는 부서 저장 가능·타부서 조 선차단(복합 FK 방어) 커버.
+- **정리**: 삭제 전 대상 출력(SA 1·WS 2) → repo delete_schedule(사번·일자 단건)×2 + SA user_id+월 정밀 삭제 → 기준선 완전 복구(1147/589/558·SA 총 0·기준정보 21/5/6/6·고중수 A조).
+- 테스트: audit 39 · contracts 52 · save_units 15 통과, git diff --check clean. (참고) 테스트 WS 행의 schedule_assignment_id 는 NULL — 현 저장 경로는 연결컬럼을 채우지 않음(002 주석의 과도기 계약, 별도 migration/코드에서 승격 예정).
+- 다음 미션 후보: (a) 월간·개인·CSV 의 assignment-우선 조회 보강(이번 미션 제외 항목 — 이것 없이는 조회 화면 조 표시가 users 기준), (b) 편성 화면 연도 범위 확장 검토, (c) work_schedules.schedule_assignment_id 연결 저장 경로.
+- 파일: scripts/test_migration_002_audit.py(+2 체크), docs/WORKLOG.md. Supabase 는 002 적용(사용자 실행) + 테스트 왕복 후 원상. commit·push 없음.
+
+## 2026-07-16 09:45 · [터미널] · [3차 미션 중단] migration 002 적용 전 기준선 불일치 — 적용 보류 (BLOCKED)
+- 요청: 정리된 002를 테스트 프로젝트에 적용하고 A→B/C 스냅샷 영속을 종단 검증. 단, §3 사전 재확인이 예상과 다르면 적용 금지·중단 보고.
+- **중단 사유(§3 명시 규칙 발동)**: 실DB 재조회 결과 work_schedules 총 **1147**(예상 1116), 2026-07 = **589**(예상 558). 초과 31건은 **2026-07-16(오늘) 생성**, user_id=21(emp_no=ADMIN, 관리자 계정)의 2026-07 한 달치(DAY 10·OFF 10·NIGHT 11) — 미션 사이에 편성 화면에서 수동 저장된 것으로 추정. users 분포도 변동: team_id=23(PET A조) **20명**+미지정 1명(예상 19+2), 활성 ADMIN(user_id=21)이 PET/A조 소속(§0·§7의 "ADMIN=관리자부서·조없음" 전제와 불일치 — 관리자부서 admin user_id=19는 비활성).
+- 적용 전 통과 항목: 작업 트리 clean(e0ab9f8), 002=커밋본 동일, SHA-256 `0229b2110fa140f74673433df69021cd67c83f5144f18c1ea3def2c46e3652ea`, 정적 테스트 37+52+15·compile OK, 002 오브젝트 3종 미존재(부분 적용 흔적 없음), 2027-07=558 불변, 기준정보 21/5/6/6 불변, 2028-01 빈 월 확인(0건).
+- 백업 근거 확보: `docs/backup_pre_migration_002.json` (UTC 2026-07-16T00:37, 프로젝트 ref icvizwmqdffwsifmnwuk, 전 테이블 + work_schedules 1147행 전체, 컬럼 목록, 002 해시 포함). **개인정보(사번·성명) 포함 — 커밋 금지, 로컬 보관용.**
+- 추가 확인: DDL 실행 경로 미확보 — supabase CLI 없음, config.toml 없음, secrets에 직접 PostgreSQL 연결 정보 없음, PG 드라이버 없음. service_role REST 우회는 미션 금지. 재개 시 Dashboard SQL Editor(수동 또는 로그인된 브라우저 세션) 필요.
+- **Supabase·스키마·데이터 무변경**(read-only SELECT만). migration 미적용 유지. commit·push 없음.
+- 재개 조건(사용자 결정 필요): (a) ADMIN 2026-07 31건을 새 기준선(총 1147, 2026-07=589)으로 승인하고 재개, 또는 (b) 해당 31건 정리 지시 후 1116 기준으로 재개. + ADMIN NULL-조 검증 대상을 어느 계정으로 할지(현 활성 ADMIN은 PET/A조).
+
 ## 2026-07-16 09:20 · [터미널] · [2차 미션] migration 002 를 DDL 전용으로 정리 — 자동 백필 완전 제거
 요청: 1차 감사 결론에 따라 002 에서 users 기반 자동 백필을 분리하고 안전한 DDL 전용 migration 으로 정리. migration 실행·Supabase 쓰기·commit 은 금지.
 

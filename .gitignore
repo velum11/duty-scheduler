@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 
 .local_sessions.json
+
+# 실DB read-only 백업 스냅샷 (사번·성명 등 개인정보 포함 — 커밋 금지)
+docs/backup_pre_migration_*.json
