@@ -21,6 +21,62 @@
 
 ## 로그
 
+## 2026-07-16 09:20 · [터미널] · [2차 미션] migration 002 를 DDL 전용으로 정리 — 자동 백필 완전 제거
+요청: 1차 감사 결론에 따라 002 에서 users 기반 자동 백필을 분리하고 안전한 DDL 전용 migration 으로 정리. migration 실행·Supabase 쓰기·commit 은 금지.
+
+1. **migration 파일 처리 전략 — 전략 A(002 직접 수정) 채택.** 근거 3중 확인: (a) 실DB 프로브에서 schedule_assignments·shift_groups·schedule_assignment_id 전부 미존재(유일한 Supabase 테스트 프로젝트에도 미적용), (b) CLAUDE.md·AGENTS.md 가 "002 미적용" 명시·배포 이력 기록 없음, (c) git 상 002 는 3fef14a 단일 커밋 도입 후 무수정. 어느 환경에도 적용된 적 없으므로 migration 불변성 문제 없이 직접 수정 가능.
+2. **자동 백필 제거 내용**: 002 의 114~134행 INSERT(users 현재 소속 기반 편성 생성) + UPDATE(schedule_assignment_id 연결) 블록 삭제. 이제 002 에는 실행 가능한 DML 이 0건 — diff 로 확인: 제거된 실행 구문은 해당 INSERT/UPDATE 뿐, 추가된 실행 구문 없음(주석만 추가). 제거 이유·기존 데이터 정책·선택적 백필 조건을 SQL 주석 블록("기존 데이터 정책: 자동 백필 없음")으로 파일 안에 기록.
+3. **schedule_assignments 최종 계약(무변경 확정)**: 직원·월 1건 UNIQUE(user_id, schedule_month) · schedule_month=해당 월 1일 date(CHECK) · user_id/department_id FK(RESTRICT) · team_id NULL 허용 + 복합 FK(team_id,department_id)→teams · shift_group_code NULL 허용 text(FK 아님) · created/updated_at(트리거) · 인덱스 month/(dept,month). **ID 참조형 "월별 배정 스냅샷"임을 주석에 명시** — 부서명·조명 변경 시 과거 화면도 최신 명칭으로 표시되며, "당시 명칭 문자열 보존"이 아니다. 현재 요구사항(기준정보 §5: 명칭 변경으로 연결이 끊기지 않아야 함)에는 ID 참조형이 충분.
+4. **teams vs shift_groups 역할 구분**: 화면의 A/B/C조 = **teams 기준정보(team_id/team_code)** 로 저장. shift_groups(근무조)는 별개 개념의 선택지·검증 전용 기준정보로 테이블은 유지하되(제거하려면 repo/db/validators 운영 코드 수정 필요 — 이번 미션 금지 범위), 저장 필수 조건이 아님: 편집기는 require_shift=False + shift_group_code='' 로 저장하고 shift_groups 를 조회하지 않음(정적 테스트로 고정).
+5. **기존 1116건 처리 정책**: work_schedules(2026-07=558, 2027-07=558)는 그대로 유지, schedule_assignment_id 는 NULL 로 남음. DDL 적용만으로는 행 수·값·타입 전부 불변.
+6. **과거 월 assignment 미존재 유지 이유**: 과거 실제 편성 조(A/B/C)를 알 수 있는 신뢰 가능한 원본이 DB 에 없음. users 현재값(재직자 대부분 A조)으로 채우면 오답이 영속 각인됨. 조회 화면의 users fallback 은 표시용일 뿐 저장하지 않는다.
+7. **선택적 백필 필요 입력**: 명시적 (사번, 월, 부서, 조) 매핑 원본(예: 편성 원본 Excel). 실행 조건 — 002 와 자동 연동 금지, 기본 미실행, users 자동 source 금지, 매핑 명시 직원·월만, dry-run·존재/중복 검증·대상 사전 출력, 사용자 승인 필수. **신뢰 원본이 아직 없으므로 실행 스크립트는 만들지 않고 계약만 문서화**(002 주석 + 본 기록).
+8. **적용 순서(승인 시)**: (a) 백업/스냅샷 확인 → (b) 002(DDL 전용) 적용 → (c) 조회 화면 assignment-우선 fallback 보강 배포(다음 미션) → (d) 편집기 시범 월 저장으로 스냅샷 영속 확인.
+9. **검증 순서**: 세 오브젝트 존재 확인 → work_schedules 총 1116·월별 558/558 불변 → schedule_assignments 0건(자동 생성 없음 확인) → 편집기 A→B/C 편성 저장 후 get_month_assignments 가 B/C 반환 → 미편성 월 빈 편성+마스터 fallback → 근무 조회 정상.
+10. **롤백 순서**(002 헤더 주석, FK 역순): work_schedules_assignment_date_key drop → work_schedules_assignment_user_fk drop → work_schedules_assignment_idx drop → schedule_assignment_id 컬럼 drop → schedule_assignments drop → shift_groups drop. 적용 후 신규 편성이 저장된 뒤 롤백하면 그 스냅샷은 유실됨(롤백 전 백업 필요).
+11. **적용 후 운영 코드에서 수정할 부분(다음 미션)**: (a) 월간(views/workspace._build_month_grid)·개인(views/my_schedule)·CSV 가 get_month_assignments 를 우선 참조하고 미존재 시 users fallback 하도록 보강 — 이것 없이는 002 적용 후에도 화면 조 표시가 개선되지 않음. (b) 저장 원자성: work_schedules 와 assignments 순차 저장(트랜잭션 없음) — 현재 계약은 "근무 저장 성공 + 편성 실패 시 실패를 숨기지 않고 안내"(assign_persisted 분기)로 허용 가능하나, 장기적으로 RPC 검토.
+12. **실제 migration 은 미실행 상태.** Supabase 스키마·데이터 무변경(이번 미션에서는 실DB 접속 자체 없음 — 정적/sample 만).
+
+- 테스트: test_migration_002_audit **37건**(백필 부재·DML 0건·users 미참조·FK RESTRICT·001 정합·롤백 역순·teams/shift 분리·validators 정합) + 회귀 52+15+23+14 = **총 141건 통과**. compile OK, git diff --check clean.
+- 파일: supabase/migrations/002_schedule_assignments.sql(백필 제거+정책 주석, 실행 구문 추가 0), scripts/test_migration_002_audit.py(계약 반전·확장), docs/WORKLOG.md(본 기록)
+- 비고: 1차 미션 미커밋분(WORKLOG 감사 기록, 감사 테스트 초판)과 이번 변경이 같은 파일에 섞여 있음 — 커밋 시 함께 반영됨. commit·push 미실행.
+
+## 2026-07-16 08:55 · [터미널] · [read-only 감사] migration 002 + 조 스냅샷 구조 적용 전 감사
+요청: migration 002 실제 적용 전, schedule_assignments/shift_groups 구조와 조 스냅샷 계약을 코드·SQL·실DB(SELECT만) 기준으로 감사하고 적용 가능 여부·위험을 보고. 쓰기·실행·commit 전면 금지.
+
+1. **migration 002 구조 요약**
+   - `shift_groups`(근무조 기준정보): id PK, department_id FK(→departments, RESTRICT), shift_code/shift_name(NOT NULL·not-blank CHECK), sort_order, is_active, created/updated_at+by. UNIQUE(department_id, shift_code). 인덱스 department_id. updated_at 트리거. RLS enable(정책 없음).
+   - `schedule_assignments`(직원별 월 편성 스냅샷): id PK, user_id FK(→users, RESTRICT), schedule_month date(CHECK 월1일), department_id FK(RESTRICT), team_id NULL, shift_group_code text NULL(FK 아님·스냅샷), created/updated. UNIQUE(user_id, schedule_month)=직원·월 1건, UNIQUE(id,user_id), 복합 FK(team_id,department_id)→teams(id,department_id) RESTRICT. 인덱스 month·(department,month). RLS enable(정책 없음).
+   - `work_schedules` 확장: `ADD COLUMN IF NOT EXISTS schedule_assignment_id`(NULL), 복합 FK(schedule_assignment_id,user_id)→schedule_assignments(id,user_id) RESTRICT, UNIQUE(schedule_assignment_id, work_date), 인덱스. user_id 유지(과도기).
+   - **백필 내장(114~134행)**: 기존 work_schedules에서 DISTINCT(user_id, 월)로 assignments를 INSERT하되 부서·팀을 **users 현재 소속(u.department_id/u.team_id)** 으로, shift_group_code는 NULL로 채우고 work_schedules.schedule_assignment_id를 UPDATE 연결. ON CONFLICT DO NOTHING + NULL 조건이라 재실행 안전.
+
+2. **현재 코드와 migration 계약의 불일치**
+   - 월간(workspace._build_month_grid)·개인(my_schedule)·CSV는 부서·조를 **users 마스터 현재값**으로만 표시하고 `schedule_assignments`를 **조회하지 않음** → 002를 적용해도 두 화면의 "전부 A조" 증상은 그대로. (편성 우선 표시는 편집기에서만 구현됨: schedule_edit `_assignment_snapshots`→세션캐시→마스터.)
+   - `db.get_month_roster`(assignments 미try/except 조인)는 **어떤 뷰도 호출하지 않음**(테스트 전용) → 운영 read 경로는 assignments 부재로 깨지지 않음. 근무 조회(get_month_schedules/_schedule_rows)는 work_schedules 전용.
+   - validators↔002 스키마는 정합(월1일, team/shift NULL 허용=require_shift False, 직원·월 UNIQUE). 편집기 저장은 require_shift=False(shift_group_code 항상 '' → NULL). "조" A/B/C는 **teams.team_code**(→team_id)로 저장, shift_groups는 편집기에서 미사용.
+
+3. **적용 전 반드시 수정해야 하는 항목** (→ 모두 Fable High 소관)
+   - (필수) 002의 **백필 블록**을 그대로 두면 실행 즉시 assignments 38±건이 "전부 A조" + shift NULL로 각인됨. "신규 저장 월부터만 스냅샷" 요구를 지키려면 백필을 분리/게이트하도록 **002 SQL을 수정**해야 함.
+   - (권장, 별도 작업) 월간·개인·CSV가 `get_month_assignments`(실패 무시 폴백)를 우선 참조하도록 뷰 로직 보강 — 이걸 안 하면 002를 적용해도 화면 조 표시는 개선되지 않음.
+
+4. **기존 데이터 영향** — *현재 값 재확인(이전 보고와 다름)*: work_schedules **총 1116건**(2026-07=558, 2027-07=558). users 21·departments 5·teams 6(dept17·18 각 A/B/C 활성)·work_types 6. **users 19명 전원 team=A조, 2명 조 없음**. 002 DDL 자체는 기존 컬럼/행을 훼손하지 않음(ADD COLUMN·신규 테이블뿐). 위험은 손상이 아니라 **백필이 1116행을 A조 편성에 연결**하는 의미 오류.
+
+5. **백필 필요 여부** — **불필요/금지**. 과거 실제 조(월별 B/C 편성)는 소스가 없어 알 수 없고, users 현재값(A조)로 채우면 오답을 영속화. 과거 월은 assignments **미존재/NULL로 유지**하고 편집기 신규 저장분부터 스냅샷을 쌓는 편이 안전. (미션 금지사항과 일치.)
+
+6. **안전한 적용 순서(권장, 승인 시)** — (a) 002에서 백필 INSERT/UPDATE 제거 또는 주석 게이트한 사본 준비(SQL 수정=Fable High), (b) 백업/스냅샷 확인, (c) DDL만 적용(테이블·컬럼·제약·인덱스·트리거·RLS), (d) 월간·개인·CSV의 assignments-우선 폴백 뷰 보강 후 배포, (e) 편집기에서 시범 월 저장→재조회로 스냅샷 영속 확인.
+
+7. **롤백 순서** — 002 헤더 주석의 역순: work_schedules 제약(assignment_date_key, assignment_user_fk) drop → index drop → schedule_assignment_id 컬럼 drop → schedule_assignments drop → shift_groups drop. **주의**: 적용 후 편집기로 신규 편성이 저장된 뒤 롤백하면 그 스냅샷은 유실(→Fable High).
+
+8. **적용 후 검증 시나리오** — schedule_assignments/shift_groups/schedule_assignment_id 존재; work_schedules 1116 불변; 특정 사번 월별 건수 불변; 편집기에서 A→B/C 편성 저장 후 get_month_assignments가 B/C 반환; 미편성 월은 빈 편성+마스터 폴백; 근무 조회는 편성 유무와 무관하게 성공.
+
+9. **Fable High 검토 필요 항목** — 판정: **적용 불가(현 상태), Fable High 필요.** 트리거 다중 해당: (i) 002 SQL 자체 수정(백필 분리), (ii) 기존 1116건 백필/변환, (iii) 과거 부서·조 추정, (iv) 적용 후 신규 편성 저장 시 롤백 데이터 유실 가능. RLS 정책 부재는 001과 동일 패턴(service_role 접근)이라 신규 위험 아님.
+
+10. **git status**: 브랜치 feature/supabase-crud, 미커밋 신규 파일 `scripts/test_migration_002_audit.py`(정적 감사 25건) 1개뿐. 운영 코드·migration SQL 무수정. 실DB 쓰기 0.
+
+- 테스트: 신규 test_migration_002_audit 25 통과. 회귀 test_schedule_contracts 52·test_schedule_save_units 15·test_master_and_views 23·test_master_forms 14 통과(총 129). compile OK.
+- 무변경 확인: git diff 비어 있음(추적 파일 무수정), 002/001 SQL·schedule_edit.py 무수정, Supabase INSERT/UPDATE/DELETE 0(SELECT·존재프로브만).
+- 파일: scripts/test_migration_002_audit.py(신규), docs/WORKLOG.md(본 기록)
+
 ## 2026-07-15 18:05 · [터미널] · [무인작업 완료] Phase 5 브라우저 read-only 검증 + Phase 6 최종 감사
 - Phase 5(브라우저 read-only, ADMIN 로그인, 저장/삭제 클릭 없음): 조 관리·근무형태 관리 신형 통일 그리드 렌더 확인. 근무형태 색상 열은 스와치(코드별 색)+HEX 표시, 셀 더블클릭 시 네이티브 컬러 피커가 현재 HEX(#1e6fd9)를 로드(Escape로 취소, 저장 안 함). [＋행추가]로 신규 −행+기본 색 스와치 생성 확인 후 −로 제거해 원상 복귀(Supabase 쓰기 없음).
 - Phase 6 자체 감사: `git diff --check` 클린(LF/CRLF 경고만). schedule_edit.py·migrations·validators.py·db/ 무변경 확인. diff 추가라인의 유일한 Supabase 쓰기 표현은 delete_team/delete_work_type 함수 본문(기능 코드, 이번 세션 실행 안 함)과 on_click 상태 람다뿐. print는 테스트 스크립트에만. compileall OK.
