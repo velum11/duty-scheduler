@@ -21,6 +21,17 @@
 
 ## 로그
 
+## 2026-07-16 15:40 · [터미널] · [디자인 통일] 기준정보 4화면(사용자·부서·조·근무형태) 레이아웃·버튼·그리드 통일
+요청: ADMIN 기준정보 4화면을 하나의 업무용 디자인으로 통일. 데이터·Supabase·권한·사이드바·월간/편성/내근무표 무변경.
+- **진단(브라우저 확인)**: ① 저장 버튼 3개(부서/조/근무형태) 모두 **검정(#1B1B1D)** — 테마 primary는 네이비(#1E3A6E)인데 CSS로 덮음. ② 새로고침이 필터행에 있음(버튼행 아님). ③ 제목이 버튼바에 섞임, 설명 줄 없음. ④ 그리드 높이가 `clamp(400~720px)`라 행 적어도 화면을 꽉 채워 **하단 거대 빈 공간**. ⑤ **사용자 관리만 구형**: `ui.card` 필터카드 + `summary_cards` 통계카드 4개 + `editable_aggrid`(선택/삭제 없음) + 하단 `신규`/독립 `저장`.
+- **공통 helper(views/workspace.py 신규)**: `_MASTER_CSS`(제목/설명/필터/버튼/건수 공용, ms_* key), `master_screen_head(title,desc)`, `master_action_bar(sel_count)`(좌 [＋행추가][삭제][저장] · 우 [새로고침], on_click 플래그 ms_*_req, 삭제 disabled=선택0), `master_grid_height(n)`(240~460 동적), `master_count(...)`. **저장 = 네이비 #1E3A6E**(검정 제거).
+- **표준 구조 적용(4화면)**: 제목 → 한 줄 설명 → 컴팩트 필터행(ms_filter, 조회 버튼 없음·값 변경 즉시 필터) → 버튼행 placeholder(ms_bar, 그리드 위) → selectable_master_grid(동적 높이, select_all_header) → 건수(ms_count). 새로고침을 버튼행 우측으로 이동. 화면별 필터/검증/삭제 로직은 유지.
+- **사용자 관리 전환**: `editable_aggrid`→`selectable_master_grid`(행 상태 계약), 통계카드·필터카드·하단 신규/독립저장 제거. 부서/조/권한을 agSelectCellEditor(표시↔코드 변환 보존: 관리자↔ADMIN 등, 부서명↔dept_code, 조명↔team_code, 타 부서 조 차단, 부서내 조명 중복 처리). [삭제]=선택 기존 사용자 **소프트 삭제(재직 해제)**(물리 삭제 아님, 과거 근무표 유지). 변경 행만 upsert·사번 중복 차단 유지.
+- **그리드 정책**: clamp 제거 → 행 수 동적 높이(240~460). 빈 셀 자동삭제 없음, Excel 다중 붙여넣기·한글 IME·선택/− 신규행 계약은 공통 그리드에서 유지. "마지막 빈 행 자동 확장"은 4화면 공통으로 **붙여넣기 자동 확장 + [행 추가] 버튼**으로 통일(사용자 관리의 구형 type-last-row 자동추가는 편집 중 remount 문제로 미채택 — 3화면 기존 정책에 맞춤).
+- **브라우저 검증(1366/1920/1024, 실DB read-only·비영속만)**: 4화면 동일 구조 확인. 사용자 관리 통계카드 없음·네이비 저장·선택 체크박스·행추가(신규 −행)·전체선택(기존 21건만, 신규 팬텀 제외)→삭제 활성화. 근무형태 색상 스와치 보존. 그리드 동적 높이(6행 309px·5행 240px, 과거 720 clamp 해소). 1024/1920 가로 오버플로우·버튼-그리드 겹침 없음. ⚠️ 저장/삭제 실행은 실DB 쓰기 방지로 미클릭(쓰기 경로는 sample 단위 테스트로 검증).
+- **테스트**: 신규 `scripts/test_master_unified.py` 73건(공통 helper·구형 제거·버튼 순서·네이비·동적 높이·사용자 변환/소프트삭제·권한 라우팅). 회귀 master_forms 14·master_and_views 23·sidebar 37·assignment 22·contracts 52·save_units 15·audit 39 = **총 275건 통과**. compile OK, git diff --check clean.
+- 남은 위험: 저장/삭제 라이브 종단은 승인 후 별도 확인 권장(이번엔 read-only). 파일: views/workspace.py, views/master_users.py, views/master_departments.py, views/master_teams.py, views/master_work_types.py, scripts/test_master_unified.py(신규), docs/WORKLOG.md. db/repo/schedule/migration/사이드바 무변경. commit·push 없음.
+
 ## 2026-07-16 14:20 · [터미널] · [디자인 보정] 사이드바 접기·로그아웃 버튼 심플 아이콘화
 요청: 직전 개선의 큰 칩·전체폭 "로그아웃" 텍스트 버튼이 과함 → ChatGPT류 심플 아이콘으로 축소. 제목·동작·접근성·라우팅 유지.
 - **접기 버튼**(`sb_hide`): 칩 배경·테두리 제거 → 투명 배경·무테두리, #B8B4AB 밝은 회색 아이콘(18px), 34×34, hover 때만 옅은 배경(rgba .08)+흰색, focus-visible 골드. 토글 컬럼 [5,1.4]→[5,1.15]. 아이콘은 기존 `view_sidebar`(사이드바 패널) 유지.

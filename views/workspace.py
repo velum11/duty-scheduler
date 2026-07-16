@@ -10,6 +10,7 @@
 """
 import calendar
 from datetime import date
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -549,6 +550,87 @@ def selectable_master_grid(
         result[meta] = result[meta].fillna("").astype(str)
     result["_sel"] = result["_sel"].map(grid_bool) if "_sel" in result.columns else False
     return result
+
+
+# ---------- 기준정보 4화면 공통 레이아웃 (제목·설명·필터·버튼·그리드 높이·건수) ----------
+# 사용자/부서/조/근무형태 관리가 동일한 화면 골격을 쓰도록 공용화한다.
+# 한 번에 한 화면만 렌더되므로 공용 컨테이너/버튼 key(ms_*)를 재사용한다.
+_MASTER_CSS = """
+<style>
+/* 제목 + 한 줄 설명 */
+.ms-title { font-size: 1.18rem; font-weight: 700; color: #26241F; letter-spacing: -0.01em; margin: 0; line-height: 1.9rem; }
+.ms-desc { font-size: 0.82rem; color: #8A8880; margin: 0 0 0.45rem; line-height: 1.35; }
+/* 컴팩트 필터 행 */
+.st-key-ms_filter { margin: 0 0 0.1rem; }
+.st-key-ms_filter div[data-testid="stHorizontalBlock"] { align-items: flex-end; }
+.st-key-ms_filter label { font-size: 0.72rem !important; color: #8A8880 !important; }
+/* 공통 작업 버튼 행 */
+.st-key-ms_bar { margin: 0.1rem 0 0.4rem; }
+.st-key-ms_bar div[data-testid="stHorizontalBlock"] { align-items: center; }
+.st-key-ms_bar div.stButton > button {
+  min-height: 2.2rem; height: 2.2rem; padding: 0 0.7rem; border-radius: 6px;
+  font-size: 0.82rem; font-weight: 600; white-space: nowrap; gap: 0.35rem;
+}
+.st-key-ms_bar div.stButton > button [data-testid="stIconMaterial"] { font-size: 17px; }
+/* 저장 — 앱 네이비 primary (검정 금지) */
+.st-key-ms_save button[kind="primary"] { background: #1E3A6E !important; border: 1px solid #1E3A6E !important; color: #FFFFFF !important; }
+.st-key-ms_save button[kind="primary"]:hover { background: #17305C !important; border-color: #17305C !important; }
+/* 행 추가 / 새로고침 — 중립 outline */
+.st-key-ms_add button, .st-key-ms_refresh button { background: #FFFFFF !important; border: 1px solid #D8D2C7 !important; color: #3D3A34 !important; }
+.st-key-ms_add button:hover, .st-key-ms_refresh button:hover { background: #F1EEE9 !important; border-color: #C9A26B !important; }
+/* 삭제 — 중립 outline(빨강 계열 글자), 선택 없으면 disabled */
+.st-key-ms_del button { background: #FFFFFF !important; border: 1px solid #E0CFC9 !important; color: #9A3B2E !important; }
+.st-key-ms_del button:hover:not(:disabled) { background: #F7EFEC !important; border-color: #C77B6B !important; }
+.st-key-ms_del button:disabled { color: #B8B4AC !important; border-color: #E7E3DB !important; background: #FFFFFF !important; }
+/* 건수 */
+.ms-count { font-size: 0.76rem; color: #8A8880; margin: 0.4rem 0 0; }
+.ms-count b { color: #3D3A34; font-weight: 600; }
+</style>
+"""
+
+
+def master_screen_head(title: str, desc: str) -> None:
+    """기준정보 공통 헤더 — 공용 CSS 주입 + 제목 + 한 줄 설명."""
+    st.markdown(_MASTER_CSS, unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='ms-title'>{escape(title)}</div>"
+        f"<div class='ms-desc'>{escape(desc)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def master_grid_height(nrows: int) -> int:
+    """행 수 기반 동적 그리드 높이(240~460px). 행이 적으면 과도하게 커지지 않고,
+    많으면 그리드 내부 스크롤한다. 하단 큰 빈 공간·저장 버튼 겹침을 방지한다."""
+    return max(240, min(35 * (int(nrows) + 1) + 64, 460))
+
+
+def master_action_bar(sel_count: int) -> None:
+    """공통 작업 버튼 행: 좌 [＋ 행 추가][삭제][저장] · 우 [새로고침].
+
+    클릭은 세션 플래그(ms_add_req/ms_del_req/ms_save_req/ms_refresh_req)로 남긴다
+    (셀 편집 blur 와 경합해도 다음 rerun 에서 반드시 처리). 삭제는 선택 행이 없으면
+    disabled. 화면은 이 함수를 상단 배치용 placeholder 컨테이너(key='ms_bar') 안에서
+    호출한다."""
+    a, d, s, _sp, r = st.columns([1.5, 1.3, 1.3, 3.4, 1.6], vertical_alignment="center")
+    a.button("행 추가", key="ms_add", icon=":material/add:", width="stretch",
+             on_click=lambda: st.session_state.update(ms_add_req=True))
+    d.button("삭제", key="ms_del", icon=":material/delete:", width="stretch",
+             disabled=int(sel_count) == 0,
+             on_click=lambda: st.session_state.update(ms_del_req=True))
+    s.button("저장", key="ms_save", type="primary", width="stretch",
+             on_click=lambda: st.session_state.update(ms_save_req=True))
+    r.button("새로고침", key="ms_refresh", icon=":material/refresh:", width="stretch",
+             on_click=lambda: st.session_state.update(ms_refresh_req=True))
+
+
+def master_count(existing: int, new: int, sel: int) -> None:
+    """그리드 하단 건수 안내 — 총 N건 · 신규 M건 · 선택 K건."""
+    new_txt = f" · 신규 <b>{int(new)}</b>건" if new else ""
+    st.markdown(
+        f"<div class='ms-count'>총 <b>{int(existing)}</b>건{new_txt} · 선택 <b>{int(sel)}</b>건</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def normalize_editor_text(df: pd.DataFrame, columns) -> pd.DataFrame:

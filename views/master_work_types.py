@@ -9,7 +9,8 @@ import pandas as pd
 import streamlit as st
 from st_aggrid import JsCode
 
-from modules import db, ui
+from modules import db
+from views import workspace
 from views.workspace import grid_bool, selectable_master_grid, set_flash, show_flash
 
 _STATUS = ["사용 중", "사용 안 함", "전체"]
@@ -64,102 +65,69 @@ _COLOR_EDITOR = JsCode(
     """
 )
 
-_CSS = """
-<style>
-.st-key-mw_screen .md-title { font-size: 1.18rem; font-weight: 700; color: #26241F; letter-spacing: -0.01em; margin: 0; line-height: 2rem; }
-.st-key-mw_bar div[data-testid="stHorizontalBlock"] { align-items: center; }
-.st-key-mw_bar div.stButton > button { min-height: 2rem; height: 2rem; padding: 0 0.7rem; border-radius: 5px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; gap: 0.3rem; }
-.st-key-mw_bar div.stButton > button [data-testid="stIconMaterial"] { font-size: 16px; }
-.st-key-mw_save button[kind="primary"] { background: #1B1B1D !important; border: 1px solid #1B1B1D !important; color: #FFFFFF !important; }
-.st-key-mw_save button[kind="primary"]:hover { background: #000000 !important; border-color: #000000 !important; }
-.st-key-mw_add button { background: #FFFFFF !important; border: 1px solid #D8D2C7 !important; color: #3D3A34 !important; }
-.st-key-mw_add button:hover { background: #F1EEE9 !important; border-color: #C9A26B !important; }
-.st-key-mw_del button { background: #FFFFFF !important; border: 1px solid #E0CFC9 !important; color: #9A3B2E !important; }
-.st-key-mw_del button:hover:not(:disabled) { background: #F7EFEC !important; border-color: #C77B6B !important; }
-.st-key-mw_del button:disabled { color: #B8B4AC !important; border-color: #E7E3DB !important; }
-.st-key-mw_tools { margin: 0.15rem 0 0.35rem; }
-.st-key-mw_tools div[data-testid="stHorizontalBlock"] { align-items: flex-end; }
-.st-key-mw_tools div.stButton > button { min-height: 2rem; height: 2rem; padding: 0 0.7rem; border-radius: 5px; font-size: 0.78rem; font-weight: 600; background: #FFFFFF; border: 1px solid #D8D2C7; color: #3D3A34; }
-.st-key-mw_tools div.stButton > button:hover { background: #F1EEE9; border-color: #C9A26B; }
-.st-key-mw_grid iframe { height: clamp(400px, calc(100vh - 250px), 720px) !important; min-height: 400px; }
-.st-key-mw_screen .md-count { font-size: 0.76rem; color: #8A8880; margin: 0.4rem 0 0; }
-.st-key-mw_screen .md-count b { color: #3D3A34; font-weight: 600; }
-</style>
-"""
-
-
 def render(user: dict) -> None:
-    st.markdown(_CSS, unsafe_allow_html=True)
+    workspace.master_screen_head(
+        "근무형태 관리", "근무형태(코드·명칭·약칭·색상)를 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
+    )
 
-    with st.container(key="mw_screen"):
-        bar = st.container(key="mw_bar")
+    refresh = st.session_state.pop("ms_refresh_req", False)
+    with st.container(key="ms_filter"):
+        f1, f2, _sp = st.columns([1.4, 3.0, 5.6], vertical_alignment="bottom")
+        active = f1.selectbox("사용 여부", _STATUS, key="mw_active", label_visibility="collapsed")
+        search = f2.text_input("검색", key="mw_search", placeholder="코드·명칭·약칭 검색", label_visibility="collapsed")
 
-        with st.container(key="mw_tools"):
-            f1, f2, _sp, f3 = st.columns([1.3, 2.4, 4.3, 1.0], vertical_alignment="bottom")
-            active = f1.selectbox("사용 여부", _STATUS, key="mw_active", label_visibility="collapsed")
-            search = f2.text_input("검색", key="mw_search", placeholder="코드·명칭·약칭 검색", label_visibility="collapsed")
-            refresh = f3.button("새로고침", key="mw_go", width="stretch")
+    params = {"active": active, "search": search.strip()}
+    if refresh or st.session_state.get("q_master_work_types") != params or "mw_rows" not in st.session_state:
+        st.session_state["q_master_work_types"] = params
+        st.session_state.pop("mw_del_plan", None)
+        _load_editor(params)
 
-        params = {"active": active, "search": search.strip()}
-        if refresh or st.session_state.get("q_master_work_types") != params or "mw_rows" not in st.session_state:
-            st.session_state["q_master_work_types"] = params
-            st.session_state.pop("mw_del_plan", None)
-            _load_editor(params)
+    show_flash("master_work_types")
 
-        show_flash("master_work_types")
+    plan = st.session_state.get("mw_del_plan")
+    if plan:
+        _confirm_bar(plan, params)
 
-        plan = st.session_state.get("mw_del_plan")
-        if plan:
-            _confirm_bar(plan, params)
+    bar = st.container(key="ms_bar")
 
-        nonce = st.session_state.setdefault("mw_nonce", 0)
-        col_config = {
-            "코드": {"width": 96, "minWidth": 80, "cellClass": "md-c-left"},
-            "명칭": {"width": 110, "minWidth": 90, "cellClass": "md-c-left"},
-            "분류": {"width": 84, "minWidth": 70, "cellClass": "md-c-left"},
-            "약칭": {"width": 72, "minWidth": 56, "cellClass": "md-c-center"},
-            "시작": {"width": 78, "minWidth": 64, "cellClass": "md-c-center"},
-            "종료": {"width": 78, "minWidth": 64, "cellClass": "md-c-center"},
-            "색상": {"width": 118, "minWidth": 100, "cellClass": "md-c-left",
-                    "cellRenderer": _COLOR_RENDERER, "cellEditor": _COLOR_EDITOR},
-            "실근무": {"width": 78, "minWidth": 64, "cellClass": "md-c-center"},
-            "특근수당": {"width": 88, "minWidth": 72, "cellClass": "md-c-center"},
-            "설명": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left"},
-            "표시순서": {"width": 96, "minWidth": 80, "cellClass": "md-c-center"},
-            "사용": {"width": 74, "minWidth": 64, "cellClass": "md-c-center"},
-        }
-        with st.container(key="mw_grid"):
-            grid_df = selectable_master_grid(
-                st.session_state["mw_rows"], key=f"mw_grid_{nonce}",
-                columns=_GRID_COLUMNS, order=_USER_COLS, height=560,
-                col_config=col_config, select_all_header=True,
-            )
-
-        live = _live(grid_df)
-        existing = live[live["_row_state"] == "existing"]
-        new_rows = live[live["_row_state"] != "existing"]
-        sel_count = int((existing["_sel"].map(grid_bool)).sum()) if not existing.empty else 0
-        new_txt = f" · 신규 <b>{len(new_rows)}</b>건" if len(new_rows) else ""
-        st.markdown(
-            f"<div class='md-count'>총 <b>{len(existing)}</b>건{new_txt} · 선택 <b>{sel_count}</b>건</div>",
-            unsafe_allow_html=True,
+    nonce = st.session_state.setdefault("mw_nonce", 0)
+    col_config = {
+        "코드": {"width": 96, "minWidth": 80, "cellClass": "md-c-left"},
+        "명칭": {"width": 110, "minWidth": 90, "cellClass": "md-c-left"},
+        "분류": {"width": 84, "minWidth": 70, "cellClass": "md-c-left"},
+        "약칭": {"width": 72, "minWidth": 56, "cellClass": "md-c-center"},
+        "시작": {"width": 78, "minWidth": 64, "cellClass": "md-c-center"},
+        "종료": {"width": 78, "minWidth": 64, "cellClass": "md-c-center"},
+        "색상": {"width": 118, "minWidth": 100, "cellClass": "md-c-left",
+                "cellRenderer": _COLOR_RENDERER, "cellEditor": _COLOR_EDITOR},
+        "실근무": {"width": 78, "minWidth": 64, "cellClass": "md-c-center"},
+        "특근수당": {"width": 88, "minWidth": 72, "cellClass": "md-c-center"},
+        "설명": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left"},
+        "표시순서": {"width": 96, "minWidth": 80, "cellClass": "md-c-center"},
+        "사용": {"width": 74, "minWidth": 64, "cellClass": "md-c-center"},
+    }
+    rows = st.session_state["mw_rows"]
+    with st.container(key="ms_grid"):
+        grid_df = selectable_master_grid(
+            rows, key=f"mw_grid_{nonce}", columns=_GRID_COLUMNS, order=_USER_COLS,
+            height=workspace.master_grid_height(len(rows)),
+            col_config=col_config, select_all_header=True,
         )
 
-        with bar:
-            title, b_add, b_del, b_save = st.columns([6, 1.5, 1.3, 1.3], vertical_alignment="center")
-            title.markdown("<div class='md-title'>근무형태 관리</div>", unsafe_allow_html=True)
-            b_add.button("행 추가", key="mw_add", icon=":material/add:", width="stretch",
-                         on_click=lambda: st.session_state.update(mw_add_req=True))
-            b_del.button("삭제", key="mw_del", icon=":material/delete:", width="stretch",
-                         disabled=sel_count == 0, on_click=lambda: st.session_state.update(mw_del_req=True))
-            b_save.button("저장", key="mw_save", type="primary", width="stretch",
-                          on_click=lambda: st.session_state.update(mw_save_req=True))
+    live = _live(grid_df)
+    existing = live[live["_row_state"] == "existing"]
+    new_rows = live[live["_row_state"] != "existing"]
+    sel_count = int((existing["_sel"].map(grid_bool)).sum()) if not existing.empty else 0
+    workspace.master_count(len(existing), len(new_rows), sel_count)
 
-    if st.session_state.pop("mw_save_req", False):
+    with bar:
+        workspace.master_action_bar(sel_count)
+
+    if st.session_state.pop("ms_save_req", False):
         _save(grid_df, params)
-    if st.session_state.pop("mw_del_req", False):
+    if st.session_state.pop("ms_del_req", False):
         _handle_delete(grid_df, params)
-    if st.session_state.pop("mw_add_req", False):
+    if st.session_state.pop("ms_add_req", False):
         _add_row(grid_df)
     if _normalize(grid_df):
         st.rerun()
