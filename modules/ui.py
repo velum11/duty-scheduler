@@ -225,7 +225,7 @@ section[data-testid="stSidebar"] div.stButton > button[kind="primary"] {
   background: var(--sb-active-bg) !important; color: #FFFFFF !important; font-weight: 600;
 }
 
-/* ===== 사이드바 헤더 (로고 마크 + 앱명 2줄 + 숨김 버튼) ===== */
+/* ===== 사이드바 헤더 (로고 마크 + 앱명 + 접기 버튼) ===== */
 .st-key-sb_head { padding: 16px 12px 10px 16px; }
 .sb-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .sb-logo {
@@ -234,23 +234,30 @@ section[data-testid="stSidebar"] div.stButton > button[kind="primary"] {
   background: linear-gradient(135deg, #D5B27C, #B8905A);
   color: #1B1B1D; font-size: 15px; font-weight: 800;
 }
-.sb-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sb-title { display: flex; flex-direction: column; min-width: 0; }
 .sb-title-ko {
-  color: #F0EEE9; font-size: 14px; font-weight: 700; line-height: 1.1; white-space: nowrap;
+  color: #F0EEE9; font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap;
 }
-.sb-title-en { color: var(--sb-item-dim); font-size: 9.5px; letter-spacing: 0.18em; line-height: 1; }
-.st-key-sb_hide div.stButton > button {
-  width: 30px; min-height: 30px; height: 30px; padding: 0; justify-content: center;
-  color: var(--sb-item-dim) !important;
+/* 접기 버튼 — 다크 배경에서 확실히 식별되도록 밝은 아이콘 + 은은한 칩 배경 */
+/* help 툴팁이 button 을 래퍼(span.stTooltipHoverTarget)로 감싸므로 직접 자식(>)이
+   아닌 하위(descendant) 셀렉터로 버튼을 잡는다. */
+.st-key-sb_hide div.stButton button {
+  width: 36px; min-height: 36px; height: 36px; padding: 0; justify-content: center;
+  color: #D8D4CA !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.10) !important; border-radius: 8px;
 }
-.st-key-sb_hide div.stButton > button:hover {
-  color: #FFFFFF !important; background: var(--sb-hover-bg) !important;
+.st-key-sb_hide div.stButton button:hover {
+  color: #FFFFFF !important; background: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
 }
-.st-key-sb_hide div.stButton > button [data-testid="stIconMaterial"] { font-size: 17px; }
-/* 아이콘 전용 버튼은 내부 래퍼도 가운데 정렬 */
-.st-key-sb_hide div.stButton > button > div, .st-key-sb_hide div.stButton > button > div > span,
-.st-key-sb_show div.stButton > button > div, .st-key-sb_show div.stButton > button > div > span,
-.st-key-sb_user div.stButton > button > div, .st-key-sb_user div.stButton > button > div > span {
+.st-key-sb_hide div.stButton button:focus-visible {
+  outline: 2px solid var(--gold) !important; outline-offset: 1px;
+}
+.st-key-sb_hide div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
+/* 아이콘 전용 버튼(접기/열기)은 내부 래퍼도 가운데 정렬 */
+.st-key-sb_hide div.stButton button > div, .st-key-sb_hide div.stButton button > div > span,
+.st-key-sb_show div.stButton button > div, .st-key-sb_show div.stButton button > div > span {
   justify-content: center; text-align: center;
 }
 
@@ -279,12 +286,16 @@ div[class*="st-key-sbi_"] div.stButton > button::before {
 }
 div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before { background: var(--gold); }
 
-/* ===== 하단 사용자 카드 (맨 아래 고정) ===== */
+/* ===== 하단 사용자 카드 (맨 아래 고정: 사용자 정보 + 로그아웃) ===== */
 .st-key-sb_user {
   margin: 10px 12px 12px; margin-top: auto;
-  background: #242427; border-radius: 10px; padding: 9px 10px;
+  background: #242427; border-radius: 10px; padding: 9px 10px 8px;
 }
-.sb-uline { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.sb-uline {
+  display: flex; align-items: center; gap: 9px; min-width: 0;
+  padding-bottom: 8px; margin-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
 .sb-ava {
   flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
@@ -297,15 +308,24 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before { backgr
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sb-urole { color: var(--gold); font-size: 10px; letter-spacing: 0.08em; line-height: 1.2; }
-.st-key-sb_user div.stButton { display: flex; justify-content: flex-end; }
-.st-key-sb_user div.stButton > button {
-  width: 28px; min-height: 28px; height: 28px; padding: 0; justify-content: center;
-  color: var(--sb-item-dim) !important;
+/* 로그아웃 — 텍스트+아이콘, 전체 폭, 밝은 글자·hover 배경 (메뉴 active 스타일과 구분).
+   help 툴팁 래퍼 때문에 descendant 셀렉터 사용. */
+.st-key-sb_user div.stButton button {
+  width: 100%; min-height: 36px; justify-content: flex-start; gap: 9px;
+  padding: 0 10px; font-size: 13px; font-weight: 500;
+  color: #D8D4CA !important;
+  background: transparent !important; border: 1px solid transparent !important;
 }
-.st-key-sb_user div.stButton > button:hover {
-  color: #FFFFFF !important; background: var(--sb-hover-bg) !important;
+.st-key-sb_user div.stButton button:hover {
+  color: #FFFFFF !important; background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
 }
-.st-key-sb_user div.stButton > button [data-testid="stIconMaterial"] { font-size: 16px; }
+.st-key-sb_user div.stButton button:focus-visible {
+  outline: 2px solid var(--gold) !important; outline-offset: 1px;
+}
+.st-key-sb_user div.stButton button [data-testid="stIconMaterial"] { font-size: 16px; }
+/* 로그아웃 버튼은 전체 폭 — 우측 정렬 컨테이너 해제 */
+.st-key-sb_user div.stButton { width: 100%; }
 
 /* ===== 본문 상단 (브레드크럼, 52px) ===== */
 .st-key-app_header {
@@ -314,14 +334,23 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before { backgr
 .st-key-app_header div[data-testid="stHorizontalBlock"] { align-items: center; }
 .crumb { font-size: 11px; font-weight: 600; color: #9A968C; letter-spacing: 0.06em; }
 .crumb .crumb-sep { margin: 0 6px; color: #C9C3B8; font-weight: 400; }
-/* 숨김 상태에서 브레드크럼 좌측에 표시되는 사이드바 열기 버튼 */
-.st-key-sb_show div.stButton > button {
-  width: 30px; min-height: 30px; height: 30px; padding: 0; justify-content: center;
-  border: none !important; background: transparent !important; box-shadow: none !important;
-  color: #9A968C !important;
+/* 접힘(숨김) 상태에서 브레드크럼 좌측에 표시되는 사이드바 열기(펼치기) 버튼 —
+   밝은 본문 배경에서 확실히 보이도록 진한 아이콘 + 은은한 칩 배경 */
+.st-key-sb_show div.stButton button {
+  width: 36px; min-height: 36px; height: 36px; padding: 0; justify-content: center;
+  color: #3D3A34 !important;
+  background: rgba(27, 27, 29, 0.05) !important;
+  border: 1px solid rgba(27, 27, 29, 0.14) !important; border-radius: 8px;
+  box-shadow: none !important;
 }
-.st-key-sb_show div.stButton > button:hover { color: #4B463D !important; }
-.st-key-sb_show div.stButton > button [data-testid="stIconMaterial"] { font-size: 17px; }
+.st-key-sb_show div.stButton button:hover {
+  color: #1B1B1D !important; background: rgba(27, 27, 29, 0.10) !important;
+  border-color: rgba(27, 27, 29, 0.24) !important;
+}
+.st-key-sb_show div.stButton button:focus-visible {
+  outline: 2px solid var(--gold) !important; outline-offset: 1px;
+}
+.st-key-sb_show div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
 </style>
 """
 
@@ -437,18 +466,17 @@ def app_shell(user: dict) -> str:
 
 
 def _sidebar_brand() -> None:
-    """사이드바 헤더: 골드 로고 마크 + 앱명 2줄 + 숨김(▤) 버튼."""
+    """사이드바 헤더: 골드 로고 마크 + 앱명(교대 근무표) + 숨김(▤) 버튼."""
     with st.container(key="sb_head"):
-        brand, toggle = st.columns([5, 1], vertical_alignment="center")
+        brand, toggle = st.columns([5, 1.4], vertical_alignment="center")
         brand.markdown(
             "<div class='sb-brand'><span class='sb-logo'>W</span>"
-            "<span class='sb-title'><span class='sb-title-ko'>생산 근무표</span>"
-            "<span class='sb-title-en'>WORKFORCE</span></span></div>",
+            "<span class='sb-title'><span class='sb-title-ko'>교대 근무표</span></span></div>",
             unsafe_allow_html=True,
         )
         with toggle:
             if st.button("", icon=":material/view_sidebar:", key="sb_hide",
-                         type="tertiary", help="사이드바 숨기기"):
+                         type="tertiary", help="사이드바 접기"):
                 st.session_state.sb_hidden = True
                 st.rerun()
 
@@ -518,17 +546,15 @@ def _sidebar_user_card(user: dict) -> None:
     name = str(user.get("name", "")) or "?"
     emp_no = str(user.get("emp_no", ""))
     with st.container(key="sb_user"):
-        info, btn = st.columns([4.6, 1], vertical_alignment="center")
-        info.markdown(
+        st.markdown(
             f"<div class='sb-uline'><span class='sb-ava'>{escape(name[:1])}</span>"
             f"<span class='sb-uinfo'><span class='sb-uname'>{escape(name)}</span>"
             f"<span class='sb-urole'>{escape(emp_no)}</span></span></div>",
             unsafe_allow_html=True,
         )
-        with btn:
-            if st.button("", icon=":material/logout:", key="btn_logout",
-                         type="tertiary", help="로그아웃"):
-                request_nav({"type": "logout"})
+        if st.button("로그아웃", icon=":material/logout:", key="btn_logout",
+                     type="secondary", width="stretch", help="로그아웃"):
+            request_nav({"type": "logout"})
 
 
 def _breadcrumb_header(user: dict, page: str) -> None:

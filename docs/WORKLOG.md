@@ -21,6 +21,18 @@
 
 ## 로그
 
+## 2026-07-16 13:40 · [터미널] · [디자인 변경] 사이드바 명칭·버튼 가시성 정리 (교대 근무표)
+요청: ADMIN/MANAGER 사이드바 상단 "생산 근무표"→"교대 근무표", 부제 "WORKFORCE" 제거, 접기·로그아웃 버튼 가시성 개선. 공식 명칭·USER 헤더·메뉴 구조·라우팅 불변.
+- **제목·부제**(`_sidebar_brand`): 표시 명칭만 "교대 근무표"로 변경(공식 `config.APP_NAME`="생산 근무표 관리"는 불변 — USER 헤더·탭 제목 유지). `sb-title-en`(WORKFORCE) span·CSS 완전 제거, 제목 15px 한 줄. 빈 여백 없음.
+- **근본 원인 발견**: 기존 접기·열기·로그아웃 버튼이 "저대비"였던 이유는 CSS 미적용 — `help=` 툴팁이 button 을 `span.stTooltipHoverTarget` 래퍼로 감싸 `div.stButton > button`(직접 자식) 셀렉터가 매칭 실패했기 때문. 세 버튼 셀렉터를 descendant(`div.stButton button`)로 교정하니 의도한 스타일이 적용됨.
+- **접기 버튼**(`sb_hide`, 다크 사이드바): #D8D4CA 밝은 아이콘 + 반투명 칩 배경(rgba 0.05)+테두리, 36×36, hover 시 흰색+0.14 배경, focus-visible 골드 아웃라인. 토글 컬럼 [5,1]→[5,1.4]로 폭 확보(36px).
+- **열기 버튼**(`sb_show`, 밝은 본문): #3D3A34 진한 아이콘 + 칩 배경, 36×36, hover 진해짐, focus-visible.
+- **로그아웃**(`btn_logout`): 아이콘 전용(28px)→ **아이콘+"로그아웃" 텍스트 전체폭 버튼**(사용자 정보 아래, 구분선). #D8D4CA 밝은 글자, hover 반투명 배경, focus-visible, 36px, 메뉴 active(골드)와 구분(빨강 강조 없음). 동작(`request_nav logout`→`auth.logout`) 불변.
+- **펼침/접힘**: show/hide 구조(sb_hidden) 보존 — 접힘=사이드바 숨김+본문 ▤ 열기 버튼. 아이콘 레일로 재작성하지 않음(§구조 보존). 브라우저에서 접기→열기 왕복·복원 확인.
+- **브라우저 검증**: ADMIN 교대 근무표·WORKFORCE 없음, 접기(36×36, hover 흰색)·로그아웃(192×36, hover) 선명, 접힘 시 열기(36×36, 진한 칩) 선명, 메뉴 이동 정상. 1366/1920/768 폭: 로그아웃 하단 고정·뷰포트 내·메뉴 무겹침·가로 오버플로우 없음·제목 무잘림. MANAGER 동일. USER 전용 헤더·자체 LogOut 유지(사이드바 미표시) 회귀 없음.
+- **테스트**: 신규 `scripts/test_sidebar_ui.py` 24건(문자열·버튼 렌더·접힘 상태·ADMIN/MANAGER/USER·동작 계약). 회귀 master 14+23·assignment 22·contracts 52·save_units 15·audit 39 = **총 189건 통과**. compile OK, git diff --check clean.
+- 남은 위험: 없음(UI 표시만 변경). Supabase·데이터·로직·migration 무변경. 파일: modules/ui.py, scripts/test_sidebar_ui.py(신규), docs/WORKLOG.md. commit·push 없음.
+
 ## 2026-07-16 12:40 · [터미널] · [4차 미션 완료] work_schedules ↔ schedule_assignment_id 연결 + 편성 우선 조회
 요청: 신규·변경 근무 저장 시 실제 schedule_assignment_id 연결, 편성 화면·내 근무표 편성 우선 조회, legacy 무백필, 전체 월간·CSV·기준정보·사이드바 무수정.
 
