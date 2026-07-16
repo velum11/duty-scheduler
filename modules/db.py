@@ -555,8 +555,12 @@ def get_month_assignments(year: int, month: int, emp_nos=None) -> pd.DataFrame:
     return _empty_contract(df.reset_index(drop=True), SCHEDULE_ASSIGNMENT_COLUMNS)
 
 
-def upsert_month_assignments(records, require_shift: bool = True) -> None:
+def upsert_month_assignments(records, require_shift: bool = True) -> dict:
     """직원·월 편성을 upsert 한다 (직원별 월 편성 1건).
+
+    반환: {(emp_no, schedule_month): 편성 레코드(id 포함)} — supabase 모드는 실제
+    DB id, sample 모드는 (emp_no, month) 기반 안정 합성 id. 근무 저장이 이 id 로
+    schedule_assignment_id 를 연결할 수 있게 한다.
 
     검증은 modules/validators 순수 함수로 수행한다: 사번·부서 존재, 팀-부서 소속,
     부서의 활성 조, 대상 월 정규화, 같은 직원·월 중복. 검증 실패 시 ValueError
@@ -568,8 +572,7 @@ def upsert_month_assignments(records, require_shift: bool = True) -> None:
     """
     records = list(records)
     if not is_sample_mode():
-        supabase_repository.upsert_month_assignments(records, require_shift=require_shift)
-        return
+        return supabase_repository.upsert_month_assignments(records, require_shift=require_shift)
     users = get_users()
     depts = get_departments()
     teams = get_teams()
@@ -599,6 +602,19 @@ def upsert_month_assignments(records, require_shift: bool = True) -> None:
     st.session_state[_ASSIGNMENTS_STORE] = pd.DataFrame(
         list(by_key.values()), columns=SCHEDULE_ASSIGNMENT_COLUMNS
     )
+    result: dict = {}
+    for record in normalized:
+        key = (record["emp_no"], record["schedule_month"])
+        # sample 안정 합성 id — 같은 (직원·월)은 재저장해도 같은 id.
+        result[key] = {
+            "id": f"S-{record['emp_no']}-{record['schedule_month']}",
+            "emp_no": record["emp_no"],
+            "schedule_month": record["schedule_month"],
+            "dept_code": record["dept_code"],
+            "team_code": record["team_code"],
+            "shift_group_code": record.get("shift_group_code", ""),
+        }
+    return result
 
 
 def get_month_roster(emp_nos, year: int, month: int):

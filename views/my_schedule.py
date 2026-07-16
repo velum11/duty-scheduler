@@ -208,8 +208,6 @@ def render(user: dict) -> None:
         work_type_df = db.get_work_types()
         work_types = db.work_types_map()
         display_of, color_of = work_type_display()
-        dept = db.dept_name(user.get("dept_code", ""))
-        team = db.team_name(user.get("dept_code", ""), user.get("team_code", ""))
         rows["d"] = pd.to_datetime(rows["duty_date"], errors="coerce").dt.date
     except Exception as exc:
         st.error(
@@ -217,6 +215,22 @@ def render(user: dict) -> None:
             "잠시 후 다시 조회하세요.\n\n" + str(exc)
         )
         return
+
+    # 소속(부서·조)은 선택 월 편성 스냅샷 우선, 없으면 users 현재 소속으로 표시 fallback.
+    # 표시 전용이며 fallback 값을 저장하지 않는다. 편성 조회 실패가 근무/달력을 막지
+    # 않도록 별도 try 로 감싸 users 기본값으로 안전하게 되돌린다.
+    dept_code = str(user.get("dept_code", "") or "")
+    team_code = str(user.get("team_code", "") or "")
+    try:
+        assignment = db.get_month_assignments(year, month, str(user["emp_no"]).strip())
+        if not assignment.empty:
+            snap = assignment.iloc[0]
+            dept_code = str(snap["dept_code"]).strip() or dept_code
+            team_code = str(snap["team_code"]).strip()  # NULL 조 → "" 그대로(조 없음 표시)
+    except Exception:
+        pass  # 편성 조회 실패 → users 현재 소속으로 표시 (근무 달력은 정상)
+    dept = db.dept_name(dept_code)
+    team = db.team_name(dept_code, team_code)
 
     st.markdown(_styles(), unsafe_allow_html=True)
     st.markdown("<div class='my-page-title'>내 근무표</div>", unsafe_allow_html=True)

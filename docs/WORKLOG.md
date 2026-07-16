@@ -21,6 +21,18 @@
 
 ## 로그
 
+## 2026-07-16 12:40 · [터미널] · [4차 미션 완료] work_schedules ↔ schedule_assignment_id 연결 + 편성 우선 조회
+요청: 신규·변경 근무 저장 시 실제 schedule_assignment_id 연결, 편성 화면·내 근무표 편성 우선 조회, legacy 무백필, 전체 월간·CSV·기준정보·사이드바 무수정.
+
+- **저장소(supabase_repository)**: `upsert_month_assignments` → `{(emp_no,month): {id,…}}` 반환(INSERT/UPDATE 실제 DB id, `_upsert_returning`). `plan_schedule_links`(순수) + `_assignment_id_index` 추가 → `_schedule_payload` 가 각 근무 행을 (user_id, 근무일 월1일) 편성이 있으면 그 id 에 연결, 없으면 NULL(legacy). 키에 user_id·month 포함 → 다른 직원·다른 월 편성 오연결 불가(복합 FK 방어). 입력 payload 행만 연결(기존 1147 일괄 UPDATE 없음).
+- **db 파사드**: `upsert_month_assignments` 반환 계약 일치(sample 은 `S-{emp}-{month}` 안정 합성 id). get_month_schedules/CSV 계약 불변.
+- **편성 화면(schedule_edit)**: 저장 순서 **편성 먼저 → 근무(연결 id)** 로 재배치. 편성 실패 시 근무 저장 중단·초안 유지(성공 은폐 없음), 편성 성공 후 근무 실패 시 부분 성공 안내. 편성 저장 결정 순수 헬퍼 `should_save_assignment(state,dept,team,loaded)`: 신규 행 또는 로드 스냅샷과 부서·조가 달라진 행만 upsert → **legacy 근무만 수정은 편성 미생성**(users 현재 소속 과각인 방지). `_load_grid` 가 로드 스냅샷 `se_orig_assign` 저장.
+- **내 근무표(my_schedule)**: 선택 월 편성 우선 → 없으면 users fallback(표시 전용, 저장 안 함). 편성 조회 실패를 별도 try 로 격리 → 근무/달력을 막지 않음. team NULL 이면 조 없음 표시. 레이아웃·색상·집계 무변경.
+- **실DB 종단(2027-01, 고중수 2008\*\*\*\*01, user_id 31)**: 신규 편성 저장 → 메시지 "근무 2건 · 편성 1명". ★ work_schedules 2행의 `schedule_assignment_id == assignment.id(2)`, team_id=24(B조), users.team_id=23(A조) 불변, 기존 1147·2026-07 589·2027-07 558 불변, NOT NULL 정확히 2. 서버 재시작+재로그인(완전 새 세션) 후 내 근무표가 B조 표시(DB 재수화, 세션 캐시 아님). persisted 행에 3일=OFF만 추가 저장 → 메시지 "근무 1건"만(편성 미변경), 편성 2차 미생성(여전히 1건 B조), 3개 근무 전부 기존 id(2) 연결. **정리**: 근무 먼저→편성, user_id+월 제한 삭제 → 기준선 완전 복구(1147/589/558·SA 0·NOT NULL 0·기준정보 21/5/6/6).
+- **테스트**: 신규 `scripts/test_assignment_linking.py` 22건(plan_schedule_links 연결/NULL/오연결차단·should_save_assignment 결정·반환 id·users 불변·NULL 보존·조회 우선). 회귀 contracts 52·save_units 15·audit 39·master 23+14 = **총 165건 통과**. compile OK, git diff --check clean.
+- **후속(다음 미션)**: 관리자용/일반 전체 월간 근무표·CSV 의 편성 우선 조회는 이번 범위에서 제외(요청대로 미수정) → 별도 설계. 저장 원자성(work_schedules+assignments 무트랜잭션 순차)은 부분 실패를 은폐하지 않는 현 계약으로 허용, 장기 RPC 검토.
+- 파일: modules/supabase_repository.py, modules/db.py, views/schedule_edit.py, views/my_schedule.py, scripts/test_assignment_linking.py(신규), docs/WORKLOG.md. migration·전체 월간·CSV·기준정보·사이드바 무수정. commit·push 없음.
+
 ## 2026-07-16 11:05 · [터미널] · [3차 미션 완료] migration 002 적용 확인 + A조→B조 편성 스냅샷 종단 검증
 - 요청: 사용자가 SQL Editor 로 002 수동 실행("Success. No rows returned") 후, 스키마·무변경·편성 영속을 검증하고 테스트 데이터 정리. 재개 기준: 기준선 1147(2026-07=589 승인·ADMIN 31건 보존), live 는 일반 직원 A→B/C 만, NULL-조는 자동 테스트.
 - **적용 확인**: shift_groups·schedule_assignments·work_schedules.schedule_assignment_id 3종 생성. 신규 테이블 0건·연결컬럼 NOT NULL 0건(자동 백필 없음). 컬럼 계약(OpenAPI): user/dept/month NOT NULL, team_id·shift_group_code nullable, schedule_month date. FK 5종(SA→users/departments/teams복합, WS→SA복합, SG→departments) PostgREST 임베딩으로 존재 증명. UNIQUE(user_id,schedule_month)는 앱 upsert(on_conflict) 성공으로 행동 증명. 사용자 주의사항: 클립보드 과정에서 한글 주석/COMMENT 문자열 일부 깨졌을 수 있음 — 기능 무관(코멘트만), DDL 정상.

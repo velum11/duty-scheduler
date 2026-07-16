@@ -308,6 +308,22 @@ def classify_save_targets(live_emps, deleted_emps):
     return sorted(dele - live), sorted(dele & live)
 
 
+def should_save_assignment(state, cur_dept_code, cur_team_code, loaded) -> bool:
+    """이 행의 부서·조 편성을 schedule_assignments 에 저장(upsert)해야 하는가 (순수).
+
+    - state == "new": 신규 직원·월 → 유효 부서가 있으면 저장.
+    - 기존 행: 로드 스냅샷(loaded=(dept_code, team_code))과 현재 부서·조가 다를 때만.
+      legacy(편성 없던) 행이든 persisted 행이든 '변경됐을 때만' 저장하므로, 근무만
+      수정한 경우 users 현재 소속이 과거 편성으로 자동 저장되지 않는다.
+    loaded 가 None(스냅샷 없음)이면 신규가 아닌 한 저장하지 않는다.
+    """
+    if state == "new":
+        return bool(str(cur_dept_code or "").strip())
+    if loaded is None:
+        return False
+    return (str(cur_dept_code or ""), str(cur_team_code or "")) != (str(loaded[0]), str(loaded[1]))
+
+
 def _build_users_map(users: pd.DataFrame) -> dict:
     return {
         str(r["emp_no"]).strip(): {
@@ -442,7 +458,8 @@ def _deleted_panel(q: dict) -> None:
 
 # ---------- 이탈 확인 ----------
 def _discard_draft() -> None:
-    for key in ("se_rows", "se_feed", "se_days", "se_orig", "se_orig_cells", "se_deleted", "se_dirty"):
+    for key in ("se_rows", "se_feed", "se_days", "se_orig", "se_orig_cells",
+                "se_orig_assign", "se_deleted", "se_dirty"):
         st.session_state.pop(key, None)
     st.session_state.pop("nav_guard", None)
 
@@ -561,6 +578,7 @@ def _load_grid(q: dict) -> None:
     snaps = _assignment_snapshots(q, sorted(with_rows))
 
     rows = []
+    orig_assign = {}  # rid -> (dept_code, team_code) 로드 스냅샷 (편성 변경 여부 판정용)
     for _, u in scope.iterrows():
         emp = str(u["emp_no"]).strip()
         if emp not in with_rows:
@@ -568,8 +586,10 @@ def _load_grid(q: dict) -> None:
         dept_code, team_code = snaps.get(
             emp, (str(u["dept_code"]).strip(), str(u["team_code"]).strip())
         )
+        rid = f"e:{emp}"
+        orig_assign[rid] = (dept_code, team_code)
         row = {
-            "_row_id": f"e:{emp}", "_row_state": "existing", "_sel": False,
+            "_row_id": rid, "_row_state": "existing", "_sel": False,
             "사번": emp,
             "성명": str(u["name"]),
             "부서": db.dept_name(dept_code),
@@ -587,6 +607,7 @@ def _load_grid(q: dict) -> None:
     st.session_state["se_rows"] = frame
     st.session_state["se_days"] = days
     st.session_state["se_deleted"] = []
+    st.session_state["se_orig_assign"] = orig_assign  # 편성 변경 판정용 로드 스냅샷
     st.session_state["se_orig"] = _canon(frame, [], day_cols)
     # 원본 셀 값(기존 행): '변경분만 저장'과 '빈 칸 = 삭제 아님' 안내에 사용
     st.session_state["se_orig_cells"] = {
@@ -676,13 +697,13 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
 
     # 2) 신규·수정 입력 검증 (삭제만 저장하는 경로에서는 참조 조회를 건너뛴다)
     records_plain, records_replace, errors = [], {}, []
-    assign_rows = []  # 행별 부서·조 편성 스냅샷 (검증 통과 시 저장)
-    assign_edited = False
+    assign_rows = []  # 편성 저장 대상 (신규 행 또는 부서·조가 로드값과 달라진 행)
     if content_rows:
         display_of, codes, label_codes = _label_maps()
         users = _users_by_emp()  # 조회 시점 캐시 재사용 (rerun 반복 조회 방지)
         depts = db.get_departments()
         teams = db.get_teams()
+        orig_assign = st.session_state.get("se_orig_assign", {})  # rid -> (dept_code, team_code) 로드 스냅샷
         dept_name_codes = {}
         for _, r in depts.iterrows():
             dept_name_codes.setdefault(str(r["dept_name"]).strip(), set()).add(str(r["dept_code"]).strip())
@@ -733,18 +754,22 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
                 else:
                     errors.append(f"{i}행({emp}): 선택한 부서에 없는 조입니다: {team_txt}")
 
-            if dept_code is not None and (
-                dept_code != str(master["dept_code"]).strip()
-                or team_code != str(master["team_code"]).strip()
+            # 편성 저장 여부 결정 (§편성 저장 조건):
+            #  - 신규 직원·월 행 → 저장(새 편성)
+            #  - 기존 행 → 로드 스냅샷과 부서·조가 달라졌을 때만 저장(명시적 변경)
+            #  - legacy 행 + 근무만 수정 → 저장 안 함 → 근무는 schedule_assignment_id NULL
+            # users 현재 소속을 과거 편성으로 자동 각인하지 않는다.
+            state = str(row.get("_row_state") or "new")
+            loaded = orig_assign.get(str(row.get("_row_id", "")))
+            if dept_code is not None and should_save_assignment(
+                state, dept_code, team_code, loaded
             ):
-                assign_edited = True
-            if dept_code is not None:
                 assign_rows.append({
                     "emp_no": emp,
                     "schedule_month": (q["year"], q["month"]),
                     "dept_code": dept_code,
                     "team_code": team_code,
-                    "shift_group_code": "",  # 근무조 입력은 아직 없음 (002 계약상 NULL 허용)
+                    "shift_group_code": "",  # 근무조 입력은 아직 없음 (NULL 허용)
                 })
 
             rid = str(row.get("_row_id", ""))
@@ -787,8 +812,30 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
         if not now:
             cleared += 1
 
-    # 3~5) 검증 통과 후에만 DB 변경 — 삭제 → 교체 → upsert 순.
-    #      원자적이지 않으므로 실패 시 단계를 보고하고 편집 초안을 유지한다.
+    # 3) 편성(schedule_assignments) 먼저 저장 — work_schedules 가 이 id 를 참조한다.
+    #    실패 시 근무 저장을 진행하지 않고(성공 은폐 방지) 초안을 유지한다.
+    month_key = f"{q['year']:04d}-{q['month']:02d}"
+    assign_persisted = False
+    if assign_rows:
+        try:
+            db.upsert_month_assignments(assign_rows, require_shift=False)
+            assign_persisted = True
+        except Exception as exc:
+            st.error(
+                "편성(부서·조) 저장 단계에서 실패했습니다. 근무는 저장하지 않았습니다.\n\n"
+                f"편집 내용은 화면에 유지됩니다. [새로고침]으로 확인 후 다시 시도하세요.\n\n{exc}"
+            )
+            return
+        cache = st.session_state.setdefault("se_assign_cache", {})
+        for rec in assign_rows:
+            cache[(month_key, rec["emp_no"])] = {
+                "dept_code": rec["dept_code"], "team_code": rec["team_code"],
+            }
+
+    # 4~6) 근무 저장 — 삭제 → 교체 → upsert 순. Repository 가 이 저장 payload 의 각
+    #      행을 (사용자·월) 편성이 있으면 schedule_assignment_id 로 연결한다(없으면 NULL).
+    #      편성이 먼저 저장됐으므로 신규 편성도 연결된다. 원자적이지 않으므로 실패 시
+    #      단계를 보고하고 초안을 유지한다(편성이 이미 저장됐으면 부분 성공을 안내).
     step = "삭제"
     try:
         if delete_only:
@@ -803,33 +850,21 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
         if records_plain:
             db.upsert_month_schedules(records_plain)
     except Exception as exc:
+        prefix = "편성(부서·조)은 저장되었으나, " if assign_persisted else ""
         st.error(
-            f"저장이 '{step}' 단계에서 실패했습니다. 이전 단계까지는 반영되었을 수 있습니다.\n\n"
+            f"{prefix}근무 저장이 '{step}' 단계에서 실패했습니다. 이전 단계까지는 반영되었을 수 있습니다.\n\n"
             f"편집 내용은 화면에 유지됩니다. [새로고침]으로 실제 저장 상태를 확인한 뒤 다시 시도하세요.\n\n{exc}"
         )
         return
 
-    # 부서·조 편성 스냅샷 저장 — 근무 저장과 분리해 처리한다.
-    # 002 이전에는 저장 테이블이 없어 실패할 수 있으며, 이 경우 근무 저장은 유효하므로
-    # 실패로 처리하지 않고 세션 스냅샷으로 화면 표시만 유지한다 (users 는 변경하지 않음).
-    assign_persisted = False
-    if assign_rows:
-        try:
-            db.upsert_month_assignments(assign_rows, require_shift=False)
-            assign_persisted = True
-        except Exception:
-            assign_persisted = False
-        month_key = f"{q['year']:04d}-{q['month']:02d}"
+    # 월 근무를 삭제한 직원의 세션 스냅샷 정리 (편성 DB 는 건드리지 않음 — assignment-only 허용)
+    if delete_only:
         cache = st.session_state.setdefault("se_assign_cache", {})
-        for rec in assign_rows:
-            cache[(month_key, rec["emp_no"])] = {
-                "dept_code": rec["dept_code"], "team_code": rec["team_code"],
-            }
-        for emp in delete_only:  # 월 근무를 삭제한 직원의 세션 스냅샷은 정리
+        for emp in delete_only:
             cache.pop((month_key, emp), None)
 
     n_saved = len(records_plain) + sum(len(v) for v in records_replace.values())
-    _load_grid(q)  # 6~8) 재조회 → 신규 행 existing 전환, dirty/삭제 예정/선택 초기화
+    _load_grid(q)  # 재조회 → 신규 행 existing 전환, DB 편성 재수화, dirty/선택 초기화
 
     parts = [f"근무 {n_saved}건 저장"]
     if delete_only:
@@ -841,11 +876,6 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
     notes = []
     if cleared:
         notes.append(f"빈 칸으로 지운 {cleared}개 셀은 삭제되지 않고 기존 근무가 유지됩니다.")
-    if assign_rows and not assign_persisted and assign_edited:
-        notes.append(
-            "부서·조 편성값은 migration 002 적용 후 DB에 저장됩니다 "
-            "(이번 세션 화면에는 그대로 유지)."
-        )
     msg = "근무표를 저장했습니다. (" + " · ".join(parts) + ")"
     if notes:
         msg += "\n\n" + "\n".join(f"- {n}" for n in notes)

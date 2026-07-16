@@ -92,6 +92,16 @@ def _upsert(table: str, records: list[dict], on_conflict: str) -> None:
         _execute(query, "upsert", table)
 
 
+def _upsert_returning(table: str, records: list[dict], on_conflict: str) -> list[dict]:
+    """upsert 후 실제 저장된 행(id 포함)을 반환한다. INSERT·UPDATE 모두 대상."""
+    saved: list[dict] = []
+    for batch in _chunks(records):
+        query = client().table(table).upsert(batch, on_conflict=on_conflict)
+        response = _execute(query, "upsert", table)
+        saved.extend(response.data or [])
+    return saved
+
+
 def _clean_text(value, *, nullable: bool = False):
     if value is None or pd.isna(value):
         return None if nullable else ""
@@ -526,17 +536,20 @@ def get_month_assignments(year: int, month: int, emp_nos: Iterable[str] | None =
     )
 
 
-def upsert_month_assignments(records: list[dict], require_shift: bool = True) -> None:
+def upsert_month_assignments(records: list[dict], require_shift: bool = True) -> dict:
     """직원·월 편성 upsert. 자연키 입력을 검증 후 id 관계값으로 변환해 저장한다.
+
+    반환: {(emp_no, schedule_month): {id, emp_no, schedule_month, dept_code,
+    team_code, shift_group_code}} — INSERT·UPDATE 모두 실제 DB 레코드(id 포함)를
+    반환한다(전역 identity 추정 없음). 근무 저장이 이 id 로 연결할 수 있게 한다.
 
     검증(팀-부서 소속, 부서의 활성 조, 월 정규화, 직원·월 중복)은
     modules/validators 순수 함수를 사용한다. require_shift=False 면 근무조 코드
-    없이 부서·팀 스냅샷만 저장하며, 이때는 shift_groups 조회도 생략한다
-    (근무표 편성 화면 — migration 002 이전에는 테이블 자체가 없을 수 있다).
+    없이 부서·팀 스냅샷만 저장하며, 이때는 shift_groups 조회도 생략한다.
     """
-    dept_by_code, _ = _department_maps()
-    team_by_key, _ = _team_maps()
-    user_by_emp, _ = _user_maps()
+    dept_by_code, dept_by_id = _department_maps()
+    team_by_key, team_by_id = _team_maps()
+    user_by_emp, user_by_id = _user_maps()
     if require_shift:
         shift_groups = get_shift_groups()
         shift_keys = {
@@ -568,8 +581,22 @@ def upsert_month_assignments(records: list[dict], require_shift: bool = True) ->
             "team_id": team_id,
             "shift_group_code": row["shift_group_code"] or None,
         })
+    result: dict[tuple[str, str], dict] = {}
     if payload:
-        _upsert("schedule_assignments", payload, "user_id,schedule_month")
+        saved = _upsert_returning("schedule_assignments", payload, "user_id,schedule_month")
+        for saved_row in saved:
+            emp_no = user_by_id.get(str(saved_row["user_id"]), "")
+            month = str(saved_row["schedule_month"])
+            team_id = saved_row.get("team_id")
+            result[(emp_no, month)] = {
+                "id": saved_row["id"],
+                "emp_no": emp_no,
+                "schedule_month": month,
+                "dept_code": dept_by_id.get(str(saved_row["department_id"]), ""),
+                "team_code": team_by_id.get(str(team_id), "") if team_id is not None else "",
+                "shift_group_code": str(saved_row.get("shift_group_code") or ""),
+            }
+    return result
 
 
 def _schedule_rows(query_builder=None) -> pd.DataFrame:
@@ -630,11 +657,58 @@ def get_month_schedules(emp_nos: Iterable[str], year: int, month: int) -> pd.Dat
     )
 
 
+def _assignment_id_index(pairs: set[tuple[int, str]]) -> dict[tuple[int, str], int]:
+    """(user_id, schedule_month) -> schedule_assignment_id. 없는 키는 담지 않는다.
+
+    work_schedules 저장 시 각 근무 행을 그 (사용자·월)에 '이미 존재하는' 편성에만
+    연결하기 위한 조회다(편성 없으면 매핑 없음 → legacy NULL). 편성 upsert 이후에
+    호출되므로 이번 저장에서 새로 만든 편성도 포함된다.
+    """
+    if not pairs:
+        return {}
+    user_ids = sorted({int(u) for u, _ in pairs})
+    months = sorted({m for _, m in pairs})
+    rows = _select_all(
+        "schedule_assignments",
+        "id,user_id,schedule_month",
+        lambda query: query.in_("user_id", user_ids).in_("schedule_month", months),
+    )
+    index: dict[tuple[int, str], int] = {}
+    for row in rows:
+        key = (int(row["user_id"]), str(row["schedule_month"]))
+        if key in pairs:
+            index[key] = row["id"]
+    return index
+
+
+def plan_schedule_links(rows: list[dict], assignment_index: dict[tuple[int, str], int]) -> list[dict]:
+    """근무 payload 각 행의 schedule_assignment_id 를 결정한다 (순수 함수).
+
+    rows 각 항목: {user_id, work_date, work_type_code, note, schedule_month}
+    - (user_id, schedule_month) 편성이 있으면 그 id 연결, 없으면 None(legacy NULL).
+    키에 user_id·schedule_month 를 모두 쓰므로 다른 직원·다른 월 편성 id 가 섞이지
+    않는다(복합 FK 위반·오연결 방지). 입력 행만 다루므로 기존 근무를 일괄 연결하지
+    않는다.
+    """
+    payload = []
+    for row in rows:
+        key = (int(row["user_id"]), str(row["schedule_month"]))
+        payload.append({
+            "user_id": row["user_id"],
+            "work_date": row["work_date"],
+            "work_type_code": row["work_type_code"],
+            "note": row.get("note", ""),
+            "schedule_assignment_id": assignment_index.get(key),
+        })
+    return payload
+
+
 def _schedule_payload(records: list[dict]) -> list[dict]:
     emp_nos = [_clean_text(row.get("emp_no")) for row in records]
     user_by_emp, _ = _user_maps(emp_nos)
     work_codes = {str(row.get("code")) for row in _select_all("work_types", "code")}
-    payload = []
+    prepared = []
+    pairs: set[tuple[int, str]] = set()
     for row in records:
         emp_no = _clean_text(row.get("emp_no"))
         work_code = _clean_text(row.get("work_type_code"))
@@ -647,13 +721,18 @@ def _schedule_payload(records: list[dict]) -> list[dict]:
             date.fromisoformat(duty_date)
         except ValueError as exc:
             raise SupabaseDataError(f"근무일자 형식이 유효하지 않습니다: {duty_date}") from exc
-        payload.append({
-            "user_id": user_by_emp[emp_no],
+        user_id = user_by_emp[emp_no]
+        schedule_month = validators.normalize_schedule_month(duty_date)
+        pairs.add((int(user_id), schedule_month))
+        prepared.append({
+            "user_id": user_id,
             "work_date": duty_date,
             "work_type_code": work_code,
             "note": _clean_text(row.get("note")),
+            "schedule_month": schedule_month,
         })
-    return payload
+    # 편성 upsert 뒤 호출되므로, 존재하는 (사용자·월) 편성 id 를 각 근무 행에 연결한다.
+    return plan_schedule_links(prepared, _assignment_id_index(pairs))
 
 
 def upsert_schedules(records: list[dict]) -> None:
