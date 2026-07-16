@@ -127,6 +127,35 @@ check("열기 버튼이 sb_hidden=False 설정", "sb_hidden = False" in inspect.
 check("로그아웃 버튼이 request_nav(logout) 유지", '"type": "logout"' in inspect.getsource(ui._sidebar_user_card))
 
 
+# ===== 7) 심플 아이콘 스타일 계약 (칩/전체폭/텍스트/구분선 제거) =====
+print("심플 아이콘 스타일 계약")
+card_src = inspect.getsource(ui._sidebar_user_card)
+# 로그아웃: 텍스트 없는 아이콘 전용, 카드 우측 컬럼 배치
+check("로그아웃 텍스트 버튼 없음(icon-only)", 'st.button("로그아웃"' not in card_src)
+check("로그아웃 아이콘 버튼(btn_logout) 존재",
+      'icon=":material/logout:", key="btn_logout"' in card_src)
+check("로그아웃이 전체폭(width=stretch) 아님", 'width="stretch"' not in card_src)
+check("로그아웃이 사용자 카드 우측 컬럼 배치", "st.columns" in card_src)
+check("접기 버튼(sb_hide) 아이콘 존재", 'key="sb_hide"' in inspect.getsource(ui._sidebar_brand))
+check("열기 버튼(sb_show) 아이콘 존재", 'key="sb_show"' in inspect.getsource(ui._breadcrumb_header))
+# 사용자 정보-로그아웃 구분선 제거 (직전 버전의 separator)
+check("사용자 카드 구분선 제거", "border-bottom: 1px solid rgba(255, 255, 255, 0.07)" not in ui_src)
+# 세 아이콘 버튼 기본 투명 배경 + hover + focus-visible (CSS)
+check("세 버튼 기본 투명 배경(>=3)", ui_src.count("background: transparent !important") >= 3)
+check("세 버튼 focus-visible 아웃라인(>=3)", ui_src.count("focus-visible") >= 3)
+check("세 버튼 hover 옅은 배경(rgba 반투명)", ui_src.count("button:hover") >= 3)
+# 큰 칩 흔적(진한 테두리 rgba .10/.14 기본 배경) 제거
+check("접기 버튼 기본 칩 배경(rgba .05) 제거",
+      "background: rgba(255, 255, 255, 0.05) !important" not in ui_src)
+check("열기 버튼 기본 칩 배경(rgba 27 .05) 제거",
+      "background: rgba(27, 27, 29, 0.05) !important" not in ui_src)
+# 렌더 결과: 로그아웃 버튼 라벨이 비어 있음(아이콘 전용).
+# 참고: help="로그아웃"(툴팁/aria-label)은 접근성상 필수라 유지 — 시각 텍스트 라벨만 없음.
+logout_btn = next((b for b in at.button if b.key == "btn_logout"), None)
+check("렌더: btn_logout 라벨 비어 있음(아이콘 전용, 툴팁은 유지)",
+      logout_btn is not None and (logout_btn.label or "") == "")
+
+
 print()
 if FAIL:
     print(f"FAILED {len(FAIL)}: {FAIL}")

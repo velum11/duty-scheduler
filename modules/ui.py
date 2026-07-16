@@ -239,25 +239,24 @@ section[data-testid="stSidebar"] div.stButton > button[kind="primary"] {
   color: #F0EEE9; font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap;
 }
 /* 접기 버튼 — 다크 배경에서 확실히 식별되도록 밝은 아이콘 + 은은한 칩 배경 */
-/* help 툴팁이 button 을 래퍼(span.stTooltipHoverTarget)로 감싸므로 직접 자식(>)이
-   아닌 하위(descendant) 셀렉터로 버튼을 잡는다. */
+/* 접기 버튼 — 심플 아이콘 전용(ChatGPT 사이드바 토글류). 기본 투명·무테두리,
+   hover 때만 옅은 반투명 배경. help 툴팁 래퍼 때문에 descendant 셀렉터 사용. */
 .st-key-sb_hide div.stButton button {
-  width: 36px; min-height: 36px; height: 36px; padding: 0; justify-content: center;
-  color: #D8D4CA !important;
-  background: rgba(255, 255, 255, 0.05) !important;
-  border: 1px solid rgba(255, 255, 255, 0.10) !important; border-radius: 8px;
+  width: 34px; min-height: 34px; height: 34px; padding: 0; justify-content: center;
+  color: #B8B4AB !important;
+  background: transparent !important; border: 1px solid transparent !important; border-radius: 7px;
 }
 .st-key-sb_hide div.stButton button:hover {
-  color: #FFFFFF !important; background: rgba(255, 255, 255, 0.14) !important;
-  border-color: rgba(255, 255, 255, 0.22) !important;
+  color: #FFFFFF !important; background: rgba(255, 255, 255, 0.08) !important;
 }
 .st-key-sb_hide div.stButton button:focus-visible {
   outline: 2px solid var(--gold) !important; outline-offset: 1px;
 }
 .st-key-sb_hide div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
-/* 아이콘 전용 버튼(접기/열기)은 내부 래퍼도 가운데 정렬 */
+/* 아이콘 전용 버튼(접기/열기/로그아웃)은 내부 래퍼도 가운데 정렬 */
 .st-key-sb_hide div.stButton button > div, .st-key-sb_hide div.stButton button > div > span,
-.st-key-sb_show div.stButton button > div, .st-key-sb_show div.stButton button > div > span {
+.st-key-sb_show div.stButton button > div, .st-key-sb_show div.stButton button > div > span,
+.st-key-sb_user div.stButton button > div, .st-key-sb_user div.stButton button > div > span {
   justify-content: center; text-align: center;
 }
 
@@ -286,16 +285,12 @@ div[class*="st-key-sbi_"] div.stButton > button::before {
 }
 div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before { background: var(--gold); }
 
-/* ===== 하단 사용자 카드 (맨 아래 고정: 사용자 정보 + 로그아웃) ===== */
+/* ===== 하단 사용자 카드 (맨 아래 고정: 좌측 정보 + 우측 로그아웃 아이콘, 한 줄) ===== */
 .st-key-sb_user {
   margin: 10px 12px 12px; margin-top: auto;
-  background: #242427; border-radius: 10px; padding: 9px 10px 8px;
+  background: #242427; border-radius: 10px; padding: 7px 8px 7px 10px;
 }
-.sb-uline {
-  display: flex; align-items: center; gap: 9px; min-width: 0;
-  padding-bottom: 8px; margin-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-}
+.sb-uline { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .sb-ava {
   flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
@@ -308,24 +303,21 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before { backgr
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sb-urole { color: var(--gold); font-size: 10px; letter-spacing: 0.08em; line-height: 1.2; }
-/* 로그아웃 — 텍스트+아이콘, 전체 폭, 밝은 글자·hover 배경 (메뉴 active 스타일과 구분).
+/* 로그아웃 — 카드 우측 작은 아이콘 전용. 기본 투명, hover 때만 옅은 배경(빨강 없음).
    help 툴팁 래퍼 때문에 descendant 셀렉터 사용. */
+.st-key-sb_user div.stButton { display: flex; justify-content: flex-end; }
 .st-key-sb_user div.stButton button {
-  width: 100%; min-height: 36px; justify-content: flex-start; gap: 9px;
-  padding: 0 10px; font-size: 13px; font-weight: 500;
-  color: #D8D4CA !important;
-  background: transparent !important; border: 1px solid transparent !important;
+  width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center;
+  color: #B8B4AB !important;
+  background: transparent !important; border: 1px solid transparent !important; border-radius: 7px;
 }
 .st-key-sb_user div.stButton button:hover {
-  color: #FFFFFF !important; background: rgba(255, 255, 255, 0.06) !important;
-  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #FFFFFF !important; background: rgba(255, 255, 255, 0.08) !important;
 }
 .st-key-sb_user div.stButton button:focus-visible {
   outline: 2px solid var(--gold) !important; outline-offset: 1px;
 }
-.st-key-sb_user div.stButton button [data-testid="stIconMaterial"] { font-size: 16px; }
-/* 로그아웃 버튼은 전체 폭 — 우측 정렬 컨테이너 해제 */
-.st-key-sb_user div.stButton { width: 100%; }
+.st-key-sb_user div.stButton button [data-testid="stIconMaterial"] { font-size: 17px; }
 
 /* ===== 본문 상단 (브레드크럼, 52px) ===== */
 .st-key-app_header {
@@ -335,17 +327,16 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before { backgr
 .crumb { font-size: 11px; font-weight: 600; color: #9A968C; letter-spacing: 0.06em; }
 .crumb .crumb-sep { margin: 0 6px; color: #C9C3B8; font-weight: 400; }
 /* 접힘(숨김) 상태에서 브레드크럼 좌측에 표시되는 사이드바 열기(펼치기) 버튼 —
-   밝은 본문 배경에서 확실히 보이도록 진한 아이콘 + 은은한 칩 배경 */
+   접기 버튼과 같은 심플 아이콘 언어. 기본 투명·무테두리, hover 때만 옅은 배경.
+   밝은 본문에서 아이콘 대비만 확보(중간 회색). */
 .st-key-sb_show div.stButton button {
-  width: 36px; min-height: 36px; height: 36px; padding: 0; justify-content: center;
-  color: #3D3A34 !important;
-  background: rgba(27, 27, 29, 0.05) !important;
-  border: 1px solid rgba(27, 27, 29, 0.14) !important; border-radius: 8px;
+  width: 34px; min-height: 34px; height: 34px; padding: 0; justify-content: center;
+  color: #6B6660 !important;
+  background: transparent !important; border: 1px solid transparent !important; border-radius: 7px;
   box-shadow: none !important;
 }
 .st-key-sb_show div.stButton button:hover {
-  color: #1B1B1D !important; background: rgba(27, 27, 29, 0.10) !important;
-  border-color: rgba(27, 27, 29, 0.24) !important;
+  color: #26282B !important; background: rgba(27, 27, 29, 0.06) !important;
 }
 .st-key-sb_show div.stButton button:focus-visible {
   outline: 2px solid var(--gold) !important; outline-offset: 1px;
@@ -468,7 +459,7 @@ def app_shell(user: dict) -> str:
 def _sidebar_brand() -> None:
     """사이드바 헤더: 골드 로고 마크 + 앱명(교대 근무표) + 숨김(▤) 버튼."""
     with st.container(key="sb_head"):
-        brand, toggle = st.columns([5, 1.4], vertical_alignment="center")
+        brand, toggle = st.columns([5, 1.15], vertical_alignment="center")
         brand.markdown(
             "<div class='sb-brand'><span class='sb-logo'>W</span>"
             "<span class='sb-title'><span class='sb-title-ko'>교대 근무표</span></span></div>",
@@ -546,15 +537,17 @@ def _sidebar_user_card(user: dict) -> None:
     name = str(user.get("name", "")) or "?"
     emp_no = str(user.get("emp_no", ""))
     with st.container(key="sb_user"):
-        st.markdown(
+        info, btn = st.columns([4.6, 1], vertical_alignment="center")
+        info.markdown(
             f"<div class='sb-uline'><span class='sb-ava'>{escape(name[:1])}</span>"
             f"<span class='sb-uinfo'><span class='sb-uname'>{escape(name)}</span>"
             f"<span class='sb-urole'>{escape(emp_no)}</span></span></div>",
             unsafe_allow_html=True,
         )
-        if st.button("로그아웃", icon=":material/logout:", key="btn_logout",
-                     type="secondary", width="stretch", help="로그아웃"):
-            request_nav({"type": "logout"})
+        with btn:
+            if st.button("", icon=":material/logout:", key="btn_logout",
+                         type="tertiary", help="로그아웃"):
+                request_nav({"type": "logout"})
 
 
 def _breadcrumb_header(user: dict, page: str) -> None:

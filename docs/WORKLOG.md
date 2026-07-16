@@ -21,6 +21,17 @@
 
 ## 로그
 
+## 2026-07-16 14:20 · [터미널] · [디자인 보정] 사이드바 접기·로그아웃 버튼 심플 아이콘화
+요청: 직전 개선의 큰 칩·전체폭 "로그아웃" 텍스트 버튼이 과함 → ChatGPT류 심플 아이콘으로 축소. 제목·동작·접근성·라우팅 유지.
+- **접기 버튼**(`sb_hide`): 칩 배경·테두리 제거 → 투명 배경·무테두리, #B8B4AB 밝은 회색 아이콘(18px), 34×34, hover 때만 옅은 배경(rgba .08)+흰색, focus-visible 골드. 토글 컬럼 [5,1.4]→[5,1.15]. 아이콘은 기존 `view_sidebar`(사이드바 패널) 유지.
+- **열기 버튼**(`sb_show`): 동일 언어 — 투명·무테두리, #6B6660(밝은 본문 대비), 34×34, hover 옅은 배경, focus-visible.
+- **로그아웃**(`btn_logout`): 전체폭 "로그아웃" 텍스트 버튼·구분선 제거 → **사용자 카드 우측 작은 아이콘 전용**(라벨 "", `st.columns([4.6,1])` 우측 배치), 투명 배경, #B8B4AB, 32×32, hover 옅은 배경(빨강 없음), focus-visible. `help/aria-label="로그아웃"` 유지, `request_nav→auth.logout` 불변.
+- **사용자 카드**: 구분선(sb-uline border-bottom) 제거, 패딩 축소 → 높이 ~46px(이전 ~70+), 좌 정보 + 우 로그아웃 한 줄 중앙 정렬, 하단 고정 유지.
+- **CSS 셀렉터**: help 툴팁 래퍼 대응 descendant(`div.stButton button`) 유지, 세 버튼 각 key 범위로 한정(메뉴·USER 헤더 CSS 무영향).
+- **브라우저 검증**: ADMIN 교대 근무표·WORKFORCE 없음, 접기(32×34 투명, hover 흰+0.08, 툴팁 "사이드바 접기")·로그아웃(32×32 투명, hover 흰+0.08, 툴팁 "로그아웃", 카드 우측 같은 줄, 구분선 없음, 카드 46px) 확인. 접기→열기(34×34 투명)→복원, 실제 로그아웃→로그인 화면. 1366/1920/768: 카드 뷰포트 내·하단 고정·로그아웃 카드 내·이름 무겹침·가로 오버플로우 없음. MANAGER 동일, USER 전용 헤더·자체 LogOut·공식명 유지(회귀 없음).
+- **테스트**: `test_sidebar_ui` 24→**37건**(심플 아이콘 계약 13건 추가: 텍스트 버튼 없음·우측 배치·구분선 제거·투명 배경≥3·focus-visible≥3·칩 배경 제거·라벨 비어있음). 회귀 master 14+23·assignment 22·contracts 52·save_units 15·audit 39 = **총 202건 통과**. compile OK, git diff --check clean.
+- 남은 위험: 없음(UI 표시만). Supabase·데이터·로직·migration 무변경. 파일: modules/ui.py, scripts/test_sidebar_ui.py, docs/WORKLOG.md. commit·push 없음.
+
 ## 2026-07-16 13:40 · [터미널] · [디자인 변경] 사이드바 명칭·버튼 가시성 정리 (교대 근무표)
 요청: ADMIN/MANAGER 사이드바 상단 "생산 근무표"→"교대 근무표", 부제 "WORKFORCE" 제거, 접기·로그아웃 버튼 가시성 개선. 공식 명칭·USER 헤더·메뉴 구조·라우팅 불변.
 - **제목·부제**(`_sidebar_brand`): 표시 명칭만 "교대 근무표"로 변경(공식 `config.APP_NAME`="생산 근무표 관리"는 불변 — USER 헤더·탭 제목 유지). `sb-title-en`(WORKFORCE) span·CSS 완전 제거, 제목 15px 한 줄. 빈 여백 없음.
