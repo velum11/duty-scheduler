@@ -18,7 +18,10 @@ PAGE_SIZE = 1000
 WRITE_BATCH_SIZE = 500
 REQUIRED_TABLES = ("departments", "teams", "users", "work_types", "work_schedules")
 _BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance"}
-_INTEGER_COLUMNS = {"sort_order"}
+_INTEGER_COLUMNS = {"sort_order", "group_sort_order"}
+
+# 운영단위 유형 내부값 (migration 003 teams.unit_type CHECK 와 동일).
+UNIT_TYPES = ("SHIFT", "GENERAL")
 
 
 class SupabaseDataError(RuntimeError):
@@ -47,6 +50,8 @@ def client() -> Client:
 def reset_client() -> None:
     """Drop the cached client so a subsequent call creates a fresh connection."""
     client.cache_clear()
+    global _ORG_READY
+    _ORG_READY = None
 
 
 # Windows 비동기 소켓의 일시 오류 표식 (예: WinError 10035 — 즉시 완료 실패).
@@ -308,6 +313,133 @@ def upsert_teams(records: list[dict]) -> None:
             "department_id": dept_by_code[dept_code],
             "team_code": team_code,
             "team_name": team_name,
+            "sort_order": _clean_int(row.get("sort_order")),
+            "is_active": _clean_bool(row.get("is_active")),
+        })
+    if payload:
+        _upsert("teams", payload, "department_id,team_code")
+
+
+# --- 조직 관리 확장 (migration 003: 부서그룹 + 운영단위 유형) ---
+# 003 적용 전 라이브 DB 에는 확장 컬럼이 없다. 조회는 호출부(db 파사드)가
+# org_extensions_ready() 로 분기해 안전한 기본값으로 폴백하고, 저장은 이 계층에서
+# 명확한 오류로 차단한다 (부분 저장·조용한 무시 없음).
+_ORG_READY: bool | None = None
+_ORG_NOT_READY_MESSAGE = (
+    "조직 관리 확장 컬럼(migration 003)이 아직 적용되지 않아 저장할 수 없습니다. "
+    "supabase/migrations/003_org_structure.sql 적용 후 다시 시도하세요."
+)
+
+
+def org_extensions_ready() -> bool:
+    """departments/teams 에 003 확장 컬럼이 존재하는지 확인한다 (1회 probe 후 캐시)."""
+    global _ORG_READY
+    if _ORG_READY is None:
+        try:
+            client().table("departments").select(
+                "department_group,group_sort_order"
+            ).limit(1).execute()
+            client().table("teams").select("unit_type").limit(1).execute()
+            _ORG_READY = True
+        except Exception:
+            _ORG_READY = False
+    return _ORG_READY
+
+
+def get_departments_org() -> pd.DataFrame:
+    """부서 목록 + 그룹 확장 컬럼. 003 적용 후에만 호출한다."""
+    rows = _select_all(
+        "departments",
+        "dept_code,dept_name,department_group,group_sort_order,sort_order,is_active",
+        lambda query: query.order("group_sort_order").order("sort_order").order("dept_code"),
+    )
+    frame = _frame(
+        rows,
+        ["dept_code", "dept_name", "department_group", "group_sort_order", "sort_order", "is_active"],
+        "departments",
+    )
+    if not frame.empty:
+        frame["group_sort_order"] = frame["group_sort_order"].map(_clean_int)
+        frame["sort_order"] = frame["sort_order"].map(_clean_int)
+        frame["is_active"] = frame["is_active"].map(_clean_bool)
+    return frame
+
+
+def upsert_departments_org(records: list[dict]) -> None:
+    """그룹 컬럼을 포함한 부서 upsert. 003 미적용이면 저장을 차단한다."""
+    if not org_extensions_ready():
+        raise SupabaseDataError(_ORG_NOT_READY_MESSAGE)
+    payload = [
+        {
+            "dept_code": _clean_text(row.get("dept_code")),
+            "dept_name": _clean_text(row.get("dept_name")),
+            "department_group": _clean_text(row.get("department_group")),
+            "group_sort_order": _clean_int(row.get("group_sort_order")),
+            "sort_order": _clean_int(row.get("sort_order")),
+            "is_active": _clean_bool(row.get("is_active")),
+        }
+        for row in records
+    ]
+    if any(
+        not row["dept_code"] or not row["dept_name"] or not row["department_group"]
+        for row in payload
+    ):
+        raise SupabaseDataError("부서코드·부서명·그룹명은 비어 있을 수 없습니다.")
+    if payload:
+        _upsert("departments", payload, "dept_code")
+
+
+def get_teams_org() -> pd.DataFrame:
+    """운영단위(조) 목록 + unit_type. 003 적용 후에만 호출한다."""
+    _, dept_by_id = _department_maps()
+    rows = _select_all(
+        "teams",
+        "department_id,team_code,team_name,unit_type,sort_order,is_active",
+        lambda query: query.order("department_id").order("sort_order").order("team_code"),
+    )
+    natural = []
+    for row in rows:
+        natural.append({
+            "dept_code": _mapped(
+                dept_by_id,
+                _required(row, "teams", "department_id"),
+                "teams.department_id",
+            ),
+            "team_code": str(_required(row, "teams", "team_code")),
+            "team_name": str(_required(row, "teams", "team_name")),
+            "unit_type": str(_required(row, "teams", "unit_type")),
+            "sort_order": _clean_int(_required(row, "teams", "sort_order")),
+            "is_active": _clean_bool(_required(row, "teams", "is_active")),
+        })
+    return _frame(
+        natural,
+        ["dept_code", "team_code", "team_name", "unit_type", "sort_order", "is_active"],
+        "teams",
+    )
+
+
+def upsert_teams_org(records: list[dict]) -> None:
+    """unit_type 을 포함한 운영단위 upsert. 003 미적용이면 저장을 차단한다."""
+    if not org_extensions_ready():
+        raise SupabaseDataError(_ORG_NOT_READY_MESSAGE)
+    dept_by_code, _ = _department_maps()
+    payload = []
+    for row in records:
+        dept_code = _clean_text(row.get("dept_code"))
+        if dept_code not in dept_by_code:
+            raise SupabaseDataError(f"운영단위의 부서코드를 찾을 수 없습니다: {dept_code}")
+        team_code = _clean_text(row.get("team_code"))
+        team_name = _clean_text(row.get("team_name"))
+        if not team_code or not team_name:
+            raise SupabaseDataError("운영단위 코드와 명칭은 비어 있을 수 없습니다.")
+        unit_type = _clean_text(row.get("unit_type")) or "SHIFT"
+        if unit_type not in UNIT_TYPES:
+            raise SupabaseDataError(f"운영단위 유형이 유효하지 않습니다: {unit_type}")
+        payload.append({
+            "department_id": dept_by_code[dept_code],
+            "team_code": team_code,
+            "team_name": team_name,
+            "unit_type": unit_type,
             "sort_order": _clean_int(row.get("sort_order")),
             "is_active": _clean_bool(row.get("is_active")),
         })

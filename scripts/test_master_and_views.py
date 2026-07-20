@@ -11,7 +11,7 @@ os.environ["DUTY_DATA_MODE"] = "sample"
 import pandas as pd  # noqa: E402
 
 from modules import db  # noqa: E402
-from views import workspace, master_teams, master_work_types  # noqa: E402
+from views import workspace, master_org, master_work_types  # noqa: E402
 
 PASS = 0
 FAIL = []
@@ -101,21 +101,34 @@ _g, rows_aug = workspace._build_month_grid(q_aug, display_of)
 check("월이 섞이지 않음(2026-08은 0건)", len(rows_aug) == 0)
 
 
-# ---------- master_teams._validate ----------
-print("master_teams._validate (부서 표시명->코드, 중복·필수)")
-disp_of, code_of = master_teams._dept_maps()
-dcode = str(db.get_departments().iloc[0]["dept_code"])
-dlabel = disp_of[dcode]
-recs, errs = master_teams._validate(_meta_rows([
-    {"부서": dlabel, "조코드": "Z1", "조명": "가조", "표시순서": "1", "사용": True},
-    {"부서": dlabel, "조코드": "Z1", "조명": "중복조", "표시순서": "2", "사용": True},  # dup
-    {"부서": "없는부서", "조코드": "Z3", "조명": "X", "표시순서": "3", "사용": True},  # bad dept
-    {"부서": "", "조코드": "", "조명": "", "표시순서": "", "사용": True},  # empty skip
-]))
-check("표시명이 dept_code 로 변환됨", recs[0]["dept_code"] == dcode)
-check("부서 내 조코드 중복 검출", any("중복" in e for e in errs))
-check("존재하지 않는 부서 검출", any("존재하지 않는 부서" in e for e in errs))
+# ---------- master_org (운영단위·그룹 검증) ----------
+print("master_org._validate_units (유형 변환, 필수, 빈 행 제외)")
+dcode = str(db.get_org_departments().iloc[0]["dept_code"])
+recs, errs = master_org._validate_units(_meta_rows([
+    {"코드": "Z1", "명칭": "가조", "유형": "교대", "표시순서": "1", "사용": True},
+    {"코드": "N9", "명칭": "나인투식스", "유형": "일반", "표시순서": "2", "사용": True},
+    {"코드": "Z3", "명칭": "이상유형", "유형": "심야", "표시순서": "3", "사용": True},  # bad type
+    {"코드": "", "명칭": "", "유형": "", "표시순서": "", "사용": True},  # empty skip
+]), dcode)
+check("선택 부서 dept_code 부여", recs[0]["dept_code"] == dcode)
+check("유형 교대→SHIFT / 일반→GENERAL 변환",
+      recs[0]["unit_type"] == "SHIFT" and recs[1]["unit_type"] == "GENERAL")
+check("비정상 유형 검출", any("유형" in e for e in errs))
 check("빈 행은 저장 대상에서 제외", len(recs) == 3)  # empty row skipped
+
+print("master_org 구조 검증 (부서 내 명칭·표시순서 / 그룹순서 전역 유일)")
+u_errs = master_org._unit_structure_errors(pd.DataFrame([
+    {"dept_code": dcode, "team_code": "A", "team_name": "같은조", "unit_type": "SHIFT", "sort_order": 1, "is_active": True},
+    {"dept_code": dcode, "team_code": "B", "team_name": "같은조", "unit_type": "SHIFT", "sort_order": 1, "is_active": True},
+]), dcode)
+check("부서 내 운영단위 명칭 중복 차단", any("명칭" in e for e in u_errs))
+check("부서 내 표시순서 중복 차단", any("표시순서" in e for e in u_errs))
+
+g_errs = master_org._group_structure_errors(pd.DataFrame([
+    {"dept_code": "D1", "dept_name": "부서1", "department_group": "PET", "group_sort_order": 1, "sort_order": 1, "is_active": True},
+    {"dept_code": "D2", "dept_name": "부서2", "department_group": "PVC", "group_sort_order": 1, "sort_order": 1, "is_active": True},
+]))
+check("그룹 간 그룹순서 중복 차단", any("여러 그룹" in e for e in g_errs))
 
 
 # ---------- master_work_types._validate ----------

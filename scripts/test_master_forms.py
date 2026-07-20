@@ -80,19 +80,21 @@ def test_master_render_smoke() -> None:
         check(f"{page} 렌더 예외 없음", not at.exception)
 
 
-# ===== 조 관리 저장 전 검증 (신 시그니처) =====
+# ===== 조직 관리 - 운영단위 저장 전 검증 =====
 def test_team_validate() -> None:
-    print("조 관리 - 저장 전 변환/검증 (신형 selectable grid)")
-    from views import master_teams
-    disp_of, code_of = master_teams._dept_maps()
-    d1 = next(iter(code_of.values()))
-    label = disp_of[d1]
-    recs, errors = master_teams._validate(_meta_rows([
-        {"부서": label, "조코드": "A", "조명": "A조", "표시순서": "1", "사용": True},
-        {"부서": label, "조코드": "A", "조명": "중복", "표시순서": "2", "사용": True},
-    ]))
-    check("표시명이 dept_code 로 변환", recs and recs[0]["dept_code"] == d1)
-    check("같은 부서 내 조코드 중복 차단", any("중복" in e for e in errors))
+    print("조직 관리 - 운영단위 저장 전 변환/검증 (교대/일반)")
+    from modules import db
+    from views import master_org
+    d1 = str(db.get_org_departments().iloc[0]["dept_code"])
+    recs, errors = master_org._validate_units(_meta_rows([
+        {"코드": "A", "명칭": "A조", "유형": "교대", "표시순서": "1", "사용": True},
+        {"코드": "N9", "명칭": "나인투식스", "유형": "일반", "표시순서": "2", "사용": True},
+        {"코드": "X", "명칭": "이상", "유형": "이상값", "표시순서": "3", "사용": True},
+    ]), d1)
+    check("선택 부서 dept_code 부여", bool(recs) and recs[0]["dept_code"] == d1)
+    check("유형 교대→SHIFT 변환", recs[0]["unit_type"] == "SHIFT")
+    check("유형 일반→GENERAL 변환", recs[1]["unit_type"] == "GENERAL")
+    check("비정상 유형 저장 차단", any("유형" in e for e in errors))
 
 
 # ===== 근무형태 관리 저장 전 검증 =====

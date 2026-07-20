@@ -29,6 +29,18 @@ DEPT_COLUMNS = ["dept_code", "dept_name", "sort_order", "is_active"]
 # 화면이 사용하는 조/팀 컬럼 (id/department_id 는 파사드 내부 매핑에만 사용).
 TEAM_COLUMNS = ["dept_code", "team_code", "team_name", "sort_order", "is_active"]
 
+# 조직 관리 화면 전용 확장 계약 (migration 003: 그룹 → 부서 → 운영단위).
+# 기존 DEPT_COLUMNS/TEAM_COLUMNS 소비 화면(근무표·편성 등)은 그대로 두고,
+# 조직 관리 화면만 이 확장 컬럼을 사용한다.
+ORG_DEPT_COLUMNS = [
+    "dept_code", "dept_name", "department_group", "group_sort_order", "sort_order", "is_active",
+]
+ORG_TEAM_COLUMNS = ["dept_code", "team_code", "team_name", "unit_type", "sort_order", "is_active"]
+
+# 운영단위 유형 내부값 ↔ 화면 표시 (내부값만 저장 — CLAUDE.md §8).
+UNIT_TYPES = ("SHIFT", "GENERAL")
+UNIT_TYPE_LABELS = {"SHIFT": "교대", "GENERAL": "일반"}
+
 # 화면이 사용하는 근무형태 컬럼 (id 는 파사드 내부 매핑에만 사용).
 WORK_TYPE_COLUMNS = [
     "code", "name", "category", "short_label", "start_time", "end_time",
@@ -53,7 +65,7 @@ SCHEDULE_ASSIGNED_COLUMNS = SCHEDULE_COLUMNS + [
 ]
 
 _BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance"}
-_INTEGER_COLUMNS = {"sort_order"}
+_INTEGER_COLUMNS = {"sort_order", "group_sort_order"}
 
 # 로컬 샘플 모드에서 편집 결과를 담아 세션 동안 유지하는 스토어 키.
 _USERS_STORE = "store_users"
@@ -243,6 +255,105 @@ def save_teams(df: pd.DataFrame) -> None:
         TEAM_COLUMNS,
     )
     supabase_repository.upsert_teams(changed)
+
+
+# --- 조직 관리 (그룹·부서·운영단위, migration 003) ---
+def org_schema_ready() -> bool:
+    """003 확장 컬럼(department_group/group_sort_order/unit_type) 사용 가능 여부.
+
+    sample 모드는 세션 스토어에 기본값을 채워 항상 사용 가능하다. supabase 모드는
+    라이브 스키마를 1회 probe 한다 — 미적용이면 조회는 안전한 기본값으로 폴백하고
+    저장은 repository 계층에서 명확한 오류로 차단된다.
+    """
+    if is_sample_mode():
+        return True
+    return supabase_repository.org_extensions_ready()
+
+
+def org_dept_defaults(df: pd.DataFrame) -> pd.DataFrame:
+    """확장 컬럼이 없거나 비어 있는 부서 프레임에 안전한 그룹 기본값을 채운다.
+
+    백필 전 상태(부서 1개 = 그룹 1개)를 그대로 재현한다: 그룹명은 부서명,
+    그룹순서는 sort_order → dept_code 순 1..N (전역 중복 없음). migration 003 의
+    백필 전략과 동일하므로 적용 전후 화면 표시가 달라지지 않는다.
+    """
+    frame = df.copy()
+    if "department_group" not in frame:
+        frame["department_group"] = ""
+    if "group_sort_order" not in frame:
+        frame["group_sort_order"] = 0
+    group = frame["department_group"].fillna("").astype(str).str.strip()
+    blank = group == ""
+    frame["department_group"] = group
+    frame.loc[blank, "department_group"] = frame.loc[blank, "dept_name"].astype(str)
+    order = pd.to_numeric(frame["group_sort_order"], errors="coerce").fillna(0).astype("int64")
+    frame["group_sort_order"] = order
+    if not frame.empty and (order == 0).all():
+        ranked = frame.sort_values(["sort_order", "dept_code"]).index
+        frame.loc[ranked, "group_sort_order"] = range(1, len(frame) + 1)
+    return frame
+
+
+def org_team_defaults(df: pd.DataFrame) -> pd.DataFrame:
+    """unit_type 이 없거나 비정상인 운영단위 프레임을 SHIFT 기본값으로 정규화한다."""
+    frame = df.copy()
+    if "unit_type" not in frame:
+        frame["unit_type"] = "SHIFT"
+    unit = frame["unit_type"].fillna("").astype(str).str.strip().str.upper()
+    frame["unit_type"] = unit.where(unit.isin(UNIT_TYPES), "SHIFT")
+    return frame
+
+
+def get_org_departments() -> pd.DataFrame:
+    """조직 관리 화면용 부서 목록(ORG_DEPT_COLUMNS, 그룹 컬럼 포함)."""
+    if is_sample_mode():
+        df = org_dept_defaults(get_departments())
+    elif supabase_repository.org_extensions_ready():
+        df = supabase_repository.get_departments_org()
+    else:
+        df = org_dept_defaults(supabase_repository.get_departments())
+    return _empty_contract(df[ORG_DEPT_COLUMNS].reset_index(drop=True), ORG_DEPT_COLUMNS)
+
+
+def save_org_departments(df: pd.DataFrame) -> None:
+    """조직 관리 화면의 그룹·부서 편집 결과를 저장한다 (변경 행만 upsert)."""
+    keep = [c for c in ORG_DEPT_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_DEPTS_STORE] = normalized
+        return
+    changed = _changed_records(
+        get_org_departments(), normalized, ["dept_code"], ORG_DEPT_COLUMNS
+    )
+    supabase_repository.upsert_departments_org(changed)
+
+
+def get_org_teams(dept_code: str | None = None, is_active: bool | None = None) -> pd.DataFrame:
+    """조직 관리 화면용 운영단위 목록(ORG_TEAM_COLUMNS, unit_type 포함)."""
+    if is_sample_mode():
+        df = org_team_defaults(get_teams())
+    elif supabase_repository.org_extensions_ready():
+        df = supabase_repository.get_teams_org()
+    else:
+        df = org_team_defaults(supabase_repository.get_teams())
+    if dept_code is not None:
+        df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
+    if is_active is not None:
+        df = df[df["is_active"].astype(bool) == bool(is_active)]
+    return _empty_contract(df[ORG_TEAM_COLUMNS].reset_index(drop=True), ORG_TEAM_COLUMNS)
+
+
+def save_org_teams(df: pd.DataFrame) -> None:
+    """조직 관리 화면의 운영단위 편집 결과를 저장한다 (변경 행만 upsert)."""
+    keep = [c for c in ORG_TEAM_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_TEAMS_STORE] = normalized
+        return
+    changed = _changed_records(
+        get_org_teams(), normalized, ["dept_code", "team_code"], ORG_TEAM_COLUMNS
+    )
+    supabase_repository.upsert_teams_org(changed)
 
 
 def _base_users() -> pd.DataFrame:

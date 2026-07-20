@@ -21,6 +21,18 @@
 
 ## 로그
 
+## 2026-07-20 09:40 · [터미널] · [화면 통합] 부서/조 관리 → 조직 관리 통합 화면 (그룹·부서 + 운영단위) + migration 003 초안
+- 요청: 부서 관리·조 관리를 "조직 관리" 하나로 통합(2번 시안: 좌 그룹·부서 / 우 선택 부서의 운영단위). 그룹은 departments 컬럼으로(별도 테이블 금지), 운영단위는 teams 확장(교대/일반), 그룹순서 전역 유일. 사이드바 무변경.
+- **화면(views/master_org.py 신규)**: 제목 "조직 관리" + 공통 필터행 → 좌우 2패널. 좌: 그룹명·그룹순서·부서코드·부서명·부서순서·사용 grid(그룹-부서 한 행에 붙음, 그룹순서→부서순서 정렬). 우: 부서 selectbox(활성, 그룹순 정렬) + 코드·명칭·유형(교대/일반 select editor)·표시순서·사용 grid. 행 상태 계약(_row_id/_sel/− 신규행)·Excel 붙여넣기·전체선택 헤더는 공용 selectable_master_grid 재사용. **라우팅**: master_departments/master_teams 는 master_org.render 위임(사이드바 메뉴·라벨·nav.py 무변경 — 두 메뉴가 같은 화면).
+- **저장 계약 분리**: 좌(od_*)/우(ou_*) 각각 [행 추가][삭제][저장][새로고침] — master_action_bar 에 prefix 파라미터 추가(기본 "ms" → 기존 사용자/근무형태 화면 무변경), _MASTER_CSS 에 od_/ou_ 키 선택자 추가. 실패 시 해당 패널 오류만 표시·초안 유지, 성공 시 해당 패널만 재조회.
+- **검증 규칙**: 그룹순서 전역 유일(그룹 다르면 순서 중복 금지 + 같은 그룹은 순서 1개), 같은 그룹 내 부서순서 중복 금지, 부서코드 유일, 그룹명 필수(기존 그룹은 그룹순서 빈 칸 상속 — 편집 중 명시값 우선). 운영단위: 부서 미선택 저장 차단, 부서 내 코드/명칭/표시순서 중복 금지, 유형 교대/일반(SHIFT/GENERAL, 그 외 차단). 구조 검증은 merged 전체 기준 — 필터로 가려진 행과의 충돌도 차단.
+- **데이터 구조(supabase/migrations/003_org_structure.sql 초안 — 미적용)**: departments + department_group text / group_sort_order int (sort_order 는 "그룹 내 부서순서"로 의미 재정의, 컬럼명 유지). teams + unit_type text CHECK(SHIFT/GENERAL). 백필: 그룹=부서명(부서 1개=그룹 1개), 그룹순서=row_number(sort_order,dept_code) 1..N — 기본값 상태 행에만 UPDATE, 재실행 안전, 롤백 주석 포함. 그룹순서 유일성은 앱 저장 계층에서 차단(그룹 행들이 순서를 공유하므로 단순 unique 불가).
+- **repo/db 계층**: supabase_repository 에 org_extensions_ready()(1회 probe·reset_client 시 초기화), get/upsert_departments_org·get/upsert_teams_org(**003 미적용 시 저장은 명확한 오류로 차단**). db 파사드에 ORG_DEPT/ORG_TEAM_COLUMNS·UNIT_TYPES(내부값)/UNIT_TYPE_LABELS(교대/일반), get/save_org_departments·get/save_org_teams, org_dept_defaults/org_team_defaults(003 미적용·sample 폴백: 그룹=부서명·순서 1..N·unit_type=SHIFT — migration 백필과 동일 규칙이라 적용 전후 표시 동일). 기존 DEPT/TEAM_COLUMNS 소비 화면(근무표·편성·조회) 계약 무변경.
+- **삭제 정책 유지**: 부서=참조(사용자/운영단위/편성) 있으면 미사용 처리·없으면 물리 삭제·ADMIN 차단, 운영단위=소속 사용자 있으면 미사용 처리. AG Grid 빈 목록 영문 문구를 "표시할 데이터가 없습니다"로 교체(공용 그리드).
+- **브라우저 검증(sample 모드 — 세션 한정이라 저장 차단 플로우까지 클릭, 1366/1920/1024)**: 사이드바 라벨·구조 무변경(조직 관리 라벨 없음), 두 메뉴 → 같은 화면, 좌 그룹-부서 붙은 구조·우 운영단위(교대 표시), 부서 전환 시 우측 갱신(PET A/B/C → 생산관리팀 빈 목록), **그룹순서 중복 편집→저장 시 차단 메시지+초안 유지+새로고침 복원**, 저장 버튼-그리드 겹침 없음, 3해상도 가로 오버플로우 없음(1366에서 양 그리드 전 컬럼 표시), 월간/내근무표/사용자 관리 렌더 회귀 없음. 20건 PASS.
+- **테스트**: 신규 scripts/test_master_org.py 45건(두 메뉴 동일 화면·그룹순서 상속/중복·운영단위 유형/중복·부서 미선택 차단·폴백 기본값·sample 왕복·라우팅). 갱신: test_master_unified 70(조직 관리 계약 추가)·test_master_and_views 26·test_master_forms 16. 회귀: sidebar 37·assignment 22·contracts 52·save_units 15·audit 39 = **총 328건 통과**(브라우저 20건 별도). compile OK, git diff --check clean.
+- 비고: **migration 003 은 초안만 — 사용자 승인 후 적용**(적용 전 라이브: 화면은 부서명 기준 그룹 폴백 표시 + 저장 차단 배너). users 화면의 "조" 표시·근무표 편성의 조 선택은 기존 teams 그대로 사용(운영단위 확장의 영향 없음). 파일: views/master_org.py(신규)·master_departments·master_teams(위임)·workspace.py(prefix/CSS/빈목록 문구), modules/db.py·supabase_repository.py, supabase/migrations/003_org_structure.sql(신규), scripts/test_master_org.py(신규)·test_master_unified·test_master_and_views·test_master_forms, docs/WORKLOG.md. 사이드바(ui.py)는 이번 작업에서 무변경(작업 전부터 있던 파비콘 diff 는 데스크탑 작업분으로 보존). commit·push 없음.
+
 ## 2026-07-16 15:40 · [터미널] · [디자인 통일] 기준정보 4화면(사용자·부서·조·근무형태) 레이아웃·버튼·그리드 통일
 요청: ADMIN 기준정보 4화면을 하나의 업무용 디자인으로 통일. 데이터·Supabase·권한·사이드바·월간/편성/내근무표 무변경.
 - **진단(브라우저 확인)**: ① 저장 버튼 3개(부서/조/근무형태) 모두 **검정(#1B1B1D)** — 테마 primary는 네이비(#1E3A6E)인데 CSS로 덮음. ② 새로고침이 필터행에 있음(버튼행 아님). ③ 제목이 버튼바에 섞임, 설명 줄 없음. ④ 그리드 높이가 `clamp(400~720px)`라 행 적어도 화면을 꽉 채워 **하단 거대 빈 공간**. ⑤ **사용자 관리만 구형**: `ui.card` 필터카드 + `summary_cards` 통계카드 4개 + `editable_aggrid`(선택/삭제 없음) + 하단 `신규`/독립 `저장`.

@@ -24,7 +24,7 @@ os.environ["DUTY_DATA_MODE"] = "sample"
 import pandas as pd  # noqa: E402
 
 from modules import db, nav  # noqa: E402
-from views import workspace, master_users, master_departments, master_teams, master_work_types  # noqa: E402
+from views import workspace, master_users, master_departments, master_teams, master_org, master_work_types  # noqa: E402
 
 PASS = 0
 FAIL: list[str] = []
@@ -42,22 +42,35 @@ def check(name: str, cond: bool) -> None:
 
 _MODULES = {
     "사용자 관리": master_users,
-    "부서 관리": master_departments,
-    "조 관리": master_teams,
+    "조직 관리": master_org,
     "근무형태 관리": master_work_types,
 }
 
 
-# ===== 1) 네 화면 공통 helper·구조 사용 =====
-print("네 화면 공통 레이아웃·helper")
+# ===== 1) 화면 공통 helper·구조 사용 =====
+print("기준정보 화면 공통 레이아웃·helper")
 for label, mod in _MODULES.items():
-    src = inspect.getsource(mod.render)
+    src = inspect.getsource(mod)
     check(f"{label}: 공통 헤더(master_screen_head) 사용", "master_screen_head" in src)
     check(f"{label}: 공통 작업 버튼(master_action_bar) 사용", "master_action_bar" in src)
     check(f"{label}: 동적 그리드 높이(master_grid_height) 사용", "master_grid_height" in src)
     check(f"{label}: 공통 필터 컨테이너(ms_filter) 사용", 'key="ms_filter"' in src)
     check(f"{label}: 공통 그리드(selectable_master_grid) 사용", "selectable_master_grid" in src)
     check(f"{label}: 공통 건수(master_count) 사용", "master_count" in src)
+
+
+# ===== 1-1) 조직 관리 통합 계약 =====
+print("조직 관리 통합 (부서/조 메뉴 → 같은 화면, 좌/우 분리 저장)")
+check("부서 관리 메뉴가 조직 관리 화면으로 위임",
+      "master_org.render" in inspect.getsource(master_departments.render))
+check("조 관리 메뉴가 조직 관리 화면으로 위임",
+      "master_org.render" in inspect.getsource(master_teams.render))
+org_src = inspect.getsource(master_org)
+check("화면 제목은 '조직 관리'", '"조직 관리"' in org_src)
+check("좌(그룹·부서)/우(운영단위) 저장 계약 분리(od_/ou_)",
+      "od_save_req" in org_src and "ou_save_req" in org_src)
+check("그룹순서 전역 유일 검증 존재", "_group_structure_errors" in org_src)
+check("운영단위 유형 교대/일반 지원", '"SHIFT"' in org_src and '"GENERAL"' in org_src)
 
 
 # ===== 2) 구형 요소 제거 =====
@@ -82,12 +95,14 @@ order_ok = (
     < bar_src.index('"저장"') < bar_src.index('"새로고침"')
 )
 check("버튼 순서: 행추가 → 삭제 → 저장 → 새로고침", order_ok)
-check("저장은 네이비 primary(type='primary')", 'type="primary"' in bar_src and 'key="ms_save"' in bar_src)
+check("저장은 네이비 primary(type='primary')", 'type="primary"' in bar_src and '_save"' in bar_src)
 check("삭제는 선택 없음 시 disabled", "disabled=int(sel_count) == 0" in bar_src)
-check("새로고침은 작업 버튼 행 우측(같은 함수 내)", '"새로고침"' in bar_src and 'key="ms_refresh"' in bar_src)
+check("새로고침은 작업 버튼 행 우측(같은 함수 내)", '"새로고침"' in bar_src and '_refresh"' in bar_src)
+check("prefix 기본값 ms(기존 화면 무변경)", 'prefix: str = "ms"' in bar_src)
 
 css = workspace._MASTER_CSS
 check("공통 CSS: 저장 네이비 #1E3A6E", "#1E3A6E" in css and ".st-key-ms_save" in css)
+check("공통 CSS: 조직 관리 좌/우 저장 버튼도 네이비", ".st-key-od_save" in css and ".st-key-ou_save" in css)
 check("공통 CSS: 검정 저장(#1B1B1D/#000000) 없음", "#1B1B1D" not in css and "#000000" not in css)
 check("공통 CSS: 삭제 disabled 스타일 존재", ".st-key-ms_del button:disabled" in css)
 

@@ -514,6 +514,8 @@ def selectable_master_grid(
         "enterNavigatesVerticallyAfterEdit": True,
         "suppressRowClickSelection": True,
         "suppressDragLeaveHidesColumns": True,
+        # 빈 목록 기본 문구(No Rows To Show)를 업무 화면 한글 문구로 교체.
+        "overlayNoRowsTemplate": "<span style='color:#8A8880;font-size:0.82rem;'>표시할 데이터가 없습니다</span>",
         "onGridReady": _NATIVE_PASTE_HANDLER,
         "onCellClicked": _ROW_ACTION_CLICK,
         # 자동 빈 행 추가는 쓰지 않는다 — 신규 행은 [＋ 행 추가]/붙여넣기로만 생성.
@@ -564,24 +566,37 @@ _MASTER_CSS = """
 .st-key-ms_filter { margin: 0 0 0.1rem; }
 .st-key-ms_filter div[data-testid="stHorizontalBlock"] { align-items: flex-end; }
 .st-key-ms_filter label { font-size: 0.72rem !important; color: #8A8880 !important; }
-/* 공통 작업 버튼 행 */
-.st-key-ms_bar { margin: 0.1rem 0 0.4rem; }
-.st-key-ms_bar div[data-testid="stHorizontalBlock"] { align-items: center; }
-.st-key-ms_bar div.stButton > button {
+/* 공통 작업 버튼 행 (ms_*: 단일 화면 · od_*/ou_*: 조직 관리 좌/우 패널) */
+.st-key-ms_bar, .st-key-od_bar, .st-key-ou_bar { margin: 0.1rem 0 0.4rem; }
+.st-key-ms_bar div[data-testid="stHorizontalBlock"],
+.st-key-od_bar div[data-testid="stHorizontalBlock"],
+.st-key-ou_bar div[data-testid="stHorizontalBlock"] { align-items: center; }
+.st-key-ms_bar div.stButton > button,
+.st-key-od_bar div.stButton > button,
+.st-key-ou_bar div.stButton > button {
   min-height: 2.2rem; height: 2.2rem; padding: 0 0.7rem; border-radius: 6px;
   font-size: 0.82rem; font-weight: 600; white-space: nowrap; gap: 0.35rem;
 }
-.st-key-ms_bar div.stButton > button [data-testid="stIconMaterial"] { font-size: 17px; }
+.st-key-ms_bar div.stButton > button [data-testid="stIconMaterial"],
+.st-key-od_bar div.stButton > button [data-testid="stIconMaterial"],
+.st-key-ou_bar div.stButton > button [data-testid="stIconMaterial"] { font-size: 17px; }
 /* 저장 — 앱 네이비 primary (검정 금지) */
-.st-key-ms_save button[kind="primary"] { background: #1E3A6E !important; border: 1px solid #1E3A6E !important; color: #FFFFFF !important; }
-.st-key-ms_save button[kind="primary"]:hover { background: #17305C !important; border-color: #17305C !important; }
+.st-key-ms_save button[kind="primary"], .st-key-od_save button[kind="primary"], .st-key-ou_save button[kind="primary"] { background: #1E3A6E !important; border: 1px solid #1E3A6E !important; color: #FFFFFF !important; }
+.st-key-ms_save button[kind="primary"]:hover, .st-key-od_save button[kind="primary"]:hover, .st-key-ou_save button[kind="primary"]:hover { background: #17305C !important; border-color: #17305C !important; }
 /* 행 추가 / 새로고침 — 중립 outline */
-.st-key-ms_add button, .st-key-ms_refresh button { background: #FFFFFF !important; border: 1px solid #D8D2C7 !important; color: #3D3A34 !important; }
-.st-key-ms_add button:hover, .st-key-ms_refresh button:hover { background: #F1EEE9 !important; border-color: #C9A26B !important; }
+.st-key-ms_add button, .st-key-ms_refresh button,
+.st-key-od_add button, .st-key-od_refresh button,
+.st-key-ou_add button, .st-key-ou_refresh button { background: #FFFFFF !important; border: 1px solid #D8D2C7 !important; color: #3D3A34 !important; }
+.st-key-ms_add button:hover, .st-key-ms_refresh button:hover,
+.st-key-od_add button:hover, .st-key-od_refresh button:hover,
+.st-key-ou_add button:hover, .st-key-ou_refresh button:hover { background: #F1EEE9 !important; border-color: #C9A26B !important; }
 /* 삭제 — 중립 outline(빨강 계열 글자), 선택 없으면 disabled */
-.st-key-ms_del button { background: #FFFFFF !important; border: 1px solid #E0CFC9 !important; color: #9A3B2E !important; }
-.st-key-ms_del button:hover:not(:disabled) { background: #F7EFEC !important; border-color: #C77B6B !important; }
-.st-key-ms_del button:disabled { color: #B8B4AC !important; border-color: #E7E3DB !important; background: #FFFFFF !important; }
+.st-key-ms_del button, .st-key-od_del button, .st-key-ou_del button { background: #FFFFFF !important; border: 1px solid #E0CFC9 !important; color: #9A3B2E !important; }
+.st-key-ms_del button:hover:not(:disabled), .st-key-od_del button:hover:not(:disabled), .st-key-ou_del button:hover:not(:disabled) { background: #F7EFEC !important; border-color: #C77B6B !important; }
+.st-key-ms_del button:disabled, .st-key-od_del button:disabled, .st-key-ou_del button:disabled { color: #B8B4AC !important; border-color: #E7E3DB !important; background: #FFFFFF !important; }
+/* 조직 관리 좌/우 패널 제목 (부서/조 통합 화면 전용) */
+.ms-panel { font-size: 0.92rem; font-weight: 700; color: #3D3A34; margin: 0.2rem 0 0.1rem; }
+.ms-panel small { font-weight: 500; color: #8A8880; }
 /* 건수 */
 .ms-count { font-size: 0.76rem; color: #8A8880; margin: 0.4rem 0 0; }
 .ms-count b { color: #3D3A34; font-weight: 600; }
@@ -605,23 +620,27 @@ def master_grid_height(nrows: int) -> int:
     return max(240, min(35 * (int(nrows) + 1) + 64, 460))
 
 
-def master_action_bar(sel_count: int) -> None:
+def master_action_bar(sel_count: int, prefix: str = "ms") -> None:
     """공통 작업 버튼 행: 좌 [＋ 행 추가][삭제][저장] · 우 [새로고침].
 
-    클릭은 세션 플래그(ms_add_req/ms_del_req/ms_save_req/ms_refresh_req)로 남긴다
+    클릭은 세션 플래그({prefix}_add_req/_del_req/_save_req/_refresh_req)로 남긴다
     (셀 편집 blur 와 경합해도 다음 rerun 에서 반드시 처리). 삭제는 선택 행이 없으면
-    disabled. 화면은 이 함수를 상단 배치용 placeholder 컨테이너(key='ms_bar') 안에서
-    호출한다."""
+    disabled. 화면은 이 함수를 상단 배치용 placeholder 컨테이너(key='{prefix}_bar')
+    안에서 호출한다. prefix 기본값 "ms" 는 기존 단일 그리드 화면용이며, 조직 관리
+    화면은 좌/우 패널에 "od"/"ou" 를 사용한다 (버튼 스타일은 _MASTER_CSS 공유)."""
+    def _flag(name: str):
+        return lambda: st.session_state.update({f"{prefix}_{name}_req": True})
+
     a, d, s, _sp, r = st.columns([1.5, 1.3, 1.3, 3.4, 1.6], vertical_alignment="center")
-    a.button("행 추가", key="ms_add", icon=":material/add:", width="stretch",
-             on_click=lambda: st.session_state.update(ms_add_req=True))
-    d.button("삭제", key="ms_del", icon=":material/delete:", width="stretch",
+    a.button("행 추가", key=f"{prefix}_add", icon=":material/add:", width="stretch",
+             on_click=_flag("add"))
+    d.button("삭제", key=f"{prefix}_del", icon=":material/delete:", width="stretch",
              disabled=int(sel_count) == 0,
-             on_click=lambda: st.session_state.update(ms_del_req=True))
-    s.button("저장", key="ms_save", type="primary", width="stretch",
-             on_click=lambda: st.session_state.update(ms_save_req=True))
-    r.button("새로고침", key="ms_refresh", icon=":material/refresh:", width="stretch",
-             on_click=lambda: st.session_state.update(ms_refresh_req=True))
+             on_click=_flag("del"))
+    s.button("저장", key=f"{prefix}_save", type="primary", width="stretch",
+             on_click=_flag("save"))
+    r.button("새로고침", key=f"{prefix}_refresh", icon=":material/refresh:", width="stretch",
+             on_click=_flag("refresh"))
 
 
 def master_count(existing: int, new: int, sel: int) -> None:
