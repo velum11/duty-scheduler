@@ -27,7 +27,7 @@ os.environ["DUTY_DATA_MODE"] = "sample"
 import pandas as pd  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-from modules import db, nav  # noqa: E402
+from modules import db, nav, supabase_repository, ui  # noqa: E402
 from views import master_org, master_users  # noqa: E402
 
 PASS = 0
@@ -91,7 +91,7 @@ for label, fn in (("부서 관리", _screen_departments_menu), ("조 관리", _s
     check(f"{label} 메뉴 렌더 예외 없음", not at.exception)
     body = " ".join(str(m.value) for m in at.markdown)
     check(f"{label} 메뉴가 조직 관리 화면을 표시", "조직 관리" in body)
-    check(f"{label} 좌측 패널(그룹·부서) 표시", "그룹·부서" in body)
+    check(f"{label} 좌측 패널(그룹·부서) 표시", "그룹 · 부서 구조" in body)
     check(f"{label} 우측 패널(운영단위) 표시", "운영단위" in body)
 
 
@@ -114,7 +114,7 @@ check("그룹 행에 그룹명·그룹순서 표시(1회)",
       str(groups.iloc[0]["그룹·부서명"]) == "PET" and str(groups.iloc[0]["순서"]) == "1")
 check("부서 행에는 그룹순서 없음(순서=부서순서)", str(depts.iloc[0]["순서"]) == "1")
 check("부서 행 소속그룹은 로드 시점 그룹 라벨", set(depts["소속그룹"]) == {"PET", "PVC"})
-check("그룹 행 부서코드 셀은 요약 표시", "부서" in str(groups.iloc[0]["부서코드"]))
+check("그룹 행 부서코드 셀은 비어 있음", str(groups.iloc[0]["부서코드"]) == "")
 
 
 # ===== 3) parse_org_grid — 그룹 1회 편집 → 자식 전파 =====
@@ -176,7 +176,7 @@ _r, errs6 = master_org.parse_org_grid(_meta_rows([
 check("부서 없는 새 그룹 저장 차단", any("부서가 없습니다" in e for e in errs6))
 recs7, errs7 = master_org.parse_org_grid(_meta_rows([
     _grow("gn:1", "DECO", 3),
-    _drow("n:4", "DECO생산부", 1, "(신규 그룹 1)", "DEC1", state="new"),
+    _drow("n:4", "DECO생산부", 1, "(새 그룹 1 — 이름 입력)", "DEC1", state="new"),
 ]), store)
 check("새 그룹 + 첫 부서 저장 가능", not errs7
       and recs7 and recs7[0]["department_group"] == "DECO" and recs7[0]["group_sort_order"] == 3)
@@ -184,7 +184,7 @@ check("새 그룹 + 첫 부서 저장 가능", not errs7
 # 새 그룹 이름/순서 필수
 _r, errs8 = master_org.parse_org_grid(_meta_rows([
     _grow("gn:2", "", ""),
-    _drow("n:5", "새부서", 1, "(신규 그룹 2)", "NEW2", state="new"),
+    _drow("n:5", "새부서", 1, "(새 그룹 2 — 이름 입력)", "NEW2", state="new"),
 ]), store)
 check("새 그룹 그룹명 필수", any("그룹명" in e for e in errs8))
 check("새 그룹 그룹순서 필수", any("그룹순서" in e for e in errs8))
@@ -300,6 +300,31 @@ check("표시순서 1 미만 차단", any("1 이상" in e for e in errs_u))
 check("USER_COLUMNS 에 display_order 포함", "display_order" in db.USER_COLUMNS)
 check("get_users 가 display_order 컬럼 제공", "display_order" in db.get_users().columns)
 
+# 003 미적용 Supabase 쓰기 관문 — 부서/클라이언트 조회 전에 전체 차단
+old_ready = supabase_repository._ORG_READY
+try:
+    supabase_repository._ORG_READY = False
+    blocked = False
+    try:
+        supabase_repository.upsert_users([{"emp_no": "T-BLOCK", "display_order": 1}])
+    except supabase_repository.SupabaseDataError as exc:
+        blocked = "003" in str(exc) and "T-BLOCK" in str(exc) and "표시순서" in str(exc)
+    check("003 미적용 + 표시순서 입력은 DB 조회 전 전체 차단", blocked)
+finally:
+    supabase_repository._ORG_READY = old_ready
+
+org_src = Path(master_org.__file__).read_text(encoding="utf-8")
+workspace_src = (ROOT / "views" / "workspace.py").read_text(encoding="utf-8")
+users_src = Path(master_users.__file__).read_text(encoding="utf-8")
+check("조직 화면: 그룹→부서→운영단위 흐름 표시", "org-flow-step" in org_src)
+check("조직 화면: 소속그룹 컬럼은 그룹 이동으로 표시", '"headerName": "그룹 이동"' in org_src)
+check("조직 화면: 신규 그룹 라벨은 입력 행동 안내", "(새 그룹 {n} — 이름 입력)" in org_src)
+check("조직 화면: migration 경고는 상단 1회", org_src.count("조직 확장(migration 003) 적용 전") == 1)
+check("조직 화면: 패널별 migration 중복 캡션 제거", "_NOT_READY_HINT" not in org_src)
+check("운영단위: 교대/일반 시각 클래스", "ms-unit-shift" in org_src and "ms-unit-general" in org_src)
+check("붙여넣기: 비편집 셀 건너뜀", "if (!editable) { return; }" in workspace_src)
+check("사용자 화면: 표시순서 조용한 누락 대신 저장 차단 안내", "표시순서를 입력하면 저장이 차단됩니다" in users_src)
+
 
 # ===== 6) 운영단위 검증 =====
 print("운영단위 검증 (_validate_units / _unit_structure_errors)")
@@ -410,8 +435,22 @@ print("권한 라우팅 (메뉴 id 유지)")
 for page in ("master_departments", "master_teams"):
     check(f"{page} 메뉴 id 유지(ADMIN 허용)", nav.allowed(page, "ADMIN"))
     check(f"{page} USER 접근 불가", not nav.allowed(page, "USER"))
-check("메뉴 라벨 무변경(부서 관리)", nav.page_label("master_departments") == "부서 관리")
-check("메뉴 라벨 무변경(조 관리)", nav.page_label("master_teams") == "조 관리")
+master_children = next(g["children"] for g in ui._shell_groups("ADMIN") if g["id"] == "master")
+check("사이드바는 조직 관리 단일 메뉴", [c["id"] for c in master_children] == [
+    "master_users", "master_org", "master_work_types",
+])
+
+
+def _screen_direct_org():
+    import app
+    from modules import db as app_db
+    app.dispatch("master_org", app_db.find_user_by_emp_no("1001"))
+
+
+at_org = AppTest.from_function(_screen_direct_org, default_timeout=30).run()
+check("master_org 직접 라우팅 예외 없음", not at_org.exception)
+check("master_org 직접 라우팅이 조직 관리 화면 표시",
+      "조직 관리" in " ".join(str(m.value) for m in at_org.markdown))
 
 
 print()

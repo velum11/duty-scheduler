@@ -171,7 +171,7 @@ def render(user: dict) -> None:
     if not db.org_schema_ready():
         st.caption(
             "표시순서 컬럼(users.display_order, migration 003)이 아직 적용되지 않아 "
-            "표시순서 입력값은 저장되지 않습니다 — supabase/migrations/003_org_structure.sql 적용 후 사용하세요."
+            "표시순서를 입력하면 저장이 차단됩니다 — supabase/migrations/003_org_structure.sql 적용 후 사용하세요."
         )
 
     with bar:
@@ -327,6 +327,18 @@ def _save(grid_df, q, dept_names, team_resolve, team_display) -> None:
     """
     live = _live(grid_df)
     records, errors = _validate(live, _dept_resolver(dept_names), team_resolve)
+
+    if not db.org_schema_ready():
+        ordered = [
+            str(record.get("emp_no") or "(사번 없음)")
+            for record in records
+            if record.get("display_order") is not None
+        ]
+        if ordered:
+            errors.append(
+                "migration 003 미적용 상태에서는 표시순서를 저장할 수 없습니다: "
+                + ", ".join(ordered)
+            )
 
     store = db.get_users()
     merged, dup, n_c, n_u, _n_d = db.upsert_records(

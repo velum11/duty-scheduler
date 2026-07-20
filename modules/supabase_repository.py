@@ -500,11 +500,25 @@ def get_users() -> pd.DataFrame:
 
 
 def upsert_users(records: list[dict]) -> None:
-    """사용자 upsert. display_order 는 003 적용 시에만 payload 에 포함한다
-    (미적용이면 해당 필드를 조용히 제외 — 화면이 별도 경고를 표시한다)."""
+    """사용자 upsert. 003 미적용 상태의 display_order 입력은 전체 차단한다.
+
+    표시순서가 모두 NULL이면 기존 사용자 필드만 저장할 수 있지만, 값이 하나라도
+    있으면 일부 필드만 성공하는 상태를 만들지 않도록 DB 조회 전에 실패시킨다.
+    """
+    with_order = org_extensions_ready()
+    blocked_emp_nos = [
+        _clean_text(row.get("emp_no")) or "(사번 없음)"
+        for row in records
+        if _clean_order(row.get("display_order")) is not None
+    ] if not with_order else []
+    if blocked_emp_nos:
+        raise SupabaseDataError(
+            "migration 003 미적용 상태에서는 사용자 표시순서를 저장할 수 없습니다: "
+            + ", ".join(blocked_emp_nos)
+        )
+
     dept_by_code, _ = _department_maps()
     team_by_key, _ = _team_maps()
-    with_order = org_extensions_ready()
     payload = []
     for row in records:
         dept_code = _clean_text(row.get("dept_code"))

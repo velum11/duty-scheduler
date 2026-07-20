@@ -163,6 +163,11 @@ _NATIVE_PASTE_HANDLER = JsCode(
           values.forEach(function(value, columnOffset) {
             const column = columns[start + columnOffset];
             if (!column) { return; }
+            const colDef = column.getColDef();
+            const editable = typeof colDef.editable === 'function'
+              ? colDef.editable({ node: node, data: node.data, column: column, colDef: colDef })
+              : colDef.editable !== false;
+            if (!editable) { return; }
             // 체크박스 컬럼은 Excel 의 TRUE/1/사용 등 텍스트를 boolean 으로 변환한다.
             // (기존 행은 boolean 타입으로 추론되어 문자열이 false 로 캐스팅됨)
             if (column.getColDef().cellEditor === 'agCheckboxCellEditor') {
@@ -425,9 +430,20 @@ _MASTER_GRID_CSS = {
     },
     ".md-act-rm:hover": {"background": "#F7EFEC", "border-color": "#C77B6B"},
     # 조직 관리 — 가상 그룹 부모 행(배경·굵게)과 부서 자식 들여쓰기.
-    ".ms-group-row": {"background": "#EFECE4 !important", "font-weight": "700"},
+    ".ms-group-row": {
+        "background": "#EFECE4 !important", "font-weight": "700",
+        "box-shadow": "inset 3px 0 #C9A26B",
+    },
     ".ms-group-row .ag-cell": {"color": "#3D3A34"},
     ".ms-indent": {"padding-left": "26px !important"},
+    ".ms-unit-shift": {
+        "background": "rgba(30, 58, 110, 0.10) !important", "color": "#1E3A6E",
+        "font-weight": "700", "border-radius": "4px", "justify-content": "center",
+    },
+    ".ms-unit-general": {
+        "background": "rgba(61, 58, 52, 0.08) !important", "color": "#3D3A34",
+        "font-weight": "700", "border-radius": "4px", "justify-content": "center",
+    },
 }
 
 _META_COLUMNS = ["_row_id", "_row_state", "_sel", "_removed"]

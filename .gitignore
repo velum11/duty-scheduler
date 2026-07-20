@@ -9,3 +9,6 @@ __pycache__/
 
 # 실DB read-only 백업 스냅샷 (사번·성명 등 개인정보 포함 — 커밋 금지)
 docs/backup_pre_migration_*.json
+
+# ORCA 멀티에이전트 orchestration 산출물 (프로세스 리포트 — 커밋 제외)
+.orca/

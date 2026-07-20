@@ -22,7 +22,7 @@ os.environ["DUTY_DATA_MODE"] = "sample"
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-from modules import db, ui  # noqa: E402
+from modules import db, nav, ui  # noqa: E402
 
 PASS = 0
 FAIL: list[str] = []
@@ -80,6 +80,16 @@ btn_keys = {b.key for b in at.button}
 check("접기 버튼(sb_hide) 렌더 유지", "sb_hide" in btn_keys)
 check("로그아웃 버튼(btn_logout) 렌더 유지", "btn_logout" in btn_keys)
 check("메뉴 버튼(sbs_*/sbi_*) 렌더 유지", any(str(k).startswith(("sbs_", "sbi_")) for k in btn_keys))
+admin_groups = ui._shell_groups("ADMIN")
+master_children = next(g["children"] for g in admin_groups if g["id"] == "master")
+check("ADMIN 기준정보 순서: 사용자→조직→근무형태",
+      [c["label"] for c in master_children] == ["사용자 관리", "조직 관리", "근무형태 관리"])
+check("조직 관리 메뉴는 한 번만 표시", [c["label"] for c in master_children].count("조직 관리") == 1)
+check("부서 관리·조 관리 메뉴 숨김",
+      not ({"부서 관리", "조 관리"} & {c["label"] for c in master_children}))
+check("조직 관리 메뉴 id 고정", [c["id"] for c in master_children] == [
+    "master_users", "master_org", "master_work_types",
+])
 
 
 # ===== 3) 접힘(숨김) 상태 — 열기 버튼(sb_show) 표시, 접기 버튼 숨김 =====
@@ -103,6 +113,7 @@ if MANAGER:
     mkeys = {b.key for b in atm.button}
     check("MANAGER 접기/로그아웃 버튼 유지", "sb_hide" in mkeys and "btn_logout" in mkeys)
     check("MANAGER 렌더에 '교대 근무표'", "교대 근무표" in " ".join(m.value for m in atm.markdown))
+    check("MANAGER 기존 권한 메뉴 불변", ui._shell_groups("MANAGER") == nav.visible_groups("MANAGER"))
 else:
     check("MANAGER 샘플 계정 존재", False)
 

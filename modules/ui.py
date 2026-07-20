@@ -432,7 +432,7 @@ def setup_page() -> None:
 def app_shell(user: dict) -> str:
     """단일 다크 사이드바(브랜드 헤더 + 접이식 그룹 메뉴 + 하단 사용자 카드)와
     본문 브레드크럼을 렌더링하고 선택된 page id 를 반환한다. (ADMIN/MANAGER PC 전용)"""
-    groups = nav.visible_groups(user["role"])
+    groups = _shell_groups(user["role"])
     valid_pages = {c["id"] for g in groups for c in g["children"]}
 
     page = st.session_state.get("nav_page")
@@ -458,6 +458,27 @@ def app_shell(user: dict) -> str:
 
     _breadcrumb_header(user, page)
     return page
+
+
+def _shell_groups(role: str) -> list:
+    """기준정보의 부서/조 메뉴를 통합 조직 관리 항목 하나로 표시한다."""
+    groups = []
+    for group in nav.visible_groups(role):
+        if group["id"] != "master":
+            groups.append(group)
+            continue
+        children = []
+        for child in group["children"]:
+            if child["id"] == "master_departments":
+                children.append({
+                    "id": "master_org",
+                    "label": "조직 관리",
+                    "desc": "그룹, 부서와 운영단위를 관리합니다.",
+                })
+            elif child["id"] != "master_teams":
+                children.append(child)
+        groups.append({**group, "children": children})
+    return groups
 
 
 def _sidebar_brand() -> None:
@@ -556,7 +577,11 @@ def _sidebar_user_card(user: dict) -> None:
 
 def _breadcrumb_header(user: dict, page: str) -> None:
     """본문 상단 브레드크럼(그룹명). 사이드바 숨김 시 열기(▤) 버튼 표시."""
-    cur_group = nav.group_of(page, user["role"])
+    cur_group = (
+        {"label": "기준정보"}
+        if page == "master_org"
+        else nav.group_of(page, user["role"])
+    )
     crumb_html = f"<span class='crumb'>{escape(cur_group['label'])}</span>"
 
     with st.container(key="app_header"):

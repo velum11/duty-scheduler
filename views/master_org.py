@@ -33,6 +33,7 @@ unit_type(SHIFT=교대/GENERAL=일반)으로 교대조와 일반근무를 함께
   필터로 가려진 행과의 충돌도 차단한다.
 """
 import json
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -54,10 +55,34 @@ _DEPT_GRID_COLUMNS = {
 _SYSTEM_CODES = {"ADMIN"}
 
 # 신규 그룹의 임시 라벨 (저장 시 그룹 부모 행의 이름으로 대체된다)
-_NEW_GROUP_LABEL = "(신규 그룹 {n})"
+_NEW_GROUP_LABEL = "(새 그룹 {n} — 이름 입력)"
 
 # 부서 행 전용 편집 — 그룹 부모 행에서는 소속그룹/부서코드/사용을 편집하지 않는다.
 _DEPT_ONLY_EDITABLE = JsCode("function(p){ return p.data && p.data._row_state !== 'group'; }")
+
+_ORG_NAME_RENDERER = JsCode(
+    """
+    function(p) {
+      if (!p.data || p.data._row_state !== 'group') { return p.value || ''; }
+      const name = p.value || '이름 없는 그룹';
+      const rid = p.data._row_id || '';
+      const target = rid.indexOf('g:') === 0
+        ? rid.substring(2)
+        : '(새 그룹 ' + rid.substring(3) + ' — 이름 입력)';
+      let count = 0;
+      p.api.forEachNodeAfterFilterAndSort(function(node) {
+        if (node.rowIndex <= p.node.rowIndex) { return; }
+        if (node.data && node.data._row_state === 'group') { return; }
+        if (node.data && node.data['소속그룹'] === target) { count += 1; }
+      });
+      return name + ' · 부서 ' + count + '개';
+    }
+    """
+)
+
+_DEPT_CODE_RENDERER = JsCode(
+    "function(p){ return p.data && p.data._row_state === 'group' ? '' : (p.value || ''); }"
+)
 
 _GROUP_ROW_CLASS_RULES = {"ms-group-row": "data._row_state == 'group'"}
 
@@ -72,6 +97,10 @@ _UNIT_COL_CONFIG = {
         "flex": 0, "width": 84, "minWidth": 72, "maxWidth": 104, "cellClass": "md-c-center",
         "cellEditor": "agSelectCellEditor",
         "cellEditorParams": {"values": ["교대", "일반"]},
+        "cellClassRules": {
+            "ms-unit-shift": "value == '교대'",
+            "ms-unit-general": "value == '일반'",
+        },
     },
     "표시순서": {"flex": 0, "width": 80, "minWidth": 68, "maxWidth": 104, "cellClass": "md-c-center"},
     "사용": {"flex": 0, "width": 62, "minWidth": 56, "maxWidth": 84, "cellClass": "md-c-center"},
@@ -83,10 +112,16 @@ _UNIT_TYPE_OF = {
     "SHIFT": "SHIFT", "GENERAL": "GENERAL",
 }
 
-_NOT_READY_HINT = (
-    "확장 컬럼(migration 003)이 적용되지 않아 저장이 차단됩니다 — "
-    "supabase/migrations/003_org_structure.sql 적용 후 사용하세요."
-)
+_ORG_PAGE_CSS = """
+<style>
+.org-flow { display:flex; align-items:center; gap:.55rem; margin:.1rem 0 .65rem; color:#6F6B63; font-size:.78rem; }
+.org-flow-step { display:flex; align-items:center; gap:.42rem; padding:.38rem .62rem; background:#F7F5F1; border:1px solid #DED8CD; border-radius:7px; }
+.org-flow-step b { display:inline-flex; align-items:center; justify-content:center; width:1.25rem; height:1.25rem; border-radius:50%; background:#1E3A6E; color:#FFF; font-size:.68rem; }
+.org-flow-arrow { color:#C9A26B; font-weight:700; }
+.st-key-od_panel, .st-key-ou_panel { background:#FFFFFF; border:1px solid #D8D2C7; border-radius:10px; padding:.75rem .8rem .65rem; box-shadow:0 1px 2px rgba(38,36,31,.04); }
+.st-key-od_panel .ms-panel, .st-key-ou_panel .ms-panel { margin:0 0 .45rem; padding-bottom:.45rem; border-bottom:1px solid #E7E3DB; }
+</style>
+"""
 
 
 def render(user: dict) -> None:
@@ -94,13 +129,19 @@ def render(user: dict) -> None:
         "조직 관리",
         "그룹과 부서를 관리하고, 선택한 부서의 운영단위(교대조·일반근무)를 설정합니다.",
     )
+    st.markdown(_ORG_PAGE_CSS, unsafe_allow_html=True)
     org_ready = db.org_schema_ready()
     if not org_ready:
-        st.warning(
-            "그룹·운영단위·사용자 표시순서 확장 컬럼(migration 003)이 아직 적용되지 않았습니다. "
-            "조회는 임시 표시(부서 1개 = 그룹 1개)이며, 이 화면의 저장은 차단됩니다. "
-            "적용 파일: supabase/migrations/003_org_structure.sql"
-        )
+        st.warning("조직 확장(migration 003) 적용 전 — 조회만 가능하며 저장은 차단됩니다.")
+
+    st.markdown(
+        "<div class='org-flow'>"
+        "<span class='org-flow-step'><b>1</b>그룹</span><span class='org-flow-arrow'>›</span>"
+        "<span class='org-flow-step'><b>2</b>부서</span><span class='org-flow-arrow'>›</span>"
+        "<span class='org-flow-step'><b>3</b>선택 부서의 운영단위</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     refresh_dept = st.session_state.pop("od_refresh_req", False)
     refresh_unit = st.session_state.pop("ou_refresh_req", False)
@@ -125,9 +166,11 @@ def render(user: dict) -> None:
 
     left, right = st.columns([1.25, 1], gap="medium")
     with left:
-        dept_grid = _render_dept_panel(params, org_ready)
+        with st.container(key="od_panel"):
+            dept_grid = _render_dept_panel(params, org_ready)
     with right:
-        unit_grid, unit_dept = _render_unit_panel(refresh_unit, org_ready)
+        with st.container(key="ou_panel"):
+            unit_grid, unit_dept = _render_unit_panel(refresh_unit, org_ready)
 
     # 버튼 클릭 처리 (최신 grid 데이터 기준 — 양쪽 그리드 렌더 이후)
     if st.session_state.pop("od_save_req", False):
@@ -169,10 +212,7 @@ def _group_labels(rows: pd.DataFrame) -> list[str]:
 
 
 def _render_dept_panel(params: dict, org_ready: bool) -> pd.DataFrame:
-    st.markdown(
-        "<div class='ms-panel'>그룹·부서 <small>— 그룹명·순서는 그룹 행에서 한 번만 수정</small></div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("<div class='ms-panel'>그룹 · 부서 구조</div>", unsafe_allow_html=True)
     show_flash("org_dept")
 
     plan = st.session_state.get("od_plan")
@@ -188,10 +228,12 @@ def _render_dept_panel(params: dict, org_ready: bool) -> pd.DataFrame:
         "그룹·부서명": {
             "flex": 1.6, "minWidth": 130, "cellClass": "md-c-left",
             "cellClassRules": {"ms-indent": "data._row_state != 'group'"},
+            "cellRenderer": _ORG_NAME_RENDERER,
         },
         "순서": {"flex": 0, "width": 68, "minWidth": 60, "maxWidth": 92, "cellClass": "md-c-center"},
         "소속그룹": {
             "flex": 1, "minWidth": 104, "cellClass": "md-c-left",
+            "headerName": "그룹 이동",
             # editable(JsCode) + cellEditor 조합은 st_aggrid 에서 select 가 열리지
             # 않아, selector 로 그룹 행 차단과 select 지정을 함께 처리한다.
             "cellEditorSelector": JsCode(
@@ -203,7 +245,7 @@ def _render_dept_panel(params: dict, org_ready: bool) -> pd.DataFrame:
             ),
         },
         "부서코드": {"flex": 0, "width": 92, "minWidth": 80, "cellClass": "md-c-left",
-                  "editable": _DEPT_ONLY_EDITABLE},
+                  "editable": _DEPT_ONLY_EDITABLE, "cellRenderer": _DEPT_CODE_RENDERER},
         "사용": {"flex": 0, "width": 60, "minWidth": 54, "maxWidth": 84, "cellClass": "md-c-center",
                "editable": _DEPT_ONLY_EDITABLE},
     }
@@ -222,11 +264,9 @@ def _render_dept_panel(params: dict, org_ready: bool) -> pd.DataFrame:
     sel_count = int((existing["_sel"].map(grid_bool)).sum()) if not existing.empty else 0
     n_groups = int((live["_row_state"] == "group").sum())
     workspace.master_count(len(existing), len(new_rows), sel_count)
-    if not org_ready:
-        st.caption(_NOT_READY_HINT)
     with bar:
         _org_dept_bar(sel_count)
-    st.caption(f"그룹 {n_groups}개 · 그룹 삭제는 소속 부서를 모두 이동/삭제하면 자동으로 사라집니다.")
+    st.caption(f"그룹 {n_groups}개")
     return grid_df
 
 
@@ -252,7 +292,7 @@ def build_org_rows(df: pd.DataFrame) -> pd.DataFrame:
     """departments 프레임 → 가상 그룹 부모 + 부서 자식 행 모델 (항상 펼침).
 
     그룹 부모: _row_id="g:{그룹명}", 그룹·부서명=그룹명, 순서=그룹순서,
-               부서코드 셀에 "부서 N개" 요약 (비편집 정보 표시).
+               부서코드 셀은 비워 두고 렌더러가 명칭 옆에 부서 수를 표시.
     부서 자식: _row_id="e:{부서코드}", 그룹·부서명=부서명(들여쓰기), 순서=부서순서,
                소속그룹=로드 시점 그룹명 (selectbox 로 이동).
     정렬: 그룹순서 → (그룹명) → 부서순서 → 부서코드 (부서순서 동률은 코드 보조 정렬).
@@ -274,7 +314,7 @@ def build_org_rows(df: pd.DataFrame) -> pd.DataFrame:
         rows.append({
             "_row_id": f"g:{group}", "_row_state": "group", "_sel": False,
             "그룹·부서명": group, "순서": str(int(g_order)),
-            "소속그룹": "", "부서코드": f"부서 {len(sub)}개", "사용": True,
+            "소속그룹": "", "부서코드": "", "사용": True,
         })
         for _, r in sub.iterrows():
             rows.append({
@@ -316,7 +356,7 @@ def _add_group_rows(grid_df: pd.DataFrame) -> None:
     label = _NEW_GROUP_LABEL.format(n=n)
     group_row = {
         "_row_id": f"gn:{n}", "_row_state": "group", "_sel": False,
-        "그룹·부서명": "", "순서": "", "소속그룹": "", "부서코드": "부서 1개", "사용": True,
+        "그룹·부서명": "", "순서": "", "소속그룹": "", "부서코드": "", "사용": True,
     }
     dept_row = {
         "_row_id": _next_rid("od_rid"), "_row_state": "new", "_sel": False,
@@ -662,17 +702,26 @@ def _dept_options() -> tuple[list[str], dict]:
     for _, r in depts.iterrows():
         code = str(r["dept_code"]).strip()
         name = str(r["dept_name"]).strip()
-        disp_of[code] = name if name_dups.get(name, 0) == 1 else f"{name} ({code})"
+        group = str(r.get("department_group") or "").strip()
+        dept_label = name if name_dups.get(name, 0) == 1 else f"{name} ({code})"
+        disp_of[code] = f"{group} › {dept_label}" if group else dept_label
     return list(disp_of), disp_of
 
 
 def _render_unit_panel(refresh: bool, org_ready: bool) -> tuple[pd.DataFrame | None, str]:
-    st.markdown("<div class='ms-panel'>선택한 부서의 운영단위</div>", unsafe_allow_html=True)
-
     codes, disp_of = _dept_options()
     if not codes:
+        st.markdown("<div class='ms-panel'>운영단위</div>", unsafe_allow_html=True)
         ui.empty_state("등록된 부서가 없습니다. 왼쪽에서 부서를 먼저 등록하세요.", head="운영단위")
         return None, ""
+
+    current = st.session_state.get("ou_dept")
+    if current not in codes:
+        current = codes[0]
+    st.markdown(
+        f"<div class='ms-panel'>운영단위 <small>— {escape(disp_of.get(current, current))}</small></div>",
+        unsafe_allow_html=True,
+    )
 
     dept = st.selectbox(
         "대상 부서", codes, key="ou_dept",
@@ -703,8 +752,6 @@ def _render_unit_panel(refresh: bool, org_ready: bool) -> tuple[pd.DataFrame | N
     new_rows = live[live["_row_state"] != "existing"]
     sel_count = int((existing["_sel"].map(grid_bool)).sum()) if not existing.empty else 0
     workspace.master_count(len(existing), len(new_rows), sel_count)
-    if not org_ready:
-        st.caption(_NOT_READY_HINT)
     with bar:
         workspace.master_action_bar(sel_count, prefix="ou")
     return grid_df, dept

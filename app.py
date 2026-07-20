@@ -14,7 +14,7 @@ ui.setup_page()
 from views import (
     dashboard, login, my_schedule,
     schedule_edit, schedule_view,
-    master_users, master_departments, master_teams, master_work_types,
+    master_users, master_departments, master_teams, master_org, master_work_types,
 )
 
 # 업무 화면 라우팅 테이블 (page id → 화면 모듈)
@@ -22,6 +22,7 @@ _PAGES = {
     "schedule_edit": schedule_edit,
     "schedule_view": schedule_view,
     "master_users": master_users,
+    "master_org": master_org,
     "master_departments": master_departments,
     "master_teams": master_teams,
     "master_work_types": master_work_types,
@@ -31,7 +32,7 @@ _PAGES = {
 def dispatch(page: str, user: dict) -> None:
     """선택된 메뉴 page id 에 맞는 화면을 렌더링한다."""
     role = str(user.get("role", "")).strip().upper()
-    if not nav.allowed(page, role):
+    if not (nav.allowed(page, role) or (page == "master_org" and role == "ADMIN")):
         page = nav.default_page(role)
         st.session_state.nav_page = page
 
