@@ -293,6 +293,11 @@ _ROW_ACTION_RENDERER = JsCode(
         const d = params.data || {};
         const eGui = document.createElement('div');
         eGui.className = 'md-act';
+        if (d._row_state === 'group') {
+          // 가상 그룹 부모 행(조직 관리) — 선택/제거 대상이 아니므로 빈 셀.
+          this.eGui = eGui;
+          return;
+        }
         if (d._row_state === 'existing') {
           const cb = document.createElement('input');
           cb.type = 'checkbox';
@@ -419,6 +424,10 @@ _MASTER_GRID_CSS = {
         "font-size": "15px", "font-weight": "700",
     },
     ".md-act-rm:hover": {"background": "#F7EFEC", "border-color": "#C77B6B"},
+    # 조직 관리 — 가상 그룹 부모 행(배경·굵게)과 부서 자식 들여쓰기.
+    ".ms-group-row": {"background": "#EFECE4 !important", "font-weight": "700"},
+    ".ms-group-row .ag-cell": {"color": "#3D3A34"},
+    ".ms-indent": {"padding-left": "26px !important"},
 }
 
 _META_COLUMNS = ["_row_id", "_row_state", "_sel", "_removed"]
@@ -432,6 +441,7 @@ def selectable_master_grid(
     order: list[str] | None = None,
     col_config: dict | None = None,
     select_all_header: bool = False,
+    extra_grid_options: dict | None = None,
 ) -> pd.DataFrame:
     """행 상태 계약(_row_id/_row_state/_sel/_removed)을 갖춘 기준정보 편집 그리드.
 
@@ -446,6 +456,8 @@ def selectable_master_grid(
       등 화면별 설정을 기본값 위에 덮어쓴다 (미지정 화면은 기존 동작 유지).
     select_all_header: True 면 선택 열 헤더에 3상태 전체 선택 체크박스를 표시한다
       (표시 중인 기존 행만 대상 — 기본 False 로 기존 화면 무변경).
+    extra_grid_options: gridOptions 에 덮어쓸 추가 옵션(dict). 조직 관리의
+      rowClassRules(가상 그룹 부모 행 강조) 등 — 기본 None 으로 기존 화면 무변경.
     """
     frame = frame.copy().reset_index(drop=True)
     for meta, default in (("_row_id", ""), ("_row_state", "new"), ("_sel", False), ("_removed", "")):
@@ -520,6 +532,8 @@ def selectable_master_grid(
         "onCellClicked": _ROW_ACTION_CLICK,
         # 자동 빈 행 추가는 쓰지 않는다 — 신규 행은 [＋ 행 추가]/붙여넣기로만 생성.
     }
+    if extra_grid_options:
+        grid_options.update(extra_grid_options)
 
     ordered = ["_action"] + order + _META_COLUMNS
     response = AgGrid(
@@ -583,12 +597,12 @@ _MASTER_CSS = """
 /* 저장 — 앱 네이비 primary (검정 금지) */
 .st-key-ms_save button[kind="primary"], .st-key-od_save button[kind="primary"], .st-key-ou_save button[kind="primary"] { background: #1E3A6E !important; border: 1px solid #1E3A6E !important; color: #FFFFFF !important; }
 .st-key-ms_save button[kind="primary"]:hover, .st-key-od_save button[kind="primary"]:hover, .st-key-ou_save button[kind="primary"]:hover { background: #17305C !important; border-color: #17305C !important; }
-/* 행 추가 / 새로고침 — 중립 outline */
+/* 행 추가 / 새로고침 — 중립 outline (od_addg = 조직 관리 [＋ 그룹]) */
 .st-key-ms_add button, .st-key-ms_refresh button,
-.st-key-od_add button, .st-key-od_refresh button,
+.st-key-od_add button, .st-key-od_addg button, .st-key-od_refresh button,
 .st-key-ou_add button, .st-key-ou_refresh button { background: #FFFFFF !important; border: 1px solid #D8D2C7 !important; color: #3D3A34 !important; }
 .st-key-ms_add button:hover, .st-key-ms_refresh button:hover,
-.st-key-od_add button:hover, .st-key-od_refresh button:hover,
+.st-key-od_add button:hover, .st-key-od_addg button:hover, .st-key-od_refresh button:hover,
 .st-key-ou_add button:hover, .st-key-ou_refresh button:hover { background: #F1EEE9 !important; border-color: #C9A26B !important; }
 /* 삭제 — 중립 outline(빨강 계열 글자), 선택 없으면 disabled */
 .st-key-ms_del button, .st-key-od_del button, .st-key-ou_del button { background: #FFFFFF !important; border: 1px solid #E0CFC9 !important; color: #9A3B2E !important; }

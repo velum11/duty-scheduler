@@ -21,6 +21,29 @@
 
 ## 로그
 
+## 2026-07-20 11:50 · [터미널] · [조직 관리 재정리] 가상 그룹 부모 모델 + 사용자 표시순서(그룹 기준)
+요청: 조직 관리의 평면 반복입력 구조를 그룹 부모/부서 자식 계층으로 재정리, 세 가지 순서(그룹/부서/사용자 표시) 분리, users.display_order 추가. migration 003 미적용 유지·사이드바/월간/편성/내근무표 무수정.
+
+**§3 진단 (문제 명시)**
+- 현재 DB 저장 형태는 departments 행별 그룹값(department_group/group_sort_order) 반복 저장.
+- 기존 UI(4a08b3b)가 이 DB 행 구조를 그대로 노출 — 부서 행마다 그룹명·그룹순서 컬럼을 직접 편집해야 했고, 한 행만 수정하면 그룹이 갈라짐(구조검증이 차단만 할 뿐 전파 없음).
+- 화면에는 가상 그룹 부모 모델이 필요하고, 저장 시 그룹 부모 값을 자식 department payload 로 확장(전파)해야 함.
+- 추가 결함: `_group_structure_errors` 가 **부서순서(sort_order)까지 그룹 내 유일값으로 차단** — 이 요구는 원래 사용자 표시순서 것 → 제거. migration 003 에 users.display_order 누락 → 추가.
+
+**구현**
+- migration 003(초안, 미적용): `users.display_order integer`(NULL 유지·백필 없음) 추가, 롤백 주석·코멘트·예상 행수(5/6/21 불변, DML=departments UPDATE 2건뿐)·work_schedules/assignments 미참조 명시. teams.unit_type SHIFT 백필·CHECK 기존 유지.
+- repo: org probe 에 users.display_order 포함(3종 일괄 판정). get_users/upsert_users 에 display_order 배관(003 미적용이면 조회 NULL·저장 시 필드 제외). `_clean_order` float 표기 수용.
+- db: USER_COLUMNS + display_order. 신규 helper — `normalize_display_order`(float 승격 "1.0" 수용), `dept_group_map(merged)`(저장 후 예상 그룹 매핑), `display_order_conflicts(users, group_of)`(활성+지정만, **그룹 기준** 중복), `sort_users_for_display`(그룹순서→표시순서 NULL 뒤→사번; §13 helper 만 — 월간/편성 적용은 후속 미션).
+- workspace: `_ROW_ACTION_RENDERER` 에 `_row_state=='group'` 빈 셀 분기(선택/− 불가), `selectable_master_grid(extra_grid_options=)`, `.ms-group-row`(배경·굵게)/`.ms-indent`(26px) CSS, od_addg 버튼 CSS. 다른 화면 무영향(기본값 None).
+- master_org 좌패널 재설계: `build_org_rows`(그룹 부모 1회 + 자식, 부서순서 동률 시 코드 보조정렬, 그룹행 부서코드 셀 "부서 N개" 요약, 항상 펼침) / `parse_org_grid`(그룹행 1회 편집 수집 → 자식 payload 전파, **필터로 화면에 없는 같은 그룹 부서에도 전파**해 그룹 갈라짐 방지, casefold 병합=순서 동일 필수, 빈 새 그룹 차단, 소속그룹 필수/미존재 차단, 부서순서 빈=0·중복 허용). 툴바 [＋그룹(부모+첫 부서 쌍)][＋부서][삭제][저장]|[새로고침]. 소속그룹은 selectbox(이동/배정 — 그룹값 타이핑 없음): editable(JsCode)+agSelectCellEditor 조합이 st_aggrid 에서 안 열리는 문제 발견 → **cellEditorSelector(JsCode)** 로 그룹행 차단+select 지정 통합. 조직 저장 전 `display_order_conflicts(users, dept_group_map(merged))` — 변경 후 그룹 구조 기준 사전 차단 + 사용자 관리 안내 문구. 003 미적용: 상단 배너(파일명)+좌우 저장 근처 캡션+저장 시 차단 오류.
+- master_users(최소): 표시순서 컬럼(권한·재직 사이)+검증(정수/1 이상/빈=NULL), 저장 전 merged 기준 그룹 충돌 검증, 003 미적용 캡션. 레이아웃 무변경.
+- 테스트: test_master_org 재작성 **76건**(계층 모델·전파·병합·부서순서 허용·display_order 12건·운영단위·폴백·왕복·라우팅). 발견 버그: pandas int+NULL→float 승격으로 "1.0" 파싱 실패 → normalize 수정.
+
+**브라우저 검증(1366/1920/1024, supabase read-only)**: 사이드바 232px·승인 메뉴 동일. 부서/조 관리 메뉴 모두 조직 관리. 그룹 부모(배경 #EFECE4·굵게·선택셀 빈)+자식 들여쓰기 26px. 그룹행 부서코드 비편집·명칭 편집 확인. 소속그룹 select 열림(옵션=빈+전 그룹). ＋그룹=부모+자식 쌍("(신규 그룹 1)" 자동 연결·− 제거). [저장]→003 차단 오류(파일명) — 실DB 쓰기 0. 우측 PVC 전환→A/B/C 교대(4·5·6). 사용자 관리 표시순서 헤더+캡션. 3해상도 가로 오버플로우·버튼-그리드 겹침 없음. 실DB 최종 re-check: 003 컬럼 3종 미존재·5/6/21/1147/SA 0 불변.
+- 자동테스트: org 76 + unified 70 + forms 16 + views 26 + sidebar 37 + assignment 22 + contracts 52 + save_units 15 + audit 39 = **353건 통과**. compile OK, git diff --check clean. 금지 파일(ui.py/nav/schedule_edit/my_schedule/dashboard/001/002) 무변경.
+- 후속: (a) 003 적용 후 sort_users_for_display 를 월간/편성 화면에 적용, (b) 적용 직후 실그룹(PET/PVC/DECO/관리) 수동 정리 + 사용자 표시순서 입력, (c) 좌패널 그룹행 접기/펼치기(현재 항상 펼침).
+- 파일: supabase/migrations/003_org_structure.sql, modules/supabase_repository.py, modules/db.py, views/workspace.py, views/master_org.py, views/master_users.py, scripts/test_master_org.py, docs/WORKLOG.md. commit·push 없음.
+
 ## 2026-07-20 09:40 · [터미널] · [화면 통합] 부서/조 관리 → 조직 관리 통합 화면 (그룹·부서 + 운영단위) + migration 003 초안
 - 요청: 부서 관리·조 관리를 "조직 관리" 하나로 통합(2번 시안: 좌 그룹·부서 / 우 선택 부서의 운영단위). 그룹은 departments 컬럼으로(별도 테이블 금지), 운영단위는 teams 확장(교대/일반), 그룹순서 전역 유일. 사이드바 무변경.
 - **화면(views/master_org.py 신규)**: 제목 "조직 관리" + 공통 필터행 → 좌우 2패널. 좌: 그룹명·그룹순서·부서코드·부서명·부서순서·사용 grid(그룹-부서 한 행에 붙음, 그룹순서→부서순서 정렬). 우: 부서 selectbox(활성, 그룹순 정렬) + 코드·명칭·유형(교대/일반 select editor)·표시순서·사용 grid. 행 상태 계약(_row_id/_sel/− 신규행)·Excel 붙여넣기·전체선택 헤더는 공용 selectable_master_grid 재사용. **라우팅**: master_departments/master_teams 는 master_org.render 위임(사이드바 메뉴·라벨·nav.py 무변경 — 두 메뉴가 같은 화면).

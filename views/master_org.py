@@ -5,21 +5,38 @@
 (department_group/group_sort_order)로 관리하고 운영단위는 teams 를 그대로 쓰되
 unit_type(SHIFT=교대/GENERAL=일반)으로 교대조와 일반근무를 함께 담는다.
 
+좌측 그리드는 DB 의 행별 반복 저장 구조를 그대로 노출하지 않는다:
+  - 가상 그룹 부모 행(_row_state="group") 아래에 부서 자식 행이 붙는 계층 표시.
+  - 그룹명·그룹순서는 그룹 부모 행에서 한 번만 편집한다 (부서 행에는 없음).
+  - 부서 행의 '소속그룹'은 이동/배정용 선택 필드다 — 그룹값을 직접 타이핑하지 않는다.
+  - 저장 시 그룹 부모의 이름·순서를 소속 부서 전체 payload 로 자동 전파한다.
+    (필터로 화면에 안 보이는 같은 그룹 부서에도 전파해 그룹이 갈라지지 않게 한다.)
+  - 부서순서(sort_order)는 그룹 안 보조 표시순서 — 중복을 저장 오류로 막지 않는다
+    (같으면 부서코드 보조 정렬). 그룹 내 유일해야 하는 순서는 사용자 표시순서
+    (users.display_order)이며 사용자 관리에서 관리한다.
+
 좌/우 패널은 각각 독립 저장 계약을 가진다 (od_* = 그룹·부서, ou_* = 운영단위):
   - 저장 오류를 영역별로 분리해 보여주고, 실패한 영역의 편집 초안은 유지한다.
   - 운영단위는 우측 상단에서 선택한 부서에 종속된다 — 부서 선택 없이 저장 불가.
 행 상태 계약(_row_id/_row_state/_sel)과 붙여넣기/삭제 흐름은 기존 기준정보
 화면(views/workspace 공용 helper)과 동일하다.
 
-검증 규칙 (그룹 순서는 전역 유일):
+검증 규칙:
   - 그룹순서(group_sort_order)는 그룹 간 중복 금지, 같은 그룹은 하나의 순서만.
-  - 같은 그룹 안에서 부서순서(sort_order) 중복 금지. 부서코드는 전역 유일.
+  - 그룹명 필수(trim), 그룹명 중복 비교는 trim+casefold — 이름이 같아지면 병합.
+  - 빈 그룹(부서 0개인 새 그룹)은 저장 불가 (그룹은 부서 행에 실려 저장되므로).
+  - 부서코드는 전역 유일. 같은 그룹 안 부서순서 중복은 허용.
+  - 조직 저장 전, 변경 후 그룹 구조 기준으로 활성 사용자 표시순서 충돌을 검증한다
+    (그룹 병합 시 PET생산부 1번·PET원료실 1번 같은 충돌을 사전 차단).
   - 같은 부서 안에서 운영단위 코드·명칭·표시순서 중복 금지, 유형은 교대/일반만.
   구조 검증은 화면에 보이는 행이 아니라 저장 후 전체(merged) 기준으로 수행해
   필터로 가려진 행과의 충돌도 차단한다.
 """
+import json
+
 import pandas as pd
 import streamlit as st
+from st_aggrid import JsCode
 
 from modules import db, ui
 from views import workspace
@@ -27,22 +44,22 @@ from views.workspace import grid_bool, selectable_master_grid, set_flash, show_f
 
 _STATUS = ["사용 중", "사용 안 함", "전체"]
 
-# 좌측: 그룹·부서 (그룹이 앞에 붙어 그룹-부서가 한 행에서 이어져 보인다)
-_DEPT_COLS = ["그룹명", "그룹순서", "부서코드", "부서명", "부서순서", "사용"]
+# 좌측: 그룹 부모 + 부서 자식 (한 그리드의 두 행 유형)
+_DEPT_COLS = ["그룹·부서명", "순서", "소속그룹", "부서코드", "사용"]
 _DEPT_ROW_COLS = ["_row_id", "_row_state", "_sel", *_DEPT_COLS]
 _DEPT_GRID_COLUMNS = {
-    "그룹명": "text", "그룹순서": "text", "부서코드": "text",
-    "부서명": "text", "부서순서": "text", "사용": "bool",
-}
-_DEPT_COL_CONFIG = {
-    "그룹명": {"flex": 1.1, "minWidth": 92, "cellClass": "md-c-left"},
-    "그룹순서": {"flex": 0, "width": 76, "minWidth": 68, "maxWidth": 100, "cellClass": "md-c-center"},
-    "부서코드": {"flex": 0, "width": 88, "minWidth": 78, "cellClass": "md-c-left"},
-    "부서명": {"flex": 1.5, "minWidth": 112, "cellClass": "md-c-left"},
-    "부서순서": {"flex": 0, "width": 76, "minWidth": 68, "maxWidth": 100, "cellClass": "md-c-center"},
-    "사용": {"flex": 0, "width": 62, "minWidth": 56, "maxWidth": 84, "cellClass": "md-c-center"},
+    "그룹·부서명": "text", "순서": "text", "소속그룹": "text",
+    "부서코드": "text", "사용": "bool",
 }
 _SYSTEM_CODES = {"ADMIN"}
+
+# 신규 그룹의 임시 라벨 (저장 시 그룹 부모 행의 이름으로 대체된다)
+_NEW_GROUP_LABEL = "(신규 그룹 {n})"
+
+# 부서 행 전용 편집 — 그룹 부모 행에서는 소속그룹/부서코드/사용을 편집하지 않는다.
+_DEPT_ONLY_EDITABLE = JsCode("function(p){ return p.data && p.data._row_state !== 'group'; }")
+
+_GROUP_ROW_CLASS_RULES = {"ms-group-row": "data._row_state == 'group'"}
 
 # 우측: 선택한 부서의 운영단위 (교대조 A/B/C + 일반근무 나인투식스/상근 등)
 _UNIT_COLS = ["코드", "명칭", "유형", "표시순서", "사용"]
@@ -66,16 +83,23 @@ _UNIT_TYPE_OF = {
     "SHIFT": "SHIFT", "GENERAL": "GENERAL",
 }
 
+_NOT_READY_HINT = (
+    "확장 컬럼(migration 003)이 적용되지 않아 저장이 차단됩니다 — "
+    "supabase/migrations/003_org_structure.sql 적용 후 사용하세요."
+)
+
 
 def render(user: dict) -> None:
     workspace.master_screen_head(
         "조직 관리",
         "그룹과 부서를 관리하고, 선택한 부서의 운영단위(교대조·일반근무)를 설정합니다.",
     )
-    if not db.org_schema_ready():
+    org_ready = db.org_schema_ready()
+    if not org_ready:
         st.warning(
-            "그룹·운영단위 확장 컬럼(migration 003)이 아직 적용되지 않았습니다. "
-            "적용 전에는 그룹이 부서명 기준 기본값으로 표시되며, 이 화면의 저장은 차단됩니다."
+            "그룹·운영단위·사용자 표시순서 확장 컬럼(migration 003)이 아직 적용되지 않았습니다. "
+            "조회는 임시 표시(부서 1개 = 그룹 1개)이며, 이 화면의 저장은 차단됩니다. "
+            "적용 파일: supabase/migrations/003_org_structure.sql"
         )
 
     refresh_dept = st.session_state.pop("od_refresh_req", False)
@@ -101,15 +125,17 @@ def render(user: dict) -> None:
 
     left, right = st.columns([1.25, 1], gap="medium")
     with left:
-        dept_grid = _render_dept_panel(params)
+        dept_grid = _render_dept_panel(params, org_ready)
     with right:
-        unit_grid, unit_dept = _render_unit_panel(refresh_unit)
+        unit_grid, unit_dept = _render_unit_panel(refresh_unit, org_ready)
 
     # 버튼 클릭 처리 (최신 grid 데이터 기준 — 양쪽 그리드 렌더 이후)
     if st.session_state.pop("od_save_req", False):
         _save_depts(dept_grid, params)
     if st.session_state.pop("od_del_req", False):
         _plan_dept_delete(dept_grid)
+    if st.session_state.pop("od_addg_req", False):
+        _add_group_rows(dept_grid)
     if st.session_state.pop("od_add_req", False):
         _add_dept_row(dept_grid)
     if st.session_state.pop("ou_save_req", False):
@@ -126,9 +152,27 @@ def render(user: dict) -> None:
         st.rerun()
 
 
-# ---------- 좌측 패널: 그룹·부서 ----------
-def _render_dept_panel(params: dict) -> pd.DataFrame:
-    st.markdown("<div class='ms-panel'>그룹·부서</div>", unsafe_allow_html=True)
+# ---------- 좌측 패널: 그룹(부모) · 부서(자식) ----------
+def _group_labels(rows: pd.DataFrame) -> list[str]:
+    """현재 그리드의 그룹 부모 라벨 목록 (소속그룹 selectbox 선택지)."""
+    if rows is None or rows.empty:
+        return []
+    groups = rows[rows["_row_state"] == "group"]
+    labels = []
+    for _, r in groups.iterrows():
+        rid = str(r["_row_id"])
+        if rid.startswith("gn:"):
+            labels.append(_NEW_GROUP_LABEL.format(n=rid[3:]))
+        else:
+            labels.append(rid[2:])  # "g:{로드 시점 그룹명}"
+    return labels
+
+
+def _render_dept_panel(params: dict, org_ready: bool) -> pd.DataFrame:
+    st.markdown(
+        "<div class='ms-panel'>그룹·부서 <small>— 그룹명·순서는 그룹 행에서 한 번만 수정</small></div>",
+        unsafe_allow_html=True,
+    )
     show_flash("org_dept")
 
     plan = st.session_state.get("od_plan")
@@ -138,25 +182,115 @@ def _render_dept_panel(params: dict) -> pd.DataFrame:
     bar = st.container(key="od_bar")
     nonce = st.session_state.setdefault("od_nonce", 0)
     rows = st.session_state["od_rows"]
+
+    # 소속그룹 선택지는 현재 그리드의 그룹 부모 행에서 도출 (신규 그룹 포함)
+    col_config = {
+        "그룹·부서명": {
+            "flex": 1.6, "minWidth": 130, "cellClass": "md-c-left",
+            "cellClassRules": {"ms-indent": "data._row_state != 'group'"},
+        },
+        "순서": {"flex": 0, "width": 68, "minWidth": 60, "maxWidth": 92, "cellClass": "md-c-center"},
+        "소속그룹": {
+            "flex": 1, "minWidth": 104, "cellClass": "md-c-left",
+            # editable(JsCode) + cellEditor 조합은 st_aggrid 에서 select 가 열리지
+            # 않아, selector 로 그룹 행 차단과 select 지정을 함께 처리한다.
+            "cellEditorSelector": JsCode(
+                "function(p){"
+                " if (p.data && p.data._row_state === 'group') { return null; }"
+                " return { component: 'agSelectCellEditor',"
+                f" params: {{ values: {json.dumps([''] + _group_labels(rows), ensure_ascii=False)} }} }};"
+                "}"
+            ),
+        },
+        "부서코드": {"flex": 0, "width": 92, "minWidth": 80, "cellClass": "md-c-left",
+                  "editable": _DEPT_ONLY_EDITABLE},
+        "사용": {"flex": 0, "width": 60, "minWidth": 54, "maxWidth": 84, "cellClass": "md-c-center",
+               "editable": _DEPT_ONLY_EDITABLE},
+    }
     with st.container(key="od_grid"):
         grid_df = selectable_master_grid(
             rows, key=f"od_grid_{nonce}", columns=_DEPT_GRID_COLUMNS, order=_DEPT_COLS,
             height=workspace.master_grid_height(len(rows)),
-            col_config=_DEPT_COL_CONFIG, select_all_header=True,
+            col_config=col_config, select_all_header=True,
+            extra_grid_options={"rowClassRules": _GROUP_ROW_CLASS_RULES},
         )
 
     live = _live(grid_df)
-    existing = live[live["_row_state"] == "existing"]
-    new_rows = live[live["_row_state"] != "existing"]
+    depts_live = live[live["_row_state"] != "group"]
+    existing = depts_live[depts_live["_row_state"] == "existing"]
+    new_rows = depts_live[depts_live["_row_state"] == "new"]
     sel_count = int((existing["_sel"].map(grid_bool)).sum()) if not existing.empty else 0
+    n_groups = int((live["_row_state"] == "group").sum())
     workspace.master_count(len(existing), len(new_rows), sel_count)
+    if not org_ready:
+        st.caption(_NOT_READY_HINT)
     with bar:
-        workspace.master_action_bar(sel_count, prefix="od")
+        _org_dept_bar(sel_count)
+    st.caption(f"그룹 {n_groups}개 · 그룹 삭제는 소속 부서를 모두 이동/삭제하면 자동으로 사라집니다.")
     return grid_df
 
 
+def _org_dept_bar(sel_count: int) -> None:
+    """좌측 작업 버튼: [＋ 그룹][＋ 부서][삭제][저장] · 우측 [새로고침]."""
+    g, a, d, s, _sp, r = st.columns([1.4, 1.4, 1.2, 1.2, 2.2, 1.6], vertical_alignment="center")
+    g.button("그룹", key="od_addg", icon=":material/create_new_folder:", width="stretch",
+             help="새 그룹과 첫 부서 행을 함께 추가합니다 (빈 그룹은 저장할 수 없습니다)",
+             on_click=lambda: st.session_state.update(od_addg_req=True))
+    a.button("부서", key="od_add", icon=":material/add:", width="stretch",
+             help="부서 행을 추가합니다 — 소속그룹을 선택하세요",
+             on_click=lambda: st.session_state.update(od_add_req=True))
+    d.button("삭제", key="od_del", icon=":material/delete:", width="stretch",
+             disabled=int(sel_count) == 0,
+             on_click=lambda: st.session_state.update(od_del_req=True))
+    s.button("저장", key="od_save", type="primary", width="stretch",
+             on_click=lambda: st.session_state.update(od_save_req=True))
+    r.button("새로고침", key="od_refresh", icon=":material/refresh:", width="stretch",
+             on_click=lambda: st.session_state.update(od_refresh_req=True))
+
+
+def build_org_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """departments 프레임 → 가상 그룹 부모 + 부서 자식 행 모델 (항상 펼침).
+
+    그룹 부모: _row_id="g:{그룹명}", 그룹·부서명=그룹명, 순서=그룹순서,
+               부서코드 셀에 "부서 N개" 요약 (비편집 정보 표시).
+    부서 자식: _row_id="e:{부서코드}", 그룹·부서명=부서명(들여쓰기), 순서=부서순서,
+               소속그룹=로드 시점 그룹명 (selectbox 로 이동).
+    정렬: 그룹순서 → (그룹명) → 부서순서 → 부서코드 (부서순서 동률은 코드 보조 정렬).
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(columns=_DEPT_ROW_COLS)
+    frame = df.copy()
+    frame["department_group"] = frame["department_group"].fillna("").astype(str).str.strip()
+    frame["group_sort_order"] = pd.to_numeric(frame["group_sort_order"], errors="coerce").fillna(0).astype("int64")
+    frame["sort_order"] = pd.to_numeric(frame["sort_order"], errors="coerce").fillna(0).astype("int64")
+    frame = frame.sort_values(
+        ["group_sort_order", "department_group", "sort_order", "dept_code"]
+    ).reset_index(drop=True)
+
+    rows: list[dict] = []
+    for (g_order, group), sub in frame.groupby(
+        ["group_sort_order", "department_group"], sort=True
+    ):
+        rows.append({
+            "_row_id": f"g:{group}", "_row_state": "group", "_sel": False,
+            "그룹·부서명": group, "순서": str(int(g_order)),
+            "소속그룹": "", "부서코드": f"부서 {len(sub)}개", "사용": True,
+        })
+        for _, r in sub.iterrows():
+            rows.append({
+                "_row_id": f"e:{str(r['dept_code']).strip()}",
+                "_row_state": "existing", "_sel": False,
+                "그룹·부서명": str(r["dept_name"]).strip(),
+                "순서": str(int(r["sort_order"])),
+                "소속그룹": group,
+                "부서코드": str(r["dept_code"]).strip(),
+                "사용": bool(r["is_active"]),
+            })
+    return pd.DataFrame(rows, columns=_DEPT_ROW_COLS)
+
+
 def _load_depts(q: dict) -> None:
-    """조회 조건(사용 여부 + 검색어)으로 그룹·부서를 편집기에 적재한다."""
+    """조회 조건(사용 여부 + 검색어)으로 그룹·부서를 계층 행 모델로 적재한다."""
     df = db.get_org_departments()
     if q["active"] == "사용 중":
         df = df[df["is_active"]]
@@ -170,36 +304,39 @@ def _load_depts(q: dict) -> None:
             | df["dept_name"].astype(str).str.contains(term, case=False, na=False, regex=False)
         )
         df = df[hit]
-    df = df.sort_values(
-        ["group_sort_order", "department_group", "sort_order", "dept_code"]
-    ).reset_index(drop=True)
-
-    g_order = pd.to_numeric(df["group_sort_order"], errors="coerce").fillna(0).astype("int64")
-    d_order = pd.to_numeric(df["sort_order"], errors="coerce").fillna(0).astype("int64")
-    rows = pd.DataFrame({
-        "_row_id": "e:" + df["dept_code"].astype(str),
-        "_row_state": "existing",
-        "_sel": False,
-        "그룹명": df["department_group"].fillna("").astype("string"),
-        "그룹순서": g_order.astype(str).astype("string"),
-        "부서코드": df["dept_code"].fillna("").astype("string"),
-        "부서명": df["dept_name"].fillna("").astype("string"),
-        "부서순서": d_order.astype(str).astype("string"),
-        "사용": df["is_active"].fillna(True).astype(bool),
-    }) if not df.empty else pd.DataFrame(columns=_DEPT_ROW_COLS)
-
-    st.session_state["od_rows"] = rows[_DEPT_ROW_COLS].reset_index(drop=True)
+    st.session_state["od_rows"] = build_org_rows(df)
     st.session_state["od_nonce"] = st.session_state.get("od_nonce", 0) + 1
 
 
-def _add_dept_row(grid_df: pd.DataFrame) -> None:
+def _add_group_rows(grid_df: pd.DataFrame) -> None:
+    """새 가상 그룹 부모 + 첫 부서 자식 행을 함께 추가한다 (빈 그룹 저장 불가 안내)."""
     live = _live(grid_df)
-    orders = pd.to_numeric(live.get("부서순서"), errors="coerce").dropna()
-    next_order = int(orders.max()) + 1 if len(orders) else 1
+    n = st.session_state.get("od_gid", 0) + 1
+    st.session_state["od_gid"] = n
+    label = _NEW_GROUP_LABEL.format(n=n)
+    group_row = {
+        "_row_id": f"gn:{n}", "_row_state": "group", "_sel": False,
+        "그룹·부서명": "", "순서": "", "소속그룹": "", "부서코드": "부서 1개", "사용": True,
+    }
+    dept_row = {
+        "_row_id": _next_rid("od_rid"), "_row_state": "new", "_sel": False,
+        "그룹·부서명": "", "순서": "1", "소속그룹": label, "부서코드": "", "사용": True,
+    }
+    st.session_state["od_rows"] = pd.concat(
+        [live[_DEPT_ROW_COLS], pd.DataFrame([group_row, dept_row])], ignore_index=True,
+    )[_DEPT_ROW_COLS]
+    st.session_state["od_nonce"] = st.session_state.get("od_nonce", 0) + 1
+    st.rerun()
+
+
+def _add_dept_row(grid_df: pd.DataFrame) -> None:
+    """신규 부서 자식 행 추가 — 소속그룹은 selectbox 로 선택한다."""
+    live = _live(grid_df)
+    labels = _group_labels(live)
     row = {
         "_row_id": _next_rid("od_rid"), "_row_state": "new", "_sel": False,
-        "그룹명": "", "그룹순서": "", "부서코드": "", "부서명": "",
-        "부서순서": str(next_order), "사용": True,
+        "그룹·부서명": "", "순서": "", "소속그룹": labels[0] if len(labels) == 1 else "",
+        "부서코드": "", "사용": True,
     }
     st.session_state["od_rows"] = pd.concat(
         [live[_DEPT_ROW_COLS], pd.DataFrame([row])], ignore_index=True,
@@ -208,11 +345,155 @@ def _add_dept_row(grid_df: pd.DataFrame) -> None:
     st.rerun()
 
 
+def parse_org_grid(live: pd.DataFrame, store: pd.DataFrame):
+    """계층 그리드 → 부서 저장 레코드. (records, errors) 반환 (모듈 레벨 — 테스트 가능).
+
+    - 그룹 부모 행에서 그룹명·그룹순서를 1회 수집한다.
+    - 부서 자식 행의 '소속그룹'(로드 시점 라벨/신규 라벨)을 그룹 부모에 매핑해
+      department_group/group_sort_order 를 자동 부여한다.
+    - 기존 그룹의 이름·순서 변경은 화면(필터)에 없는 같은 그룹 부서에도 전파한다.
+    - 그룹명은 trim, 중복 비교는 casefold — 이름이 같아지면 병합(순서 동일해야 함).
+    - 빈 그룹(부서 0개인 새 그룹)은 오류. 부서순서는 빈 값=0 허용, 중복 허용.
+    """
+    errors: list[str] = []
+
+    # 1) 그룹 부모 수집: gid → {orig(로드 시 라벨), name, order}
+    groups: dict[str, dict] = {}
+    label_to_gid: dict[str, str] = {}
+    for i, (_, row) in enumerate(live.iterrows(), start=1):
+        if str(row.get("_row_state")) != "group":
+            continue
+        gid = str(row.get("_row_id") or "")
+        name = str(row.get("그룹·부서명") or "").strip()
+        order_raw = str(row.get("순서") or "").strip()
+        orig = gid[2:] if gid.startswith("g:") else None
+        label = orig if orig is not None else _NEW_GROUP_LABEL.format(n=gid[3:] or "?")
+        label_to_gid[label] = gid
+        label_to_gid[label.casefold()] = gid
+        order = None
+        if order_raw:
+            try:
+                order = int(order_raw)
+            except ValueError:
+                errors.append(f"그룹 '{name or label}': 그룹순서는 숫자여야 합니다.")
+        groups[gid] = {"orig": orig, "label": label, "name": name, "order": order, "row": i}
+
+    # 2) 부서 자식 수집 + 소속그룹 매핑
+    dept_rows: list[dict] = []
+    for i, (_, row) in enumerate(live.iterrows(), start=1):
+        if str(row.get("_row_state")) == "group":
+            continue
+        code = str(row.get("부서코드") or "").strip()
+        name = str(row.get("그룹·부서명") or "").strip()
+        d_raw = str(row.get("순서") or "").strip()
+        parent_txt = str(row.get("소속그룹") or "").strip()
+        if not any([code, name, parent_txt]):
+            continue  # 완전히 빈 신규 행
+
+        tag = f"{i}행" + (f"({code})" if code else "")
+        if not code:
+            errors.append(f"{i}행: 부서코드를 입력하세요.")
+        if not name:
+            errors.append(f"{tag}: 부서명을 입력하세요.")
+
+        gid = label_to_gid.get(parent_txt) or label_to_gid.get(parent_txt.casefold())
+        if not parent_txt:
+            errors.append(f"{tag}: 소속그룹을 선택하세요.")
+        elif gid is None:
+            errors.append(f"{tag}: 존재하지 않는 그룹입니다: {parent_txt}")
+
+        d_order = 0
+        if d_raw:
+            try:
+                d_order = int(d_raw)
+            except ValueError:
+                errors.append(f"{tag}: 부서순서는 숫자여야 합니다.")
+
+        dept_rows.append({
+            "gid": gid, "dept_code": code, "dept_name": name,
+            "sort_order": d_order, "is_active": grid_bool(row.get("사용")),
+        })
+
+    # 3) 그룹 검증 — 자식 있는 그룹만 이름·순서 필수, 새 그룹은 자식 필수
+    children: dict[str, int] = {}
+    for d in dept_rows:
+        if d["gid"]:
+            children[d["gid"]] = children.get(d["gid"], 0) + 1
+    for gid, info in groups.items():
+        has_children = children.get(gid, 0) > 0
+        in_store = (
+            info["orig"] is not None
+            and not store.empty
+            and (store["department_group"].astype(str).str.strip() == info["orig"]).any()
+        )
+        if info["orig"] is None and not has_children:
+            errors.append(
+                f"새 그룹 '{info['name'] or info['label']}'에 부서가 없습니다 — "
+                "부서를 1개 이상 추가하거나 그룹 행을 비워두지 마세요."
+            )
+        if not (has_children or in_store):
+            continue  # 저장에 영향 없는 그룹 행은 더 검증하지 않음
+        if not info["name"]:
+            errors.append(f"그룹 행({info['label']}): 그룹명을 입력하세요.")
+        if info["order"] is None:
+            errors.append(f"그룹 '{info['name'] or info['label']}': 그룹순서를 입력하세요.")
+
+    # 4) 최종 그룹명 casefold 병합 — 이름이 같으면 순서도 같아야 한다
+    by_final: dict[str, list] = {}
+    for gid, info in groups.items():
+        if info["name"]:
+            by_final.setdefault(info["name"].casefold(), []).append(info)
+    for _key, infos in by_final.items():
+        orders = {info["order"] for info in infos if info["order"] is not None}
+        if len(orders) > 1:
+            errors.append(
+                f"그룹 '{infos[0]['name']}'(병합)의 그룹순서가 서로 다릅니다: "
+                + ", ".join(str(o) for o in sorted(orders))
+            )
+
+    # 5) 레코드 생성 — 화면 부서 행 + 화면 밖 같은 그룹 부서 전파
+    records: list[dict] = []
+    seen_codes: set[str] = set()
+    for d in dept_rows:
+        info = groups.get(d["gid"]) if d["gid"] else None
+        group_name = info["name"] if info else ""
+        group_order = info["order"] if info and info["order"] is not None else 0
+        records.append({
+            "dept_code": d["dept_code"], "dept_name": d["dept_name"],
+            "department_group": group_name, "group_sort_order": group_order,
+            "sort_order": d["sort_order"], "is_active": d["is_active"],
+        })
+        if d["dept_code"]:
+            seen_codes.add(d["dept_code"])
+
+    if not store.empty:
+        store_group = store["department_group"].astype(str).str.strip()
+        for gid, info in groups.items():
+            if info["orig"] is None or not info["name"] or info["order"] is None:
+                continue
+            renamed = info["name"] != info["orig"]
+            for _, r in store[store_group == info["orig"]].iterrows():
+                code = str(r["dept_code"]).strip()
+                if code in seen_codes:
+                    continue
+                same_order = int(pd.to_numeric(r["group_sort_order"], errors="coerce") or 0) == info["order"]
+                if not renamed and same_order:
+                    continue  # 변경 없음 — 전파 불필요
+                records.append({
+                    "dept_code": code, "dept_name": str(r["dept_name"]).strip(),
+                    "department_group": info["name"], "group_sort_order": info["order"],
+                    "sort_order": int(pd.to_numeric(r["sort_order"], errors="coerce") or 0),
+                    "is_active": bool(r["is_active"]),
+                })
+                seen_codes.add(code)
+    return records, errors
+
+
 def _save_depts(grid_df: pd.DataFrame, q: dict) -> None:
-    """그룹·부서 편집 결과 검증 후 dept_code 기준 upsert (오류 시 전체 차단)."""
+    """그룹·부서 편집 결과 검증 후 dept_code 기준 batch upsert (오류 시 전체 차단)."""
     live = _live(grid_df)
     store = db.get_org_departments()
-    records, errors = _validate_departments(live, store)
+    records, errors = parse_org_grid(live, store)
 
     merged, dup, n_c, n_u, _n_d = db.upsert_records(
         store, records, set(), ["dept_code"], "is_active", db.ORG_DEPT_COLUMNS,
@@ -221,6 +502,11 @@ def _save_depts(grid_df: pd.DataFrame, q: dict) -> None:
         errors.append("부서코드가 중복되었습니다: " + ", ".join(k[0] for k in dup))
     # 구조 검증은 merged(저장 후 전체) 기준 — 필터로 가려진 그룹·부서와의 충돌 차단.
     errors.extend(_group_structure_errors(merged))
+    # 변경 후 그룹 구조 기준 활성 사용자 표시순서 충돌 검증 (그룹 병합 사전 차단).
+    order_errors = db.display_order_conflicts(db.get_users(), db.dept_group_map(merged))
+    if order_errors:
+        errors.extend(order_errors)
+        errors.append("→ 사용자 관리에서 해당 사용자의 표시순서를 먼저 조정한 뒤 다시 저장하세요.")
     if errors:
         st.error("그룹·부서를 저장하지 못했습니다.\n\n- " + "\n- ".join(errors))
         return
@@ -232,83 +518,16 @@ def _save_depts(grid_df: pd.DataFrame, q: dict) -> None:
         return
     _load_depts(q)
     st.session_state.pop("ou_loaded_dept", None)  # 부서명·그룹 변경 반영 위해 우측 재적재
-    set_flash("org_dept", "success", f"그룹·부서를 저장했습니다. (신규 {n_c} · 수정 {n_u})")
+    set_flash("org_dept", "success", f"그룹·부서를 저장했습니다. (부서 {len(records)}건 반영 — 신규 {n_c} · 수정 {n_u})")
     st.rerun()
 
 
-def _validate_departments(live: pd.DataFrame, store: pd.DataFrame):
-    """표시 형태 → 저장 형태 변환 + 행별 검증. 완전히 빈 신규 행은 제외.
-
-    그룹순서가 빈 행은 같은 그룹의 다른 행(편집 중 행 우선, 없으면 저장된 그룹)의
-    순서를 이어받는다 — 기존 그룹에 부서를 추가할 때 순서를 다시 칠 필요가 없다.
-    """
-    parsed = []
-    for i, (_, row) in enumerate(live.iterrows(), start=1):
-        group = str(row.get("그룹명") or "").strip()
-        g_raw = str(row.get("그룹순서") or "").strip()
-        code = str(row.get("부서코드") or "").strip()
-        name = str(row.get("부서명") or "").strip()
-        d_raw = str(row.get("부서순서") or "").strip()
-        if not any([group, code, name]):
-            continue
-        parsed.append((i, group, g_raw, code, name, d_raw, grid_bool(row.get("사용"))))
-
-    # 그룹 → 순서: 편집 중 행의 명시값이 저장된 값보다 우선한다
-    # (그룹 순서를 바꾸는 편집에서 빈 칸 상속이 새 값을 따라가도록).
-    known_orders: dict[str, int] = {}
-    for _i, group, g_raw, _c, _n, _d, _a in parsed:
-        if group and g_raw:
-            try:
-                known_orders.setdefault(group, int(g_raw))
-            except ValueError:
-                pass
-    if not store.empty:
-        for _, r in store.iterrows():
-            g = str(r["department_group"]).strip()
-            if g:
-                known_orders.setdefault(g, int(r["group_sort_order"]))
-
-    records, errors = [], []
-    for i, group, g_raw, code, name, d_raw, active in parsed:
-        tag = f"{i}행" + (f"({code})" if code else "")
-        if not code:
-            errors.append(f"{i}행: 부서코드를 입력하세요.")
-        if not name:
-            errors.append(f"{tag}: 부서명을 입력하세요.")
-        if not group:
-            errors.append(f"{tag}: 그룹명을 입력하세요.")
-
-        g_order = None
-        if g_raw:
-            try:
-                g_order = int(g_raw)
-            except ValueError:
-                errors.append(f"{tag}: 그룹순서는 숫자여야 합니다.")
-        elif group in known_orders:
-            g_order = known_orders[group]
-        elif group:
-            errors.append(f"{tag}: 그룹순서를 입력하세요. (새 그룹 '{group}')")
-
-        try:
-            d_order = int(d_raw) if d_raw else None
-        except ValueError:
-            d_order = None
-            errors.append(f"{tag}: 부서순서는 숫자여야 합니다.")
-        if d_raw == "":
-            errors.append(f"{tag}: 부서순서를 입력하세요.")
-
-        records.append({
-            "dept_code": code, "dept_name": name,
-            "department_group": group,
-            "group_sort_order": g_order if g_order is not None else 0,
-            "sort_order": d_order if d_order is not None else 0,
-            "is_active": active,
-        })
-    return records, errors
-
-
 def _group_structure_errors(merged: pd.DataFrame) -> list[str]:
-    """저장 후 전체 기준 구조 검증 — 그룹순서 전역 유일 + 그룹 내 부서순서 유일."""
+    """저장 후 전체 기준 구조 검증 — 그룹순서 전역 유일 + 같은 그룹 순서 단일.
+
+    부서순서(sort_order)는 그룹 안 보조 표시순서라 중복을 허용한다
+    (같으면 부서코드 보조 정렬). 그룹 내 유일 요구는 사용자 표시순서 쪽 계약이다.
+    """
     errors: list[str] = []
     if merged.empty:
         return errors
@@ -317,10 +536,14 @@ def _group_structure_errors(merged: pd.DataFrame) -> list[str]:
     frame["group_sort_order"] = pd.to_numeric(
         frame["group_sort_order"], errors="coerce"
     ).fillna(0).astype("int64")
-    frame["sort_order"] = pd.to_numeric(frame["sort_order"], errors="coerce").fillna(0).astype("int64")
 
-    # 같은 그룹은 하나의 그룹순서만 가진다.
     for group, sub in frame.groupby("department_group"):
+        if not group:
+            errors.append(
+                "그룹명이 비어 있는 부서가 있습니다: "
+                + ", ".join(sub["dept_code"].astype(str))
+            )
+            continue
         orders = sorted(set(sub["group_sort_order"]))
         if len(orders) > 1:
             errors.append(
@@ -328,21 +551,15 @@ def _group_structure_errors(merged: pd.DataFrame) -> list[str]:
                 + ", ".join(str(o) for o in orders)
             )
 
-    # 그룹이 다르면 그룹순서도 달라야 한다 (전역 유일).
     order_groups: dict[int, set] = {}
     for _, r in frame.iterrows():
-        order_groups.setdefault(int(r["group_sort_order"]), set()).add(r["department_group"])
-    for order, groups in sorted(order_groups.items()):
-        if len(groups) > 1:
+        if r["department_group"]:
+            order_groups.setdefault(int(r["group_sort_order"]), set()).add(r["department_group"])
+    for order, names in sorted(order_groups.items()):
+        if len(names) > 1:
             errors.append(
-                f"그룹순서 {order}이(가) 여러 그룹에 중복되었습니다: " + ", ".join(sorted(groups))
+                f"그룹순서 {order}이(가) 여러 그룹에 중복되었습니다: " + ", ".join(sorted(names))
             )
-
-    # 같은 그룹 안에서 부서순서 중복 금지.
-    for (group, order), sub in frame.groupby(["department_group", "sort_order"]):
-        if len(sub) > 1:
-            codes = ", ".join(sub["dept_code"].astype(str))
-            errors.append(f"그룹 '{group}'의 부서순서 {order}이(가) 중복되었습니다: {codes}")
     return errors
 
 
@@ -449,7 +666,7 @@ def _dept_options() -> tuple[list[str], dict]:
     return list(disp_of), disp_of
 
 
-def _render_unit_panel(refresh: bool) -> tuple[pd.DataFrame | None, str]:
+def _render_unit_panel(refresh: bool, org_ready: bool) -> tuple[pd.DataFrame | None, str]:
     st.markdown("<div class='ms-panel'>선택한 부서의 운영단위</div>", unsafe_allow_html=True)
 
     codes, disp_of = _dept_options()
@@ -486,6 +703,8 @@ def _render_unit_panel(refresh: bool) -> tuple[pd.DataFrame | None, str]:
     new_rows = live[live["_row_state"] != "existing"]
     sel_count = int((existing["_sel"].map(grid_bool)).sum()) if not existing.empty else 0
     workspace.master_count(len(existing), len(new_rows), sel_count)
+    if not org_ready:
+        st.caption(_NOT_READY_HINT)
     with bar:
         workspace.master_action_bar(sel_count, prefix="ou")
     return grid_df, dept

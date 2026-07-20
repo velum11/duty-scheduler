@@ -21,7 +21,11 @@ DATA_SOURCE_ERRORS = (
 )
 
 # 화면이 사용하는 사용자 자연키 컬럼 (id/외래키는 파사드 내부에서만 사용).
-USER_COLUMNS = ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active"]
+# display_order: 부서그룹 안에서의 직원 표시순서 (migration 003, NULL=미지정).
+USER_COLUMNS = [
+    "emp_no", "name", "dept_code", "team_code", "position", "role", "is_active",
+    "display_order",
+]
 
 # 화면이 사용하는 부서 컬럼 (id 는 파사드 내부 매핑에만 사용).
 DEPT_COLUMNS = ["dept_code", "dept_name", "sort_order", "is_active"]
@@ -356,6 +360,101 @@ def save_org_teams(df: pd.DataFrame) -> None:
     supabase_repository.upsert_teams_org(changed)
 
 
+# --- 부서그룹 기준 사용자 표시순서 (users.display_order, migration 003) ---
+def normalize_display_order(value):
+    """표시순서 입력 정규화 — 빈 값/NaN 은 None(미지정), 그 외 int. 실패 시 ValueError.
+
+    pandas 가 int+NULL 혼합 컬럼을 float 로 승격시키므로("1.0") float 표기도 수용한다.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "nan", "<na>"}:
+        return None
+    number = float(text)  # 정수/float 표기 외에는 ValueError
+    if number != int(number):
+        raise ValueError(f"표시순서는 정수여야 합니다: {value!r}")
+    return int(number)
+
+
+def dept_group_map(org_depts: pd.DataFrame | None = None) -> dict:
+    """dept_code -> (department_group, group_sort_order) 매핑.
+
+    org_depts 를 넘기면 그 프레임(예: 저장 후 예상 merged) 기준으로 계산한다 —
+    조직 저장 전 '변경 후 그룹 구조' 기준 검증(§그룹 병합 충돌)에 사용한다.
+    """
+    frame = get_org_departments() if org_depts is None else org_depts
+    out: dict = {}
+    for _, r in frame.iterrows():
+        out[str(r["dept_code"]).strip()] = (
+            str(r["department_group"]).strip(),
+            int(pd.to_numeric(r["group_sort_order"], errors="coerce") or 0),
+        )
+    return out
+
+
+def display_order_conflicts(users_df: pd.DataFrame, group_of: dict) -> list[str]:
+    """부서그룹 기준 활성 사용자 display_order 중복 오류 목록.
+
+    - 검증 대상: 활성(is_active) + 표시순서 지정(display_order not NULL) 사용자만.
+      비활성(퇴직) 사용자는 번호를 점유하지 않는다.
+    - group_of: dept_code -> (group, group_order) — 저장 후 예상 매핑을 넘기면
+      그룹 병합·부서 이동 후 충돌을 사전 차단할 수 있다.
+    """
+    errors: list[str] = []
+    if users_df is None or users_df.empty:
+        return errors
+    holders: dict[tuple[str, int], list[str]] = {}
+    for _, r in users_df.iterrows():
+        if not bool(r.get("is_active")):
+            continue
+        try:
+            order = normalize_display_order(r.get("display_order"))
+        except (TypeError, ValueError):
+            continue  # 형식 오류는 입력 화면 검증이 담당
+        if order is None:
+            continue
+        dept = str(r.get("dept_code") or "").strip()
+        group = group_of.get(dept, (dept, 0))[0]
+        key = (group, order)
+        holders.setdefault(key, []).append(
+            f"{str(r.get('emp_no') or '').strip()} {str(r.get('name') or '').strip()}".strip()
+        )
+    for (group, order), users in sorted(holders.items()):
+        if len(users) > 1:
+            errors.append(
+                f"그룹 '{group}'의 사용자 표시순서 {order}이(가) 중복되었습니다: "
+                + ", ".join(users)
+            )
+    return errors
+
+
+def sort_users_for_display(users_df: pd.DataFrame, org_depts: pd.DataFrame | None = None) -> pd.DataFrame:
+    """근무표·편성 공통 직원 정렬 — 그룹순서 → 표시순서(NULL 뒤) → 사번.
+
+    이번 미션에서는 helper 만 제공하고 월간/편성 화면 적용은 후속 미션에서 한다.
+    """
+    if users_df is None or users_df.empty:
+        return users_df
+    group_of = dept_group_map(org_depts)
+    frame = users_df.copy()
+    frame["_g_order"] = [
+        group_of.get(str(d).strip(), ("", 10**9))[1] for d in frame["dept_code"]
+    ]
+    orders = []
+    for value in frame.get("display_order", pd.Series([None] * len(frame))):
+        try:
+            orders.append(normalize_display_order(value))
+        except (TypeError, ValueError):
+            orders.append(None)
+    frame["_d_null"] = [1 if o is None else 0 for o in orders]
+    frame["_d_order"] = [0 if o is None else o for o in orders]
+    frame = frame.sort_values(
+        ["_g_order", "_d_null", "_d_order", "emp_no"], kind="stable"
+    ).drop(columns=["_g_order", "_d_null", "_d_order"])
+    return frame.reset_index(drop=True)
+
+
 def _base_users() -> pd.DataFrame:
     """샘플 CSV(id 기반)를 화면용 자연키 컬럼(USER_COLUMNS)으로 변환한 원본."""
     df = sample_data.users()
@@ -364,6 +463,8 @@ def _base_users() -> pd.DataFrame:
     df = df.copy()
     df["dept_code"] = df["department_id"].astype(str).map(_dept_code_by_id()).fillna("")
     df["team_code"] = df["team_id"].astype(str).map(_team_code_by_id()).fillna("")
+    if "display_order" not in df.columns:  # 샘플 CSV 미보유 → NULL(미지정)로 시작
+        df["display_order"] = None
     return df[USER_COLUMNS].reset_index(drop=True)
 
 

@@ -26,11 +26,13 @@ _ROLE_TO_LABEL = {"ADMIN": "관리자", "MANAGER": "조장", "USER": "조원"}
 _LABEL_TO_ROLE = {label: role for role, label in _ROLE_TO_LABEL.items()}
 
 _STATUS = ["전체", "재직", "퇴직"]
-_USER_COLS = ["사번", "성명", "부서", "조", "직급", "권한", "재직"]
+# 표시순서: 부서그룹 안에서의 직원 출력 순서 (users.display_order, 빈 값=미지정).
+# 같은 부서그룹의 활성 사용자끼리 중복 금지 — 부서가 아니라 그룹 기준으로 검증한다.
+_USER_COLS = ["사번", "성명", "부서", "조", "직급", "권한", "표시순서", "재직"]
 _ROW_COLS = ["_row_id", "_row_state", "_sel", *_USER_COLS]
 _GRID_COLUMNS = {
     "사번": "text", "성명": "text", "부서": "text", "조": "text",
-    "직급": "text", "권한": "text", "재직": "bool",
+    "직급": "text", "권한": "text", "표시순서": "text", "재직": "bool",
 }
 
 
@@ -73,6 +75,15 @@ def _team_maps(teams: pd.DataFrame):
         resolve[name_key] = None if name_key in resolve else code
         resolve.setdefault((dept, code), code)
     return resolve, display
+
+
+def _order_text(value) -> str:
+    """저장소 display_order → 편집기 표시 문자열 ('' = 미지정)."""
+    try:
+        order = db.normalize_display_order(value)
+    except (TypeError, ValueError):
+        return ""
+    return "" if order is None else str(order)
 
 
 def _role_resolver() -> dict[str, str]:
@@ -141,6 +152,7 @@ def render(user: dict) -> None:
         "권한": {"width": 96, "minWidth": 80, "cellClass": "md-c-center",
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": list(_LABEL_TO_ROLE)}},
+        "표시순서": {"width": 84, "minWidth": 70, "maxWidth": 108, "cellClass": "md-c-center"},
         "재직": {"width": 74, "minWidth": 64, "cellClass": "md-c-center"},
     }
     rows = st.session_state["mu_rows"]
@@ -156,6 +168,11 @@ def render(user: dict) -> None:
     new_rows = live[live["_row_state"] != "existing"]
     sel_count = int((existing["_sel"].map(grid_bool)).sum()) if not existing.empty else 0
     workspace.master_count(len(existing), len(new_rows), sel_count)
+    if not db.org_schema_ready():
+        st.caption(
+            "표시순서 컬럼(users.display_order, migration 003)이 아직 적용되지 않아 "
+            "표시순서 입력값은 저장되지 않습니다 — supabase/migrations/003_org_structure.sql 적용 후 사용하세요."
+        )
 
     with bar:
         workspace.master_action_bar(sel_count)
@@ -296,6 +313,7 @@ def _load_editor(q: dict, dept_names: dict, team_display: dict, source: pd.DataF
             "조": [team_display.get((str(d), str(t)), str(t or "")) for d, t in zip(df["dept_code"], df["team_code"])],
             "직급": df["position"].fillna("").astype("string"),
             "권한": df["role"].map(_ROLE_TO_LABEL).fillna("").astype("string"),
+            "표시순서": [_order_text(v) for v in df.get("display_order", pd.Series([None] * len(df)))],
             "재직": df["is_active"].fillna(True).astype(bool),
         })[_ROW_COLS]
     st.session_state["mu_rows"] = rows[_ROW_COLS].reset_index(drop=True)
@@ -316,6 +334,9 @@ def _save(grid_df, q, dept_names, team_resolve, team_display) -> None:
     )
     if dup:
         errors.append("사번이 중복되었습니다: " + ", ".join(k[0] for k in dup))
+    # 표시순서 충돌 검증 — 부서가 아니라 '부서그룹' 기준, 활성 사용자만, 저장 후
+    # 전체(merged) 기준 (필터로 안 보이는 사용자·부서 이동 후 충돌까지 차단).
+    errors.extend(db.display_order_conflicts(merged, db.dept_group_map()))
     if errors:
         st.error("저장하지 못했습니다.\n\n- " + "\n- ".join(errors))
         return
@@ -371,6 +392,17 @@ def _validate(live, dept_resolver, team_resolve):
         if role not in _ROLE_TO_LABEL:
             errors.append(f"{tag}: 권한을 선택하세요. (관리자/조장/조원)")
 
+        # 표시순서: 빈 값=미지정(NULL), 정수만 허용, 1 이상 권장.
+        display_order = None
+        order_raw = str(row.get("표시순서") or "").strip()
+        if order_raw:
+            try:
+                display_order = db.normalize_display_order(order_raw)
+            except (TypeError, ValueError):
+                errors.append(f"{tag}: 표시순서는 숫자여야 합니다. (입력값: {order_raw})")
+            if display_order is not None and display_order < 1:
+                errors.append(f"{tag}: 표시순서는 1 이상이어야 합니다.")
+
         records.append({
             "emp_no": emp_no,
             "name": name,
@@ -379,5 +411,6 @@ def _validate(live, dept_resolver, team_resolve):
             "position": position,
             "role": role,
             "is_active": grid_bool(row.get("재직")),
+            "display_order": display_order,
         })
     return records, errors

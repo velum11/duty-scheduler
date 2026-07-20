@@ -332,7 +332,9 @@ _ORG_NOT_READY_MESSAGE = (
 
 
 def org_extensions_ready() -> bool:
-    """departments/teams 에 003 확장 컬럼이 존재하는지 확인한다 (1회 probe 후 캐시)."""
+    """003 확장 컬럼(departments 그룹·teams unit_type·users display_order)의
+    존재 여부를 확인한다 (1회 probe 후 캐시). 한 파일(003)로 함께 적용되므로
+    셋을 묶어 판정한다."""
     global _ORG_READY
     if _ORG_READY is None:
         try:
@@ -340,6 +342,7 @@ def org_extensions_ready() -> bool:
                 "department_group,group_sort_order"
             ).limit(1).execute()
             client().table("teams").select("unit_type").limit(1).execute()
+            client().table("users").select("display_order").limit(1).execute()
             _ORG_READY = True
         except Exception:
             _ORG_READY = False
@@ -447,14 +450,28 @@ def upsert_teams_org(records: list[dict]) -> None:
         _upsert("teams", payload, "department_id,team_code")
 
 
+def _clean_order(value):
+    """display_order 정규화 — 빈 값/NaN 은 None(미지정), 그 외 int."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "nan", "<na>"}:
+        return None
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return None
+
+
 def get_users() -> pd.DataFrame:
+    """사용자 목록. display_order 는 003 적용 시 실제 값, 미적용이면 NULL 컬럼."""
     _, dept_by_id = _department_maps()
     _, team_by_id = _team_maps()
-    rows = _select_all(
-        "users",
-        "emp_no,name,department_id,team_id,position,role,is_active",
-        lambda query: query.order("emp_no"),
-    )
+    with_order = org_extensions_ready()
+    select_cols = "emp_no,name,department_id,team_id,position,role,is_active"
+    if with_order:
+        select_cols += ",display_order"
+    rows = _select_all("users", select_cols, lambda query: query.order("emp_no"))
     natural = []
     for row in rows:
         team_id = _optional(row, "users", "team_id")
@@ -471,17 +488,23 @@ def get_users() -> pd.DataFrame:
             "position": str(_required(row, "users", "position")),
             "role": str(_required(row, "users", "role")).strip().upper(),
             "is_active": _clean_bool(_required(row, "users", "is_active")),
+            "display_order": _clean_order(row.get("display_order")) if with_order else None,
         })
     return _frame(
         natural,
-        ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active"],
+        ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active",
+         "display_order"],
         "users",
+        nullable_columns=("display_order",),
     )
 
 
 def upsert_users(records: list[dict]) -> None:
+    """사용자 upsert. display_order 는 003 적용 시에만 payload 에 포함한다
+    (미적용이면 해당 필드를 조용히 제외 — 화면이 별도 경고를 표시한다)."""
     dept_by_code, _ = _department_maps()
     team_by_key, _ = _team_maps()
+    with_order = org_extensions_ready()
     payload = []
     for row in records:
         dept_code = _clean_text(row.get("dept_code"))
@@ -498,7 +521,7 @@ def upsert_users(records: list[dict]) -> None:
         role = _clean_text(row.get("role")).upper()
         if not emp_no or not name or role not in config.ROLES:
             raise SupabaseDataError(f"사용자 필수값 또는 역할이 유효하지 않습니다: {emp_no}")
-        payload.append({
+        record = {
             "emp_no": emp_no,
             "name": name,
             "department_id": dept_by_code[dept_code],
@@ -506,7 +529,10 @@ def upsert_users(records: list[dict]) -> None:
             "position": _clean_text(row.get("position")),
             "role": role,
             "is_active": _clean_bool(row.get("is_active")),
-        })
+        }
+        if with_order:
+            record["display_order"] = _clean_order(row.get("display_order"))
+        payload.append(record)
     if payload:
         _upsert("users", payload, "emp_no")
 
