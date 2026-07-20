@@ -17,10 +17,14 @@ App Shell 구조 (DESIGN.md §2):
 """
 from datetime import date
 from html import escape
+from pathlib import Path
 
 import streamlit as st
 
 from modules import auth, config, db, nav
+
+# 브라우저 파비콘 — 주간/야간(해·달) 투명 배경 PNG (assets/favicon.png)
+_FAVICON = str(Path(__file__).resolve().parent.parent / "assets" / "favicon.png")
 
 _WEEKDAY = ["월", "화", "수", "목", "금", "토", "일"]
 
@@ -416,8 +420,8 @@ def setup_page() -> None:
     user = st.session_state.get("user") or {}
     role = str(user.get("role", "")).strip().upper()
     st.set_page_config(
-        page_title=config.APP_NAME,
-        page_icon="🏭",
+        page_title="교대 근무표",
+        page_icon=_FAVICON if Path(_FAVICON).exists() else "🏭",
         layout="wide",
         initial_sidebar_state="collapsed" if role == "USER" else "expanded",
     )
