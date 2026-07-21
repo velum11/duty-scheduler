@@ -12,3 +12,6 @@ docs/backup_pre_migration_*.json
 
 # ORCA orchestration 프로세스 산출물만 제외 (프로젝트 overlay `.orca/PLAYBOOK.md`는 추적)
 .orca/reports/
+
+# ORCA 설계·QA 임시 산출물 (커밋 제외)
+.orca/artifacts/

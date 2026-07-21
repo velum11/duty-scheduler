@@ -5,9 +5,10 @@ natural keys used by the existing Streamlit views.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date
 from functools import lru_cache
-from typing import Iterable
+from typing import Callable, Iterable
 
 import pandas as pd
 from supabase import Client, create_client
@@ -26,6 +27,83 @@ UNIT_TYPES = ("SHIFT", "GENERAL")
 
 class SupabaseDataError(RuntimeError):
     """A sanitized Supabase operation failure."""
+
+
+# --- 저장 부분성공 결과 계약 (Phase2 §8-1·§10-4, 위험 #1) ------------------
+# 프레임워크 비의존(=views 를 import 하지 않음) 결과 원장. 화면 controller 는
+# ``to_persist_kwargs()`` 로 ``views.master.lifecycle.PersistResult`` 를 만들 수
+# 있고, 저장 계약을 바꾸지 않는 기존 호출부는 이 타입을 몰라도 된다(추가형).
+#
+# 왜 필요한가: ``_upsert`` 는 WRITE_BATCH_SIZE(500) chunk 를 순차 실행하며
+# transaction 이 아니다. 중간 batch 실패 시 앞 batch 는 이미 저장된다. 조직은
+# 부서/운영단위가 별도 호출이라 더 취약하다. 진짜 원자성은 서버 RPC/transaction
+# (=migration, 승인 필요)이 필요하므로, 그 전까지 "무엇이 저장되고 무엇이
+# 실패했는지"를 자연키로 드러내는 것을 잠정 계약으로 삼는다.
+@dataclass
+class BatchWriteResult:
+    """단일 저장 명령(한 테이블/한 단계)의 부분성공 결과.
+
+    - ``saved_keys``/``failed_keys``: 자연키(단일 컬럼=문자열, 복합키=튜플) 목록.
+    - ``error``: 실패/불명 사유(사용자 문구, 이미 sanitize 됨).
+    - ``retryable``: 실패분 재시도 가능 여부(검증 실패는 False).
+    - ``unknown``: 결과 불명(일시적 소켓/네트워크 오류로 저장 여부를 알 수 없음).
+      전체 성공으로 추정하지 않고 '재조회 필요'로 표기하기 위한 플래그.
+    """
+
+    saved_keys: list = field(default_factory=list)
+    failed_keys: list = field(default_factory=list)
+    error: str | None = None
+    retryable: bool = False
+    unknown: bool = False
+
+    @property
+    def ok(self) -> bool:
+        """대상이 모두 성공하고 실패/불명이 없을 때만 True."""
+        return not self.failed_keys and not self.unknown and self.error is None
+
+    @property
+    def partial(self) -> bool:
+        return bool(self.saved_keys) and (bool(self.failed_keys) or self.unknown)
+
+    def merge(self, other: "BatchWriteResult") -> "BatchWriteResult":
+        """여러 단계(예: 조직 부서→운영단위) 결과를 하나로 합친다.
+
+        두 단계가 모두 성공해야 전체 성공이다. 앞 단계 성공 + 뒤 단계 실패는
+        ``partial`` 로 드러난다(조직 2단계 저장의 부분성공 표면화)."""
+        return BatchWriteResult(
+            saved_keys=list(self.saved_keys) + list(other.saved_keys),
+            failed_keys=list(self.failed_keys) + list(other.failed_keys),
+            error=self.error or other.error,
+            retryable=self.retryable or other.retryable,
+            unknown=self.unknown or other.unknown,
+        )
+
+    def to_persist_kwargs(self) -> dict:
+        """``PersistResult(page_id=..., **result.to_persist_kwargs())`` 로 매핑."""
+        return {
+            "succeeded_keys": list(self.saved_keys),
+            "failed_keys": list(self.failed_keys),
+            "error": self.error,
+            "retryable": self.retryable,
+            "unknown": self.unknown,
+        }
+
+
+# --- migration readiness 3-state (Phase2 §8-5·§10-6, 위험 #5) --------------
+# ``org_extensions_ready() -> bool`` 는 미적용과 probe 실패를 모두 False 로 접는다
+# (안전하지만 UX 상 원인을 구분하지 못함). 아래 3-state probe 는 라이브 스키마를
+# read-only 로 확인해 READY/NOT_READY(컬럼 없음)/PROBE_ERROR(확인 자체 실패)를
+# 구분한다. 실제 WRITE 차단은 여전히 bool gate 로 하므로(오분류가 쓰기를 열지
+# 않음) 3-state 는 배너 문구·재확인 UX 전용이다.
+READINESS_READY = "READY"
+READINESS_NOT_READY = "NOT_READY"
+READINESS_PROBE_ERROR = "PROBE_ERROR"
+
+# undefined-column / schema-cache 오류 표식 → NOT_READY(마이그레이션 미적용).
+# 그 외 오류(권한/네트워크)는 PROBE_ERROR(확인 실패)로 본다.
+_MISSING_COLUMN_MARKERS = (
+    "42703", "does not exist", "could not find", "PGRST204", "PGRST203", "schema cache",
+)
 
 
 def _sanitized_error(action: str, table: str, exc: Exception) -> SupabaseDataError:
@@ -50,8 +128,17 @@ def client() -> Client:
 def reset_client() -> None:
     """Drop the cached client so a subsequent call creates a fresh connection."""
     client.cache_clear()
-    global _ORG_READY
+    reset_org_readiness()
+
+
+def reset_org_readiness() -> None:
+    """org 확장 스키마 readiness 캐시를 비운다(다음 확인에서 재프로브).
+
+    실행 중 migration 003 이 적용된 뒤 프로세스 재시작 없이 재평가하려면 이
+    경로를 쓴다(Phase2 blocking 6 — readiness cache 재평가 절차)."""
+    global _ORG_READY, _ORG_PROBE
     _ORG_READY = None
+    _ORG_PROBE = None
 
 
 # Windows 비동기 소켓의 일시 오류 표식 (예: WinError 10035 — 즉시 완료 실패).
@@ -105,6 +192,64 @@ def _upsert_returning(table: str, records: list[dict], on_conflict: str) -> list
         response = _execute(query, "upsert", table)
         saved.extend(response.data or [])
     return saved
+
+
+def _natural_key(record: dict, key_cols: list[str]):
+    """부분성공 원장에 쓸 사람이 읽을 수 있는 자연키(단일=str, 복합=tuple)."""
+    values = tuple(str(record.get(col, "")).strip() for col in key_cols)
+    return values[0] if len(values) == 1 else values
+
+
+def _upsert_reported(
+    table: str, payload: list[dict], on_conflict: str, keys: list
+) -> BatchWriteResult:
+    """``_upsert`` 와 같은 chunk 순차 저장이되, batch 경계 부분성공을 원장으로 반환한다.
+
+    payload 와 keys 는 1:1 정렬 상태여야 한다. 한 batch 가 실패하면 그 batch 부터
+    끝까지를 failed 로 표기한다(앞선 batch 는 이미 저장 → saved). 일시적 소켓 오류로
+    끝난 실패는 저장 여부를 단정할 수 없어 ``unknown`` 으로 표기한다."""
+    saved_keys: list = []
+    cursor = 0
+    for batch in _chunks(payload):
+        batch_keys = keys[cursor:cursor + len(batch)]
+        try:
+            _execute(client().table(table).upsert(batch, on_conflict=on_conflict), "upsert", table)
+        except SupabaseDataError as exc:
+            remaining = keys[cursor:]
+            unknown = any(marker in str(exc) for marker in _TRANSIENT_MARKERS)
+            return BatchWriteResult(
+                saved_keys=saved_keys,
+                failed_keys=list(remaining),
+                error=str(exc),
+                retryable=True,
+                unknown=unknown,
+            )
+        saved_keys.extend(batch_keys)
+        cursor += len(batch)
+    return BatchWriteResult(saved_keys=saved_keys)
+
+
+def _reported_write(
+    table: str,
+    records: list[dict],
+    on_conflict: str,
+    key_cols: list[str],
+    payload_builder: Callable[[list[dict]], list[dict]],
+) -> BatchWriteResult:
+    """검증(payload_builder)→batch 저장을 부분성공 원장으로 감싼다.
+
+    payload_builder 가 던지는 검증 오류(SupabaseDataError)는 write 전이므로 대상
+    전체를 failed(retryable=False)로 표기한다 — draft 를 유지하고 명시적 실패로
+    controller 가 처리할 수 있게 한다. 저장 예외는 ``_upsert_reported`` 가 batch
+    경계로 나눠 saved/failed 를 구분한다."""
+    keys = [_natural_key(record, key_cols) for record in records]
+    try:
+        payload = payload_builder(records)
+    except SupabaseDataError as exc:
+        return BatchWriteResult(failed_keys=keys, error=str(exc), retryable=False)
+    if not payload:
+        return BatchWriteResult()
+    return _upsert_reported(table, payload, on_conflict, keys)
 
 
 def _clean_text(value, *, nullable: bool = False):
@@ -255,7 +400,7 @@ def get_departments() -> pd.DataFrame:
     return frame
 
 
-def upsert_departments(records: list[dict]) -> None:
+def _departments_payload(records: list[dict]) -> list[dict]:
     payload = [
         {
             "dept_code": _clean_text(row.get("dept_code")),
@@ -267,8 +412,20 @@ def upsert_departments(records: list[dict]) -> None:
     ]
     if any(not row["dept_code"] or not row["dept_name"] for row in payload):
         raise SupabaseDataError("부서코드와 부서명은 비어 있을 수 없습니다.")
+    return payload
+
+
+def upsert_departments(records: list[dict]) -> None:
+    payload = _departments_payload(records)
     if payload:
         _upsert("departments", payload, "dept_code")
+
+
+def upsert_departments_reported(records: list[dict]) -> BatchWriteResult:
+    """부서 upsert(부분성공 원장 반환). 기존 ``upsert_departments`` 는 그대로 둔다."""
+    return _reported_write(
+        "departments", records, "dept_code", ["dept_code"], _departments_payload
+    )
 
 
 def get_teams() -> pd.DataFrame:
@@ -298,7 +455,7 @@ def get_teams() -> pd.DataFrame:
     )
 
 
-def upsert_teams(records: list[dict]) -> None:
+def _teams_payload(records: list[dict]) -> list[dict]:
     dept_by_code, _ = _department_maps()
     payload = []
     for row in records:
@@ -316,8 +473,20 @@ def upsert_teams(records: list[dict]) -> None:
             "sort_order": _clean_int(row.get("sort_order")),
             "is_active": _clean_bool(row.get("is_active")),
         })
+    return payload
+
+
+def upsert_teams(records: list[dict]) -> None:
+    payload = _teams_payload(records)
     if payload:
         _upsert("teams", payload, "department_id,team_code")
+
+
+def upsert_teams_reported(records: list[dict]) -> BatchWriteResult:
+    """조 upsert(부분성공 원장 반환). 기존 ``upsert_teams`` 는 그대로 둔다."""
+    return _reported_write(
+        "teams", records, "department_id,team_code", ["dept_code", "team_code"], _teams_payload
+    )
 
 
 # --- 조직 관리 확장 (migration 003: 부서그룹 + 운영단위 유형) ---
@@ -325,6 +494,7 @@ def upsert_teams(records: list[dict]) -> None:
 # org_extensions_ready() 로 분기해 안전한 기본값으로 폴백하고, 저장은 이 계층에서
 # 명확한 오류로 차단한다 (부분 저장·조용한 무시 없음).
 _ORG_READY: bool | None = None
+_ORG_PROBE: str | None = None
 _ORG_NOT_READY_MESSAGE = (
     "조직 관리 확장 컬럼(migration 003)이 아직 적용되지 않아 저장할 수 없습니다. "
     "supabase/migrations/003_org_structure.sql 적용 후 다시 시도하세요."
@@ -349,6 +519,38 @@ def org_extensions_ready() -> bool:
     return _ORG_READY
 
 
+def org_extensions_probe(*, force: bool = False) -> str:
+    """003 확장 스키마 준비 상태를 3-state 로 확인한다(read-only, 1회 probe 후 캐시).
+
+    반환: ``READINESS_READY`` / ``READINESS_NOT_READY`` / ``READINESS_PROBE_ERROR``.
+      - READY: 확장 컬럼이 존재한다(003 적용됨).
+      - NOT_READY: 확인은 성공했으나 컬럼이 없다(undefined-column/schema-cache).
+      - PROBE_ERROR: 확인 자체가 실패했다(권한/네트워크) — 미적용으로 단정 불가.
+
+    ``force=True`` 또는 ``reset_org_readiness()`` 후 재프로브한다(실행 중 003 적용
+    반영 경로). bool ``org_extensions_ready()`` 와 캐시(_ORG_READY)를 함께 정합화한다:
+    READY→True, NOT_READY→False, PROBE_ERROR→None(불명, 쓰기는 보수적으로 차단)."""
+    global _ORG_READY, _ORG_PROBE
+    if force:
+        _ORG_PROBE = None
+    if _ORG_PROBE is not None:
+        return _ORG_PROBE
+    try:
+        client().table("departments").select("department_group,group_sort_order").limit(1).execute()
+        client().table("teams").select("unit_type").limit(1).execute()
+        client().table("users").select("display_order").limit(1).execute()
+        _ORG_PROBE = READINESS_READY
+        _ORG_READY = True
+    except Exception as exc:
+        if any(marker in repr(exc) for marker in _MISSING_COLUMN_MARKERS):
+            _ORG_PROBE = READINESS_NOT_READY
+            _ORG_READY = False
+        else:
+            _ORG_PROBE = READINESS_PROBE_ERROR
+            _ORG_READY = None  # 불명 — org_extensions_ready() 가 다시 보수적으로 판정
+    return _ORG_PROBE
+
+
 def get_departments_org() -> pd.DataFrame:
     """부서 목록 + 그룹 확장 컬럼. 003 적용 후에만 호출한다."""
     rows = _select_all(
@@ -368,8 +570,7 @@ def get_departments_org() -> pd.DataFrame:
     return frame
 
 
-def upsert_departments_org(records: list[dict]) -> None:
-    """그룹 컬럼을 포함한 부서 upsert. 003 미적용이면 저장을 차단한다."""
+def _departments_org_payload(records: list[dict]) -> list[dict]:
     if not org_extensions_ready():
         raise SupabaseDataError(_ORG_NOT_READY_MESSAGE)
     payload = [
@@ -388,8 +589,21 @@ def upsert_departments_org(records: list[dict]) -> None:
         for row in payload
     ):
         raise SupabaseDataError("부서코드·부서명·그룹명은 비어 있을 수 없습니다.")
+    return payload
+
+
+def upsert_departments_org(records: list[dict]) -> None:
+    """그룹 컬럼을 포함한 부서 upsert. 003 미적용이면 저장을 차단한다."""
+    payload = _departments_org_payload(records)
     if payload:
         _upsert("departments", payload, "dept_code")
+
+
+def upsert_departments_org_reported(records: list[dict]) -> BatchWriteResult:
+    """그룹 포함 부서 upsert(부분성공 원장). 003 미적용은 전체 failed 로 표기한다."""
+    return _reported_write(
+        "departments", records, "dept_code", ["dept_code"], _departments_org_payload
+    )
 
 
 def get_teams_org() -> pd.DataFrame:
@@ -421,8 +635,7 @@ def get_teams_org() -> pd.DataFrame:
     )
 
 
-def upsert_teams_org(records: list[dict]) -> None:
-    """unit_type 을 포함한 운영단위 upsert. 003 미적용이면 저장을 차단한다."""
+def _teams_org_payload(records: list[dict]) -> list[dict]:
     if not org_extensions_ready():
         raise SupabaseDataError(_ORG_NOT_READY_MESSAGE)
     dept_by_code, _ = _department_maps()
@@ -446,8 +659,21 @@ def upsert_teams_org(records: list[dict]) -> None:
             "sort_order": _clean_int(row.get("sort_order")),
             "is_active": _clean_bool(row.get("is_active")),
         })
+    return payload
+
+
+def upsert_teams_org(records: list[dict]) -> None:
+    """unit_type 을 포함한 운영단위 upsert. 003 미적용이면 저장을 차단한다."""
+    payload = _teams_org_payload(records)
     if payload:
         _upsert("teams", payload, "department_id,team_code")
+
+
+def upsert_teams_org_reported(records: list[dict]) -> BatchWriteResult:
+    """unit_type 포함 운영단위 upsert(부분성공 원장). 003 미적용은 전체 failed."""
+    return _reported_write(
+        "teams", records, "department_id,team_code", ["dept_code", "team_code"], _teams_org_payload
+    )
 
 
 def _clean_order(value):
@@ -499,12 +725,7 @@ def get_users() -> pd.DataFrame:
     )
 
 
-def upsert_users(records: list[dict]) -> None:
-    """사용자 upsert. 003 미적용 상태의 display_order 입력은 전체 차단한다.
-
-    표시순서가 모두 NULL이면 기존 사용자 필드만 저장할 수 있지만, 값이 하나라도
-    있으면 일부 필드만 성공하는 상태를 만들지 않도록 DB 조회 전에 실패시킨다.
-    """
+def _users_payload(records: list[dict]) -> list[dict]:
     with_order = org_extensions_ready()
     blocked_emp_nos = [
         _clean_text(row.get("emp_no")) or "(사번 없음)"
@@ -547,8 +768,23 @@ def upsert_users(records: list[dict]) -> None:
         if with_order:
             record["display_order"] = _clean_order(row.get("display_order"))
         payload.append(record)
+    return payload
+
+
+def upsert_users(records: list[dict]) -> None:
+    """사용자 upsert. 003 미적용 상태의 display_order 입력은 전체 차단한다.
+
+    표시순서가 모두 NULL이면 기존 사용자 필드만 저장할 수 있지만, 값이 하나라도
+    있으면 일부 필드만 성공하는 상태를 만들지 않도록 DB 조회 전에 실패시킨다.
+    """
+    payload = _users_payload(records)
     if payload:
         _upsert("users", payload, "emp_no")
+
+
+def upsert_users_reported(records: list[dict]) -> BatchWriteResult:
+    """사용자 upsert(부분성공 원장). 003 미적용 + 표시순서 입력은 전체 failed(비재시도)."""
+    return _reported_write("users", records, "emp_no", ["emp_no"], _users_payload)
 
 
 def get_work_types() -> pd.DataFrame:
@@ -578,7 +814,7 @@ def get_work_types() -> pd.DataFrame:
     return frame
 
 
-def upsert_work_types(records: list[dict]) -> None:
+def _work_types_payload(records: list[dict]) -> list[dict]:
     payload = []
     for row in records:
         code = _clean_text(row.get("code"))
@@ -601,8 +837,18 @@ def upsert_work_types(records: list[dict]) -> None:
             "sort_order": _clean_int(row.get("sort_order")),
             "is_active": _clean_bool(row.get("is_active")),
         })
+    return payload
+
+
+def upsert_work_types(records: list[dict]) -> None:
+    payload = _work_types_payload(records)
     if payload:
         _upsert("work_types", payload, "code")
+
+
+def upsert_work_types_reported(records: list[dict]) -> BatchWriteResult:
+    """근무형태 upsert(부분성공 원장 반환). 기존 ``upsert_work_types`` 는 그대로 둔다."""
+    return _reported_write("work_types", records, "code", ["code"], _work_types_payload)
 
 
 def get_shift_groups() -> pd.DataFrame:

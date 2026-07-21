@@ -20,6 +20,17 @@ DATA_SOURCE_ERRORS = (
     supabase_repository.SupabaseDataError,
 )
 
+# 저장 부분성공 원장 계약(프레임워크 비의존). 화면 controller 는 이 결과를
+# ``views.master.lifecycle.PersistResult(page_id=..., **result.to_persist_kwargs())``
+# 로 매핑한다. 기존 save_* 는 None 을 반환하는 계약을 유지하고, 부분성공이 필요한
+# 화면만 아래 ``save_*_report`` 를 호출한다(추가형).
+BatchWriteResult = supabase_repository.BatchWriteResult
+
+# migration readiness 3-state(READY/NOT_READY/PROBE_ERROR) 문자열 상수.
+READINESS_READY = supabase_repository.READINESS_READY
+READINESS_NOT_READY = supabase_repository.READINESS_NOT_READY
+READINESS_PROBE_ERROR = supabase_repository.READINESS_PROBE_ERROR
+
 # 화면이 사용하는 사용자 자연키 컬럼 (id/외래키는 파사드 내부에서만 사용).
 # display_order: 부서그룹 안에서의 직원 표시순서 (migration 003, NULL=미지정).
 USER_COLUMNS = [
@@ -153,6 +164,21 @@ def _changed_records(
     return changed
 
 
+def _natural_keys(records: list[dict], key_cols) -> list:
+    """부분성공 원장용 자연키 목록(단일 컬럼=str, 복합키=tuple)."""
+    cols = list(key_cols)
+    keys = []
+    for record in records:
+        values = tuple(str(record.get(col, "")).strip() for col in cols)
+        keys.append(values[0] if len(values) == 1 else values)
+    return keys
+
+
+def _sample_report(changed: list[dict], key_cols) -> BatchWriteResult:
+    """sample 모드 저장 결과(항상 전체 성공). 변경 행의 자연키를 saved 로 보고한다."""
+    return BatchWriteResult(saved_keys=_natural_keys(changed, key_cols))
+
+
 # --- id -> 자연키 매핑 (내부) ---
 def _dept_code_by_id() -> dict:
     df = sample_data.departments()
@@ -212,6 +238,21 @@ def save_departments(df: pd.DataFrame) -> None:
     supabase_repository.upsert_departments(changed)
 
 
+def save_departments_report(df: pd.DataFrame) -> BatchWriteResult:
+    """save_departments 의 부분성공 원장 반환 변형. 기존 save_departments 는 그대로 둔다."""
+    keep = [c for c in DEPT_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_DEPTS_STORE] = normalized
+        return _sample_report(normalized.to_dict("records"), ["dept_code"])
+    changed = _changed_records(
+        supabase_repository.get_departments(), normalized, ["dept_code"], DEPT_COLUMNS
+    )
+    if not changed:
+        return BatchWriteResult()
+    return supabase_repository.upsert_departments_reported(changed)
+
+
 def _base_teams() -> pd.DataFrame:
     """샘플 CSV(id 기반)를 화면용 조/팀 컬럼(TEAM_COLUMNS)으로 변환한 원본."""
     df = sample_data.teams()
@@ -261,6 +302,21 @@ def save_teams(df: pd.DataFrame) -> None:
     supabase_repository.upsert_teams(changed)
 
 
+def save_teams_report(df: pd.DataFrame) -> BatchWriteResult:
+    """save_teams 의 부분성공 원장 반환 변형. 기존 save_teams 는 그대로 둔다."""
+    keep = [c for c in TEAM_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_TEAMS_STORE] = normalized
+        return _sample_report(normalized.to_dict("records"), ["dept_code", "team_code"])
+    changed = _changed_records(
+        supabase_repository.get_teams(), normalized, ["dept_code", "team_code"], TEAM_COLUMNS
+    )
+    if not changed:
+        return BatchWriteResult()
+    return supabase_repository.upsert_teams_reported(changed)
+
+
 # --- 조직 관리 (그룹·부서·운영단위, migration 003) ---
 def org_schema_ready() -> bool:
     """003 확장 컬럼(department_group/group_sort_order/unit_type) 사용 가능 여부.
@@ -272,6 +328,28 @@ def org_schema_ready() -> bool:
     if is_sample_mode():
         return True
     return supabase_repository.org_extensions_ready()
+
+
+def org_schema_readiness() -> str:
+    """003 확장 스키마 준비 상태를 3-state 로 반환한다.
+
+    반환: ``READINESS_READY`` / ``READINESS_NOT_READY`` / ``READINESS_PROBE_ERROR``.
+    sample 모드는 항상 READY. supabase 모드는 라이브 스키마를 read-only 로 확인해
+    미적용(NOT_READY)과 확인 실패(PROBE_ERROR)를 구분한다 — 화면 배너/재확인 UX 용.
+    실제 WRITE 차단은 ``org_schema_ready()`` bool 게이트가 담당한다(오분류가 쓰기를
+    열지 않음). controller 는 이 값을 ``ReadinessState`` 로 승격한다."""
+    if is_sample_mode():
+        return READINESS_READY
+    return supabase_repository.org_extensions_probe()
+
+
+def reset_org_schema_cache() -> None:
+    """org readiness 캐시를 비운다(다음 확인에서 재프로브).
+
+    실행 중 migration 003 이 적용된 뒤 프로세스 재시작 없이 반영하려면(예: 화면의
+    '스키마 재확인' 동작) 이 경로를 쓴다. sample 모드는 캐시가 없어 no-op."""
+    if not is_sample_mode():
+        supabase_repository.reset_org_readiness()
 
 
 def org_dept_defaults(df: pd.DataFrame) -> pd.DataFrame:
@@ -332,6 +410,23 @@ def save_org_departments(df: pd.DataFrame) -> None:
     supabase_repository.upsert_departments_org(changed)
 
 
+def save_org_departments_report(df: pd.DataFrame) -> BatchWriteResult:
+    """save_org_departments 의 부분성공 원장 반환 변형. 기존 함수는 그대로 둔다.
+
+    003 미적용 supabase 모드에서는 repository 가 전체 failed(비재시도) 원장을 반환한다."""
+    keep = [c for c in ORG_DEPT_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_DEPTS_STORE] = normalized
+        return _sample_report(normalized.to_dict("records"), ["dept_code"])
+    changed = _changed_records(
+        get_org_departments(), normalized, ["dept_code"], ORG_DEPT_COLUMNS
+    )
+    if not changed:
+        return BatchWriteResult()
+    return supabase_repository.upsert_departments_org_reported(changed)
+
+
 def get_org_teams(dept_code: str | None = None, is_active: bool | None = None) -> pd.DataFrame:
     """조직 관리 화면용 운영단위 목록(ORG_TEAM_COLUMNS, unit_type 포함)."""
     if is_sample_mode():
@@ -358,6 +453,39 @@ def save_org_teams(df: pd.DataFrame) -> None:
         get_org_teams(), normalized, ["dept_code", "team_code"], ORG_TEAM_COLUMNS
     )
     supabase_repository.upsert_teams_org(changed)
+
+
+def save_org_teams_report(df: pd.DataFrame) -> BatchWriteResult:
+    """save_org_teams 의 부분성공 원장 반환 변형. 기존 함수는 그대로 둔다."""
+    keep = [c for c in ORG_TEAM_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_TEAMS_STORE] = normalized
+        return _sample_report(normalized.to_dict("records"), ["dept_code", "team_code"])
+    changed = _changed_records(
+        get_org_teams(), normalized, ["dept_code", "team_code"], ORG_TEAM_COLUMNS
+    )
+    if not changed:
+        return BatchWriteResult()
+    return supabase_repository.upsert_teams_org_reported(changed)
+
+
+def save_org_structure_report(
+    dept_df: pd.DataFrame, team_df: pd.DataFrame
+) -> BatchWriteResult:
+    """조직(부서→운영단위) 2단계 저장을 하나의 부분성공 원장으로 합쳐 반환한다.
+
+    부서 저장이 하나도 성공하지 못하면(전체 실패/불명) 운영단위 저장을 시도하지
+    않는다 — 없는 부서를 참조하는 운영단위 저장 실패를 부르지 않기 위함이다. 부서가
+    (일부라도) 저장되면 운영단위도 저장하고 두 결과를 ``merge`` 한다.
+
+    주의: 이는 진짜 원자성이 아니다(부서 성공·운영단위 실패 = partial 로 드러남).
+    완전한 원자성은 서버 transaction/RPC(=migration, **승인 필요**)가 있어야 한다.
+    controller 는 반환 원장으로 실패분 draft 를 유지하고 재시도할 수 있다."""
+    dept_result = save_org_departments_report(dept_df)
+    if not dept_result.saved_keys and (dept_result.failed_keys or dept_result.unknown):
+        return dept_result
+    return dept_result.merge(save_org_teams_report(team_df))
 
 
 # --- 부서그룹 기준 사용자 표시순서 (users.display_order, migration 003) ---
@@ -510,6 +638,24 @@ def save_users(df: pd.DataFrame) -> None:
     supabase_repository.upsert_users(changed)
 
 
+def save_users_report(df: pd.DataFrame) -> BatchWriteResult:
+    """save_users 의 부분성공 원장 반환 변형. 기존 save_users 는 그대로 둔다.
+
+    supabase 모드에서 003 미적용 + 표시순서 입력이 있으면 repository 가 전체
+    failed(비재시도) 원장을 반환한다(부분 저장 금지 계약 유지)."""
+    keep = [c for c in USER_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_USERS_STORE] = normalized
+        return _sample_report(normalized.to_dict("records"), ["emp_no"])
+    changed = _changed_records(
+        supabase_repository.get_users(), normalized, ["emp_no"], USER_COLUMNS
+    )
+    if not changed:
+        return BatchWriteResult()
+    return supabase_repository.upsert_users_reported(changed)
+
+
 def _base_work_types() -> pd.DataFrame:
     """샘플 CSV 를 화면용 근무형태 컬럼(WORK_TYPE_COLUMNS)으로 정리한 원본."""
     df = sample_data.work_types()
@@ -554,6 +700,21 @@ def save_work_types(df: pd.DataFrame) -> None:
         supabase_repository.get_work_types(), normalized, ["code"], WORK_TYPE_COLUMNS
     )
     supabase_repository.upsert_work_types(changed)
+
+
+def save_work_types_report(df: pd.DataFrame) -> BatchWriteResult:
+    """save_work_types 의 부분성공 원장 반환 변형. 기존 save_work_types 는 그대로 둔다."""
+    keep = [c for c in WORK_TYPE_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_WORK_TYPES_STORE] = normalized
+        return _sample_report(normalized.to_dict("records"), ["code"])
+    changed = _changed_records(
+        supabase_repository.get_work_types(), normalized, ["code"], WORK_TYPE_COLUMNS
+    )
+    if not changed:
+        return BatchWriteResult()
+    return supabase_repository.upsert_work_types_reported(changed)
 
 
 def upsert_records(store, records, loaded_keys, key_cols, status_col, columns):
