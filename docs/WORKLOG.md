@@ -1,258 +1,30 @@
-# 작업 로그 (WORKLOG)
+# 최근 작업 인계
 
-터미널 Claude Code와 데스크탑 Cowork가 번갈아 작업할 때 맥락을 공유하기 위한 로그입니다.
-작업(= 사용자가 화면에서 확인할 수 있는 결과 하나)을 마칠 때마다 아래 **로그** 섹션 **맨 위**에 한 항목씩 추가합니다. 최신 항목이 맨 위에 오는 역순입니다.
+이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 제품 요구사항, 디자인 승인, DB 적용 상태의 원본으로 사용하지 않습니다. 기능은 `docs/requirements.md`, 디자인은 `DESIGN.md`, DB는 live schema와 `docs/database.md`를 확인합니다.
 
-## 형식
+새 항목은 맨 위에 1~3개 bullet로 작성하고 오래된 항목은 제거합니다. 상세 과정은 Git diff와 작업 보고서에서 확인합니다.
 
-```text
-## YYYY-MM-DD HH:MM · [터미널|데스크탑] · 한 줄 제목
-- 요청: 사용자 요청 요약 (1~2줄)
-- 변경: 무엇을 어떻게 바꿨는지 (1~3줄)
-- 파일: 수정/생성한 파일 목록
-- 비고: 미완료·후속 작업·주의사항 (없으면 생략)
-```
+## 2026-07-21 · 문서 기준 재정리
 
-- `[터미널]`은 Claude Code(터미널), `[데스크탑]`은 Cowork(데스크탑) 작업을 뜻합니다.
-- 시각은 Asia/Seoul(KST) 기준입니다.
-- 사실 기록만 남기고, 커밋은 사용자 요청이 있을 때만 합니다.
+- 모든 프로젝트 MD를 현재 구현 기준으로 축소하고 문서별 책임을 분리했습니다.
+- 특정 조직관리 레이아웃과 일률적인 디자인 절차를 요구사항·에이전트 지침에서 제거했습니다.
 
----
+## 2026-07-21 · 로그인 안정화
 
-## 로그
+- 사번 조회를 trim + 대소문자 무시로 통일하고, 대소문자만 다른 중복 사용자는 활성·정확 일치 순으로 선택하도록 수정했습니다.
+- `scripts/test_login_auth.py`와 브라우저에서 로그인 경로를 검증했습니다. 비활성 소문자 `admin` 중복 행은 실DB에 남아 있을 수 있습니다.
 
-## 2026-07-20 11:50 · [터미널] · [조직 관리 재정리] 가상 그룹 부모 모델 + 사용자 표시순서(그룹 기준)
-요청: 조직 관리의 평면 반복입력 구조를 그룹 부모/부서 자식 계층으로 재정리, 세 가지 순서(그룹/부서/사용자 표시) 분리, users.display_order 추가. migration 003 미적용 유지·사이드바/월간/편성/내근무표 무수정.
+## 2026-07-20 · 조직 관리와 메뉴 통합
 
-**§3 진단 (문제 명시)**
-- 현재 DB 저장 형태는 departments 행별 그룹값(department_group/group_sort_order) 반복 저장.
-- 기존 UI(4a08b3b)가 이 DB 행 구조를 그대로 노출 — 부서 행마다 그룹명·그룹순서 컬럼을 직접 편집해야 했고, 한 행만 수정하면 그룹이 갈라짐(구조검증이 차단만 할 뿐 전파 없음).
-- 화면에는 가상 그룹 부모 모델이 필요하고, 저장 시 그룹 부모 값을 자식 department payload 로 확장(전파)해야 함.
-- 추가 결함: `_group_structure_errors` 가 **부서순서(sort_order)까지 그룹 내 유일값으로 차단** — 이 요구는 원래 사용자 표시순서 것 → 제거. migration 003 에 users.display_order 누락 → 추가.
+- ADMIN 기준정보 메뉴는 사용자 관리, 조직 관리, 근무형태 관리로 표시되며 레거시 부서·조 route는 `views/master_org.py`로 위임합니다.
+- 조직 확장 코드는 migration 003 적용 전 조회 fallback과 저장 차단을 지원합니다. 마지막 live 확인 당시 003은 미적용이었습니다.
 
-**구현**
-- migration 003(초안, 미적용): `users.display_order integer`(NULL 유지·백필 없음) 추가, 롤백 주석·코멘트·예상 행수(5/6/21 불변, DML=departments UPDATE 2건뿐)·work_schedules/assignments 미참조 명시. teams.unit_type SHIFT 백필·CHECK 기존 유지.
-- repo: org probe 에 users.display_order 포함(3종 일괄 판정). get_users/upsert_users 에 display_order 배관(003 미적용이면 조회 NULL·저장 시 필드 제외). `_clean_order` float 표기 수용.
-- db: USER_COLUMNS + display_order. 신규 helper — `normalize_display_order`(float 승격 "1.0" 수용), `dept_group_map(merged)`(저장 후 예상 그룹 매핑), `display_order_conflicts(users, group_of)`(활성+지정만, **그룹 기준** 중복), `sort_users_for_display`(그룹순서→표시순서 NULL 뒤→사번; §13 helper 만 — 월간/편성 적용은 후속 미션).
-- workspace: `_ROW_ACTION_RENDERER` 에 `_row_state=='group'` 빈 셀 분기(선택/− 불가), `selectable_master_grid(extra_grid_options=)`, `.ms-group-row`(배경·굵게)/`.ms-indent`(26px) CSS, od_addg 버튼 CSS. 다른 화면 무영향(기본값 None).
-- master_org 좌패널 재설계: `build_org_rows`(그룹 부모 1회 + 자식, 부서순서 동률 시 코드 보조정렬, 그룹행 부서코드 셀 "부서 N개" 요약, 항상 펼침) / `parse_org_grid`(그룹행 1회 편집 수집 → 자식 payload 전파, **필터로 화면에 없는 같은 그룹 부서에도 전파**해 그룹 갈라짐 방지, casefold 병합=순서 동일 필수, 빈 새 그룹 차단, 소속그룹 필수/미존재 차단, 부서순서 빈=0·중복 허용). 툴바 [＋그룹(부모+첫 부서 쌍)][＋부서][삭제][저장]|[새로고침]. 소속그룹은 selectbox(이동/배정 — 그룹값 타이핑 없음): editable(JsCode)+agSelectCellEditor 조합이 st_aggrid 에서 안 열리는 문제 발견 → **cellEditorSelector(JsCode)** 로 그룹행 차단+select 지정 통합. 조직 저장 전 `display_order_conflicts(users, dept_group_map(merged))` — 변경 후 그룹 구조 기준 사전 차단 + 사용자 관리 안내 문구. 003 미적용: 상단 배너(파일명)+좌우 저장 근처 캡션+저장 시 차단 오류.
-- master_users(최소): 표시순서 컬럼(권한·재직 사이)+검증(정수/1 이상/빈=NULL), 저장 전 merged 기준 그룹 충돌 검증, 003 미적용 캡션. 레이아웃 무변경.
-- 테스트: test_master_org 재작성 **76건**(계층 모델·전파·병합·부서순서 허용·display_order 12건·운영단위·폴백·왕복·라우팅). 발견 버그: pandas int+NULL→float 승격으로 "1.0" 파싱 실패 → normalize 수정.
+## 2026-07-16 · 월 편성 스냅샷 연결
 
-**브라우저 검증(1366/1920/1024, supabase read-only)**: 사이드바 232px·승인 메뉴 동일. 부서/조 관리 메뉴 모두 조직 관리. 그룹 부모(배경 #EFECE4·굵게·선택셀 빈)+자식 들여쓰기 26px. 그룹행 부서코드 비편집·명칭 편집 확인. 소속그룹 select 열림(옵션=빈+전 그룹). ＋그룹=부모+자식 쌍("(신규 그룹 1)" 자동 연결·− 제거). [저장]→003 차단 오류(파일명) — 실DB 쓰기 0. 우측 PVC 전환→A/B/C 교대(4·5·6). 사용자 관리 표시순서 헤더+캡션. 3해상도 가로 오버플로우·버튼-그리드 겹침 없음. 실DB 최종 re-check: 003 컬럼 3종 미존재·5/6/21/1147/SA 0 불변.
-- 자동테스트: org 76 + unified 70 + forms 16 + views 26 + sidebar 37 + assignment 22 + contracts 52 + save_units 15 + audit 39 = **353건 통과**. compile OK, git diff --check clean. 금지 파일(ui.py/nav/schedule_edit/my_schedule/dashboard/001/002) 무변경.
-- 후속: (a) 003 적용 후 sort_users_for_display 를 월간/편성 화면에 적용, (b) 적용 직후 실그룹(PET/PVC/DECO/관리) 수동 정리 + 사용자 표시순서 입력, (c) 좌패널 그룹행 접기/펼치기(현재 항상 펼침).
-- 파일: supabase/migrations/003_org_structure.sql, modules/supabase_repository.py, modules/db.py, views/workspace.py, views/master_org.py, views/master_users.py, scripts/test_master_org.py, docs/WORKLOG.md. commit·push 없음.
+- migration 002 적용과 월 편성 저장을 확인했습니다. 신규 근무는 해당 월 편성이 있으면 `schedule_assignment_id`로 연결합니다.
+- 기존 근무는 자동 백필하지 않으며 편성이 없으면 사용자 현재 소속을 표시용으로만 사용합니다.
 
-## 2026-07-20 09:40 · [터미널] · [화면 통합] 부서/조 관리 → 조직 관리 통합 화면 (그룹·부서 + 운영단위) + migration 003 초안
-- 요청: 부서 관리·조 관리를 "조직 관리" 하나로 통합(2번 시안: 좌 그룹·부서 / 우 선택 부서의 운영단위). 그룹은 departments 컬럼으로(별도 테이블 금지), 운영단위는 teams 확장(교대/일반), 그룹순서 전역 유일. 사이드바 무변경.
-- **화면(views/master_org.py 신규)**: 제목 "조직 관리" + 공통 필터행 → 좌우 2패널. 좌: 그룹명·그룹순서·부서코드·부서명·부서순서·사용 grid(그룹-부서 한 행에 붙음, 그룹순서→부서순서 정렬). 우: 부서 selectbox(활성, 그룹순 정렬) + 코드·명칭·유형(교대/일반 select editor)·표시순서·사용 grid. 행 상태 계약(_row_id/_sel/− 신규행)·Excel 붙여넣기·전체선택 헤더는 공용 selectable_master_grid 재사용. **라우팅**: master_departments/master_teams 는 master_org.render 위임(사이드바 메뉴·라벨·nav.py 무변경 — 두 메뉴가 같은 화면).
-- **저장 계약 분리**: 좌(od_*)/우(ou_*) 각각 [행 추가][삭제][저장][새로고침] — master_action_bar 에 prefix 파라미터 추가(기본 "ms" → 기존 사용자/근무형태 화면 무변경), _MASTER_CSS 에 od_/ou_ 키 선택자 추가. 실패 시 해당 패널 오류만 표시·초안 유지, 성공 시 해당 패널만 재조회.
-- **검증 규칙**: 그룹순서 전역 유일(그룹 다르면 순서 중복 금지 + 같은 그룹은 순서 1개), 같은 그룹 내 부서순서 중복 금지, 부서코드 유일, 그룹명 필수(기존 그룹은 그룹순서 빈 칸 상속 — 편집 중 명시값 우선). 운영단위: 부서 미선택 저장 차단, 부서 내 코드/명칭/표시순서 중복 금지, 유형 교대/일반(SHIFT/GENERAL, 그 외 차단). 구조 검증은 merged 전체 기준 — 필터로 가려진 행과의 충돌도 차단.
-- **데이터 구조(supabase/migrations/003_org_structure.sql 초안 — 미적용)**: departments + department_group text / group_sort_order int (sort_order 는 "그룹 내 부서순서"로 의미 재정의, 컬럼명 유지). teams + unit_type text CHECK(SHIFT/GENERAL). 백필: 그룹=부서명(부서 1개=그룹 1개), 그룹순서=row_number(sort_order,dept_code) 1..N — 기본값 상태 행에만 UPDATE, 재실행 안전, 롤백 주석 포함. 그룹순서 유일성은 앱 저장 계층에서 차단(그룹 행들이 순서를 공유하므로 단순 unique 불가).
-- **repo/db 계층**: supabase_repository 에 org_extensions_ready()(1회 probe·reset_client 시 초기화), get/upsert_departments_org·get/upsert_teams_org(**003 미적용 시 저장은 명확한 오류로 차단**). db 파사드에 ORG_DEPT/ORG_TEAM_COLUMNS·UNIT_TYPES(내부값)/UNIT_TYPE_LABELS(교대/일반), get/save_org_departments·get/save_org_teams, org_dept_defaults/org_team_defaults(003 미적용·sample 폴백: 그룹=부서명·순서 1..N·unit_type=SHIFT — migration 백필과 동일 규칙이라 적용 전후 표시 동일). 기존 DEPT/TEAM_COLUMNS 소비 화면(근무표·편성·조회) 계약 무변경.
-- **삭제 정책 유지**: 부서=참조(사용자/운영단위/편성) 있으면 미사용 처리·없으면 물리 삭제·ADMIN 차단, 운영단위=소속 사용자 있으면 미사용 처리. AG Grid 빈 목록 영문 문구를 "표시할 데이터가 없습니다"로 교체(공용 그리드).
-- **브라우저 검증(sample 모드 — 세션 한정이라 저장 차단 플로우까지 클릭, 1366/1920/1024)**: 사이드바 라벨·구조 무변경(조직 관리 라벨 없음), 두 메뉴 → 같은 화면, 좌 그룹-부서 붙은 구조·우 운영단위(교대 표시), 부서 전환 시 우측 갱신(PET A/B/C → 생산관리팀 빈 목록), **그룹순서 중복 편집→저장 시 차단 메시지+초안 유지+새로고침 복원**, 저장 버튼-그리드 겹침 없음, 3해상도 가로 오버플로우 없음(1366에서 양 그리드 전 컬럼 표시), 월간/내근무표/사용자 관리 렌더 회귀 없음. 20건 PASS.
-- **테스트**: 신규 scripts/test_master_org.py 45건(두 메뉴 동일 화면·그룹순서 상속/중복·운영단위 유형/중복·부서 미선택 차단·폴백 기본값·sample 왕복·라우팅). 갱신: test_master_unified 70(조직 관리 계약 추가)·test_master_and_views 26·test_master_forms 16. 회귀: sidebar 37·assignment 22·contracts 52·save_units 15·audit 39 = **총 328건 통과**(브라우저 20건 별도). compile OK, git diff --check clean.
-- 비고: **migration 003 은 초안만 — 사용자 승인 후 적용**(적용 전 라이브: 화면은 부서명 기준 그룹 폴백 표시 + 저장 차단 배너). users 화면의 "조" 표시·근무표 편성의 조 선택은 기존 teams 그대로 사용(운영단위 확장의 영향 없음). 파일: views/master_org.py(신규)·master_departments·master_teams(위임)·workspace.py(prefix/CSS/빈목록 문구), modules/db.py·supabase_repository.py, supabase/migrations/003_org_structure.sql(신규), scripts/test_master_org.py(신규)·test_master_unified·test_master_and_views·test_master_forms, docs/WORKLOG.md. 사이드바(ui.py)는 이번 작업에서 무변경(작업 전부터 있던 파비콘 diff 는 데스크탑 작업분으로 보존). commit·push 없음.
+## 2026-07-16 · App Shell과 기준정보 공용 UI
 
-## 2026-07-16 15:40 · [터미널] · [디자인 통일] 기준정보 4화면(사용자·부서·조·근무형태) 레이아웃·버튼·그리드 통일
-요청: ADMIN 기준정보 4화면을 하나의 업무용 디자인으로 통일. 데이터·Supabase·권한·사이드바·월간/편성/내근무표 무변경.
-- **진단(브라우저 확인)**: ① 저장 버튼 3개(부서/조/근무형태) 모두 **검정(#1B1B1D)** — 테마 primary는 네이비(#1E3A6E)인데 CSS로 덮음. ② 새로고침이 필터행에 있음(버튼행 아님). ③ 제목이 버튼바에 섞임, 설명 줄 없음. ④ 그리드 높이가 `clamp(400~720px)`라 행 적어도 화면을 꽉 채워 **하단 거대 빈 공간**. ⑤ **사용자 관리만 구형**: `ui.card` 필터카드 + `summary_cards` 통계카드 4개 + `editable_aggrid`(선택/삭제 없음) + 하단 `신규`/독립 `저장`.
-- **공통 helper(views/workspace.py 신규)**: `_MASTER_CSS`(제목/설명/필터/버튼/건수 공용, ms_* key), `master_screen_head(title,desc)`, `master_action_bar(sel_count)`(좌 [＋행추가][삭제][저장] · 우 [새로고침], on_click 플래그 ms_*_req, 삭제 disabled=선택0), `master_grid_height(n)`(240~460 동적), `master_count(...)`. **저장 = 네이비 #1E3A6E**(검정 제거).
-- **표준 구조 적용(4화면)**: 제목 → 한 줄 설명 → 컴팩트 필터행(ms_filter, 조회 버튼 없음·값 변경 즉시 필터) → 버튼행 placeholder(ms_bar, 그리드 위) → selectable_master_grid(동적 높이, select_all_header) → 건수(ms_count). 새로고침을 버튼행 우측으로 이동. 화면별 필터/검증/삭제 로직은 유지.
-- **사용자 관리 전환**: `editable_aggrid`→`selectable_master_grid`(행 상태 계약), 통계카드·필터카드·하단 신규/독립저장 제거. 부서/조/권한을 agSelectCellEditor(표시↔코드 변환 보존: 관리자↔ADMIN 등, 부서명↔dept_code, 조명↔team_code, 타 부서 조 차단, 부서내 조명 중복 처리). [삭제]=선택 기존 사용자 **소프트 삭제(재직 해제)**(물리 삭제 아님, 과거 근무표 유지). 변경 행만 upsert·사번 중복 차단 유지.
-- **그리드 정책**: clamp 제거 → 행 수 동적 높이(240~460). 빈 셀 자동삭제 없음, Excel 다중 붙여넣기·한글 IME·선택/− 신규행 계약은 공통 그리드에서 유지. "마지막 빈 행 자동 확장"은 4화면 공통으로 **붙여넣기 자동 확장 + [행 추가] 버튼**으로 통일(사용자 관리의 구형 type-last-row 자동추가는 편집 중 remount 문제로 미채택 — 3화면 기존 정책에 맞춤).
-- **브라우저 검증(1366/1920/1024, 실DB read-only·비영속만)**: 4화면 동일 구조 확인. 사용자 관리 통계카드 없음·네이비 저장·선택 체크박스·행추가(신규 −행)·전체선택(기존 21건만, 신규 팬텀 제외)→삭제 활성화. 근무형태 색상 스와치 보존. 그리드 동적 높이(6행 309px·5행 240px, 과거 720 clamp 해소). 1024/1920 가로 오버플로우·버튼-그리드 겹침 없음. ⚠️ 저장/삭제 실행은 실DB 쓰기 방지로 미클릭(쓰기 경로는 sample 단위 테스트로 검증).
-- **테스트**: 신규 `scripts/test_master_unified.py` 73건(공통 helper·구형 제거·버튼 순서·네이비·동적 높이·사용자 변환/소프트삭제·권한 라우팅). 회귀 master_forms 14·master_and_views 23·sidebar 37·assignment 22·contracts 52·save_units 15·audit 39 = **총 275건 통과**. compile OK, git diff --check clean.
-- 남은 위험: 저장/삭제 라이브 종단은 승인 후 별도 확인 권장(이번엔 read-only). 파일: views/workspace.py, views/master_users.py, views/master_departments.py, views/master_teams.py, views/master_work_types.py, scripts/test_master_unified.py(신규), docs/WORKLOG.md. db/repo/schedule/migration/사이드바 무변경. commit·push 없음.
-
-## 2026-07-16 14:20 · [터미널] · [디자인 보정] 사이드바 접기·로그아웃 버튼 심플 아이콘화
-요청: 직전 개선의 큰 칩·전체폭 "로그아웃" 텍스트 버튼이 과함 → ChatGPT류 심플 아이콘으로 축소. 제목·동작·접근성·라우팅 유지.
-- **접기 버튼**(`sb_hide`): 칩 배경·테두리 제거 → 투명 배경·무테두리, #B8B4AB 밝은 회색 아이콘(18px), 34×34, hover 때만 옅은 배경(rgba .08)+흰색, focus-visible 골드. 토글 컬럼 [5,1.4]→[5,1.15]. 아이콘은 기존 `view_sidebar`(사이드바 패널) 유지.
-- **열기 버튼**(`sb_show`): 동일 언어 — 투명·무테두리, #6B6660(밝은 본문 대비), 34×34, hover 옅은 배경, focus-visible.
-- **로그아웃**(`btn_logout`): 전체폭 "로그아웃" 텍스트 버튼·구분선 제거 → **사용자 카드 우측 작은 아이콘 전용**(라벨 "", `st.columns([4.6,1])` 우측 배치), 투명 배경, #B8B4AB, 32×32, hover 옅은 배경(빨강 없음), focus-visible. `help/aria-label="로그아웃"` 유지, `request_nav→auth.logout` 불변.
-- **사용자 카드**: 구분선(sb-uline border-bottom) 제거, 패딩 축소 → 높이 ~46px(이전 ~70+), 좌 정보 + 우 로그아웃 한 줄 중앙 정렬, 하단 고정 유지.
-- **CSS 셀렉터**: help 툴팁 래퍼 대응 descendant(`div.stButton button`) 유지, 세 버튼 각 key 범위로 한정(메뉴·USER 헤더 CSS 무영향).
-- **브라우저 검증**: ADMIN 교대 근무표·WORKFORCE 없음, 접기(32×34 투명, hover 흰+0.08, 툴팁 "사이드바 접기")·로그아웃(32×32 투명, hover 흰+0.08, 툴팁 "로그아웃", 카드 우측 같은 줄, 구분선 없음, 카드 46px) 확인. 접기→열기(34×34 투명)→복원, 실제 로그아웃→로그인 화면. 1366/1920/768: 카드 뷰포트 내·하단 고정·로그아웃 카드 내·이름 무겹침·가로 오버플로우 없음. MANAGER 동일, USER 전용 헤더·자체 LogOut·공식명 유지(회귀 없음).
-- **테스트**: `test_sidebar_ui` 24→**37건**(심플 아이콘 계약 13건 추가: 텍스트 버튼 없음·우측 배치·구분선 제거·투명 배경≥3·focus-visible≥3·칩 배경 제거·라벨 비어있음). 회귀 master 14+23·assignment 22·contracts 52·save_units 15·audit 39 = **총 202건 통과**. compile OK, git diff --check clean.
-- 남은 위험: 없음(UI 표시만). Supabase·데이터·로직·migration 무변경. 파일: modules/ui.py, scripts/test_sidebar_ui.py, docs/WORKLOG.md. commit·push 없음.
-
-## 2026-07-16 13:40 · [터미널] · [디자인 변경] 사이드바 명칭·버튼 가시성 정리 (교대 근무표)
-요청: ADMIN/MANAGER 사이드바 상단 "생산 근무표"→"교대 근무표", 부제 "WORKFORCE" 제거, 접기·로그아웃 버튼 가시성 개선. 공식 명칭·USER 헤더·메뉴 구조·라우팅 불변.
-- **제목·부제**(`_sidebar_brand`): 표시 명칭만 "교대 근무표"로 변경(공식 `config.APP_NAME`="생산 근무표 관리"는 불변 — USER 헤더·탭 제목 유지). `sb-title-en`(WORKFORCE) span·CSS 완전 제거, 제목 15px 한 줄. 빈 여백 없음.
-- **근본 원인 발견**: 기존 접기·열기·로그아웃 버튼이 "저대비"였던 이유는 CSS 미적용 — `help=` 툴팁이 button 을 `span.stTooltipHoverTarget` 래퍼로 감싸 `div.stButton > button`(직접 자식) 셀렉터가 매칭 실패했기 때문. 세 버튼 셀렉터를 descendant(`div.stButton button`)로 교정하니 의도한 스타일이 적용됨.
-- **접기 버튼**(`sb_hide`, 다크 사이드바): #D8D4CA 밝은 아이콘 + 반투명 칩 배경(rgba 0.05)+테두리, 36×36, hover 시 흰색+0.14 배경, focus-visible 골드 아웃라인. 토글 컬럼 [5,1]→[5,1.4]로 폭 확보(36px).
-- **열기 버튼**(`sb_show`, 밝은 본문): #3D3A34 진한 아이콘 + 칩 배경, 36×36, hover 진해짐, focus-visible.
-- **로그아웃**(`btn_logout`): 아이콘 전용(28px)→ **아이콘+"로그아웃" 텍스트 전체폭 버튼**(사용자 정보 아래, 구분선). #D8D4CA 밝은 글자, hover 반투명 배경, focus-visible, 36px, 메뉴 active(골드)와 구분(빨강 강조 없음). 동작(`request_nav logout`→`auth.logout`) 불변.
-- **펼침/접힘**: show/hide 구조(sb_hidden) 보존 — 접힘=사이드바 숨김+본문 ▤ 열기 버튼. 아이콘 레일로 재작성하지 않음(§구조 보존). 브라우저에서 접기→열기 왕복·복원 확인.
-- **브라우저 검증**: ADMIN 교대 근무표·WORKFORCE 없음, 접기(36×36, hover 흰색)·로그아웃(192×36, hover) 선명, 접힘 시 열기(36×36, 진한 칩) 선명, 메뉴 이동 정상. 1366/1920/768 폭: 로그아웃 하단 고정·뷰포트 내·메뉴 무겹침·가로 오버플로우 없음·제목 무잘림. MANAGER 동일. USER 전용 헤더·자체 LogOut 유지(사이드바 미표시) 회귀 없음.
-- **테스트**: 신규 `scripts/test_sidebar_ui.py` 24건(문자열·버튼 렌더·접힘 상태·ADMIN/MANAGER/USER·동작 계약). 회귀 master 14+23·assignment 22·contracts 52·save_units 15·audit 39 = **총 189건 통과**. compile OK, git diff --check clean.
-- 남은 위험: 없음(UI 표시만 변경). Supabase·데이터·로직·migration 무변경. 파일: modules/ui.py, scripts/test_sidebar_ui.py(신규), docs/WORKLOG.md. commit·push 없음.
-
-## 2026-07-16 12:40 · [터미널] · [4차 미션 완료] work_schedules ↔ schedule_assignment_id 연결 + 편성 우선 조회
-요청: 신규·변경 근무 저장 시 실제 schedule_assignment_id 연결, 편성 화면·내 근무표 편성 우선 조회, legacy 무백필, 전체 월간·CSV·기준정보·사이드바 무수정.
-
-- **저장소(supabase_repository)**: `upsert_month_assignments` → `{(emp_no,month): {id,…}}` 반환(INSERT/UPDATE 실제 DB id, `_upsert_returning`). `plan_schedule_links`(순수) + `_assignment_id_index` 추가 → `_schedule_payload` 가 각 근무 행을 (user_id, 근무일 월1일) 편성이 있으면 그 id 에 연결, 없으면 NULL(legacy). 키에 user_id·month 포함 → 다른 직원·다른 월 편성 오연결 불가(복합 FK 방어). 입력 payload 행만 연결(기존 1147 일괄 UPDATE 없음).
-- **db 파사드**: `upsert_month_assignments` 반환 계약 일치(sample 은 `S-{emp}-{month}` 안정 합성 id). get_month_schedules/CSV 계약 불변.
-- **편성 화면(schedule_edit)**: 저장 순서 **편성 먼저 → 근무(연결 id)** 로 재배치. 편성 실패 시 근무 저장 중단·초안 유지(성공 은폐 없음), 편성 성공 후 근무 실패 시 부분 성공 안내. 편성 저장 결정 순수 헬퍼 `should_save_assignment(state,dept,team,loaded)`: 신규 행 또는 로드 스냅샷과 부서·조가 달라진 행만 upsert → **legacy 근무만 수정은 편성 미생성**(users 현재 소속 과각인 방지). `_load_grid` 가 로드 스냅샷 `se_orig_assign` 저장.
-- **내 근무표(my_schedule)**: 선택 월 편성 우선 → 없으면 users fallback(표시 전용, 저장 안 함). 편성 조회 실패를 별도 try 로 격리 → 근무/달력을 막지 않음. team NULL 이면 조 없음 표시. 레이아웃·색상·집계 무변경.
-- **실DB 종단(2027-01, 고중수 2008\*\*\*\*01, user_id 31)**: 신규 편성 저장 → 메시지 "근무 2건 · 편성 1명". ★ work_schedules 2행의 `schedule_assignment_id == assignment.id(2)`, team_id=24(B조), users.team_id=23(A조) 불변, 기존 1147·2026-07 589·2027-07 558 불변, NOT NULL 정확히 2. 서버 재시작+재로그인(완전 새 세션) 후 내 근무표가 B조 표시(DB 재수화, 세션 캐시 아님). persisted 행에 3일=OFF만 추가 저장 → 메시지 "근무 1건"만(편성 미변경), 편성 2차 미생성(여전히 1건 B조), 3개 근무 전부 기존 id(2) 연결. **정리**: 근무 먼저→편성, user_id+월 제한 삭제 → 기준선 완전 복구(1147/589/558·SA 0·NOT NULL 0·기준정보 21/5/6/6).
-- **테스트**: 신규 `scripts/test_assignment_linking.py` 22건(plan_schedule_links 연결/NULL/오연결차단·should_save_assignment 결정·반환 id·users 불변·NULL 보존·조회 우선). 회귀 contracts 52·save_units 15·audit 39·master 23+14 = **총 165건 통과**. compile OK, git diff --check clean.
-- **후속(다음 미션)**: 관리자용/일반 전체 월간 근무표·CSV 의 편성 우선 조회는 이번 범위에서 제외(요청대로 미수정) → 별도 설계. 저장 원자성(work_schedules+assignments 무트랜잭션 순차)은 부분 실패를 은폐하지 않는 현 계약으로 허용, 장기 RPC 검토.
-- 파일: modules/supabase_repository.py, modules/db.py, views/schedule_edit.py, views/my_schedule.py, scripts/test_assignment_linking.py(신규), docs/WORKLOG.md. migration·전체 월간·CSV·기준정보·사이드바 무수정. commit·push 없음.
-
-## 2026-07-16 11:05 · [터미널] · [3차 미션 완료] migration 002 적용 확인 + A조→B조 편성 스냅샷 종단 검증
-- 요청: 사용자가 SQL Editor 로 002 수동 실행("Success. No rows returned") 후, 스키마·무변경·편성 영속을 검증하고 테스트 데이터 정리. 재개 기준: 기준선 1147(2026-07=589 승인·ADMIN 31건 보존), live 는 일반 직원 A→B/C 만, NULL-조는 자동 테스트.
-- **적용 확인**: shift_groups·schedule_assignments·work_schedules.schedule_assignment_id 3종 생성. 신규 테이블 0건·연결컬럼 NOT NULL 0건(자동 백필 없음). 컬럼 계약(OpenAPI): user/dept/month NOT NULL, team_id·shift_group_code nullable, schedule_month date. FK 5종(SA→users/departments/teams복합, WS→SA복합, SG→departments) PostgREST 임베딩으로 존재 증명. UNIQUE(user_id,schedule_month)는 앱 upsert(on_conflict) 성공으로 행동 증명. 사용자 주의사항: 클립보드 과정에서 한글 주석/COMMENT 문자열 일부 깨졌을 수 있음 — 기능 무관(코멘트만), DDL 정상.
-- **기존 데이터 무변경**: work_schedules 1147(2026-07=589·2027-07=558)·users 21·departments 5·teams 6·work_types 6 전부 불변, 기존 컬럼 타입 불변.
-- **종단 검증(테스트 월 2027-01, 고중수 2008110301·user_id 31)**: ⚠️ 편차 기록 — 계획상 2028-01 이었으나 편성 화면 연도 선택지가 `today±1`(2025~2027)라 UI 진입 불가 → 빈 월 재확인(0/0) 후 **2027-01 로 조정**(뷰 수정은 미션 금지). ADMIN 로그인 → 사번 입력(성명·부서·조 자동조회: A조) → 조를 **B조**로 수정 → 1일=주·2일=야 입력 → 저장. 메시지 "근무 2건 저장 · **편성 1명 저장**"(성공, 002 이전의 '적용 후 저장' 경고 없음 = assign_persisted). DB: SA 1건(user 31·2027-01-01·dept 17·**team_id 24=B조**·shift NULL), **users.team_id 23=A조 유지**, WS 2건(DAY/NIGHT)만 추가. **새로고침(재로그인 필요=완전 새 세션)·월 이동(2027-02 빈 월 격리 확인)→복귀·서버 프로세스 재시작+재로그인** 모두 B조·주/야 유지 — 세션 캐시 소멸 상태이므로 DB 영속 확정.
-- **NULL-조 자동 테스트**: audit 테스트에 2건 보강(팀 미지정 '' 보존 = users 조 자동 대입/A조 fallback 저장 없음, 근무조 '' 보존) → 39건. 기존: NULL 허용 정합·조 없는 부서 저장 가능·타부서 조 선차단(복합 FK 방어) 커버.
-- **정리**: 삭제 전 대상 출력(SA 1·WS 2) → repo delete_schedule(사번·일자 단건)×2 + SA user_id+월 정밀 삭제 → 기준선 완전 복구(1147/589/558·SA 총 0·기준정보 21/5/6/6·고중수 A조).
-- 테스트: audit 39 · contracts 52 · save_units 15 통과, git diff --check clean. (참고) 테스트 WS 행의 schedule_assignment_id 는 NULL — 현 저장 경로는 연결컬럼을 채우지 않음(002 주석의 과도기 계약, 별도 migration/코드에서 승격 예정).
-- 다음 미션 후보: (a) 월간·개인·CSV 의 assignment-우선 조회 보강(이번 미션 제외 항목 — 이것 없이는 조회 화면 조 표시가 users 기준), (b) 편성 화면 연도 범위 확장 검토, (c) work_schedules.schedule_assignment_id 연결 저장 경로.
-- 파일: scripts/test_migration_002_audit.py(+2 체크), docs/WORKLOG.md. Supabase 는 002 적용(사용자 실행) + 테스트 왕복 후 원상. commit·push 없음.
-
-## 2026-07-16 09:45 · [터미널] · [3차 미션 중단] migration 002 적용 전 기준선 불일치 — 적용 보류 (BLOCKED)
-- 요청: 정리된 002를 테스트 프로젝트에 적용하고 A→B/C 스냅샷 영속을 종단 검증. 단, §3 사전 재확인이 예상과 다르면 적용 금지·중단 보고.
-- **중단 사유(§3 명시 규칙 발동)**: 실DB 재조회 결과 work_schedules 총 **1147**(예상 1116), 2026-07 = **589**(예상 558). 초과 31건은 **2026-07-16(오늘) 생성**, user_id=21(emp_no=ADMIN, 관리자 계정)의 2026-07 한 달치(DAY 10·OFF 10·NIGHT 11) — 미션 사이에 편성 화면에서 수동 저장된 것으로 추정. users 분포도 변동: team_id=23(PET A조) **20명**+미지정 1명(예상 19+2), 활성 ADMIN(user_id=21)이 PET/A조 소속(§0·§7의 "ADMIN=관리자부서·조없음" 전제와 불일치 — 관리자부서 admin user_id=19는 비활성).
-- 적용 전 통과 항목: 작업 트리 clean(e0ab9f8), 002=커밋본 동일, SHA-256 `0229b2110fa140f74673433df69021cd67c83f5144f18c1ea3def2c46e3652ea`, 정적 테스트 37+52+15·compile OK, 002 오브젝트 3종 미존재(부분 적용 흔적 없음), 2027-07=558 불변, 기준정보 21/5/6/6 불변, 2028-01 빈 월 확인(0건).
-- 백업 근거 확보: `docs/backup_pre_migration_002.json` (UTC 2026-07-16T00:37, 프로젝트 ref icvizwmqdffwsifmnwuk, 전 테이블 + work_schedules 1147행 전체, 컬럼 목록, 002 해시 포함). **개인정보(사번·성명) 포함 — 커밋 금지, 로컬 보관용.**
-- 추가 확인: DDL 실행 경로 미확보 — supabase CLI 없음, config.toml 없음, secrets에 직접 PostgreSQL 연결 정보 없음, PG 드라이버 없음. service_role REST 우회는 미션 금지. 재개 시 Dashboard SQL Editor(수동 또는 로그인된 브라우저 세션) 필요.
-- **Supabase·스키마·데이터 무변경**(read-only SELECT만). migration 미적용 유지. commit·push 없음.
-- 재개 조건(사용자 결정 필요): (a) ADMIN 2026-07 31건을 새 기준선(총 1147, 2026-07=589)으로 승인하고 재개, 또는 (b) 해당 31건 정리 지시 후 1116 기준으로 재개. + ADMIN NULL-조 검증 대상을 어느 계정으로 할지(현 활성 ADMIN은 PET/A조).
-
-## 2026-07-16 09:20 · [터미널] · [2차 미션] migration 002 를 DDL 전용으로 정리 — 자동 백필 완전 제거
-요청: 1차 감사 결론에 따라 002 에서 users 기반 자동 백필을 분리하고 안전한 DDL 전용 migration 으로 정리. migration 실행·Supabase 쓰기·commit 은 금지.
-
-1. **migration 파일 처리 전략 — 전략 A(002 직접 수정) 채택.** 근거 3중 확인: (a) 실DB 프로브에서 schedule_assignments·shift_groups·schedule_assignment_id 전부 미존재(유일한 Supabase 테스트 프로젝트에도 미적용), (b) CLAUDE.md·AGENTS.md 가 "002 미적용" 명시·배포 이력 기록 없음, (c) git 상 002 는 3fef14a 단일 커밋 도입 후 무수정. 어느 환경에도 적용된 적 없으므로 migration 불변성 문제 없이 직접 수정 가능.
-2. **자동 백필 제거 내용**: 002 의 114~134행 INSERT(users 현재 소속 기반 편성 생성) + UPDATE(schedule_assignment_id 연결) 블록 삭제. 이제 002 에는 실행 가능한 DML 이 0건 — diff 로 확인: 제거된 실행 구문은 해당 INSERT/UPDATE 뿐, 추가된 실행 구문 없음(주석만 추가). 제거 이유·기존 데이터 정책·선택적 백필 조건을 SQL 주석 블록("기존 데이터 정책: 자동 백필 없음")으로 파일 안에 기록.
-3. **schedule_assignments 최종 계약(무변경 확정)**: 직원·월 1건 UNIQUE(user_id, schedule_month) · schedule_month=해당 월 1일 date(CHECK) · user_id/department_id FK(RESTRICT) · team_id NULL 허용 + 복합 FK(team_id,department_id)→teams · shift_group_code NULL 허용 text(FK 아님) · created/updated_at(트리거) · 인덱스 month/(dept,month). **ID 참조형 "월별 배정 스냅샷"임을 주석에 명시** — 부서명·조명 변경 시 과거 화면도 최신 명칭으로 표시되며, "당시 명칭 문자열 보존"이 아니다. 현재 요구사항(기준정보 §5: 명칭 변경으로 연결이 끊기지 않아야 함)에는 ID 참조형이 충분.
-4. **teams vs shift_groups 역할 구분**: 화면의 A/B/C조 = **teams 기준정보(team_id/team_code)** 로 저장. shift_groups(근무조)는 별개 개념의 선택지·검증 전용 기준정보로 테이블은 유지하되(제거하려면 repo/db/validators 운영 코드 수정 필요 — 이번 미션 금지 범위), 저장 필수 조건이 아님: 편집기는 require_shift=False + shift_group_code='' 로 저장하고 shift_groups 를 조회하지 않음(정적 테스트로 고정).
-5. **기존 1116건 처리 정책**: work_schedules(2026-07=558, 2027-07=558)는 그대로 유지, schedule_assignment_id 는 NULL 로 남음. DDL 적용만으로는 행 수·값·타입 전부 불변.
-6. **과거 월 assignment 미존재 유지 이유**: 과거 실제 편성 조(A/B/C)를 알 수 있는 신뢰 가능한 원본이 DB 에 없음. users 현재값(재직자 대부분 A조)으로 채우면 오답이 영속 각인됨. 조회 화면의 users fallback 은 표시용일 뿐 저장하지 않는다.
-7. **선택적 백필 필요 입력**: 명시적 (사번, 월, 부서, 조) 매핑 원본(예: 편성 원본 Excel). 실행 조건 — 002 와 자동 연동 금지, 기본 미실행, users 자동 source 금지, 매핑 명시 직원·월만, dry-run·존재/중복 검증·대상 사전 출력, 사용자 승인 필수. **신뢰 원본이 아직 없으므로 실행 스크립트는 만들지 않고 계약만 문서화**(002 주석 + 본 기록).
-8. **적용 순서(승인 시)**: (a) 백업/스냅샷 확인 → (b) 002(DDL 전용) 적용 → (c) 조회 화면 assignment-우선 fallback 보강 배포(다음 미션) → (d) 편집기 시범 월 저장으로 스냅샷 영속 확인.
-9. **검증 순서**: 세 오브젝트 존재 확인 → work_schedules 총 1116·월별 558/558 불변 → schedule_assignments 0건(자동 생성 없음 확인) → 편집기 A→B/C 편성 저장 후 get_month_assignments 가 B/C 반환 → 미편성 월 빈 편성+마스터 fallback → 근무 조회 정상.
-10. **롤백 순서**(002 헤더 주석, FK 역순): work_schedules_assignment_date_key drop → work_schedules_assignment_user_fk drop → work_schedules_assignment_idx drop → schedule_assignment_id 컬럼 drop → schedule_assignments drop → shift_groups drop. 적용 후 신규 편성이 저장된 뒤 롤백하면 그 스냅샷은 유실됨(롤백 전 백업 필요).
-11. **적용 후 운영 코드에서 수정할 부분(다음 미션)**: (a) 월간(views/workspace._build_month_grid)·개인(views/my_schedule)·CSV 가 get_month_assignments 를 우선 참조하고 미존재 시 users fallback 하도록 보강 — 이것 없이는 002 적용 후에도 화면 조 표시가 개선되지 않음. (b) 저장 원자성: work_schedules 와 assignments 순차 저장(트랜잭션 없음) — 현재 계약은 "근무 저장 성공 + 편성 실패 시 실패를 숨기지 않고 안내"(assign_persisted 분기)로 허용 가능하나, 장기적으로 RPC 검토.
-12. **실제 migration 은 미실행 상태.** Supabase 스키마·데이터 무변경(이번 미션에서는 실DB 접속 자체 없음 — 정적/sample 만).
-
-- 테스트: test_migration_002_audit **37건**(백필 부재·DML 0건·users 미참조·FK RESTRICT·001 정합·롤백 역순·teams/shift 분리·validators 정합) + 회귀 52+15+23+14 = **총 141건 통과**. compile OK, git diff --check clean.
-- 파일: supabase/migrations/002_schedule_assignments.sql(백필 제거+정책 주석, 실행 구문 추가 0), scripts/test_migration_002_audit.py(계약 반전·확장), docs/WORKLOG.md(본 기록)
-- 비고: 1차 미션 미커밋분(WORKLOG 감사 기록, 감사 테스트 초판)과 이번 변경이 같은 파일에 섞여 있음 — 커밋 시 함께 반영됨. commit·push 미실행.
-
-## 2026-07-16 08:55 · [터미널] · [read-only 감사] migration 002 + 조 스냅샷 구조 적용 전 감사
-요청: migration 002 실제 적용 전, schedule_assignments/shift_groups 구조와 조 스냅샷 계약을 코드·SQL·실DB(SELECT만) 기준으로 감사하고 적용 가능 여부·위험을 보고. 쓰기·실행·commit 전면 금지.
-
-1. **migration 002 구조 요약**
-   - `shift_groups`(근무조 기준정보): id PK, department_id FK(→departments, RESTRICT), shift_code/shift_name(NOT NULL·not-blank CHECK), sort_order, is_active, created/updated_at+by. UNIQUE(department_id, shift_code). 인덱스 department_id. updated_at 트리거. RLS enable(정책 없음).
-   - `schedule_assignments`(직원별 월 편성 스냅샷): id PK, user_id FK(→users, RESTRICT), schedule_month date(CHECK 월1일), department_id FK(RESTRICT), team_id NULL, shift_group_code text NULL(FK 아님·스냅샷), created/updated. UNIQUE(user_id, schedule_month)=직원·월 1건, UNIQUE(id,user_id), 복합 FK(team_id,department_id)→teams(id,department_id) RESTRICT. 인덱스 month·(department,month). RLS enable(정책 없음).
-   - `work_schedules` 확장: `ADD COLUMN IF NOT EXISTS schedule_assignment_id`(NULL), 복합 FK(schedule_assignment_id,user_id)→schedule_assignments(id,user_id) RESTRICT, UNIQUE(schedule_assignment_id, work_date), 인덱스. user_id 유지(과도기).
-   - **백필 내장(114~134행)**: 기존 work_schedules에서 DISTINCT(user_id, 월)로 assignments를 INSERT하되 부서·팀을 **users 현재 소속(u.department_id/u.team_id)** 으로, shift_group_code는 NULL로 채우고 work_schedules.schedule_assignment_id를 UPDATE 연결. ON CONFLICT DO NOTHING + NULL 조건이라 재실행 안전.
-
-2. **현재 코드와 migration 계약의 불일치**
-   - 월간(workspace._build_month_grid)·개인(my_schedule)·CSV는 부서·조를 **users 마스터 현재값**으로만 표시하고 `schedule_assignments`를 **조회하지 않음** → 002를 적용해도 두 화면의 "전부 A조" 증상은 그대로. (편성 우선 표시는 편집기에서만 구현됨: schedule_edit `_assignment_snapshots`→세션캐시→마스터.)
-   - `db.get_month_roster`(assignments 미try/except 조인)는 **어떤 뷰도 호출하지 않음**(테스트 전용) → 운영 read 경로는 assignments 부재로 깨지지 않음. 근무 조회(get_month_schedules/_schedule_rows)는 work_schedules 전용.
-   - validators↔002 스키마는 정합(월1일, team/shift NULL 허용=require_shift False, 직원·월 UNIQUE). 편집기 저장은 require_shift=False(shift_group_code 항상 '' → NULL). "조" A/B/C는 **teams.team_code**(→team_id)로 저장, shift_groups는 편집기에서 미사용.
-
-3. **적용 전 반드시 수정해야 하는 항목** (→ 모두 Fable High 소관)
-   - (필수) 002의 **백필 블록**을 그대로 두면 실행 즉시 assignments 38±건이 "전부 A조" + shift NULL로 각인됨. "신규 저장 월부터만 스냅샷" 요구를 지키려면 백필을 분리/게이트하도록 **002 SQL을 수정**해야 함.
-   - (권장, 별도 작업) 월간·개인·CSV가 `get_month_assignments`(실패 무시 폴백)를 우선 참조하도록 뷰 로직 보강 — 이걸 안 하면 002를 적용해도 화면 조 표시는 개선되지 않음.
-
-4. **기존 데이터 영향** — *현재 값 재확인(이전 보고와 다름)*: work_schedules **총 1116건**(2026-07=558, 2027-07=558). users 21·departments 5·teams 6(dept17·18 각 A/B/C 활성)·work_types 6. **users 19명 전원 team=A조, 2명 조 없음**. 002 DDL 자체는 기존 컬럼/행을 훼손하지 않음(ADD COLUMN·신규 테이블뿐). 위험은 손상이 아니라 **백필이 1116행을 A조 편성에 연결**하는 의미 오류.
-
-5. **백필 필요 여부** — **불필요/금지**. 과거 실제 조(월별 B/C 편성)는 소스가 없어 알 수 없고, users 현재값(A조)로 채우면 오답을 영속화. 과거 월은 assignments **미존재/NULL로 유지**하고 편집기 신규 저장분부터 스냅샷을 쌓는 편이 안전. (미션 금지사항과 일치.)
-
-6. **안전한 적용 순서(권장, 승인 시)** — (a) 002에서 백필 INSERT/UPDATE 제거 또는 주석 게이트한 사본 준비(SQL 수정=Fable High), (b) 백업/스냅샷 확인, (c) DDL만 적용(테이블·컬럼·제약·인덱스·트리거·RLS), (d) 월간·개인·CSV의 assignments-우선 폴백 뷰 보강 후 배포, (e) 편집기에서 시범 월 저장→재조회로 스냅샷 영속 확인.
-
-7. **롤백 순서** — 002 헤더 주석의 역순: work_schedules 제약(assignment_date_key, assignment_user_fk) drop → index drop → schedule_assignment_id 컬럼 drop → schedule_assignments drop → shift_groups drop. **주의**: 적용 후 편집기로 신규 편성이 저장된 뒤 롤백하면 그 스냅샷은 유실(→Fable High).
-
-8. **적용 후 검증 시나리오** — schedule_assignments/shift_groups/schedule_assignment_id 존재; work_schedules 1116 불변; 특정 사번 월별 건수 불변; 편집기에서 A→B/C 편성 저장 후 get_month_assignments가 B/C 반환; 미편성 월은 빈 편성+마스터 폴백; 근무 조회는 편성 유무와 무관하게 성공.
-
-9. **Fable High 검토 필요 항목** — 판정: **적용 불가(현 상태), Fable High 필요.** 트리거 다중 해당: (i) 002 SQL 자체 수정(백필 분리), (ii) 기존 1116건 백필/변환, (iii) 과거 부서·조 추정, (iv) 적용 후 신규 편성 저장 시 롤백 데이터 유실 가능. RLS 정책 부재는 001과 동일 패턴(service_role 접근)이라 신규 위험 아님.
-
-10. **git status**: 브랜치 feature/supabase-crud, 미커밋 신규 파일 `scripts/test_migration_002_audit.py`(정적 감사 25건) 1개뿐. 운영 코드·migration SQL 무수정. 실DB 쓰기 0.
-
-- 테스트: 신규 test_migration_002_audit 25 통과. 회귀 test_schedule_contracts 52·test_schedule_save_units 15·test_master_and_views 23·test_master_forms 14 통과(총 129). compile OK.
-- 무변경 확인: git diff 비어 있음(추적 파일 무수정), 002/001 SQL·schedule_edit.py 무수정, Supabase INSERT/UPDATE/DELETE 0(SELECT·존재프로브만).
-- 파일: scripts/test_migration_002_audit.py(신규), docs/WORKLOG.md(본 기록)
-
-## 2026-07-15 18:05 · [터미널] · [무인작업 완료] Phase 5 브라우저 read-only 검증 + Phase 6 최종 감사
-- Phase 5(브라우저 read-only, ADMIN 로그인, 저장/삭제 클릭 없음): 조 관리·근무형태 관리 신형 통일 그리드 렌더 확인. 근무형태 색상 열은 스와치(코드별 색)+HEX 표시, 셀 더블클릭 시 네이티브 컬러 피커가 현재 HEX(#1e6fd9)를 로드(Escape로 취소, 저장 안 함). [＋행추가]로 신규 −행+기본 색 스와치 생성 확인 후 −로 제거해 원상 복귀(Supabase 쓰기 없음).
-- Phase 6 자체 감사: `git diff --check` 클린(LF/CRLF 경고만). schedule_edit.py·migrations·validators.py·db/ 무변경 확인. diff 추가라인의 유일한 Supabase 쓰기 표현은 delete_team/delete_work_type 함수 본문(기능 코드, 이번 세션 실행 안 함)과 on_click 상태 람다뿐. print는 테스트 스크립트에만. compileall OK.
-- 테스트 전량 재확인: test_schedule_contracts 52 · test_schedule_save_units 15 · test_master_and_views 23 · test_master_forms 14 = 104 전부 통과. test_supabase_crud(라이브 쓰기 유발)는 규칙상 미실행.
-- Supabase read-only 카운트 재검증(세션 전후 동일): users 21 · departments 5 · teams 6 · work_types 6 · work_schedules 2027-07 = 558 · 2026-07 = 0 · 총 558. 쓰기 전무 확인.
-- 상태: 커밋/푸시 대기(사용자 지시 전까지 커밋 안 함). 미커밋 8개 수정 + 신규 scripts/test_master_and_views.py.
-
-## 2026-07-15 17:50 · [터미널] · [무인작업 체크포인트] Phase 4·5 코드 완료 — 기준정보 통일 + 테스트
-- Phase 4: `views/master_teams.py`·`views/master_work_types.py` 를 부서 관리와 동일한 `selectable_master_grid`(행 상태 계약, 상단 행추가/삭제/저장, 3상태 전체선택, 반응형 표, 신규 −행/기존 체크박스 분리)로 전면 통일. 조 관리: 부서 표시명↔dept_code 변환·부서내 조코드 중복 차단·소속 사용자 있는 조 미사용 처리/없으면 삭제. 근무형태: 색상 열을 **네이티브 컬러 피커(cellEditor)+스와치 렌더러**로 변경(저장 #RRGGBB 유지), 근무표 사용 중 코드 미사용 처리/없으면 삭제. db/repo에 delete_team·team_reference_counts·delete_work_type·work_type_reference_counts 추가(부서 패턴 미러링). validators.validate_assignment_records 는 이전 커밋에서 require_shift 옵션화됨(무관).
-- Phase 5: 신규 `scripts/test_master_and_views.py`(23건: work_type_display·월간 필터/약칭/빈월/월분리·조/근무형태 validate·db 참조/삭제). `scripts/test_master_forms.py` 를 구형 폼 UI 테스트에서 신형 AG Grid 스모크(4화면 렌더 무예외)+신 시그니처 검증+라우팅(6페이지)으로 갱신(14건). 회귀: test_schedule_contracts 52, test_schedule_save_units 15 통과. 총 52+15+23+14 전부 통과. compile OK.
-- 주의: test_master_forms 구버전은 4f9fe3b(부서 재설계, 승인됨)부터 이미 obsolete(제거된 폼 위젯 테스트)였고 이번 조 관리 재설계로 team 시그니처도 바뀜 → 신형에 맞게 재작성(실패 은폐 아님, UI 변경 반영).
-- 미검증(진행 중): (a) 새 조/근무형태 화면 브라우저 read-only 렌더, (b) 월간 필터/개인 데이터 표시 — 단위/AppTest 로 결정적 검증했고 브라우저는 Supabase 쓰기 없는 read-only 렌더만 확인 예정. 실제 저장/삭제는 sample 모드/AppTest 로만(Supabase 쓰기 금지 준수).
-- 다음: Phase 5 브라우저 read-only 렌더 → Phase 6 최종 감사(diff/write호출/스키마/schedule_edit 무변경/테이블 행수 재확인).
-
-## 2026-07-15 17:34 · [터미널] · [무인작업 체크포인트] Phase 2·3 완료 — 월간/개인 약칭·색상 표시
-- Phase 2(월간 근무표, views/workspace.py): `work_type_display()` 신설(코드→약칭 display_of, 약칭·코드 양쪽→색상 color_of, 약칭 비거나 모호하면 코드 표시). `_build_month_grid`가 셀을 약칭으로 표시, `_cell_style`는 color_of 기준, 집계표 열 머리글도 약칭, 범례를 `_label_legend_html`로 약칭 표시. 필터·연월 로직은 미변경.
-- Phase 3(개인 근무표, views/my_schedule.py): `_calendar_html`이 셀을 약칭+색상으로 표시(work_type_display 재사용). 광범위 try/except 를 유지하되 repository 오류 메시지에 원인 노출(빈 월과 구분 명확화).
-- 브라우저 검증: 월간 2027-07 재조회 → 셀이 주/야/OFF/연차(색상 포함)로 표시 확인(스크린샷). 개인: USER(2008082501) 로그인·전용 App Shell·달력 렌더 정상(2026-07 빈 달력, 오류 없음). **미완 검증**: (a) 월간 부서·조 필터, (b) 개인 2027-07 데이터 표시 — Streamlit 셀렉트박스/wheel picker 가 브라우저 자동화 커밋을 거부(제품 결함 아님). → Phase 5 에서 sample 모드 단위/AppTest 로 결정적 검증 예정.
-- compile OK. schedule_edit.py 미변경. Supabase 쓰기 없음(read-only 조회만).
-- 다음: Phase 4(master_teams·master_work_types 를 selectable_master_grid 로 통일, work_types 색상표) → Phase 5 테스트 → Phase 6 감사.
-
-## 2026-07-15 17:11 · [터미널] · [무인작업 체크포인트] Phase 1 감사 완료 — 월간/개인 조회 원인 특정
-- 기준: 커밋 5ecda99, 작업 트리 clean, sample 테스트 통과, compile OK. Supabase read-only 프로브 결과: work_schedules 558행(전부 2027-07)/users 21/dept 5/teams 6/work_types 6, schedule_assignments 없음.
-- 연결도(read-only 코드 추적): 로그인 사번→auth.get_current_user→app.py dispatch→(schedule_view→workspace.schedule_screen / my_schedule.render)→db.get_month_schedules(emp_nos,y,m)→supabase_repository._user_maps(emp_no→user_id)+work_schedules 범위조회(work_date gte/lt)→SCHEDULE_COLUMNS(emp_no/duty_date/work_type_code/note)→표/달력. work_types는 code/short_label/color 보유.
-- **핵심 진단: 저장·조회·연결은 정상. "안 보임"은 UI 계층 이슈**. repository 프로브에서 2027-07 전체 558행/18명, 개인(2008082501) 31행 정상 반환.
-  1) 두 화면 모두 날짜 셀에 내부 코드(DAY/NIGHT..)를 그대로 표시 — 요구사항의 약칭(주/야/OFF..) 표시 위반. (월간 workspace._build_month_grid, 개인 my_schedule._calendar_html)
-  2) 기본 연·월이 today(2026-07)라 첫 진입 시 빈 월 → 사용자가 "조회 안 됨"으로 오인 가능(정상 빈 월). 데이터는 2027-07 선택 시 표시.
-  3) 월간 schedule_screen 은 상단에서 db.get_schedules()(전체 조회)를 매 렌더 호출 — 일시 소켓 오류 시 화면 전체가 예외로 죽을 수 있음(try/except 없음).
-  4) 개인 my_schedule.render 는 전체를 광범위 try/except 로 감싸 모든 예외를 "불러오지 못했습니다"로 뭉갬 — repository 오류와 정상 빈 월 구분 불가(요구 Phase3 #12 위반).
-- 기준정보 현황: master_departments=신형 그리드(selectable_master_grid). master_users=editable_aggrid(안정). master_teams=editable_aggrid+요약카드+신규 폼 버튼(구형). master_work_types=st.data_editor+요약카드+색상 텍스트+범례(구형). → Phase4 대상은 teams·work_types 를 부서 관리와 동일한 selectable_master_grid 로 통일 + work_types 색상 컬럼을 색상표로.
-- schedule_edit.py 는 이번 무인작업에서 read-only 참조만(수정 금지 준수).
-- 다음: Phase 2(월간 조회 약칭·색상·견고성) → Phase 3(개인 조회 약칭·오류 구분) → Phase 4(teams/work_types 통일) → Phase 5 테스트 → Phase 6 감사.
-- 요청: ① 저장한 조가 유실되고 전원 A조로 조회되는 오류 수정 ② 통계 카드·하단 범례 제거, 날짜 셀 근무 색상, 표 중심 레이아웃 정리.
-- 원인: 조 유실은 코드 fallback 이 아니라 저장처 부재 — 조 스냅샷의 설계 저장처(schedule_assignments, migration 002)가 Supabase 에 미적용이고, 재조회 표시가 users 마스터 조(전원 A조)로 대체되고 있었음.
-- 변경: `validators.validate_assignment_records(require_shift=)` 옵션화(기본 True 계약 유지), `db/supabase_repository.upsert_month_assignments(require_shift=)` 전달(False 면 shift_groups 조회 생략·NULL 저장). `views/schedule_edit.py` — 저장 시 행별 부서·조 스냅샷을 upsert_month_assignments(require_shift=False)로 저장 시도(002 이전엔 실패 허용) + 세션 스냅샷 캐시(se_assign_cache), 재조회 표시 우선순위 영속 편성→세션 스냅샷→users 마스터. UI: 통계 카드/범례 제거, 메타 한 줄(대상 월·표시·신규·선택·입력·삭제 예정), 날짜 셀 색상은 work_types.color 를 코드·약칭에 매핑한 cellStyle(연한 배경+진한 글자, DESIGN.md §15 계열). 단위 테스트 15건(조 스냅샷 왕복·A조 fallback 부재·조 변경 유지·users 무변경·기본 계약 유지 포함).
-- 파일: views/schedule_edit.py, modules/validators.py, modules/db.py, modules/supabase_repository.py, scripts/test_schedule_save_units.py, docs/WORKLOG.md
-- 비고: 커밋 안 함. Supabase 종단(2027-07, 기존 데이터 무접촉): 박시우(2026060101) B조 저장→재조회·월 이동 후 재진입 모두 B조 유지, 셀 색상 일관, 임시 2건 정리 완료. **주의: 프롬프트의 '0행 사고 상태'와 달리 현재 work_schedules 에 558건이 존재하며 전부 2027-07** (2026-07 은 여전히 0). 직전 커밋 시점(총 0행) 이후 이 터미널 밖에서 유입 — 2026-07 복구 시도 중 연도가 2027 로 들어갔을 가능성. 사용자 확인 필요. Supabase 모드의 조 영속 저장은 migration 002 적용 시 자동 활성화(세션 내에서는 유지됨).
-
-## 2026-07-15 15:15 · [터미널] · 근무표 편성 — 혼합 저장·삭제만 저장·전체 선택 수정
-- 요청: ① 삭제 예정+동일 사번 재등록 시 저장 차단 해제(교체 처리) ② 삭제만 저장 시 users 조회 의존 제거(WinError 10035 표면적 축소) ③ 선택 헤더 3상태 전체 선택 ④ 필터 결과만 전체 선택.
-- 변경: `views/schedule_edit.py` — `classify_save_targets`(delete_only/replace_after_delete)로 최종 사번별 상태 분류, 저장 파이프라인 재구성(검증 전체 통과 후 삭제→교체(replace_month_schedules)→변경분 upsert, 단계 실패 시 단계 보고+초안 유지), 삭제만 저장 경로는 users/근무형태/부서·조 조회 생략, users 매핑 세션 캐시(조회 시점 갱신·rerun 반복 조회 제거), `표시 M·신규 N·선택 K` 카운트 표시, 새로고침 버튼 on_click 플래그 전환(클릭 소실 경합 해결). `views/workspace.py` — `_SELECT_ALL_HEADER`(3상태, forEachNodeAfterFilter로 표시 중 기존 행만, 신규/제거 행 제외, refreshCells로 행 체크 표시 동기화), `selectable_master_grid(select_all_header=)` opt-in(부서 관리 무영향). `scripts/test_schedule_save_units.py` 신규(분류·약칭 계약 10건).
-- 파일: views/schedule_edit.py, views/workspace.py, scripts/test_schedule_save_units.py, docs/WORKLOG.md
-- 비고: 커밋 안 함. 브라우저 검증(2027-07 임시 데이터 한정, 종료 후 정리 완료): 전체 선택/indeterminate/신규 행 제외/조 변경 시 선택 해제/전체 삭제 예정+1명 재등록 저장(충돌 없음, "2명 삭제·1명 교체", DB stale 없음)/삭제만 저장(빈 월 복귀·dirty·선택 초기화) 모두 통과. 기준정보 무변경(users 21). 2026-07 소실 데이터는 복구 시도하지 않음(아래 사고 기록 유지, 승인 대기).
-
-## 2026-07-15 14:55 · [터미널] · ⚠ 데이터 사고 기록 — Supabase work_schedules 전체 소실 (보존 중)
-- 발견: 2026-07-15 14:20~14:40(KST) 사이, 근무표 편성 화면 진입 시 2026-07 기존 행 0명으로 확인 → DB 직접 조회로 확정.
-- 현재 테이블 행 수(14:55 기준, read-only 조회): users 21 · departments 5 · teams 6 · work_types 6 · **work_schedules 0** (직전 558행).
-- 데이터 존재 마지막 확인: 13:47(KST) 근무표 편성 화면에 2026-07 18명/558건 정상 로드(작업 보고 스크린샷).
-- 이 저장소 코드의 근무표 쓰기 API 는 (사번×월) 범위 한정 replace/upsert 뿐이라 테이블 전체 삭제 경로 없음. 13:47 이후 터미널 세션에서 실행한 것은 sample 모드 강제 테스트와 코드 수정뿐(Supabase 쓰기 없음).
-- 조치: Supabase 쓰기 중단·상태 보존. 시드 재실행·백업/PITR 복원 금지(사용자 승인 대기). 2026-07 복구 시도 금지. 종단 검증은 2027-07 테스트 월 한정 임시 데이터로만 진행(사용자 지시).
-
-## 2026-07-15 13:49 · [터미널] · 근무표 편성 화면 1차 기능 기반 (사번 중심 입력)
-- 요청: 전체 사용자 자동 나열 제거, 사번 중심 입력 + 성명·부서·조 자동 조회, 부서·조 편성값 수정, 근무형태 약칭 표시, 행 추가/삭제, 일괄 저장, dirty tracking + 화면 이탈 경고. 디자인 개편·wheel picker·migration 002 제외.
-- 변경: `views/schedule_edit.py` 재작성 — selectable_master_grid(행 상태 계약) 기반: 저장된 직원 행만 표시(없으면 빈 행 1개), [행 추가], 신규 행 − 제거/기존 행 체크박스+[행 삭제]→삭제 예정 패널(취소 가능, 저장 시 replace 로 명시 삭제), 사번 paste→성명·부서·조 자동 채움, 날짜 셀 약칭 표시·입력(저장 시 내부 코드 변환, 미등록/모호 약칭·미등록/중복 사번·재직 아님 차단), 변경 셀만 upsert(빈 셀 자동 삭제 없음 — `db.upsert_month_schedules` 신설), dirty 스냅샷 비교 + 사이드바/로그아웃/조건 변경 이탈 확인(`ui.request_nav` 가드) + beforeunload(best effort). `workspace.selectable_master_grid` 에 col_config(폭·pinned·editable) 확장. `supabase_repository._execute` 일시 소켓 오류(10035 등) 1회 재시도.
-- 파일: views/schedule_edit.py, views/workspace.py, modules/ui.py, modules/db.py, modules/supabase_repository.py, docs/WORKLOG.md
-- 비고: 커밋 안 함(사용자 확인 대기). 부서·조 편성값 영구 저장은 migration 002 미적용 + 근무조 필수 계약으로 이번 단계 미지원(화면 편집·검증만, 저장 시 안내). 브라우저 검증 28항목 중 핵심 전부 통과, 테스트 데이터(2027-07) 정리 완료·2026-07 558건 무영향. 한계: 편집 직후 ~1초 내 즉시 이탈 시 가드가 한 박자 늦을 수 있음(컴포넌트 전송 경합).
-
-## 2026-07-15 08:11 · [터미널] · App Shell 전면 교체 — 단일 다크 사이드바 (디자인 변경 승인 작업)
-- 요청: 기존 "1차 아이콘 레일 + 2차 메뉴 패널" 폐기, 사용자 목업(레퍼런스 이미지) 기준 단일 다크 사이드바로 교체. 다크 차콜(#1B1B1D)+골드(#C9A26B) 톤, 크림 본문(#F1EEE9), 하단 사용자 카드, ▤ 숨김/열기. ADMIN 계정 사번은 ADMIN.
-- 변경: `modules/ui.py` app_shell 재작성 — 브랜드 헤더(W 로고+생산 근무표/WORKFORCE), 단독 항목(홈→대시보드)+그룹 라벨(근무표·기준정보)+도트 하위 항목, 맨 아래 고정 사용자 카드(아바타+이름+사번+로그아웃), 본문은 브레드크럼(그룹명)만. 기존 상단 헤더(_header)와 «/» 토글 제거, 숨김은 `sb_hidden` session_state+▤ 버튼. CSS 는 `_SHELL_CSS`(--sb-* 토큰)로 분리해 app_shell 에서만 주입 → USER/로그인 화면 무영향. `nav.py` 홈 그룹 라벨 "대시보드"→"홈". `_ROLE_LABEL` 을 CLAUDE.md §6 표시명(조장/조원)으로 정정. DESIGN.md §2·§3·§4·§7.1·§9·§20, CLAUDE.md §7 App Shell 서술 갱신.
-- 파일: modules/ui.py, modules/nav.py, DESIGN.md, CLAUDE.md, docs/WORKLOG.md
-- 비고: 커밋 안 함(사용자 화면 확인 대기). 브라우저 검증 — ADMIN: 이동/활성/브레드크럼/숨김·열기·상태 유지 OK, MANAGER(2008110301): 기준정보 미노출 OK, USER(2008082501): 전용 화면 무변화 OK. 주의: 이전 세션에서 웹소켓 재접속이 잦을 때 메뉴가 저절로 이동하는 현상 1회 관찰(안정 세션에서는 재현 안 됨) — 재발 시 보고 요망. 대시보드 KPI 카드 등 본문 내부는 이번 범위에서 미변경(레퍼런스의 카드 스타일과 다름).
-- 요청: 사이드바(1차 아이콘 레일 + 2차 메뉴 패널)를 SAP Fiori 계열의 절제된 스타일로 정리. "옅은 강조 + 좌측 3px 액센트 바" 문법으로 통일, 수치 스펙 지정.
-- 변경: `modules/ui.py` 사이드바 CSS를 `:root`의 `--nav-*` 디자인 토큰 기반으로 재작성. 레일 72px/항목 64px/간격 4px/단색 `#1B2A4A`, 패널 240px/항목 40px/활성 `#EBF1FC`+`#1B4DBF`+액센트 `#4C7DFF`, 라운드 6px·전환 background-color 130ms 통일. DESIGN.md §3.1·§4.1·§7.1 을 구현 토큰 값으로 갱신.
-- 파일: modules/ui.py, DESIGN.md, .claude/launch.json (브라우저 검증용 신규)
-- 비고: 커밋 안 함(사용자 화면 확인 대기). 브라우저 검증: ADMIN(1001)으로 대시보드/근무표/기준정보 전환·활성 표시·수치(computed style) 확인 완료, 본문·헤더 변화 없음. 레일 상단은 Streamlit 사이드바 헤더(접기 버튼 영역) 높이만큼 내려온 뒤 4px 간격 시작.
-
-## 2026-07-14 15:02 · [데스크탑] · AGENTS.md 신설 + 디자인 동결·도구 역할 분담 규칙 도입
-- 요청: 코덱스·클로드 병행 작업 중 디자인 수정 때마다 화면 틀이 크게 바뀌는 문제 해결. 사용자가 정리한 진행 상황 요약(사용자 관리 검증 14/15 PASS, 로그인 수정 미확인, 조 관리 rerun 경합, 저장 메시지 N건 이슈, 다음 단계 후보 순서 등)도 반영.
-- 변경: `AGENTS.md` 신설(Codex 규칙 — CLAUDE.md 원본 참조, UI 파일 수정 금지, 디자인 동결, WORKLOG 기록). `CLAUDE.md` §3에 확인 필요 항목·다음 단계 후보 순서 추가, §7에 디자인 동결 조항, §11에 도구 역할 분담(Claude=UI, Codex=로직·데이터) 추가.
-- 파일: AGENTS.md (신규), CLAUDE.md, docs/WORKLOG.md
-- 비고: 역할 분담은 필요 시 사용자 지시로 변경 가능. CLAUDE.md 규칙 변경 시 AGENTS.md 요약도 함께 갱신할 것.
-
-## 2026-07-14 14:40 · [데스크탑] · 작업 로그(WORKLOG) 체계 도입
-- 요청: 터미널/데스크탑을 오가며 작업할 때 서로의 요청·수정 내용을 이해할 수 있게 로그를 남기고 싶음.
-- 변경: `docs/WORKLOG.md`를 신설(형식·규칙 정의). `CLAUDE.md` §12에 "재개 시 WORKLOG 확인 + 작업 후 WORKLOG 기록" 규칙 추가.
-- 파일: docs/WORKLOG.md (신규), CLAUDE.md
-- 비고: 앞으로 두 도구 모두 작업 완료 시 이 파일 맨 위에 항목을 추가한다.
+- ADMIN/MANAGER는 단일 다크 사이드바, USER는 별도 상단 메뉴 구조를 사용합니다.
+- 기준정보 화면은 공용 AG Grid 행 상태와 작업 버튼을 사용합니다.
