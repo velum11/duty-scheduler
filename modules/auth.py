@@ -128,10 +128,12 @@ def login(emp_no: str):
     emp_no = str(emp_no or "").strip()
     if not emp_no:
         return None, "사번을 입력하세요."
+    # 사번 조회는 trim + 대소문자 무시(find_user_by_emp_no). 세션/토큰에는
+    # 입력값이 아니라 DB 의 정규 emp_no 를 저장해 대소문자 표기 흔들림을 막는다.
     user = db.find_user_by_emp_no(emp_no)
     if user is None or not user.get("is_active", False):
         return None, "등록되지 않은 사번입니다. 관리자에게 문의하세요."
-    token = _issue_token(emp_no)
+    token = _issue_token(user.get("emp_no", emp_no))
     st.session_state.pop("nav_page", None)
     st.session_state.user = user
     st.session_state.auth_token = token

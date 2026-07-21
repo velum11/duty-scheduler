@@ -852,12 +852,33 @@ def get_month_roster(emp_nos, year: int, month: int):
 
 # --- 조회 헬퍼 ---
 def find_user_by_emp_no(emp_no: str):
-    """사번으로 사용자 1명을 dict 로 반환. 없으면 None."""
+    """사번으로 사용자 1명을 dict 로 반환. 없으면 None.
+
+    사번 조회는 앞뒤 공백을 제거하고 대소문자를 구분하지 않는다
+    (영문 사번 ADMIN·admin·Admin 은 동일 사용자). 정규화(trim+casefold)는
+    비교에만 쓰고, DB 의 원래 emp_no 값은 변경하지 않는다.
+    대소문자만 다른 사번이 여러 건이면 활성 사용자 → 정확한 대소문자 순으로 우선한다.
+    """
     df = get_users()
     if df.empty:
         return None
-    match = df[df["emp_no"].astype(str).str.strip() == str(emp_no).strip()]
-    return None if match.empty else match.iloc[0].to_dict()
+    raw = str(emp_no).strip()
+    key = raw.casefold()
+    norm = df["emp_no"].astype(str).str.strip()
+    match = df[norm.str.casefold() == key]
+    if match.empty:
+        return None
+    if len(match) > 1:
+        pool = match
+        if "is_active" in pool.columns:
+            active = pool[pool["is_active"].astype(bool)]
+            if not active.empty:
+                pool = active
+        exact = pool[norm.loc[pool.index] == raw]
+        if not exact.empty:
+            pool = exact
+        return pool.iloc[0].to_dict()
+    return match.iloc[0].to_dict()
 
 
 def dept_name(dept_code: str) -> str:
