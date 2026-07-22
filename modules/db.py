@@ -44,13 +44,18 @@ DEPT_COLUMNS = ["dept_code", "dept_name", "sort_order", "is_active"]
 # 화면이 사용하는 조/팀 컬럼 (id/department_id 는 파사드 내부 매핑에만 사용).
 TEAM_COLUMNS = ["dept_code", "team_code", "team_name", "sort_order", "is_active"]
 
-# 조직 관리 화면 전용 확장 계약 (migration 003: 그룹 → 부서 → 운영단위).
+# 조직 관리 화면 전용 확장 계약 (migration 004: 그룹 → 부서 → 운영단위, group_id/FK).
 # 기존 DEPT_COLUMNS/TEAM_COLUMNS 소비 화면(근무표·편성 등)은 그대로 두고,
-# 조직 관리 화면만 이 확장 컬럼을 사용한다.
+# 조직 관리 화면만 이 확장 컬럼을 사용한다. 그룹은 organization_groups 1급 테이블이며
+# 부서는 group_code(내부적으로 group_id FK)로 그룹에 귀속된다. 조는 dept_code(내부적으로
+# department_id FK)로 부서에 귀속된다. 003 잔재(department_group/group_sort_order)는 폐기.
+ORG_GROUP_COLUMNS = ["group_code", "group_name", "sort_order", "description", "is_active"]
 ORG_DEPT_COLUMNS = [
-    "dept_code", "dept_name", "department_group", "group_sort_order", "sort_order", "is_active",
+    "dept_code", "dept_name", "group_code", "description", "sort_order", "is_active",
 ]
-ORG_TEAM_COLUMNS = ["dept_code", "team_code", "team_name", "unit_type", "sort_order", "is_active"]
+ORG_TEAM_COLUMNS = [
+    "dept_code", "team_code", "team_name", "unit_type", "description", "sort_order", "is_active",
+]
 
 # 운영단위 유형 내부값 ↔ 화면 표시 (내부값만 저장 — CLAUDE.md §8).
 UNIT_TYPES = ("SHIFT", "GENERAL")
@@ -80,7 +85,7 @@ SCHEDULE_ASSIGNED_COLUMNS = SCHEDULE_COLUMNS + [
 ]
 
 _BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance"}
-_INTEGER_COLUMNS = {"sort_order", "group_sort_order"}
+_INTEGER_COLUMNS = {"sort_order"}
 
 # 로컬 샘플 모드에서 편집 결과를 담아 세션 동안 유지하는 스토어 키.
 _USERS_STORE = "store_users"
@@ -90,6 +95,13 @@ _WORK_TYPES_STORE = "store_work_types"
 _SCHEDULES_STORE = "store_schedules"
 _SHIFT_GROUPS_STORE = "store_shift_groups"
 _ASSIGNMENTS_STORE = "store_schedule_assignments"
+# 조직 그룹 전용 샘플 스토어. 그룹은 기존 기준정보에 대응 테이블이 없어 독립 스토어를
+# 쓴다. 반면 조직 화면의 부서·조 데이터는 **기본 부서·조와 동일한 단일 스토어**
+# (_DEPTS_STORE/_TEAMS_STORE)를 확장 컬럼과 함께 공유한다 — 저장/물리삭제/soft삭제/조회와
+# 사용자·근무 화면 읽기가 같은 backing store 를 보게 하기 위함이다(store 이원화 금지).
+# supabase 모드는 실제 테이블(organization_groups/departments.group_id/teams.department_id)을
+# 쓰므로 이 스토어를 사용하지 않는다 — 모드별 경로를 명확히 분리한다.
+_ORG_GROUPS_STORE = "store_org_groups"
 
 
 def datasource() -> str:
@@ -204,17 +216,36 @@ def _base_departments() -> pd.DataFrame:
     return df[DEPT_COLUMNS].reset_index(drop=True).copy()
 
 
+def _dept_store() -> pd.DataFrame:
+    """샘플 모드 부서 단일 backing store. 기본 화면과 조직 화면이 함께 쓴다.
+
+    처음 접근 시 기본 부서(DEPT_COLUMNS)로 seed 한다. 조직 화면 저장이 group_code/
+    description 확장 컬럼을 얹으면 그대로 보존한다 — 저장/물리삭제/조회/사용자 화면
+    읽기가 모두 이 한 스토어를 본다(store 이원화 금지).
+    """
+    if _DEPTS_STORE not in st.session_state:
+        st.session_state[_DEPTS_STORE] = _base_departments()
+    return st.session_state[_DEPTS_STORE]
+
+
+def _team_store() -> pd.DataFrame:
+    """샘플 모드 조 단일 backing store. 기본 화면과 조직 화면이 함께 쓴다."""
+    if _TEAMS_STORE not in st.session_state:
+        st.session_state[_TEAMS_STORE] = _base_teams()
+    return st.session_state[_TEAMS_STORE]
+
+
 def get_departments(is_active: bool | None = None) -> pd.DataFrame:
     """부서 목록(DEPT_COLUMNS).
 
-    로컬 샘플 모드에서는 세션 편집 결과(save_departments)를 우선 반환하므로,
-    부서 관리 화면에서 저장한 내용이 다른 화면에도 그대로 반영된다.
-    Phase 5(Supabase)에서는 이 분기를 실제 조회로 교체한다.
+    로컬 샘플 모드에서는 세션 편집 결과(save_departments/save_org_departments)를 우선
+    반환하므로, 조직 관리 화면에서 저장한 내용이 다른 화면에도 그대로 반영된다.
+    조직 화면이 확장 컬럼(group_code 등)을 저장해도 여기서는 기본 계약(DEPT_COLUMNS)만
+    투영한다.
     """
     if is_sample_mode():
-        if _DEPTS_STORE not in st.session_state:
-            st.session_state[_DEPTS_STORE] = _base_departments()
-        return _empty_contract(st.session_state[_DEPTS_STORE].copy(), DEPT_COLUMNS)
+        store = _dept_store()
+        return _empty_contract(store[DEPT_COLUMNS].reset_index(drop=True).copy(), DEPT_COLUMNS)
     df = supabase_repository.get_departments()
     if is_active is not None:
         df = df[df["is_active"].astype(bool) == bool(is_active)]
@@ -271,9 +302,8 @@ def get_teams(dept_code: str | None = None, is_active: bool | None = None) -> pd
     Phase 5(Supabase)에서는 이 분기를 실제 조회로 교체한다.
     """
     if is_sample_mode():
-        if _TEAMS_STORE not in st.session_state:
-            st.session_state[_TEAMS_STORE] = _base_teams()
-        return _empty_contract(st.session_state[_TEAMS_STORE].copy(), TEAM_COLUMNS)
+        store = _team_store()
+        return _empty_contract(store[TEAM_COLUMNS].reset_index(drop=True).copy(), TEAM_COLUMNS)
     df = supabase_repository.get_teams()
     if dept_code is not None:
         df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
@@ -317,9 +347,9 @@ def save_teams_report(df: pd.DataFrame) -> BatchWriteResult:
     return supabase_repository.upsert_teams_reported(changed)
 
 
-# --- 조직 관리 (그룹·부서·운영단위, migration 003) ---
+# --- 조직 관리 (그룹·부서·운영단위, migration 004: group_id/FK 기반) ---
 def org_schema_ready() -> bool:
-    """003 확장 컬럼(department_group/group_sort_order/unit_type) 사용 가능 여부.
+    """004 조직 그룹 스키마(organization_groups + departments.group_id) 사용 가능 여부.
 
     sample 모드는 세션 스토어에 기본값을 채워 항상 사용 가능하다. supabase 모드는
     라이브 스키마를 1회 probe 한다 — 미적용이면 조회는 안전한 기본값으로 폴백하고
@@ -331,7 +361,7 @@ def org_schema_ready() -> bool:
 
 
 def org_schema_readiness() -> str:
-    """003 확장 스키마 준비 상태를 3-state 로 반환한다.
+    """004 조직 그룹 스키마 준비 상태를 3-state 로 반환한다.
 
     반환: ``READINESS_READY`` / ``READINESS_NOT_READY`` / ``READINESS_PROBE_ERROR``.
     sample 모드는 항상 READY. supabase 모드는 라이브 스키마를 read-only 로 확인해
@@ -346,34 +376,10 @@ def org_schema_readiness() -> str:
 def reset_org_schema_cache() -> None:
     """org readiness 캐시를 비운다(다음 확인에서 재프로브).
 
-    실행 중 migration 003 이 적용된 뒤 프로세스 재시작 없이 반영하려면(예: 화면의
+    실행 중 migration 004 가 적용된 뒤 프로세스 재시작 없이 반영하려면(예: 화면의
     '스키마 재확인' 동작) 이 경로를 쓴다. sample 모드는 캐시가 없어 no-op."""
     if not is_sample_mode():
         supabase_repository.reset_org_readiness()
-
-
-def org_dept_defaults(df: pd.DataFrame) -> pd.DataFrame:
-    """확장 컬럼이 없거나 비어 있는 부서 프레임에 안전한 그룹 기본값을 채운다.
-
-    백필 전 상태(부서 1개 = 그룹 1개)를 그대로 재현한다: 그룹명은 부서명,
-    그룹순서는 sort_order → dept_code 순 1..N (전역 중복 없음). migration 003 의
-    백필 전략과 동일하므로 적용 전후 화면 표시가 달라지지 않는다.
-    """
-    frame = df.copy()
-    if "department_group" not in frame:
-        frame["department_group"] = ""
-    if "group_sort_order" not in frame:
-        frame["group_sort_order"] = 0
-    group = frame["department_group"].fillna("").astype(str).str.strip()
-    blank = group == ""
-    frame["department_group"] = group
-    frame.loc[blank, "department_group"] = frame.loc[blank, "dept_name"].astype(str)
-    order = pd.to_numeric(frame["group_sort_order"], errors="coerce").fillna(0).astype("int64")
-    frame["group_sort_order"] = order
-    if not frame.empty and (order == 0).all():
-        ranked = frame.sort_values(["sort_order", "dept_code"]).index
-        frame.loc[ranked, "group_sort_order"] = range(1, len(frame) + 1)
-    return frame
 
 
 def org_team_defaults(df: pd.DataFrame) -> pd.DataFrame:
@@ -386,19 +392,181 @@ def org_team_defaults(df: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def get_org_departments() -> pd.DataFrame:
-    """조직 관리 화면용 부서 목록(ORG_DEPT_COLUMNS, 그룹 컬럼 포함)."""
+# --- 샘플 모드 조직 계층 seed (supabase 와 인터페이스 대칭, 실제 테이블 미사용) ---
+def _sample_org_groups() -> pd.DataFrame:
+    """샘플 그룹 seed — 부서 1개당 그룹 1개(group_code=dept_code)로 초기화한다.
+
+    supabase 모드의 organization_groups(그룹코드/그룹명/순서/비고/사용유무)와 같은
+    계약 컬럼(ORG_GROUP_COLUMNS)을 반환한다. 로컬 편집·저장은 세션 스토어에서만
+    유지되며 실제 DB 를 건드리지 않는다.
+    """
+    depts = _base_departments()
+    if depts.empty:
+        return _typed_empty_frame(ORG_GROUP_COLUMNS)
+    frame = depts.sort_values(["sort_order", "dept_code"]).reset_index(drop=True)
+    return pd.DataFrame({
+        "group_code": frame["dept_code"].astype(str),
+        "group_name": frame["dept_name"].astype(str),
+        "sort_order": range(1, len(frame) + 1),
+        "description": "",
+        "is_active": True,
+    })[ORG_GROUP_COLUMNS].reset_index(drop=True)
+
+
+def _org_dept_view(store: pd.DataFrame) -> pd.DataFrame:
+    """공유 부서 스토어(_DEPTS_STORE)를 조직 화면 계약(ORG_DEPT_COLUMNS)으로 투영한다.
+
+    기본 부서 스토어는 group_code/description 를 안 가질 수 있으므로(레거시 basic seed),
+    없으면 안전한 기본값으로 보강한다: group_code 미배정은 '부서 1개=그룹 1개'(=dept_code),
+    비고는 빈 문자열. 조직 화면이 저장한 확장 컬럼이 있으면 그대로 보존한다.
+    """
+    frame = store.copy()
+    if frame.empty:
+        return _typed_empty_frame(ORG_DEPT_COLUMNS)
+    if "description" not in frame.columns:
+        frame["description"] = ""
+    frame["description"] = frame["description"].fillna("").astype(str)
+    if "group_code" not in frame.columns:
+        frame["group_code"] = ""
+    gc = frame["group_code"].fillna("").astype(str).str.strip()
+    blank = gc == ""
+    frame["group_code"] = gc
+    frame.loc[blank, "group_code"] = frame.loc[blank, "dept_code"].astype(str)
+    return frame[ORG_DEPT_COLUMNS].reset_index(drop=True)
+
+
+def _org_team_view(store: pd.DataFrame) -> pd.DataFrame:
+    """공유 조 스토어(_TEAMS_STORE)를 조직 화면 계약(ORG_TEAM_COLUMNS)으로 투영한다.
+
+    unit_type 이 없으면 SHIFT(교대) 기본값, 비고가 없으면 빈 문자열로 보강한다.
+    조직 화면이 저장한 확장 컬럼이 있으면 그대로 보존한다.
+    """
+    frame = store.copy()
+    if frame.empty:
+        return _typed_empty_frame(ORG_TEAM_COLUMNS)
+    if "description" not in frame.columns:
+        frame["description"] = ""
+    frame["description"] = frame["description"].fillna("").astype(str)
+    frame = org_team_defaults(frame)  # unit_type 없음/비정상 → SHIFT
+    return frame[ORG_TEAM_COLUMNS].reset_index(drop=True)
+
+
+# --- 그룹(organization_groups) ---
+def get_org_groups(is_active: bool | None = None) -> pd.DataFrame:
+    """조직 그룹 목록(ORG_GROUP_COLUMNS). 그룹은 부서·조 계층의 최상위다."""
     if is_sample_mode():
-        df = org_dept_defaults(get_departments())
+        if _ORG_GROUPS_STORE not in st.session_state:
+            st.session_state[_ORG_GROUPS_STORE] = _sample_org_groups()
+        df = st.session_state[_ORG_GROUPS_STORE].copy()
+    elif supabase_repository.org_extensions_ready():
+        df = supabase_repository.get_organization_groups()
+    else:
+        df = _typed_empty_frame(ORG_GROUP_COLUMNS)  # 004 미적용 — 조회 전용 빈 그룹
+    if is_active is not None and not df.empty:
+        df = df[df["is_active"].astype(bool) == bool(is_active)]
+    return _empty_contract(df[ORG_GROUP_COLUMNS].reset_index(drop=True), ORG_GROUP_COLUMNS)
+
+
+def save_org_groups(df: pd.DataFrame) -> None:
+    """그룹 편집 결과를 저장한다 (변경 행만 upsert, 저장코드 수정 불가)."""
+    keep = [c for c in ORG_GROUP_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_ORG_GROUPS_STORE] = normalized
+        return
+    changed = _changed_records(
+        get_org_groups(), normalized, ["group_code"], ORG_GROUP_COLUMNS
+    )
+    supabase_repository.upsert_organization_groups(changed)
+
+
+def save_org_groups_report(df: pd.DataFrame) -> BatchWriteResult:
+    """save_org_groups 의 부분성공 원장 반환 변형. 004 미적용은 전체 failed."""
+    keep = [c for c in ORG_GROUP_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if is_sample_mode():
+        st.session_state[_ORG_GROUPS_STORE] = normalized
+        return _sample_report(normalized.to_dict("records"), ["group_code"])
+    changed = _changed_records(
+        get_org_groups(), normalized, ["group_code"], ORG_GROUP_COLUMNS
+    )
+    if not changed:
+        return BatchWriteResult()
+    return supabase_repository.upsert_organization_groups_reported(changed)
+
+
+def deactivate_org_group(group_code: str) -> None:
+    """그룹을 미사용 처리(soft-delete)한다. 저장된(기존) 그룹 삭제의 기본 경로."""
+    code = str(group_code).strip()
+    if is_sample_mode():
+        if _ORG_GROUPS_STORE in st.session_state:
+            store = st.session_state[_ORG_GROUPS_STORE].copy()
+            mask = store["group_code"].astype(str).str.strip() == code
+            store.loc[mask, "is_active"] = False
+            st.session_state[_ORG_GROUPS_STORE] = store.reset_index(drop=True)
+        return
+    supabase_repository.deactivate_organization_group(code)
+
+
+def delete_org_group(group_code: str) -> None:
+    """그룹을 물리 삭제한다(참조 없는 그룹 전용 — 참조 확인은 호출부가 담당).
+
+    참조가 있으면 supabase 는 departments_group_fk(on delete restrict)로 삭제를 거부한다.
+    """
+    code = str(group_code).strip()
+    if is_sample_mode():
+        if _ORG_GROUPS_STORE in st.session_state:
+            store = st.session_state[_ORG_GROUPS_STORE]
+            st.session_state[_ORG_GROUPS_STORE] = (
+                store[store["group_code"].astype(str).str.strip() != code].reset_index(drop=True)
+            )
+        return
+    supabase_repository.delete_organization_group(code)
+
+
+def org_group_reference_counts(group_code: str) -> dict:
+    """그룹을 참조하는 부서 건수를 반환한다(활성·비활성 모두 포함)."""
+    code = str(group_code).strip()
+    try:
+        depts = get_org_departments()
+    except Exception:
+        return {"departments": 0}
+    if depts.empty or "group_code" not in depts:
+        return {"departments": 0}
+    return {"departments": int((depts["group_code"].astype(str).str.strip() == code).sum())}
+
+
+# --- 부서(departments, group_code→group_id FK) ---
+def get_org_departments(
+    group_code: str | None = None, is_active: bool | None = None
+) -> pd.DataFrame:
+    """조직 관리 화면용 부서 목록(ORG_DEPT_COLUMNS, 소속 그룹코드 포함).
+
+    group_code 를 넘기면 해당 그룹 소속 부서만(그룹별 부서 조회). supabase 모드는
+    group_id FK 를 group_code 로 해석해 반환한다.
+    """
+    if is_sample_mode():
+        df = _org_dept_view(_dept_store())
     elif supabase_repository.org_extensions_ready():
         df = supabase_repository.get_departments_org()
     else:
-        df = org_dept_defaults(supabase_repository.get_departments())
+        # 004 미적용 — 그룹 정보 없이 부서만 표시(조회 전용, 저장은 차단됨)
+        df = supabase_repository.get_departments().copy()
+        df["group_code"] = ""
+        df["description"] = ""
+    if group_code is not None and not df.empty:
+        df = df[df["group_code"].astype(str).str.strip() == str(group_code).strip()]
+    if is_active is not None and not df.empty:
+        df = df[df["is_active"].astype(bool) == bool(is_active)]
     return _empty_contract(df[ORG_DEPT_COLUMNS].reset_index(drop=True), ORG_DEPT_COLUMNS)
 
 
 def save_org_departments(df: pd.DataFrame) -> None:
-    """조직 관리 화면의 그룹·부서 편집 결과를 저장한다 (변경 행만 upsert)."""
+    """조직 관리 화면의 부서 편집 결과를 저장한다 (변경 행만 upsert).
+
+    부서→그룹 귀속은 group_code(내부 group_id FK)로 저장한다. 저장코드(dept_code)는
+    수정 불가이며, 신규 부서만 새 코드로 insert 한다.
+    """
     keep = [c for c in ORG_DEPT_COLUMNS if c in df.columns]
     normalized = df[keep].reset_index(drop=True).copy()
     if is_sample_mode():
@@ -413,7 +581,7 @@ def save_org_departments(df: pd.DataFrame) -> None:
 def save_org_departments_report(df: pd.DataFrame) -> BatchWriteResult:
     """save_org_departments 의 부분성공 원장 반환 변형. 기존 함수는 그대로 둔다.
 
-    003 미적용 supabase 모드에서는 repository 가 전체 failed(비재시도) 원장을 반환한다."""
+    004 미적용 supabase 모드에서는 repository 가 전체 failed(비재시도) 원장을 반환한다."""
     keep = [c for c in ORG_DEPT_COLUMNS if c in df.columns]
     normalized = df[keep].reset_index(drop=True).copy()
     if is_sample_mode():
@@ -427,17 +595,23 @@ def save_org_departments_report(df: pd.DataFrame) -> BatchWriteResult:
     return supabase_repository.upsert_departments_org_reported(changed)
 
 
+# --- 운영단위(teams, dept_code→department_id FK) ---
 def get_org_teams(dept_code: str | None = None, is_active: bool | None = None) -> pd.DataFrame:
-    """조직 관리 화면용 운영단위 목록(ORG_TEAM_COLUMNS, unit_type 포함)."""
+    """조직 관리 화면용 운영단위 목록(ORG_TEAM_COLUMNS, unit_type·비고 포함).
+
+    dept_code 를 넘기면 해당 부서 소속 조만(부서별 조 조회, department_id FK 필터).
+    """
     if is_sample_mode():
-        df = org_team_defaults(get_teams())
+        df = _org_team_view(_team_store())
     elif supabase_repository.org_extensions_ready():
         df = supabase_repository.get_teams_org()
     else:
+        # 004 미적용 — unit_type/비고 기본값으로 폴백(조회 전용, 저장은 차단됨)
         df = org_team_defaults(supabase_repository.get_teams())
-    if dept_code is not None:
+        df["description"] = ""
+    if dept_code is not None and not df.empty:
         df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
-    if is_active is not None:
+    if is_active is not None and not df.empty:
         df = df[df["is_active"].astype(bool) == bool(is_active)]
     return _empty_contract(df[ORG_TEAM_COLUMNS].reset_index(drop=True), ORG_TEAM_COLUMNS)
 
@@ -506,18 +680,25 @@ def normalize_display_order(value):
 
 
 def dept_group_map(org_depts: pd.DataFrame | None = None) -> dict:
-    """dept_code -> (department_group, group_sort_order) 매핑.
+    """dept_code -> (group_code, group_sort_order) 매핑 (migration 004: group_id 기반).
 
     org_depts 를 넘기면 그 프레임(예: 저장 후 예상 merged) 기준으로 계산한다 —
     조직 저장 전 '변경 후 그룹 구조' 기준 검증(§그룹 병합 충돌)에 사용한다.
+    그룹순서는 organization_groups.sort_order 를 group_code 로 조회해 붙인다.
     """
     frame = get_org_departments() if org_depts is None else org_depts
+    group_orders: dict = {}
+    try:
+        for _, g in get_org_groups().iterrows():
+            group_orders[str(g["group_code"]).strip()] = int(
+                pd.to_numeric(g["sort_order"], errors="coerce") or 0
+            )
+    except Exception:
+        group_orders = {}
     out: dict = {}
     for _, r in frame.iterrows():
-        out[str(r["dept_code"]).strip()] = (
-            str(r["department_group"]).strip(),
-            int(pd.to_numeric(r["group_sort_order"], errors="coerce") or 0),
-        )
+        code = str(r.get("group_code", "") or "").strip()
+        out[str(r["dept_code"]).strip()] = (code, group_orders.get(code, 0))
     return out
 
 

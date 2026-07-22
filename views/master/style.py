@@ -88,9 +88,22 @@ _PAGE_CSS = """
 /* §7 액션바 */
 [class*="__bar"] { margin:.15rem 0 .45rem; }
 [class*="__bar"] div[data-testid="stHorizontalBlock"] { align-items:center; }
-[class*="__bar"] div.stButton > button { min-height:2.2rem; height:2.2rem; padding:0 .72rem; border-radius:6px;
+/* 액션바 버튼 공통 형태 — 색 규칙(§8)과 동일하게 role-key(`__save/__del/__add/__addg/
+   __refresh`) 부분일치로 스코프한다(파일 상단 주석의 계약). 화면이 버튼을 `__bar`
+   컨테이너로 감싸든(사용자·근무형태) 감싸지 않든(조직 3시트) 균일 적용된다.
+   후손 셀렉터(> 아님): disabled+help 시 Streamlit 이 button 위에 stTooltipHoverTarget
+   래퍼를 끼워 넣어 직계자식이 끊겨도 사이즈/radius/weight 를 유지한다. 액션바 stButton 은
+   버튼을 하나만 담으므로 후손 매칭이 안전하다. `__del`_ok/_cancel(2단계 확인 바)·
+   `__discard`(폐기 바)는 별도 컴포넌트이므로 `:not([class*="__del_"])` 로 제외해 건드리지 않는다. */
+[class*="__save"] div.stButton button,
+[class*="__del"]:not([class*="__del_"]) div.stButton button,
+[class*="__add"] div.stButton button,
+[class*="__refresh"] div.stButton button { min-height:2.2rem; height:2.2rem; padding:0 .72rem; border-radius:6px;
   font-size:.82rem; font-weight:600; white-space:nowrap; gap:.35rem; }
-[class*="__bar"] div.stButton > button [data-testid="stIconMaterial"] { font-size:16px; }
+[class*="__save"] div.stButton button [data-testid="stIconMaterial"],
+[class*="__del"]:not([class*="__del_"]) div.stButton button [data-testid="stIconMaterial"],
+[class*="__add"] div.stButton button [data-testid="stIconMaterial"],
+[class*="__refresh"] div.stButton button [data-testid="stIconMaterial"] { font-size:16px; }
 /* §8 주요(저장) — 앱 네이비, 검정 금지 */
 [class*="__save"] button[kind="primary"] { background:var(--ms-navy) !important; border:1px solid var(--ms-navy) !important; color:#FFF !important; }
 [class*="__save"] button[kind="primary"]:hover:not(:disabled) { background:var(--ms-navy-hover) !important; border-color:var(--ms-navy-hover) !important; }
@@ -130,12 +143,60 @@ _PAGE_CSS = """
 .ms-chip.warn   { background:var(--ms-warn-bg);    color:var(--ms-warn);    border:1px solid #E7D9A8; }
 .ms-chip.mute   { background:var(--ms-surface-3);  color:var(--ms-ink-3);   border:1px solid var(--ms-line); }
 .ms-chip.lock   { background:var(--ms-surface-3);  color:var(--ms-ink-2);   border:1px solid var(--ms-line-strong); }
+/* 드릴다운 활성(상위 시트에서 현재 하위를 열어둔 행) — 신규(info)와 물리적 구분: navy 틴트 */
+.ms-chip.link   { background:#E5EAF2;              color:var(--ms-navy);    border:1px solid #C6D2E4; }
 /* readiness 배지 — 모드 배지와 분리 */
 .ms-ready { display:inline-flex; align-items:center; gap:.35rem; padding:.22rem .55rem; border-radius:6px;
   font-size:.72rem; font-weight:600; }
 .ms-ready.ready { background:var(--ms-success-bg); color:var(--ms-success); }
 .ms-ready.not   { background:var(--ms-warn-bg);    color:var(--ms-warn); }
 .ms-ready.err   { background:var(--ms-danger-bg);  color:var(--ms-danger); }
+/* ===================================================================== */
+/* 조직 3시트 [그룹][부서][조] 공유 레이아웃 (Wave2a)                       */
+/* 시트는 org controller 가 st.columns(3) + st.container(key=f"{page_id}__sheet")  */
+/* 로 렌더한다. 아래 규칙은 그 컨테이너 key(.st-key-*__sheet)와              */
+/* 드릴다운 컨텍스트 스트립(.ms-ctx)·시트 헤더(.ms-sheet-*)·잠김 빈상태       */
+/* (.ms-locked)를 스타일링한다. 사용자·근무형태 화면은 이 클래스를 쓰지 않으므로 */
+/* 영향받지 않는다.                                                        */
+/* 드릴다운 컨텍스트 스트립 — 그룹 › 부서 › 조 */
+.ms-ctx { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; background:var(--ms-surface-2);
+  border:1px solid var(--ms-line); border-radius:8px; padding:.42rem .7rem; margin:.2rem 0 .55rem;
+  font-size:.78rem; color:var(--ms-ink-2); }
+.ms-ctx b { color:var(--ms-ink); font-weight:700; }
+.ms-ctx .pin { color:var(--ms-navy); font-weight:700; }
+.ms-ctx .arw { color:var(--ms-ink-3); }
+.ms-ctx .none { color:var(--ms-ink-3); font-weight:600; }
+/* 시트 카드 — 컨테이너 key(.st-key-*__sheet)에 카드 외형을 입힌다 */
+[class*="__sheet"] { background:var(--ms-surface); border:1px solid var(--ms-line-strong);
+  border-radius:10px; padding:.2rem .1rem .1rem; box-shadow:0 1px 0 rgba(0,0,0,.02); }
+[class*="__sheet"].ms-sheet-locked { background:var(--ms-surface-2); border-style:dashed; }
+/* 시트 헤더(제목 + 건수 + 드릴다운 컨텍스트 칩) */
+.ms-sheet-head { display:flex; align-items:center; gap:.5rem; padding:.55rem .7rem .5rem; }
+.ms-sheet-head .t { font-size:.92rem; font-weight:700; color:var(--ms-ink); }
+.ms-sheet-head .cnt { font-size:.7rem; font-weight:600; color:var(--ms-ink-2); background:var(--ms-surface-3);
+  border:1px solid var(--ms-line); border-radius:999px; padding:.05rem .5rem; }
+.ms-sheet-head .ctx { margin-left:auto; font-size:.7rem; font-weight:600; color:var(--ms-navy);
+  background:#E5EAF2; border:1px solid #C6D2E4; border-radius:6px; padding:.1rem .45rem;
+  max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ms-sheet-head .lock { margin-left:auto; font-size:.7rem; font-weight:600; color:var(--ms-ink-3);
+  display:inline-flex; align-items:center; gap:.3rem; }
+/* 잠김/빈 상태 — 상위 미선택 시 하위 시트 (§ '그룹을 먼저 선택하세요') */
+.ms-locked { display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:.5rem; text-align:center; padding:2.6rem 1rem; min-height:220px; color:var(--ms-ink-3); }
+.ms-locked .glyph { font-size:1.4rem; line-height:1; color:var(--ms-line-strong); }
+.ms-locked .t { font-size:.82rem; font-weight:700; color:var(--ms-ink-2); }
+.ms-locked .s { font-size:.74rem; color:var(--ms-ink-3); line-height:1.45; }
+/* 빈 상태(정상 empty, 오류 아님) — 표 본문 자리 */
+.ms-empty { display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:.4rem; text-align:center; padding:2rem 1rem; color:var(--ms-ink-3); }
+.ms-empty .t { font-size:.82rem; font-weight:600; color:var(--ms-ink-2); }
+.ms-empty .s { font-size:.74rem; color:var(--ms-ink-3); }
+/* ≤1100px: 3시트 세로 스택(드릴다운 연동 유지). st.columns 를 감싼 horizontal block 대상. */
+@media (max-width:1100px){
+  div[data-testid="stHorizontalBlock"]:has([class*="__sheet"]) { flex-direction:column; }
+  div[data-testid="stHorizontalBlock"]:has([class*="__sheet"]) > div[data-testid="stColumn"]{
+    width:100% !important; flex:1 1 100% !important; }
+}
 </style>
 """
 
@@ -198,6 +259,19 @@ GRID_CSS: dict[str, dict] = {
     ".ms-cell-select": {"position": "relative"},
     ".ms-cell-select::after": {"content": "'\\25BE'", "position": "absolute", "right": "8px",
                                "color": TOKENS["ink-3"], "font-size": "10px", "pointer-events": "none"},
+    # ---- 그리드 내부 칩(cellRenderer HTML 용) — iframe 은 --ms-* var 를 못 보므로 리터럴 색 ----
+    # 페이지 크롬 .ms-chip 과 시각이 일치하도록 동일 팔레트. 색+텍스트 이중부호화(이모지 금지).
+    ".ms-chip": {"display": "inline-flex", "align-items": "center", "gap": "3px",
+                 "padding": "1px 7px", "border-radius": "5px", "font-size": "10.5px",
+                 "font-weight": "600", "line-height": "1.5", "white-space": "nowrap"},
+    ".ms-chip.new": {"background": TOKENS["info-bg"], "color": TOKENS["info"], "border": "1px solid #C9DCEE"},
+    ".ms-chip.del": {"background": TOKENS["danger-bg"], "color": TOKENS["danger"], "border": "1px solid #E7CDC7"},
+    ".ms-chip.ok": {"background": TOKENS["success-bg"], "color": TOKENS["success"], "border": "1px solid #C7DFCF"},
+    ".ms-chip.warn": {"background": TOKENS["warn-bg"], "color": TOKENS["warn"], "border": "1px solid #E7D9A8"},
+    ".ms-chip.mute": {"background": TOKENS["surface-3"], "color": TOKENS["ink-3"], "border": "1px solid " + TOKENS["line"]},
+    ".ms-chip.lock": {"background": TOKENS["surface-3"], "color": TOKENS["ink-2"], "border": "1px solid " + TOKENS["line-strong"]},
+    # 드릴다운 활성(상위 시트에서 현재 하위를 열어둔 행) — navy 틴트(신규 info 와 구분)
+    ".ms-chip.link": {"background": "#E5EAF2", "color": TOKENS["navy"], "border": "1px solid #C6D2E4"},
     # ---- 조직 전용(기존 자산 계승) ----
     ".ms-group-row": {"background": TOKENS["gold-soft"] + " !important", "font-weight": "700",
                       "box-shadow": "inset 3px 0 " + TOKENS["gold"]},
@@ -323,3 +397,94 @@ def readiness_badge_html(state: str) -> str:
     if state == "PROBE_ERROR":
         return "<span class='ms-ready err'>상태 확인 실패</span>"
     return "<span class='ms-ready not'>migration 미적용</span>"
+
+
+# ---------------------------------------------------------------------------
+# 조직 3시트 [그룹][부서][조] 공유 컴포넌트 (Wave2a)
+#   org controller 가 st.columns(3) + st.container(key=f"{page_id}__sheet") 안에서
+#   호출한다. 사용자·근무형태 화면은 사용하지 않으므로 회귀 영향 없음.
+# ---------------------------------------------------------------------------
+def drilldown_context_html(items: list[tuple[str, str | None]]) -> str:
+    """드릴다운 컨텍스트 스트립 HTML — 그룹 › 부서 › 조 계층 선택 상태.
+
+    ``items`` 는 ``[(role_label, value|None), ...]`` 순서열(예:
+    ``[("그룹", "PET계열"), ("부서", "PET생산부"), ("조", None)]``). 값이 None 이면
+    "미선택"(회색)으로 표시하고, 마지막 선택된 단계는 navy 로 강조한다. 표시 라벨은
+    escape 하며, 실제 컨텍스트 키(group_uid/dept_code)는 controller 가 별도 보관한다.
+    """
+    last_selected = -1
+    for i, (_role, val) in enumerate(items):
+        if val:
+            last_selected = i
+    segs: list[str] = []
+    for i, (role, val) in enumerate(items):
+        role_e = escape(role)
+        if val:
+            cls = "pin" if i == last_selected else "sel"
+            segs.append(f"<span>{role_e} <b class='{cls}'>{escape(val)}</b></span>")
+        else:
+            segs.append(f"<span class='none'>{role_e} —</span>")
+    joined = "<span class='arw'>›</span>".join(segs)
+    return f"<div class='ms-ctx'><span>드릴다운</span><span class='arw'>·</span>{joined}</div>"
+
+
+def drilldown_context(items: list[tuple[str, str | None]]) -> None:
+    """``drilldown_context_html`` 을 렌더한다."""
+    st.markdown(drilldown_context_html(items), unsafe_allow_html=True)
+
+
+def sheet_head_html(title: str, *, count: int | None = None, context: str | None = None,
+                    locked: bool = False) -> str:
+    """시트 헤더 HTML — 제목 + (건수 칩) + (드릴다운 컨텍스트 칩 또는 잠김 표식).
+
+    ``context`` 는 상위 선택으로 이 시트가 열려 있을 때의 컨텍스트명(예: 부서 시트의
+    "PET계열"). ``locked=True`` 면 오른쪽에 잠김 표식을 보인다(컨텍스트 칩과 상호배타).
+    """
+    cnt = f"<span class='cnt'>{int(count)}개</span>" if count is not None else ""
+    if locked:
+        right = "<span class='lock'>▸ 잠김</span>"
+    elif context:
+        right = f"<span class='ctx'>▸ {escape(context)}</span>"
+    else:
+        right = ""
+    return (f"<div class='ms-sheet-head'><span class='t'>{escape(title)}</span>{cnt}{right}</div>")
+
+
+def sheet_head(title: str, *, count: int | None = None, context: str | None = None,
+               locked: bool = False) -> None:
+    """``sheet_head_html`` 을 렌더한다."""
+    st.markdown(sheet_head_html(title, count=count, context=context, locked=locked),
+                unsafe_allow_html=True)
+
+
+def sheet_locked_html(title: str, hint: str | None = None) -> str:
+    """상위 미선택 시 하위 시트의 잠김/빈 상태 HTML (§ '그룹을 먼저 선택하세요').
+
+    정상 empty(오류 아님)로 렌더한다. 이 컴포넌트를 표시하는 시트는 controller 가
+    행 추가·삭제·저장 등 **쓰기 컨트롤을 함께 비활성**(``master_action_bar(can_write=False)``)
+    해야 한다. 색만으로 상태를 표시하지 않으며 자물쇠 글리프+텍스트로 이중부호화한다.
+    """
+    sub = f"<div class='s'>{escape(hint)}</div>" if hint else ""
+    lock_svg = (
+        "<svg class='glyph' width='26' height='26' viewBox='0 0 24 24' fill='none' "
+        "stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'>"
+        "<rect x='5' y='11' width='14' height='9' rx='1.5'/><path d='M8 11V8a4 4 0 0 1 8 0v3'/></svg>"
+    )
+    return (f"<div class='ms-locked'>{lock_svg}"
+            f"<div class='t'>{escape(title)}</div>{sub}</div>")
+
+
+def sheet_locked(title: str, hint: str | None = None) -> None:
+    """``sheet_locked_html`` 을 렌더한다(잠긴 하위 시트 본문 자리)."""
+    st.markdown(sheet_locked_html(title, hint), unsafe_allow_html=True)
+
+
+def empty_state_html(title: str, hint: str | None = None) -> str:
+    """정상 빈 상태(데이터 0 / 필터 결과 0) HTML — 오류로 위장하지 않는다(§18)."""
+    sub = f"<div class='s'>{escape(hint)}</div>" if hint else ""
+    return f"<div class='ms-empty'><div class='t'>{escape(title)}</div>{sub}</div>"
+
+
+def empty_state(title: str, hint: str | None = None) -> None:
+    """``empty_state_html`` 을 렌더한다."""
+    st.markdown(empty_state_html(title, hint), unsafe_allow_html=True)

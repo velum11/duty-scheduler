@@ -166,12 +166,97 @@ _BOOL_RENDERER = JsCode(
     """
 )
 
+# ---------------------------------------------------------------------------
+# 약칭 셀 — 값 + 라이브 중복 경고칩(공통 `.ms-chip warn`). 활성 행끼리 같은 약칭이
+# 둘 이상이면 표시(근무표는 코드로 표시되므로 저장 차단이 아닌 소프트 경고 §11).
+# 중복 판정은 저장 검증 `_duplicate_short_labels` 와 동일 규칙(활성·비어있지 않음).
+# 다른 행/사용 편집에 반응하도록 grid `onCellValueChanged` 가 이 열을 refresh 한다.
+# ---------------------------------------------------------------------------
+_SHORT_LABEL_RENDERER = JsCode(
+    """
+    (class {
+      init(p) { this.eGui = document.createElement('div'); this._render(p); }
+      _active(d) {
+        const removed = String(d._removed == null ? '' : d._removed).trim() === '1';
+        const u = d['사용'];
+        const use = (u === true || u === 'true' || u === 1 || u === '사용' || u === '재직');
+        return !removed && use;
+      }
+      _render(p) {
+        const g = this.eGui; g.innerHTML = '';
+        g.style.display = 'flex'; g.style.alignItems = 'center'; g.style.gap = '6px'; g.style.height = '100%';
+        const val = String(p.value == null ? '' : p.value).trim();
+        const t = document.createElement('span');
+        t.textContent = val || '—';
+        if (!val) { t.style.color = '#908C83'; }
+        g.appendChild(t);
+        const d = p.data || {};
+        if (val && this._active(d) && p.api) {
+          let count = 0;
+          const self = this;
+          p.api.forEachNode(function(node) {
+            const nd = node.data || {};
+            if (self._active(nd) && String(nd['약칭'] == null ? '' : nd['약칭']).trim() === val) { count += 1; }
+          });
+          if (count > 1) {
+            const chip = document.createElement('span');
+            chip.className = 'ms-chip warn'; chip.textContent = '약칭 중복';
+            chip.title = '같은 약칭이 여러 근무형태에 사용 중입니다. 근무표에서는 코드로 표시됩니다.';
+            g.appendChild(chip);
+          }
+        }
+      }
+      getGui() { return this.eGui; }
+      refresh(p) { this._render(p); return true; }
+    })
+    """
+)
+
+# 분류 셀 — 공통 `.ms-chip mute` 로 표시(편집은 더블클릭 시 기본 텍스트 에디터).
+_CATEGORY_RENDERER = JsCode(
+    """
+    (class {
+      init(p) { this.eGui = document.createElement('div'); this._render(p); }
+      _render(p) {
+        const g = this.eGui; g.innerHTML = '';
+        g.style.display = 'flex'; g.style.alignItems = 'center'; g.style.height = '100%'; g.style.paddingLeft = '2px';
+        const val = String(p.value == null ? '' : p.value).trim();
+        if (val) {
+          const chip = document.createElement('span');
+          chip.className = 'ms-chip mute'; chip.textContent = val;
+          g.appendChild(chip);
+        } else {
+          const t = document.createElement('span'); t.textContent = '—'; t.style.color = '#908C83';
+          g.appendChild(t);
+        }
+      }
+      getGui() { return this.eGui; }
+      refresh(p) { this._render(p); return true; }
+    })
+    """
+)
+
+# 약칭 중복칩은 다른 행의 약칭/사용 변경에 반응해야 한다 — 해당 셀 변경 시 약칭 열만
+# 강제 refresh 한다(paste 는 onGridReady/onCellEditingStopped 를 쓰므로 충돌 없음).
+_DUP_REFRESH = JsCode(
+    """
+    function(e) {
+      const col = (e.column && e.column.getColId) ? e.column.getColId()
+                  : (e.colDef && e.colDef.field);
+      if ((col === '약칭' || col === '사용') && e.api) {
+        e.api.refreshCells({ columns: ['약칭'], force: true });
+      }
+    }
+    """
+)
+
+
 # ---- 컬럼 폭·정렬(디자인 계약 §4·mockup) ----
 _COL_WIDTHS = {
     "코드": {"width": 108, "minWidth": 88, "pinned": "left", "cellClass": "md-c-left"},
     "명칭": {"width": 118, "minWidth": 96, "cellClass": "md-c-left"},
-    "분류": {"width": 92, "minWidth": 72, "cellClass": "md-c-left"},
-    "약칭": {"width": 78, "minWidth": 60, "cellClass": "md-c-center"},
+    "분류": {"width": 96, "minWidth": 76, "cellClass": "md-c-left", "cellRenderer": _CATEGORY_RENDERER},
+    "약칭": {"width": 130, "minWidth": 96, "cellClass": "md-c-left", "cellRenderer": _SHORT_LABEL_RENDERER},
     "시작": {"width": 80, "minWidth": 66, "cellClass": "md-c-center ms-num"},
     "종료": {"width": 80, "minWidth": 66, "cellClass": "md-c-center ms-num"},
     "색상": {"width": 156, "minWidth": 130, "cellClass": "md-c-left",
@@ -182,6 +267,16 @@ _COL_WIDTHS = {
     "표시순서": {"width": 92, "minWidth": 78, "cellClass": "md-c-center ms-num"},
     "사용": {"width": 66, "minWidth": 58, "cellClass": "md-c-center", "cellRenderer": _BOOL_RENDERER},
 }
+
+
+def _filter_summary_html() -> str:
+    """필터바 우측 요약칩(사용 중 N · 미사용 M) — 전체 데이터 기준(현재 필터 무관, 목업)."""
+    store = db.get_work_types()
+    total = int(len(store))
+    active = int(store["is_active"].astype(bool).sum()) if total else 0
+    inactive = total - active
+    return (f"<div class='ms-filt-sum'>사용 중 <b>{active}</b>"
+            f"<span class='ms-filt-sep'>·</span>미사용 <b>{inactive}</b></div>")
 
 
 def _col_config() -> dict:
@@ -217,6 +312,7 @@ def render(user: dict) -> None:
         active = f1.selectbox("사용 여부", _STATUS, key=state.key("f_active"), label_visibility="collapsed")
         search = f2.text_input("검색", key=state.key("f_search"),
                                placeholder="코드·명칭·약칭 검색", label_visibility="collapsed")
+        _sp.markdown(_filter_summary_html(), unsafe_allow_html=True)
     params = {"active": active, "search": search.strip()}
 
     # ---- 재적재 결정(dirty 무경고 소실 금지, §17) ----
@@ -236,6 +332,7 @@ def render(user: dict) -> None:
         page_id=PAGE_ID, columns=_GRID_COLUMNS, order=_USER_COLS,
         col_config=_col_config(), select_all=True,
         height=master_grid_height(len(frame)),
+        grid_options={"onCellValueChanged": _DUP_REFRESH},
     )
     grid_df = render_master_grid(spec, frame, key=state.grid_key())
 
@@ -862,5 +959,9 @@ _EXTRA_CSS = """
 .ms-hintline { font-size:.68rem; color:var(--ms-ink-3); margin-top:.5rem; }
 .ms-errlist { margin:.25rem 0 0; padding-left:1.1rem; font-size:.76rem; color:var(--ms-ink-2); }
 .ms-absorb { color:var(--ms-ink-2); font-size:.72rem; margin-top:.3rem; }
+.ms-filt-sum { text-align:right; font-size:.78rem; color:var(--ms-ink-2); white-space:nowrap;
+  padding-bottom:.35rem; }
+.ms-filt-sum b { color:var(--ms-ink); font-weight:700; }
+.ms-filt-sep { color:var(--ms-line-strong); margin:0 .4rem; }
 </style>
 """

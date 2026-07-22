@@ -141,6 +141,40 @@ def test_delete_error_handling() -> None:
     check("_err_text: 빈 예외는 기본 문구", m._err_text(Exception("")) != "")
 
 
+# ===== 1-4) WAVE 2b 통일 재설계 — 약칭 중복칩·분류칩·필터 요약칩 =====
+def test_unified_redesign_features() -> None:
+    print("WAVE2b 통일 재설계 (약칭 중복 경고칩·분류 칩·필터 요약칩)")
+    import inspect
+    from views import master_work_types as m
+
+    cfg = m._col_config()
+    check("약칭 열에 셀 렌더러 주입(라이브 중복칩)", "cellRenderer" in cfg["약칭"])
+    check("분류 열에 셀 렌더러 주입(칩)", "cellRenderer" in cfg["분류"])
+
+    # 약칭 중복칩은 공통 `.ms-chip warn` 어휘 + 활성 기준(저장 검증과 동일 규칙)을 사용.
+    short_src = str(m._SHORT_LABEL_RENDERER.js_code)
+    check("약칭 렌더러가 공통 warn 칩 사용", "ms-chip warn" in short_src and "약칭 중복" in short_src)
+    check("약칭 중복 판정은 활성 행 기준(사용/제거 반영)", "_active" in short_src and "_removed" in short_src)
+    cat_src = str(m._CATEGORY_RENDERER.js_code)
+    check("분류 렌더러가 공통 mute 칩 사용", "ms-chip mute" in cat_src)
+
+    # 다른 행 약칭/사용 편집에 반응하도록 onCellValueChanged 로 약칭 열을 refresh.
+    render_src = inspect.getsource(m.render)
+    check("그리드에 onCellValueChanged(_DUP_REFRESH) 배선", "onCellValueChanged" in render_src)
+    dup_src = str(m._DUP_REFRESH.js_code)
+    check("변경 셀이 약칭/사용일 때 약칭 열 refresh", "refreshCells" in dup_src and "약칭" in dup_src)
+
+    # 필터 요약칩 — 전체 데이터 기준 사용중/미사용 카운트.
+    from modules import db
+    store = db.get_work_types()
+    total = int(len(store))
+    active = int(store["is_active"].astype(bool).sum()) if total else 0
+    html = m._filter_summary_html()
+    check("요약칩 클래스(ms-filt-sum) 사용", "ms-filt-sum" in html)
+    check("요약칩에 사용 중 카운트 반영", f"<b>{active}</b>" in html)
+    check("요약칩에 미사용 카운트 반영", f"<b>{total - active}</b>" in html)
+
+
 # ===== 2) _validate 하위호환 =====
 def test_validate_backward_compat() -> None:
     print("_validate 하위호환 ((records, errors), 색상 보존, 필수값)")
@@ -264,6 +298,7 @@ def main() -> int:
     for test in (
         test_render_smoke,
         test_action_bar_above_grid,
+        test_unified_redesign_features,
         test_partial_success_ledger_wiring,
         test_delete_error_handling,
         test_validate_backward_compat,

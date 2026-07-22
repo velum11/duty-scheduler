@@ -42,6 +42,8 @@ from views.master import (
     DraftState,
     MasterGridSpec,
     PersistResult,
+    Readiness,
+    ReadinessState,
     banner,
     cell_dirty_rule,
     cell_error_rule,
@@ -83,6 +85,14 @@ _CONTENT_COLS = ["사번", "성명", "부서", "조", "직급"]
 
 # 필터 위젯 세션 key (이 화면 전용 — 취소 시 위젯 복원에 사용).
 _F_ACTIVE, _F_DEPT, _F_ROLE, _F_SEARCH = "mu_active", "mu_dept", "mu_role", "mu_search"
+
+# readiness(migration 003 확장) 안내 문구 — 표시순서(display_order) 저장이 이 확장에 의존한다.
+_NOT_READY_MSG = (
+    "조직 확장 migration(003)이 아직 적용되지 않아 표시순서를 저장할 수 없습니다 — 조회·편집만 가능합니다."
+)
+_PROBE_ERROR_MSG = (
+    "스키마 상태를 확인하지 못했습니다(권한·네트워크). '스키마 재확인' 후 다시 시도하세요."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +177,35 @@ def _group_hints(group_of: dict, dept_names: dict, dept_labels: dict) -> dict[st
         if grp and grp != dept_names.get(code, ""):
             out[label] = grp
     return out
+
+
+def _readiness() -> ReadinessState:
+    """migration 003 확장 스키마 준비 상태를 3-state(READY/NOT_READY/PROBE_ERROR)로 승격한다.
+
+    표시순서(display_order) 저장은 이 확장에 의존한다. sample 모드는 항상 READY.
+    실제 write 차단은 ``ReadinessState.write_enabled``(READY 에서만 True)가 담당하므로
+    오분류(NOT_READY↔PROBE_ERROR)가 저장을 열지 않는다 — 조직 화면과 동일 계약(§25).
+    """
+    state = db.org_schema_readiness()
+    if state == db.READINESS_READY:
+        return ReadinessState.ready()
+    if state == db.READINESS_PROBE_ERROR:
+        return ReadinessState.probe_error(_PROBE_ERROR_MSG)
+    return ReadinessState.not_ready(_NOT_READY_MSG)
+
+
+def _head_badges(readiness: ReadinessState) -> str:
+    """§5 readiness 배지(스키마 준비) + 모드 배지(데이터 연결) — 색·의미를 분리해 우측에 노출.
+
+    READY 면 스키마 배지는 생략하고 모드 배지만 보인다(조직 화면과 동일). 정보 종류가
+    다른 두 신호를 한 배지에 섞지 않는다.
+    """
+    sample = db.is_sample_mode()
+    badges = ""
+    if not readiness.write_enabled:  # READY 가 아니면 스키마 배지를 함께 노출
+        badges += readiness.badge_html()
+    badges += mode_badge_html(connected=(None if sample else True), sample=sample)
+    return badges
 
 
 def _is_protected(emp_no) -> bool:
@@ -710,13 +749,19 @@ def render(user: dict) -> None:
     hint_json = json.dumps(_group_hints(group_of, dept_names, dept_labels), ensure_ascii=False)
     teams_json = json.dumps(_dept_team_options(teams, dept_labels), ensure_ascii=False)
 
-    sample = db.is_sample_mode()
+    readiness = _readiness()
     master_screen_head(
         "사용자 관리",
         "사번·소속·권한을 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
         breadcrumb="기준정보 › 사용자 관리",
-        mode_badge=mode_badge_html(connected=(None if sample else True), sample=sample),
+        mode_badge=_head_badges(readiness),
     )
+    # readiness 배너(NOT_READY/PROBE_ERROR 만) + 확인 실패 시 재프로브 — 조직 화면과 동일 UX(§25).
+    readiness.banner()
+    if readiness.state is Readiness.PROBE_ERROR:
+        if st.button("스키마 재확인", key=f"{PAGE_ID}__recheck", icon=":material/refresh:"):
+            db.reset_org_schema_cache()
+            st.rerun()
 
     refresh = state.take_action(REFRESH)
 
@@ -738,7 +783,7 @@ def render(user: dict) -> None:
         )
 
     params = {"active": active, "dept": dept, "role": role, "search": str(search).strip()}
-    ready = db.org_schema_ready()
+    ready = readiness.write_enabled  # READY 에서만 True — org_schema_ready() bool 게이트와 동치
 
     # dirty 인식 재적재 — 미저장 초안이 있으면 필터/새로고침 시 무경고 소실 대신 확인을 요구한다.
     decision = state.resolve_reload(params, refresh=refresh, dirty=state.is_dirty())

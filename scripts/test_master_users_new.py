@@ -374,6 +374,32 @@ def test_delete_controller_guards():
     check("삭제 실행이 물리삭제(delete_user) 없음", "delete_user" not in inspect.getsource(mu))
 
 
+# ---------------------------------------------------------------------------
+# 10) 통일 헤더 — readiness 배지(스키마 준비) + 모드 배지(데이터 연결) 분리 (§5/§25)
+# ---------------------------------------------------------------------------
+def test_readiness_state():
+    from views.master import Readiness
+    r = mu._readiness()  # sample 모드 → 항상 READY
+    check("sample 모드 readiness READY", r.state is Readiness.READY and r.write_enabled)
+
+
+def test_head_badges_compose():
+    from views.master import ReadinessState
+    ready_html = mu._head_badges(ReadinessState.ready())
+    not_html = mu._head_badges(ReadinessState.not_ready("mig 003"))
+    err_html = mu._head_badges(ReadinessState.probe_error("probe"))
+    check("READY 는 스키마 배지 생략(모드 배지만)", "ms-ready" not in ready_html and "ms-mode" in ready_html)
+    check("NOT_READY 는 스키마 배지 동반", "ms-ready" in not_html and "ms-mode" in not_html)
+    check("PROBE_ERROR 도 스키마 배지 동반", "ms-ready" in err_html and "ms-mode" in err_html)
+
+
+def test_readiness_gate_wired():
+    src = inspect.getsource(mu.render)
+    check("헤더가 readiness 배지 조합(_head_badges) 사용", "_head_badges(readiness)" in src)
+    check("readiness 배너/재프로브 노출", "readiness.banner()" in src and "reset_org_schema_cache" in src)
+    check("저장 게이트가 readiness.write_enabled 로 통일", "ready = readiness.write_enabled" in src)
+
+
 def main():
     test_transform_ok()
     test_role_variants()
@@ -395,6 +421,9 @@ def main():
     test_reconcile_partial_apptest()
     test_summarize_delete()
     test_delete_controller_guards()
+    test_readiness_state()
+    test_head_badges_compose()
+    test_readiness_gate_wired()
 
     print("-" * 60)
     if _failures:
