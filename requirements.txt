@@ -1,5 +1,5 @@
-streamlit==1.60.0
-pandas==3.0.3
-supabase==2.31.0
-streamlit-cookies-controller==0.0.4
-streamlit-aggrid==1.2.1.post2
+streamlit>=1.57
+pandas>=2.0
+supabase>=2.4
+streamlit-cookies-controller>=0.0.4
+streamlit-aggrid>=1.2.1.post2
