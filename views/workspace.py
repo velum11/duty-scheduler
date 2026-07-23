@@ -839,18 +839,63 @@ def schedule_screen(user: dict, page_id: str) -> None:
         )
 
 
+def _month_assignment_snapshot(year: int, month: int) -> dict:
+    """대상 월의 부서·조 편성 스냅샷 {emp_no: (dept_code, team_code)}.
+
+    영속 저장(schedule_assignments — 직원·월 편성 1건)을 조회한다. 스냅샷은 근무표
+    작성 당시의 소속을 보존하므로, 과거 월을 조회할 때 인사이동 이후의 현재 소속이
+    아니라 그 당시 소속으로 표시·필터하기 위한 기준이다(requirements.md §5·불변계약).
+    테이블 미적용/조회 실패 시 빈 맵을 반환해 호출부가 현재 소속으로 폴백한다.
+    (schedule_edit._assignment_snapshots 와 같은 '스냅샷 우선, 현재는 폴백' 패턴 —
+    단 조회 화면은 편집 세션 draft 를 읽지 않고 영속 스냅샷만 사용한다.)
+    """
+    try:
+        assigns = db.get_month_assignments(int(year), int(month))
+    except Exception:
+        return {}  # 002 미적용 등 — 조회 실패는 현재 소속 폴백
+    snaps: dict = {}
+    if assigns is None or assigns.empty:
+        return snaps
+    for _, r in assigns.iterrows():
+        emp = str(r.get("emp_no") or "").strip()
+        if emp:
+            snaps[emp] = (
+                str(r.get("dept_code") or "").strip(),
+                str(r.get("team_code") or "").strip(),
+            )
+    return snaps
+
+
 def _build_month_grid(q: dict, display_of: dict | None = None):
     """해당 월/부서/조의 가로형 근무표 DataFrame 과 세로형 원본 레코드를 반환.
 
-    날짜 셀은 내부 코드가 아니라 근무형태 약칭(display_of)으로 표시한다.
+    부서·조는 대상 월의 편성 스냅샷(schedule_assignments)을 우선 사용하고, 없으면
+    현재 사용자 소속으로 폴백한다(표시 전용·자동저장/백필 없음 — requirements.md §5).
+    조회 조건의 부서·조 필터도 같은 스냅샷 기준으로 일관 적용해, 과거 월 조회 시
+    인사이동한 직원이 현재 소속으로 오분류되지 않게 한다. 날짜 셀은 내부 코드가 아니라
+    근무형태 약칭(display_of)으로 표시한다.
     """
     display_of = display_of or {}
     users = db.get_users()
-    users = users[users["is_active"]]
+    users = users[users["is_active"]].copy()
+
+    # 스냅샷 우선으로 '그 당시 부서/조'를 해석한다(없으면 현재 소속 폴백).
+    snaps = _month_assignment_snapshot(q["year"], q["month"])
+    eff_depts, eff_teams = [], []
+    for _, u in users.iterrows():
+        emp = str(u["emp_no"]).strip()
+        dept_code, team_code = snaps.get(
+            emp, (str(u["dept_code"] or "").strip(), str(u.get("team_code") or "").strip())
+        )
+        eff_depts.append(dept_code)
+        eff_teams.append(team_code)
+    users["_eff_dept"] = eff_depts
+    users["_eff_team"] = eff_teams
+
     if q["dept"] != ALL:
-        users = users[users["dept_code"] == q["dept"]]
+        users = users[users["_eff_dept"] == q["dept"]]
         if q["team"] != ALL:
-            users = users[users["team_code"] == q["team"]]
+            users = users[users["_eff_team"] == q["team"]]
     keyword = str(q.get("keyword", "")).strip()
     if keyword:
         emp_match = users["emp_no"].astype(str).str.contains(
@@ -860,7 +905,7 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
             keyword, case=False, na=False, regex=False,
         )
         users = users[emp_match | name_match]
-    users = users.sort_values(["dept_code", "team_code", "emp_no"])
+    users = users.sort_values(["_eff_dept", "_eff_team", "emp_no"])
 
     scheds = db.get_month_schedules(users["emp_no"], q["year"], q["month"])
 
@@ -870,11 +915,12 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
 
     rows = []
     for _, u in users.iterrows():
+        dept_code, team_code = u["_eff_dept"], u["_eff_team"]
         row = {
             "사번": u["emp_no"],
             "성명": u["name"],
-            "부서": db.dept_name(u["dept_code"]),
-            "조": db.team_name(u["dept_code"], u["team_code"]),
+            "부서": db.dept_name(dept_code),
+            "조": db.team_name(dept_code, team_code),
         }
         for d in days:
             code = lookup.get((u["emp_no"], d.isoformat()), "")

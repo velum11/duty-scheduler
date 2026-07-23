@@ -497,6 +497,53 @@ def test_dashboard_scope_and_safety() -> None:
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
 
 
+def test_month_grid_snapshot() -> None:
+    print("workspace._build_month_grid 월 편성 스냅샷 우선(과거 월 인사이동)")
+    from views import workspace
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+
+    ALL = workspace.ALL
+    disp, _ = workspace.work_type_display()
+
+    # 1002(이책임): 현재 소속 PET1, 2026-07 근무 존재. 그 달 편성 스냅샷을 PET2 로 이동.
+    teams = db.get_teams()
+    pet2_team = str(teams[teams["dept_code"] == "PET2"].iloc[0]["team_code"])
+    db.upsert_month_assignments([{
+        "emp_no": "1002", "schedule_month": "2026-07",
+        "dept_code": "PET2", "team_code": pet2_team, "shift_group_code": "",
+    }], require_shift=False)
+
+    def grid_for(dept):
+        q = {"year": 2026, "month": 7, "dept": dept, "team": ALL, "keyword": ""}
+        g, _ = workspace._build_month_grid(q, disp)
+        return g
+
+    # 스냅샷 부서(PET2)로 조회 → 이동 직원 포함 + 부서 열이 스냅샷 부서명
+    g_pet2 = grid_for("PET2")
+    emps_pet2 = set(g_pet2["사번"].astype(str)) if not g_pet2.empty else set()
+    check("스냅샷 부서(PET2) 조회에 이동 직원 포함", "1002" in emps_pet2)
+    dept_cell = g_pet2[g_pet2["사번"].astype(str) == "1002"].iloc[0]["부서"]
+    check("부서 열이 스냅샷 부서명 표시", dept_cell == db.dept_name("PET2"))
+
+    # 현재 부서(PET1)로 조회 → 스냅샷 이동으로 1002 제외, 미이동 직원(1003)은 유지
+    g_pet1 = grid_for("PET1")
+    emps_pet1 = set(g_pet1["사번"].astype(str)) if not g_pet1.empty else set()
+    check("현재 부서(PET1) 조회에서 이동 직원 제외(스냅샷 필터)", "1002" not in emps_pet1)
+    check("스냅샷 없는 직원은 현재 부서(PET1)에 유지", "1003" in emps_pet1)
+
+    # 표시 전용 — users 기준정보는 변경되지 않음(자동저장/백필 없음)
+    check("스냅샷 표시가 users 현재 소속 불변",
+          db.find_user_by_emp_no("1002")["dept_code"] == "PET1")
+
+    # 스냅샷 없는 월 → 빈 맵(현재 소속 폴백), 예외 없음
+    check("스냅샷 없는 월 → 빈 맵(현재 소속 폴백)",
+          workspace._month_assignment_snapshot(2030, 1) == {})
+
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+
+
 def main() -> int:
     for test in (
         test_normalize_schedule_month,
@@ -510,6 +557,7 @@ def main() -> int:
         test_day_schedules,
         test_dashboard_board_contracts,
         test_dashboard_scope_and_safety,
+        test_month_grid_snapshot,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")
