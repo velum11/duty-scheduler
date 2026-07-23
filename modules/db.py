@@ -688,13 +688,15 @@ def dept_group_map(org_depts: pd.DataFrame | None = None) -> dict:
     """
     frame = get_org_departments() if org_depts is None else org_depts
     group_orders: dict = {}
-    try:
-        for _, g in get_org_groups().iterrows():
-            group_orders[str(g["group_code"]).strip()] = int(
-                pd.to_numeric(g["sort_order"], errors="coerce") or 0
-            )
-    except Exception:
-        group_orders = {}
+    # get_org_groups() 의 진짜 저장소 오류(DATA_SOURCE_ERRORS 등)는 get_org_departments()
+    # 와 동일하게 호출부로 전파한다(다른 조직 조회와의 오류 처리 일관성 — 조용히 빈
+    # 매핑으로 위장하지 않는다). 행 단위 정렬값 결측/형식 이상만 그 행에 한해 0으로 폴백.
+    for _, g in get_org_groups().iterrows():
+        try:
+            order = int(pd.to_numeric(g["sort_order"], errors="coerce"))
+        except (TypeError, ValueError):
+            order = 0
+        group_orders[str(g["group_code"]).strip()] = order
     out: dict = {}
     for _, r in frame.iterrows():
         code = str(r.get("group_code", "") or "").strip()
