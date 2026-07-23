@@ -46,20 +46,24 @@ def _clean(value) -> str:
 def _scope_for(user: dict) -> tuple[str, str | None]:
     """대시보드 조회 범위를 결정한다(fail-closed).
 
-    반환: ("all", None)      — ADMIN: 전체 조회
-          ("scoped", dept)   — MANAGER: 유효한 담당 부서(dept)로 한정
-          ("blocked", None)  — MANAGER 인데 담당 부서를 확정할 수 없음(공백/None/미해석)
+    반환: ("all", None)      — ADMIN 만: 전체 조회
+          ("scoped", dept)   — MANAGER 且 유효 담당 부서(dept)일 때만: 그 부서로 한정
+          ("blocked", None)  — 그 외 전부(부서 미확정 MANAGER, 미지/비정상 역할,
+                               MANAGER 아닌데 dept 있는 경우 등)
 
-    '전체 조회(제한 없음)'는 오직 ADMIN 일 때만이다. 역할이 MANAGER 인데 유효한
-    부서 범위가 없으면 전체로 열지 않고(fail-open 금지) 차단한다(권한경계).
+    fail-closed 원칙: '전체 조회(제한 없음)'는 오직 ADMIN, '부서 한정'은 오직
+    MANAGER 且 유효 dept 일 때만 부여한다. 그 밖의 모든 경우는 데이터를 열지 않고
+    차단한다(미지 역할이 유효 dept 로 scoped 로 새는 fail-open 방지). USER 는 상위
+    render 에서 개인 요약으로 분기하므로 이 경로에 도달하지 않는다.
     """
     role = _clean(user.get("role")).upper()
     if role == "ADMIN":
         return ("all", None)
-    dept = _clean(user.get("dept_code")) or None
-    if dept is None:
-        return ("blocked", None)
-    return ("scoped", dept)
+    if role == "MANAGER":
+        dept = _clean(user.get("dept_code")) or None
+        if dept is not None:
+            return ("scoped", dept)
+    return ("blocked", None)
 
 
 def render(user: dict) -> None:
