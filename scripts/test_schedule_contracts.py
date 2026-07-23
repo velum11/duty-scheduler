@@ -374,6 +374,19 @@ def test_dashboard_board_contracts() -> None:
     # 스냅샷은 users 를 바꾸지 않는다(표시용)
     check("스냅샷이 users 현재 소속 불변", db.find_user_by_emp_no("1005")["dept_code"] == "PET2")
 
+    # P2-4: 비활성 그룹은 재출현하지 않고 부서명으로 폴백(그룹 권위=활성 organization_groups)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    groups = db.get_org_groups().copy()
+    groups.loc[groups["group_code"] == "PET2", "group_name"] = "구분되는그룹명"
+    groups.loc[groups["group_code"] == "PET2", "is_active"] = False
+    db.save_org_groups(groups)
+    day2 = db.get_day_schedules(_date(2026, 7, 1))
+    board2, _, _ = dash._build_board(day2, db.get_users(), wt)
+    pet2_names = [g["name"] for g in board2 if g["code"] == "PET2"]
+    check("비활성 그룹명 미사용(재출현 방지)", "구분되는그룹명" not in pet2_names)
+    check("비활성 그룹 부서는 부서명으로 폴백", bool(pet2_names) and pet2_names[0] == db.dept_name("PET2"))
+
+    st.session_state.pop(db._ORG_GROUPS_STORE, None)
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
 
 

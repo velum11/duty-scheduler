@@ -226,16 +226,18 @@ def _build_board(day_rows, users, wt, snap=None, manager_dept=None):
 
     merged = day_rows.merge(users, on="emp_no", how="left")
 
-    # 그룹명은 전체(비활성 포함)에서 조회해 비활성 그룹 부서가 dept_name(group_code)로
-    # 오표시되지 않게 한다(P2-4). 정의 순서는 활성 그룹 sort_order 를 우선한다.
-    groups_all = db.get_org_groups()
-    group_name_of = dict(zip(
-        groups_all["group_code"].astype(str), groups_all["group_name"].astype(str)
-    )) if not groups_all.empty else {}
+    # 그룹 권위는 migration 004(organization_groups) — 앱 전체(master_org/db.py)와 동일.
+    # 활성 그룹만 반영하고 그룹명은 organization_groups 에서 정확히 조회한다(P2-4).
+    # 부서가 비활성 그룹에 매핑돼 있거나(soft-delete) 그룹 미해석(004 미적용)이면
+    # 비활성 그룹을 재출현시키지 않고 부서를 자체 그룹으로 폴백한다.
     active_groups = db.get_org_groups(is_active=True)
     if not active_groups.empty:
         active_groups = active_groups.sort_values("sort_order", kind="stable")
-    group_seq = list(active_groups["group_code"].astype(str))
+    group_name_of = dict(zip(
+        active_groups["group_code"].astype(str), active_groups["group_name"].astype(str)
+    )) if not active_groups.empty else {}
+    active_codes = set(group_name_of)
+    group_seq = list(active_groups["group_code"].astype(str)) if not active_groups.empty else []
     dgm = db.dept_group_map()  # dept_code -> (group_code, group_order)
 
     boards: dict = {}
@@ -252,8 +254,9 @@ def _build_board(day_rows, users, wt, snap=None, manager_dept=None):
             continue  # MANAGER 담당 부서 범위 밖
 
         gc, _ = dgm.get(dept, ("", 0))
-        if not gc:
-            gc = dept or "(미지정)"  # group_code 공백/migration 미적용 → dept 폴백
+        if gc not in active_codes:
+            # 비활성 그룹/미매핑/004 미적용 → 부서를 자체 그룹으로 폴백(비활성 재출현 방지)
+            gc = dept or "(미지정)"
         if gc not in boards:
             if gc == "(미지정)":
                 name = "(그룹 미지정)"
