@@ -323,6 +323,35 @@ def test_day_schedules() -> None:
     check("야간 코드 분류", db.classify_work_group("야", wt.get("야", {})) == "야간")
     check("OFF 코드 분류", db.classify_work_group("OFF", wt.get("OFF", {})) == "OFF")
 
+    # Supabase 분기가 실제로 정규화된 YYYY-MM-DD 인자로 eq 조회하는지 검증(P2-2·E2E).
+    # datetime 시간부가 eq 조건에 새지 않음을 supabase 인자 수준에서 증명한다.
+    from datetime import datetime as _dtm2
+
+    captured: dict = {}
+
+    class _FakeQuery:
+        def eq(self, col, val):
+            captured[col] = val
+            return self
+
+        def order(self, *args, **kwargs):
+            return self
+
+    def _fake_schedule_rows(builder):
+        builder(_FakeQuery())
+        return db._typed_empty_frame(db.SCHEDULE_COLUMNS)
+
+    orig_sample = db.is_sample_mode
+    orig_rows = db.supabase_repository._schedule_rows
+    db.is_sample_mode = lambda: False
+    db.supabase_repository._schedule_rows = _fake_schedule_rows
+    try:
+        db.get_day_schedules(_dtm2(2026, 7, 1, 13, 30))
+        check("Supabase eq 인자 정규화(YYYY-MM-DD)", captured.get("work_date") == "2026-07-01")
+    finally:
+        db.is_sample_mode = orig_sample
+        db.supabase_repository._schedule_rows = orig_rows
+
 
 def test_dashboard_board_contracts() -> None:
     print("views.dashboard 보드 계약 (MANAGER 범위·스냅샷 소속·비활성 표시)")
@@ -390,6 +419,84 @@ def test_dashboard_board_contracts() -> None:
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
 
 
+def test_dashboard_scope_and_safety() -> None:
+    print("views.dashboard 권한범위(fail-closed)·NA-safety·견고성")
+    from datetime import date as _date
+    from views import dashboard as dash
+    from views import workspace
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    st.session_state.pop(db._ORG_GROUPS_STORE, None)
+    st.session_state.pop(db._WORK_TYPES_STORE, None)
+
+    day = db.get_day_schedules(_date(2026, 7, 1))
+    users = db.get_users()
+    wt = db.work_types_map()
+
+    # (a) fail-closed: 전체 조회는 ADMIN 만. 부서 미확정 MANAGER 는 차단(전체 아님).
+    check("ADMIN → 전체", dash._scope_for({"role": "ADMIN"}) == ("all", None))
+    check("유효 MANAGER → 자기부서 한정",
+          dash._scope_for({"role": "MANAGER", "dept_code": "PET1"}) == ("scoped", "PET1"))
+    check("공백 dept MANAGER → 차단(blocked)",
+          dash._scope_for({"role": "MANAGER", "dept_code": ""}) == ("blocked", None))
+    check("None dept MANAGER → 차단(blocked)",
+          dash._scope_for({"role": "MANAGER", "dept_code": None}) == ("blocked", None))
+    import numpy as _np
+    check("NaN dept MANAGER → 차단(NA-safe)",
+          dash._scope_for({"role": "MANAGER", "dept_code": _np.nan}) == ("blocked", None))
+    # 차단 MANAGER 는 결코 전체(ADMIN) 보드로 열리지 않는다: manager_dept 로 None 이
+    # 넘어가지 않음을 계약으로 고정(전체 집계와 비교).
+    admin_board, _, _ = dash._build_board(day, users, wt, manager_dept=None)
+    admin_total = sum(g["total"] for g in admin_board)
+    check("차단 MANAGER 는 전체 조회 아님(fail-open 아님)",
+          dash._scope_for({"role": "MANAGER", "dept_code": ""})[0] == "blocked"
+          and admin_total == len(day))
+
+    # (b) 비활성 근무형태 참조 근무의 약칭·색 표시(소프트삭제 참조 보존)
+    wts = db.get_work_types().copy()
+    wts.loc[wts["code"] == "특주", "is_active"] = False
+    db.save_work_types(wts)
+    active_only, _ = workspace.work_type_display()
+    check("활성전용 맵은 비활성 근무형태 제외", "특주" not in active_only)
+    disp, col = dash._display_maps()
+    check("비활성 근무형태 약칭 보존", disp.get("특주") == "특주")
+    check("비활성 근무형태 색 보존", str(col.get("특주", "")).startswith("#"))
+    st.session_state.pop(db._WORK_TYPES_STORE, None)  # 원복
+
+    # (c) 조직 조회 실패가 보드에서 삼켜지지 않고 전파(화면 render try 가 처리)
+    orig = db.get_org_groups
+
+    def _boom(*a, **k):
+        raise db.supabase_repository.SupabaseDataError("조직 조회 실패(모의)")
+
+    db.get_org_groups = _boom
+    try:
+        propagated = raises(
+            lambda: dash._build_board(day, users, wt), db.DATA_SOURCE_ERRORS
+        )
+        check("조직 조회 실패 전파(화면 밖 유출 아님)", propagated is not None)
+    finally:
+        db.get_org_groups = orig
+
+    # (d) 활성 그룹 0건에도 보드 구성(부서 폴백, crash 없음)
+    st.session_state[db._ORG_GROUPS_STORE] = db.get_org_groups().iloc[0:0].copy()
+    board0, _, tot0 = dash._build_board(day, db.get_users(), wt)
+    check("활성 그룹 0건 → 부서 폴백 집계 유지", sum(g["total"] for g in board0) == len(day))
+    check("활성 그룹 0건 → 요약 합 유지", sum(tot0.values()) == len(day))
+    st.session_state.pop(db._ORG_GROUPS_STORE, None)
+
+    # (e) _month_snapshot NA-safety: dept/team 이 NaN 인 편성도 예외 없이 처리
+    import pandas as _pd
+    st.session_state[db._ASSIGNMENTS_STORE] = _pd.DataFrame([
+        {"emp_no": "1002", "schedule_month": "2026-07-01",
+         "dept_code": _np.nan, "team_code": None, "shift_group_code": ""},
+    ], columns=db.SCHEDULE_ASSIGNMENT_COLUMNS)
+    snap = dash._month_snapshot(_date(2026, 7, 1))
+    check("NA 편성도 NA-safe(빈 문자열 폴백)", snap.get("1002") == ("", ""))
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+
+
 def main() -> int:
     for test in (
         test_normalize_schedule_month,
@@ -402,6 +509,7 @@ def main() -> int:
         test_month_roster,
         test_day_schedules,
         test_dashboard_board_contracts,
+        test_dashboard_scope_and_safety,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")

@@ -31,8 +31,39 @@ _DASHBOARD_DATE = "dashboard_date"
 _DASHBOARD_DATE_WIDGET = "dash_date_input"
 
 
+def _clean(value) -> str:
+    """pandas NA-safe 문자열 정규화 — None/NaN/pd.NA → ''(폴백), 그 외 str.strip()."""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass  # 배열·비스칼라 등 isna 판정 불가 값은 그대로 문자열화
+    return str(value).strip()
+
+
+def _scope_for(user: dict) -> tuple[str, str | None]:
+    """대시보드 조회 범위를 결정한다(fail-closed).
+
+    반환: ("all", None)      — ADMIN: 전체 조회
+          ("scoped", dept)   — MANAGER: 유효한 담당 부서(dept)로 한정
+          ("blocked", None)  — MANAGER 인데 담당 부서를 확정할 수 없음(공백/None/미해석)
+
+    '전체 조회(제한 없음)'는 오직 ADMIN 일 때만이다. 역할이 MANAGER 인데 유효한
+    부서 범위가 없으면 전체로 열지 않고(fail-open 금지) 차단한다(권한경계).
+    """
+    role = _clean(user.get("role")).upper()
+    if role == "ADMIN":
+        return ("all", None)
+    dept = _clean(user.get("dept_code")) or None
+    if dept is None:
+        return ("blocked", None)
+    return ("scoped", dept)
+
+
 def render(user: dict) -> None:
-    role = str(user.get("role", "")).strip().upper()
+    role = _clean(user.get("role")).upper()
     if role == "USER":
         _render_user(user)
         return
@@ -41,12 +72,15 @@ def render(user: dict) -> None:
     the_date = _date_nav_bar()
     _inject_board_style()
 
-    # MANAGER 는 담당 부서 범위만 본다(requirements.md §2). 근무표 편성·조회 화면
-    # (schedule_edit/workspace)의 선례와 동일하게 본인 dept_code 로 한정하고, ADMIN 은
-    # 전체를 유지한다. USER 는 위에서 개인 요약으로 분기했다.
-    manager_dept = None
-    if role == "MANAGER":
-        manager_dept = str(user.get("dept_code") or "").strip() or None
+    # 범위 결정(fail-closed): ADMIN=전체, MANAGER=자기 부서, 부서 미확정 MANAGER=차단.
+    scope, manager_dept = _scope_for(user)
+    if scope == "blocked":
+        ui.empty_state(
+            "소속 부서가 지정되지 않아 근무 현황을 표시할 수 없습니다. "
+            "관리자에게 부서 지정을 요청하세요.",
+            head="당일 근무 현황",
+        )
+        return
 
     # 조직 조회(get_org_groups/dept_group_map/team_name 등)도 오류 처리 범위에 포함한다
     # — 최초 근무 조회만 감싸면 보드 구성 중 데이터소스 오류가 화면 전체 예외가 된다.
@@ -162,11 +196,11 @@ def _display_maps():
     wt_all = db.get_work_types()
     if not wt_all.empty:
         for _, r in wt_all.iterrows():
-            code = str(r["code"]).strip()
+            code = _clean(r.get("code"))
             if not code:
                 continue
-            label = str(r.get("short_label") or "").strip() or code
-            color = str(r.get("color") or "").strip()
+            label = _clean(r.get("short_label")) or code
+            color = _clean(r.get("color"))
             display_of.setdefault(code, label)
             if color.startswith("#"):
                 color_of.setdefault(code, color)
@@ -186,12 +220,9 @@ def _month_snapshot(the_date: date) -> dict:
     if assigns is None or assigns.empty:
         return snap
     for _, r in assigns.iterrows():
-        emp = str(r.get("emp_no") or "").strip()
+        emp = _clean(r.get("emp_no"))
         if emp:
-            snap[emp] = (
-                str(r.get("dept_code") or "").strip(),
-                str(r.get("team_code") or "").strip(),
-            )
+            snap[emp] = (_clean(r.get("dept_code")), _clean(r.get("team_code")))
     return snap
 
 
@@ -244,11 +275,11 @@ def _build_board(day_rows, users, wt, snap=None, manager_dept=None):
     order: list = list(group_seq)
 
     for _, row in merged.iterrows():
-        emp_no = str(row.get("emp_no") or "").strip()
+        emp_no = _clean(row.get("emp_no"))
         # 스냅샷 소속 우선 → 현재 users 소속 폴백(과거일/편성없음, 표시용·저장 안 함).
         snap_dept, snap_team = snap.get(emp_no, ("", ""))
-        dept = snap_dept or str(row.get("dept_code") or "").strip()
-        team = snap_team or str(row.get("team_code") or "").strip()
+        dept = snap_dept or _clean(row.get("dept_code"))
+        team = snap_team or _clean(row.get("team_code"))
 
         if manager_dept is not None and dept != manager_dept:
             continue  # MANAGER 담당 부서 범위 밖
@@ -266,9 +297,9 @@ def _build_board(day_rows, users, wt, snap=None, manager_dept=None):
             if gc not in order:
                 order.append(gc)
 
-        code = str(row.get("work_type_code") or "").strip()
+        code = _clean(row.get("work_type_code"))
         bucket = _bucket_of(code, wt)
-        display_name = str(row.get("name") or emp_no or "").strip() or emp_no
+        display_name = _clean(row.get("name")) or emp_no
         team_label = db.team_name(dept, team)
         boards[gc]["buckets"].setdefault(bucket, []).append(
             {"name": display_name, "team": team_label, "code": code}
