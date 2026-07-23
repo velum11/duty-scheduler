@@ -392,7 +392,7 @@ def _dept_renderer(hint_json: str) -> JsCode:
             var g = H[v];
             if(g){
               var s = document.createElement('span');
-              s.style.color = '#908C83'; s.style.fontSize = '11px';
+              s.style.color = '#5F5C55'; s.style.fontSize = '11px';
               s.textContent = '\\u00B7 ' + String(g);
               e.appendChild(s);
             }
