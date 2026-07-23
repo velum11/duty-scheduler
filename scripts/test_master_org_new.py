@@ -118,12 +118,26 @@ for skey in ("org_group__save", "org_dept__save", "org_unit__save"):
         check(f"갓 로드 시 {skey} 라벨에 변경 badge 없음", sv is not None and sv.label == "저장")
 
 
-# ===== 2b) 드릴다운 단일 선택 selectbox =====
-print("드릴다운 단일 선택 — 그룹/부서 selectbox")
+# ===== 2b) 행 클릭 드릴다운 (상단 그룹/부서 selectbox 제거) =====
+print("행 클릭 드릴다운 — 상단 selectbox 제거 + 행 클릭 배선 + 초기 미선택 하위 잠금")
 sb_keys = {s.key for s in at.selectbox}
-check("그룹 단일 선택 selectbox 존재", "og_group" in sb_keys)
-check("부서 단일 선택 selectbox 존재(부서/조 드릴다운)",
-      "og_dept" in sb_keys or "og_dept_empty" in sb_keys)
+check("상단 그룹 선택 selectbox 제거", "og_group" not in sb_keys and "og_group_empty" not in sb_keys)
+check("상단 부서 선택 selectbox 제거", "og_dept" not in sb_keys and "og_dept_empty" not in sb_keys)
+check("사용 여부 필터 selectbox 는 유지", "og_active" in sb_keys)
+check("그룹/부서 그리드에 행 클릭 드릴다운 핸들러(onCellClicked) 배선",
+      "_DRILL_CLICK" in src and "onCellClicked" in src)
+check("드릴다운 선택은 안정 코드키(session_state)로 보관",
+      "og_group_sel" in src and "og_dept_sel" in src)
+check("그룹 변경 시 하위(부서·조) 선택 초기화(og_dept_sel pop)", 'pop("og_dept_sel"' in src)
+check("클릭된(_linked) 행의 안정 코드키를 읽는 _picked_code 존재",
+      "_picked_code" in src and hasattr(master_org, "_picked_code"))
+# 초기(아무 상위도 클릭 안 함) → 하위 시트 잠금(비우고 행추가 비활성)
+check("초기 미선택 → 부서 시트 잠금(그룹 먼저 선택)", "그룹을 먼저 선택하세요" in body)
+check("초기 미선택 → 조 시트 잠금(부서 먼저 선택)", "부서를 먼저 선택하세요" in body)
+check("초기 미선택 → 부서·조 write 버튼 비활성", all(
+    (_b is not None and getattr(_b, "disabled", False))
+    for _b in (_save_button(at, k) for k in
+               ("org_dept__save", "org_dept__add", "org_unit__save", "org_unit__add"))))
 
 
 # ===== 3) migration readiness 3-state =====
@@ -341,7 +355,7 @@ def _gate_block_probe():
         mo._OD.set_rows(rows); mo._OD.set_dirty(True)
         mo._OD.commit_query({"active": "전체", "search": "", "group": gA})
         st.session_state["og_active"] = "전체"
-        st.session_state["og_group"] = gB
+        st.session_state["og_group_sel"] = gB
         st.session_state["_gA"] = gA; st.session_state["_gB"] = gB
         st.session_state["_tgt"] = str(rows.iloc[0]["코드"])
     mo.render(adb.find_user_by_emp_no("1001"))
@@ -374,7 +388,7 @@ def _gate_discard_probe():
         mo._OD.set_rows(rows); mo._OD.set_dirty(True)
         mo._OD.commit_query({"active": "전체", "search": "", "group": gA})
         st.session_state["og_active"] = "전체"
-        st.session_state["og_group"] = gB
+        st.session_state["og_group_sel"] = gB
         st.session_state["_gA"] = gA; st.session_state["_gB"] = gB
         st.session_state["_tgt"] = str(rows.iloc[0]["코드"])
     mo.render(adb.find_user_by_emp_no("1001"))
@@ -413,7 +427,7 @@ def _gate_cancel_probe():
         mo._OD.set_rows(rows); mo._OD.set_dirty(True)
         mo._OD.commit_query({"active": "전체", "search": "", "group": gA})
         st.session_state["og_active"] = "전체"
-        st.session_state["og_group"] = gB
+        st.session_state["og_group_sel"] = gB
         st.session_state["_gA"] = gA; st.session_state["_gB"] = gB
         st.session_state["_tgt"] = str(rows.iloc[0]["코드"])
     mo.render(adb.find_user_by_emp_no("1001"))

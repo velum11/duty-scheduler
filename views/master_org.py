@@ -3,15 +3,17 @@
 부서 관리·조 관리 메뉴는 모두 이 화면을 연다 (사이드바 메뉴 구조는 무변경).
 데이터 계층(migration 004)은 그룹(organization_groups) → 부서(departments.group_id)
 → 조(teams.department_id)를 전부 group_code/dept_code(내부 FK)로 조회·저장한다.
-이 화면은 트리 UI 를 쓰지 않고, 세 개의 독립 시트를 가로로 배치해 상위 선택이
-하위 시트를 여는 마스터-디테일 드릴다운으로 구성한다.
+이 화면은 트리 UI 를 쓰지 않고, 세 개의 독립 시트를 가로로 배치해 상위 시트의 **행을
+직접 클릭**하면 하위 시트가 열리는 마스터-디테일 드릴다운으로 구성한다(별도 상위 선택
+selectbox/드롭다운 없음). 상위→하위로 진행되는 활성 체인은 단계 배지·커넥터·비선택 하위
+디엠퍼시스로 시각화한다.
 
 각 시트는 공통 컬럼(코드 / 코드명 / 순서 / 비고 / 사용)을 가지며, 조 시트만 유형
 (교대=SHIFT / 일반=GENERAL)을 추가한다. 세 시트는 각각 독립 저장 계약을 가진다:
   - 그룹 시트 = ``org_group``(_GRP), 부서 시트 = ``org_dept``(_OD),
     조 시트 = ``org_unit``(_OU). page-scoped DraftState 로 편집 상태를 고립한다.
-  - 상위(그룹/부서)는 저장된 활성 항목만 드릴다운 대상이 된다 — 미저장 상위 행에는
-    하위를 추가할 수 없다(저장 후에만 selectbox 에 나타남).
+  - 상위(그룹/부서)의 저장된 행을 클릭하면 그 상위가 선택된다 — 미저장 상위 행에는
+    하위를 추가할 수 없다(저장 후 존재하는 행만 클릭 드릴다운 대상이 됨).
   - 상위 미선택이면 하위 시트를 잠근다(sheet_locked + 모든 write control 비활성).
   - 상위 선택을 바꿀 때 하위에 미저장 draft 가 있으면 폐기/계속 게이트를 태운다.
   - 저장된 코드는 수정 불가(신규 등록 시에만 입력), 저장 실패 시 draft 를 보존한다.
@@ -122,21 +124,87 @@ _LINK_CHIP = JsCode(
     """
 )
 
-# 조직 전용 페이지 크롬 — 공통 크롬(views/master/style) 위에 드릴다운 컨트롤 카드와
-# 시트 액션바 버튼 nowrap(좁은 폭에서도 눌림 방지)만 얹는다. 3시트 세로 스택(≤1100px)은
-# 공통 style 의 `stHorizontalBlock:has([class*="__sheet"])` 규칙이 담당한다.
+# 조직 전용 페이지 크롬 — 공통 크롬(views/master/style) 위에 (1)시트 액션바 버튼
+# nowrap, (2)행 클릭 드릴다운의 흐름 시각화(단계 배지·커넥터·활성/비활성 시트 대비)를
+# 얹는다. 3시트 세로 스택(≤1100px)은 공통 style 의
+# `stHorizontalBlock:has([class*="__sheet"])` 규칙이 담당한다.
 _ORG_PAGE_CSS = """
 <style>
-.st-key-org__drill { background:var(--ms-surface-2); border:1px solid var(--ms-line); border-radius:8px;
-  padding:.5rem .65rem; margin:.35rem 0 .1rem; }
-.st-key-org__drill label { font-size:.72rem !important; color:var(--ms-ink-3) !important; }
 /* 시트 액션바 버튼은 절대 세로로 줄바꿈하지 않는다(좁은 폭에서도 눌림 방지). */
 .st-key-org_group__sheet div.stButton > button,
 .st-key-org_dept__sheet div.stButton > button,
 .st-key-org_unit__sheet div.stButton > button {
   white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+
+/* ── 행 클릭 드릴다운 흐름 시각화 ─────────────────────────────────────────
+   세 시트가 '동등한 독립 표'로 보이지 않도록 상위→하위 진행을 표현한다:
+   ① 각 시트 헤더 왼쪽에 단계 배지(1·2·3),
+   ② 활성 시트(상위가 선택돼 열린 시트)는 네이비 상단 액센트로 강조,
+   ③ 비선택(잠긴) 하위 시트는 디엠퍼시스(흐리게),
+   ④ 카드 사이 커넥터(›) 로 순차 흐름을 명시(넓은 폭에서만). */
+.st-key-org_group__sheet, .st-key-org_dept__sheet, .st-key-org_unit__sheet { position:relative; }
+/* 활성 시트(잠기지 않은 시트 = 상위가 선택돼 데이터가 열린 시트) — 상단 네이비 액센트 */
+.st-key-org_group__sheet:not(:has(.ms-locked)),
+.st-key-org_dept__sheet:not(:has(.ms-locked)),
+.st-key-org_unit__sheet:not(:has(.ms-locked)) { border-top:2px solid var(--ms-navy); }
+/* 비활성(잠긴) 하위 시트 — 디엠퍼시스로 아직 진행 전임을 표현 */
+.st-key-org_dept__sheet:has(.ms-locked),
+.st-key-org_unit__sheet:has(.ms-locked) { opacity:.6; }
+/* 단계 배지 — 헤더 제목 앞 원형 숫자 */
+.st-key-org_group__sheet .ms-sheet-head::before,
+.st-key-org_dept__sheet .ms-sheet-head::before,
+.st-key-org_unit__sheet .ms-sheet-head::before {
+  display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;
+  width:1.15rem; height:1.15rem; border-radius:50%; font-size:.68rem; font-weight:700;
+  color:#FFF; background:var(--ms-navy); margin-right:.1rem; }
+.st-key-org_group__sheet .ms-sheet-head::before { content:'1'; }
+.st-key-org_dept__sheet .ms-sheet-head::before { content:'2'; }
+.st-key-org_unit__sheet .ms-sheet-head::before { content:'3'; }
+/* 잠긴 하위 시트의 배지는 중립색(진행 전) */
+.st-key-org_dept__sheet:has(.ms-locked) .ms-sheet-head::before,
+.st-key-org_unit__sheet:has(.ms-locked) .ms-sheet-head::before { background:var(--ms-ink-3); }
+/* 카드 사이 커넥터(›) — 넓은 폭에서만(세로 스택 시 숨김) */
+@media (min-width:1101px){
+  .st-key-org_dept__sheet::before, .st-key-org_unit__sheet::before {
+    content:'\\203A'; position:absolute; left:-.85rem; top:50%; transform:translateY(-50%);
+    color:var(--ms-ink-3); font-size:1.3rem; font-weight:700; line-height:1; pointer-events:none; }
+}
 </style>
 """
+
+# 행 클릭 드릴다운 — 데이터 셀 클릭 시 저장된 상위 행을 단일 선택(_linked)으로 표시한다.
+# _action 열(선택 체크박스/− 제거)의 기존 동작은 그대로 보존하고, 데이터 셀 클릭에서만
+# 이 행을 '열린 상위'로 표시한다: 다른 노드의 _linked 를 지우고 클릭 노드에 '1' 을 쓴다
+# → cellValueChanged 가 발생해 Python 이 안정 코드키(코드 컬럼)를 읽어 선택을 갱신한다.
+# 신규/draft 행·편집 중·이미 선택된 행은 양보해(편집·붙여넣기와 충돌 없음) rerun 을
+# 유발하지 않는다.
+_DRILL_CLICK = JsCode(
+    """
+    function(e) {
+      var colId = e.colDef && e.colDef.field;
+      var d = (e.node && e.node.data) || {};
+      var t = e.event && e.event.target;
+      if (colId === '_action') {                       // 선택/제거 열 — 기존 동작 보존
+        if (!t || !t.classList) { return; }
+        if (t.classList.contains('md-act-rm')) {
+          e.node.setDataValue('_removed', '1');
+        } else if (t.classList.contains('md-act-cb')) {
+          if (d._protected === '1' || d._protected === 1) { return; }
+          e.node.setDataValue('_sel', !!t.checked);
+        }
+        return;
+      }
+      if (d._row_state !== 'existing') { return; }      // 신규/draft 행은 드릴다운 대상 아님
+      if (e.api.getEditingCells && e.api.getEditingCells().length > 0) { return; }  // 편집 중 양보
+      if (d._linked === '1' || d._linked === 1) { return; }  // 이미 선택된 행 → 무변경
+      e.api.forEachNode(function(node) {
+        var nd = node.data || {};
+        var want = (node === e.node) ? '1' : '';
+        if (String(nd._linked || '') !== want) { node.setDataValue('_linked', want); }
+      });
+    }
+    """
+)
 
 
 def render(user: dict) -> None:
@@ -168,11 +236,10 @@ def render(user: dict) -> None:
         )
     filt = {"active": active, "search": search.strip()}
 
-    # 드릴다운 컨트롤(단일 선택) — 저장된 활성 항목만 대상. 미저장 상위는 나타나지 않는다.
-    with st.container(key="org__drill"):
-        dc1, dc2, _dsp = st.columns([2.4, 2.4, 5.2], vertical_alignment="bottom")
-        group_code, group_name = _group_picker(dc1)
-        dept_code, dept_name = _dept_picker(dc2, group_code)
+    # 드릴다운 선택 상태 — 상단 selectbox 없이 표 안의 행 클릭으로만 정한다. 선택은 안정
+    # 코드키(group_code/dept_code)로 session_state 에 보관하고, 저장된 행이 사라지면 해제한다.
+    group_code, group_name = _resolve_group_selection()
+    dept_code, dept_name = _resolve_dept_selection(group_code)
     drilldown_context([("그룹", group_name or None), ("부서", dept_name or None), ("조", None)])
 
     # 그룹 로드(필터 변경/새로고침/최초). dirty draft 는 폐기 확인 게이트를 탄다.
@@ -204,6 +271,20 @@ def render(user: dict) -> None:
         with c_unit:
             with st.container(key="org_unit__sheet"):
                 unit_grid = _render_unit_sheet(t_params, readiness, dept_code, dept_name)
+
+    # 행 클릭 드릴다운 — 그룹/부서 표에서 클릭된(=_linked) 상위를 읽어 선택을 갱신한다.
+    # 그룹 변경 시 부서·조 선택을 함께 초기화하고, 부서 변경 시 조(하위 표)가 재적재된다.
+    # 클릭이 없거나 이미 선택된 행이면 picked == 현재 선택이라 재실행이 없다(무한 루프 없음).
+    picked_group = _picked_code(grp_grid)
+    if picked_group is not None and picked_group != group_code:
+        st.session_state["og_group_sel"] = picked_group
+        st.session_state.pop("og_dept_sel", None)  # 상위(그룹) 변경 → 부서·조 선택 초기화
+        st.rerun()
+    if dept_grid is not None:
+        picked_dept = _picked_code(dept_grid)
+        if picked_dept is not None and picked_dept != dept_code:
+            st.session_state["og_dept_sel"] = picked_dept  # 부서 변경 → 조 표 재적재
+            st.rerun()
 
     # 버튼 클릭 처리 (최신 grid 데이터 기준 — 시트 렌더 이후, page-scoped flag).
     if _GRP.take_action(ADD):
@@ -260,51 +341,73 @@ def _readiness() -> ReadinessState:
     return ReadinessState.not_ready(_NOT_READY_MSG)
 
 
-# ---------- 드릴다운 단일 선택(저장된 활성 항목만) ----------
-def _options(df: pd.DataFrame, code_col: str, name_col: str) -> tuple[list[str], dict, dict]:
-    """(코드 목록, 표시명 맵, 원본명 맵). 중복명은 코드를 병기해 구분한다."""
-    codes, disp_of, name_of = [], {}, {}
+# ---------- 행 클릭 드릴다운 선택(안정 코드키, 저장된 행만) ----------
+# 선택은 상단 컨트롤이 아니라 표 행 클릭으로 정하며, 안정 코드키로 아래 session_state
+# 에 보관한다(행 인덱스·표시명 키 금지). 저장된 행이 사라지면(삭제·필터) 자동 해제한다.
+_GROUP_SEL_KEY = "og_group_sel"
+_DEPT_SEL_KEY = "og_dept_sel"
+
+
+def _name_by_code(df: pd.DataFrame, code_col: str, name_col: str, code: str) -> str | None:
+    """저장 프레임에서 코드로 표시명을 찾는다. 없으면 None(=선택 해제 신호)."""
     if df is None or df.empty:
-        return codes, disp_of, name_of
-    name_dups: dict[str, int] = {}
-    for _, r in df.iterrows():
-        name_dups[str(r[name_col]).strip()] = name_dups.get(str(r[name_col]).strip(), 0) + 1
-    for _, r in df.iterrows():
-        code = str(r[code_col]).strip()
-        name = str(r[name_col]).strip()
-        codes.append(code)
-        name_of[code] = name
-        disp_of[code] = name if name_dups.get(name, 0) == 1 else f"{name} ({code})"
-    return codes, disp_of, name_of
+        return None
+    match = df[df[code_col].astype(str).str.strip() == str(code).strip()]
+    if match.empty:
+        return None
+    return str(match.iloc[0][name_col])
 
 
-def _group_picker(col) -> tuple[str, str]:
-    """활성 그룹 단일 선택. 저장된 그룹만 대상(미저장 그룹은 나타나지 않음)."""
-    df = db.get_org_groups(is_active=True).sort_values(["sort_order", "group_code"])
-    codes, disp_of, name_of = _options(df, "group_code", "group_name")
-    if not codes:
-        col.selectbox("그룹 선택", ["(그룹 없음)"], key="og_group_empty", disabled=True)
+def _resolve_group_selection() -> tuple[str, str]:
+    """행 클릭으로 정한 그룹 선택을 저장된 그룹과 대조해 (코드, 이름)으로 확정한다.
+
+    선택된 그룹이 더 이상 존재하지 않으면(삭제 등) 선택과 하위(부서) 선택을 함께 비운다.
+    """
+    code = str(st.session_state.get(_GROUP_SEL_KEY, "") or "").strip()
+    if not code:
         return "", ""
-    if st.session_state.get("og_group") not in codes:
-        st.session_state.pop("og_group", None)
-    code = col.selectbox("그룹 선택", codes, key="og_group", format_func=lambda c: disp_of.get(c, c))
-    return code, name_of.get(code, code)
+    name = _name_by_code(db.get_org_groups(), "group_code", "group_name", code)
+    if name is None:
+        st.session_state.pop(_GROUP_SEL_KEY, None)
+        st.session_state.pop(_DEPT_SEL_KEY, None)
+        return "", ""
+    return code, name
 
 
-def _dept_picker(col, group_code: str) -> tuple[str, str]:
-    """선택 그룹의 활성 부서 단일 선택. 그룹 미선택이면 비활성."""
+def _resolve_dept_selection(group_code: str) -> tuple[str, str]:
+    """선택 그룹에 종속된 부서 선택을 확정한다. 그룹 미선택이면 부서 선택을 비운다.
+
+    선택된 부서가 현재 그룹의 부서가 아니면(그룹 변경·삭제) 부서 선택을 해제한다.
+    """
     if not group_code:
-        col.selectbox("부서 선택", ["(그룹 먼저 선택)"], key="og_dept_empty", disabled=True)
+        st.session_state.pop(_DEPT_SEL_KEY, None)
         return "", ""
-    df = db.get_org_departments(group_code=group_code, is_active=True).sort_values(["sort_order", "dept_code"])
-    codes, disp_of, name_of = _options(df, "dept_code", "dept_name")
-    if not codes:
-        col.selectbox("부서 선택", ["(부서 없음)"], key="og_dept_empty", disabled=True)
+    code = str(st.session_state.get(_DEPT_SEL_KEY, "") or "").strip()
+    if not code:
         return "", ""
-    if st.session_state.get("og_dept") not in codes:
-        st.session_state.pop("og_dept", None)
-    code = col.selectbox("부서 선택", codes, key="og_dept", format_func=lambda c: disp_of.get(c, c))
-    return code, name_of.get(code, code)
+    name = _name_by_code(db.get_org_departments(group_code=group_code), "dept_code", "dept_name", code)
+    if name is None:
+        st.session_state.pop(_DEPT_SEL_KEY, None)
+        return "", ""
+    return code, name
+
+
+def _picked_code(grid_df: pd.DataFrame) -> str | None:
+    """그룹/부서 그리드 반환에서 클릭으로 열린(=_linked) 저장 행의 코드를 읽는다.
+
+    행 클릭 시 _DRILL_CLICK 이 클릭 노드에만 _linked='1' 을 쓰고 나머지를 지운다. 여기서
+    그 안정 코드키(코드 컬럼)를 돌려준다 — 클릭·선택이 없으면 None. 클릭이 없을 때는
+    Python 이 현재 선택 행에 계산한 _linked 와 동일하므로 controller 에서 무변경으로 판정된다.
+    """
+    if grid_df is None or "_linked" not in grid_df.columns or "코드" not in grid_df.columns:
+        return None
+    linked = grid_df[
+        (grid_df["_row_state"].astype(str) == "existing")
+        & (grid_df["_linked"].astype(str).str.strip() == "1")
+    ]
+    if linked.empty:
+        return None
+    return str(linked.iloc[0]["코드"]).strip()
 
 
 # ---------- 공통 시트 헬퍼 ----------
@@ -431,6 +534,7 @@ def _render_group_sheet(params: dict, readiness: ReadinessState, sel_group: str)
     spec = MasterGridSpec(
         page_id=_GRP.page_id, columns=_GROUP_GRID_COLUMNS, order=_GROUP_COLS,
         col_config=_code_name_config(with_link=True), select_all=True, include_linked_rows=True,
+        grid_options={"onCellClicked": _DRILL_CLICK},  # 행 클릭 → 그룹 드릴다운 선택
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
     grid_df = render_master_grid(spec, _group_display(rows, sel_group), key=_GRP.grid_key())
@@ -672,6 +776,7 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
     spec = MasterGridSpec(
         page_id=_OD.page_id, columns=_DEPT_GRID_COLUMNS, order=_DEPT_COLS,
         col_config=_code_name_config(with_link=True), select_all=True, include_linked_rows=True,
+        grid_options={"onCellClicked": _DRILL_CLICK},  # 행 클릭 → 부서 드릴다운 선택
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
     grid_df = render_master_grid(spec, _dept_display(rows, sel_dept), key=_OD.grid_key(suffix=group_code))
