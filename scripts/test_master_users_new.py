@@ -285,6 +285,48 @@ def test_renderers_are_components():
 
 
 # ---------------------------------------------------------------------------
+# 7b) D2 — 편집 게이트(자연키·보호행 잠금) + 읽기전용/보호행 시각 + 배지 상태색 상속
+# ---------------------------------------------------------------------------
+def test_editable_gate():
+    st_ = mstate.DraftState("gate_test")
+    spec = mu._grid_spec(st_, "{}", "{}")
+    cc = spec.col_config
+
+    # 사번(자연키): 신규행만 편집 — 저장행 잠금(_row_state === 'new').
+    sabun_ed = cc["사번"]["editable"].js_code
+    check("사번 editable=신규행만", "_row_state === 'new'" in sabun_ed)
+
+    # 데이터셀(성명/부서/조/직급/권한/표시순서/재직): 보호행만 잠금, 일반 저장행 편집 유지.
+    for c in ("성명", "부서", "조", "직급", "권한", "표시순서", "재직"):
+        ed = cc[c]["editable"].js_code
+        check(f"{c} editable=보호행만 잠금", "_protected" in ed and "function(p)" in ed)
+
+    # 읽기전용 시각(ms-cell-readonly)은 잠금 조건과 동일 식으로 켜진다(외형·동작 일치).
+    check("사번 읽기전용 규칙(기존행)", "ms-cell-readonly" in cc["사번"]["cellClassRules"]
+          and "_row_state" in cc["사번"]["cellClassRules"]["ms-cell-readonly"])
+    check("성명 읽기전용 규칙(보호행)", "ms-cell-readonly" in cc["성명"]["cellClassRules"]
+          and "_protected" in cc["성명"]["cellClassRules"]["ms-cell-readonly"])
+    check("재직 읽기전용 규칙(보호행)", "ms-cell-readonly" in cc["재직"]["cellClassRules"])
+
+    # 셀 오류/변경 마커는 읽기전용과 병존한다(약화 금지).
+    check("사번 오류·변경 마커 병존", "ms-cell-error" in cc["사번"]["cellClassRules"]
+          and "ms-cell-dirty" in cc["사번"]["cellClassRules"])
+
+    # 보호행 rowClassRule — 상태 cascade 위에 겹치되 배경을 덮지 않는다.
+    rr = spec.row_class_rules or {}
+    check("ms-row-protected rowClassRule 존재", "ms-row-protected" in rr and "_protected" in rr["ms-row-protected"])
+    check("상태 cascade 보존(신규/퇴직/선택 규칙 유지)",
+          all(k in rr for k in ("ms-row-new", "ms-row-inactive", "ms-row-selected")))
+
+
+def test_name_badge_status_color():
+    code = mu._NAME_STATUS_RENDERER.js_code
+    check("성명 배지 ms-badge class 사용(행 상태색 상속)", "ms-badge" in code)
+    check("성명 배지 흰배경 인라인 제거", "#FFFFFF" not in code and "#FFF'" not in code)
+    check("성명 배지 색은 element.style.color 로만 지정(테두리 currentColor)", "style.color" in code)
+
+
+# ---------------------------------------------------------------------------
 # 8) B2 — _persist_users 가 부분성공 원장(save_*_report)을 그대로 반환
 # ---------------------------------------------------------------------------
 def test_persist_report_wiring():
@@ -417,6 +459,8 @@ def main():
     test_source_guards()
     test_render_apptest()
     test_renderers_are_components()
+    test_editable_gate()
+    test_name_badge_status_color()
     test_persist_report_wiring()
     test_reconcile_partial_apptest()
     test_summarize_delete()

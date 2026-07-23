@@ -64,7 +64,10 @@ def build_paste_handler(uid: str) -> JsCode:
             const table = lines.map(function(line) { return line.split('\\t'); });
             const missing = focused.rowIndex + table.length - api.getDisplayedRowCount();
             if (missing > 0) {
-              api.applyTransaction({ add: Array.from({ length: missing }, function() { return {}; }) });
+              // 자동확장 넘침행은 [＋ 행 추가]와 동일하게 신규로 태깅한다. _row_state 가 없으면
+              // 신규행 전용 editable 게이트(자연키=_row_state==='new')가 false 로 보고 붙여넣기를
+              // 스킵해 사번/코드가 소실된다(H1). _row_id 는 controller 가 재적재 시 부여한다.
+              api.applyTransaction({ add: Array.from({ length: missing }, function() { return { _row_state: 'new' }; }) });
             }
             const columns = api.getAllDisplayedColumns();
             const start = columns.findIndex(function(c) { return c.getColId() === focused.column.getColId(); });
@@ -174,7 +177,9 @@ def _combined_ready(uid: str) -> JsCode:
             const table = lines.map(function(line){ return line.split('\\t'); });
             const missing = focused.rowIndex + table.length - api.getDisplayedRowCount();
             if (missing > 0) {
-              api.applyTransaction({ add: Array.from({ length: missing }, function(){ return {}; }) });
+              // 자동확장 넘침행은 [＋ 행 추가]와 동일하게 신규로 태깅한다(H1: _row_state 없으면
+              // 신규행 전용 editable 게이트가 자연키 붙여넣기를 스킵해 사번/코드 소실).
+              api.applyTransaction({ add: Array.from({ length: missing }, function(){ return { _row_state: 'new' }; }) });
             }
             const columns = api.getAllDisplayedColumns();
             const start = columns.findIndex(function(c){ return c.getColId() === focused.column.getColId(); });

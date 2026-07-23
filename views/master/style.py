@@ -216,11 +216,14 @@ GRID_CSS: dict[str, dict] = {
     ".ag-header-cell": {"border-right": "1px solid rgba(0,0,0,.08)"},
     ".ag-header-cell-label": {"justify-content": "center", "font-size": "12.5px",
                               "font-weight": "600", "color": TOKENS["ink-2"]},
+    # 기본 셀: 테두리·타이포는 편집 중에도 유지. 레이아웃(flex)만 편집셀에서 제외한다.
     ".ag-cell": {
         "border-right": "1px solid rgba(0,0,0,.06)",
-        "display": "flex", "align-items": "center", "line-height": "normal",
-        "font-size": "13px", "color": TOKENS["ink"],
+        "line-height": "normal", "font-size": "13px", "color": TOKENS["ink"],
     },
+    # 표시(비편집) 셀만 flex 정렬 — 편집 중(.ag-cell-inline-editing)엔 flex 를 걸지 않아
+    # 편집 input 이 클리핑되지 않는다(F1). 정렬 클래스(md-c-*)는 이 flex 위에서 동작한다.
+    ".ag-cell:not(.ag-cell-inline-editing)": {"display": "flex", "align-items": "center"},
     ".ag-row": {"border-bottom": "1px solid " + TOKENS["line"]},
     ".ag-row-hover": {"background": "#F1EFEA"},
     # 정렬 클래스
@@ -240,19 +243,30 @@ GRID_CSS: dict[str, dict] = {
         "box-shadow": "0 0 0 6px transparent", "outline-offset": "6px",
     },
     ".md-act-rm:hover": {"background": TOKENS["danger-bg"], "border-color": "#C77B6B"},
-    # ---- 행 상태(상호 배타, 우선순위: error>delete>new>inactive>selected) ----
+    # ---- 행 상태 배경(상호 배타, 우선순위: error>delete>new>inactive>selected) ----
+    # 합성 규칙(#5/#6): 배경은 셀(.ag-cell)에, 좌측 상태 바는 행(.ag-row)에 둔다. 상태 바와
+    # 셀 box-shadow(dirty/error)가 서로 다른 요소를 써 box-shadow 슬롯이 겹치지 않으므로,
+    # 행 상태와 셀 dirty/error 신호가 동시에 사라지지 않고 함께 유지된다.
     ".ms-row-selected .ag-cell": {"background": TOKENS["selected-bg"] + " !important"},
     ".ms-row-inactive .ag-cell": {"background": TOKENS["surface-3"] + " !important",
                                   "color": TOKENS["ink-3"] + " !important"},
-    ".ms-row-new .ag-cell": {"background": TOKENS["info-bg"] + " !important",
-                             "box-shadow": "inset 3px 0 " + TOKENS["info"]},
-    ".ms-row-delete .ag-cell": {"background": TOKENS["danger-bg"] + " !important",
-                                "box-shadow": "inset 3px 0 " + TOKENS["danger"]},
-    ".ms-row-error .ag-cell": {"background": TOKENS["danger-bg"] + " !important",
-                               "box-shadow": "inset 3px 0 " + TOKENS["danger"]},
+    ".ms-row-new .ag-cell": {"background": TOKENS["info-bg"] + " !important"},
+    ".ms-row-delete .ag-cell": {"background": TOKENS["danger-bg"] + " !important"},
+    ".ms-row-error .ag-cell": {"background": TOKENS["danger-bg"] + " !important"},
     # §25 드릴다운 활성(조직) — 신규와 물리적으로 구분(네이비 틴트 + 우측 칩)
     ".ms-row-linked .ag-cell": {"background": "rgba(30,58,110,.10) !important"},
-    # ---- 셀 상태 ----
+    # 좌측 상태 바(행 요소) — error/delete/new 상호배타. 조직 그룹행(.ms-group-row)과 동일 패턴.
+    ".ag-row.ms-row-new": {"box-shadow": "inset 3px 0 " + TOKENS["info"]},
+    ".ag-row.ms-row-delete": {"box-shadow": "inset 3px 0 " + TOKENS["danger"]},
+    ".ag-row.ms-row-error": {"box-shadow": "inset 3px 0 " + TOKENS["danger"]},
+    # ---- 보호행/읽기전용 어포던스(항상 유지 신호 — 상태 배경 위에 겹침) ----
+    # 보호행: 선택/삭제 불가. 상태색을 덮지 않게 배경 대신 커서·액션열 흐림으로 표식한다.
+    ".ms-row-protected .ag-cell": {"cursor": "default"},
+    ".ms-row-protected .md-act": {"opacity": ".5"},
+    # 읽기전용 셀: 편집 불가 어포던스(중립 틴트 + 기본 커서). 상태 행 배경(!important)이 우선.
+    ".ms-cell-readonly": {"background": TOKENS["surface-2"], "cursor": "default",
+                          "color": TOKENS["ink-2"]},
+    # ---- 셀 상태(행 배경/좌측 바 위에 겹침 — dirty/error 가 함께 유지) ----
     ".ms-cell-error": {"box-shadow": "inset 0 0 0 1.5px " + TOKENS["danger"], "background": "#FFF6F4"},
     ".ms-cell-dirty": {"box-shadow": "inset 2px 0 " + TOKENS["warn"]},
     # 드롭다운 셀 ▾ 표식(선택형임을 상시 노출)
@@ -272,6 +286,13 @@ GRID_CSS: dict[str, dict] = {
     ".ms-chip.lock": {"background": TOKENS["surface-3"], "color": TOKENS["ink-2"], "border": "1px solid " + TOKENS["line-strong"]},
     # 드릴다운 활성(상위 시트에서 현재 하위를 열어둔 행) — navy 틴트(신규 info 와 구분)
     ".ms-chip.link": {"background": "#E5EAF2", "color": TOKENS["navy"], "border": "1px solid #C6D2E4"},
+    # ---- 렌더러 상태 배지(행 상태색 인지) — 인라인 #FFFFFF 배경 대신 이 class 사용 ----
+    # 배경 transparent 로 행 상태 배경(선택/신규/삭제/오류)을 그대로 상속하고, 색/테두리는
+    # 렌더러가 element.style.color 한 번만 지정한다(테두리 currentColor). 색+텍스트 이중부호화.
+    ".ms-badge": {"display": "inline-flex", "align-items": "center", "gap": "3px",
+                  "padding": "0 5px", "border-radius": "4px", "font-size": "11px",
+                  "font-weight": "600", "line-height": "1.5", "white-space": "nowrap",
+                  "background": "transparent", "border": "1px solid currentColor"},
     # ---- 조직 전용(기존 자산 계승) ----
     ".ms-group-row": {"background": TOKENS["gold-soft"] + " !important", "font-weight": "700",
                       "box-shadow": "inset 3px 0 " + TOKENS["gold"]},

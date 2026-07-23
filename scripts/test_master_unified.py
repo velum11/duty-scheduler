@@ -229,12 +229,16 @@ rules = style.master_row_class_rules(include_group=True, include_linked=True)
 check("행 상태 상호배타: selected 가 상위 4개 배제", rules["ms-row-selected"].count("!(") == 4)
 check("행 상태: error 는 최상위(무가드)", "&& !(" not in rules["ms-row-error"])
 # 이중부호화: 색(background) 과 함께 비색 신호(box-shadow inset/테두리)를 갖는다.
+# cascade #6(D2): 배경은 셀(.ms-row-X .ag-cell), 좌측 상태바(비색)는 행(.ag-row.ms-row-X)로
+# 정당하게 분리됐다 — 셀 dirty/error box-shadow 와 슬롯이 겹치지 않게. 두 신호가 세 상태
+# 모두에 실재하는지(약화 없이) 각 selector 에서 검증한다.
 gcss = style.GRID_CSS
 for state_cls in ("ms-row-new", "ms-row-delete", "ms-row-error"):
-    spec = gcss.get(f".{state_cls} .ag-cell", {})
-    has_color = "background" in spec
-    has_noncolor = any("box-shadow" in k or "border" in k for k in spec)
-    check(f"'{state_cls}' 색+비색 이중부호화", has_color and has_noncolor)
+    cell_spec = gcss.get(f".{state_cls} .ag-cell", {})   # 색(배경)
+    row_spec = gcss.get(f".ag-row.{state_cls}", {})       # 비색(좌측 상태바)
+    has_color = "background" in cell_spec
+    has_noncolor = any("box-shadow" in k or "border" in k for k in row_spec)
+    check(f"'{state_cls}' 색+비색 이중부호화(배경=셀 / 좌측바=행)", has_color and has_noncolor)
 # 셀 오류/드롭다운도 비색 신호(테두리/▾)를 동반.
 check("셀 오류는 테두리(inset) 동반", "box-shadow" in gcss.get(".ms-cell-error", {}))
 check("드롭다운 셀은 ▾ 표식 동반", ".ms-cell-select::after" in gcss)

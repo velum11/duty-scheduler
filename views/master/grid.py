@@ -154,6 +154,34 @@ _ROW_ACTION_CLICK = JsCode(
     """
 )
 
+# ---------------------------------------------------------------------------
+# 공통 bool 표시 렌더러 — 가운데 고정 체크박스(표시 전용, navy accent, 클릭 불가).
+# ag-grid v34 자동 타입추론에 맡기면 빈 그리드·신규 행에서 값이 text 로 렌더돼 체크박스가
+# 사라지므로, bool 컬럼은 이 렌더러를 명시 지정한다(_build_column_defs 가 기본 적용).
+# 편집은 agCheckboxCellEditor(더블클릭/Space). null/None 은 표시상 미체크(false)로 일관
+# 처리하되 저장값은 변형하지 않는다(표시 전용 — pointerEvents:none, tabIndex:-1).
+# 화면이 col_config 로 cellRenderer 를 지정하면 그 값이 우선한다(setdefault).
+# ---------------------------------------------------------------------------
+BOOL_DISPLAY_RENDERER = JsCode(
+    """
+    (class {
+      init(p) {
+        const v = (p.value === true || p.value === 'true' || p.value === 1
+                   || p.value === '사용' || p.value === '재직');
+        const g = document.createElement('div');
+        g.style.display='flex'; g.style.alignItems='center'; g.style.justifyContent='center'; g.style.height='100%';
+        const cb = document.createElement('input');
+        cb.type='checkbox'; cb.checked=v; cb.style.width='16px'; cb.style.height='16px';
+        cb.style.margin='0'; cb.style.accentColor='#1E3A6E'; cb.style.pointerEvents='none';
+        cb.tabIndex=-1; cb.setAttribute('aria-hidden','true');
+        g.appendChild(cb); this.eGui = g;
+      }
+      getGui() { return this.eGui; }
+      refresh() { return false; }
+    })
+    """
+)
+
 _NO_ROWS = ("<span style='color:%s;font-size:.82rem;'>표시할 데이터가 없습니다</span>"
             % style.TOKENS["ink-3"])
 
@@ -247,6 +275,7 @@ def _build_column_defs(spec: MasterGridSpec) -> list[dict]:
                 if k != "cellClass":
                     col[k] = v
         if kind == "bool":
+            col.setdefault("cellRenderer", BOOL_DISPLAY_RENDERER)
             col.setdefault("cellEditor", "agCheckboxCellEditor")
         defs.append(col)
     for meta in META_COLUMNS:

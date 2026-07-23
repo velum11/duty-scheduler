@@ -57,6 +57,7 @@ from views.master import (
     live_rows,
     master_action_bar,
     master_grid_height,
+    master_row_class_rules,
     master_screen_head,
     mode_badge_html,
     render_master_grid,
@@ -82,6 +83,16 @@ _GRID_COLUMNS = {
 }
 # validate 가 필수/참조를 확인하는 텍스트 필드(재직/표시순서 제외) — 완전 빈 행 판별과 동일.
 _CONTENT_COLS = ["사번", "성명", "부서", "조", "직급"]
+
+# 편집 게이트(JsCode predicate) — org 화면과 동일 계약(master_org.py _EDIT_NEW_ONLY /
+# _EDIT_UNLESS_PROTECTED). 자연키(사번)는 신규행만 편집(저장행 잠금), 보호행(_protected)은
+# 데이터셀·재직토글을 잠근다. 일반 저장행의 성명/부서/조/권한/표시순서/재직 편집은 유지한다.
+_IS_PROTECTED_JS = "(data._protected === '1' || data._protected === 1)"
+_IS_EXISTING_JS = "(data._row_state !== 'new')"
+_EDIT_NEW_ONLY = JsCode("function(p){ return !!(p.data && p.data._row_state === 'new'); }")
+_EDIT_UNLESS_PROTECTED = JsCode(
+    "function(p){ return !(p.data && (p.data._protected === '1' || p.data._protected === 1)); }"
+)
 
 # 필터 위젯 세션 key (이 화면 전용 — 취소 시 위젯 복원에 사용).
 _F_ACTIVE, _F_DEPT, _F_ROLE, _F_SEARCH = "mu_active", "mu_dept", "mu_role", "mu_search"
@@ -421,18 +432,18 @@ _NAME_STATUS_RENDERER = JsCode(
         e.style.display = 'inline-flex'; e.style.alignItems = 'center'; e.style.gap = '6px';
         var v = (p.value == null) ? '' : String(p.value);
         e.appendChild(document.createTextNode(v));
-        var label = '', fg = '', bd = '';
+        var label = '', fg = '';
         var hasErr = (d._error != null && d._error !== '' && d._error !== '{}');
-        if(hasErr){ label = '오류'; fg = '#9A3B2E'; bd = '#E7C9C1'; }
-        else if(d._delete === '1' || d._delete === 1){ label = '퇴직예정'; fg = '#9A3B2E'; bd = '#E7C9C1'; }
-        else if(d._protected === '1' || d._protected === 1){ label = '보호'; fg = '#5F5C55'; bd = '#D4CEC3'; }
-        else if(d._inactive === '1' || d._inactive === 1){ label = '퇴직'; fg = '#908C83'; bd = '#D4CEC3'; }
+        if(hasErr){ label = '오류'; fg = '#9A3B2E'; }
+        else if(d._delete === '1' || d._delete === 1){ label = '퇴직예정'; fg = '#9A3B2E'; }
+        else if(d._protected === '1' || d._protected === 1){ label = '보호'; fg = '#5F5C55'; }
+        else if(d._inactive === '1' || d._inactive === 1){ label = '퇴직'; fg = '#908C83'; }
         if(label){
+          // 배경은 .ms-badge(transparent)로 행 상태색을 상속하고, 색·테두리(currentColor)만
+          // 지정한다 — 틴트행(퇴직/삭제/보호/신규) 위 흰배지 충돌 해소(#2/#5).
           var b = document.createElement('span');
-          b.style.display = 'inline-flex'; b.style.alignItems = 'center';
-          b.style.border = '1px solid ' + bd; b.style.background = '#FFFFFF'; b.style.color = fg;
-          b.style.borderRadius = '4px'; b.style.padding = '0 5px'; b.style.fontSize = '11px';
-          b.style.fontWeight = '600'; b.style.lineHeight = '1.5';
+          b.className = 'ms-badge';
+          b.style.color = fg;
           b.textContent = label;
           e.appendChild(b);
         }
@@ -875,38 +886,62 @@ def render(user: dict) -> None:
         st.rerun()
 
 
-def _cell_rules(field: str) -> dict:
-    """셀 단위 오류(⚠ 인셋)·변경(warn 인셋) 마커 — 숨김 _error/_dirty_fields 를 읽는다."""
-    return {**cell_error_rule(field), **cell_dirty_rule(field)}
+def _cell_rules(field: str, readonly: str | None = None) -> dict:
+    """셀 단위 오류(⚠ 인셋)·변경(warn 인셋)·읽기전용(중립 틴트) 마커.
+
+    숨김 _error/_dirty_fields 를 읽는다. ``readonly`` 표현식이 주어지면 그 조건이 참인 셀에
+    ``ms-cell-readonly`` 를 켜 편집 불가 어포던스를 붙인다(editable=false 조건과 동일 식 —
+    외형·동작 일치). 상태 행 배경(!important)이 읽기전용 틴트보다 우선한다.
+    """
+    rules = {**cell_error_rule(field), **cell_dirty_rule(field)}
+    if readonly:
+        rules["ms-cell-readonly"] = readonly
+    return rules
 
 
 def _grid_spec(state: DraftState, hint_json: str, teams_json: str) -> MasterGridSpec:
+    # 데이터셀 편집 게이트: 사번(자연키)=신규행만, 그 외=보호행만 잠금(일반 저장행 편집 유지).
+    # 읽기전용 시각(ms-cell-readonly)은 각 컬럼의 잠금 조건과 동일 식으로 켠다.
     col_config = {
         "사번": {"width": 128, "minWidth": 104, "cellClass": "md-c-left",
-                "cellClassRules": _cell_rules("사번")},
+                "editable": _EDIT_NEW_ONLY,
+                "cellClassRules": _cell_rules("사번", readonly=_IS_EXISTING_JS)},
         "성명": {"width": 132, "minWidth": 100, "cellClass": "md-c-left",
-                "cellRenderer": _NAME_STATUS_RENDERER, "cellClassRules": _cell_rules("성명")},
+                "editable": _EDIT_UNLESS_PROTECTED,
+                "cellRenderer": _NAME_STATUS_RENDERER,
+                "cellClassRules": _cell_rules("성명", readonly=_IS_PROTECTED_JS)},
         "부서": {"flex": 1, "minWidth": 168, "cellClass": "md-c-left ms-cell-select",
+                "editable": _EDIT_UNLESS_PROTECTED,
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": _dept_option_values(state)},
-                "cellRenderer": _dept_renderer(hint_json), "cellClassRules": _cell_rules("부서")},
+                "cellRenderer": _dept_renderer(hint_json),
+                "cellClassRules": _cell_rules("부서", readonly=_IS_PROTECTED_JS)},
         "조": {"width": 130, "minWidth": 96, "cellClass": "md-c-left ms-cell-select",
+              "editable": _EDIT_UNLESS_PROTECTED,
               "cellEditor": "agSelectCellEditor",
-              "cellEditorParams": _team_editor_params(teams_json), "cellClassRules": _cell_rules("조")},
+              "cellEditorParams": _team_editor_params(teams_json),
+              "cellClassRules": _cell_rules("조", readonly=_IS_PROTECTED_JS)},
         "직급": {"width": 96, "minWidth": 72, "cellClass": "md-c-left",
-                "cellClassRules": _cell_rules("직급")},
+                "editable": _EDIT_UNLESS_PROTECTED,
+                "cellClassRules": _cell_rules("직급", readonly=_IS_PROTECTED_JS)},
         "권한": {"width": 100, "minWidth": 80, "cellClass": "md-c-center ms-cell-select",
+                "editable": _EDIT_UNLESS_PROTECTED,
                 "cellEditor": "agSelectCellEditor",
-                "cellEditorParams": {"values": list(_LABEL_TO_ROLE)}, "cellClassRules": _cell_rules("권한")},
+                "cellEditorParams": {"values": list(_LABEL_TO_ROLE)},
+                "cellClassRules": _cell_rules("권한", readonly=_IS_PROTECTED_JS)},
         "표시순서": {"width": 92, "minWidth": 72, "maxWidth": 120, "cellClass": "md-c-center ms-num",
-                 "cellClassRules": _cell_rules("표시순서")},
+                 "editable": _EDIT_UNLESS_PROTECTED,
+                 "cellClassRules": _cell_rules("표시순서", readonly=_IS_PROTECTED_JS)},
         "재직": {"width": 74, "minWidth": 64, "cellClass": "md-c-center",
-                "cellClassRules": _cell_rules("재직")},
+                "editable": _EDIT_UNLESS_PROTECTED,
+                "cellClassRules": _cell_rules("재직", readonly=_IS_PROTECTED_JS)},
     }
     nrows = len(state.get_rows()) if state.get_rows() is not None else 0
+    # 보호행 어포던스: 상태색을 덮지 않는 ms-row-protected 를 기본 cascade 위에 겹친다.
+    row_rules = {**master_row_class_rules(), "ms-row-protected": _IS_PROTECTED_JS}
     return MasterGridSpec(
         page_id=PAGE_ID, columns=_GRID_COLUMNS, order=_USER_COLS, col_config=col_config,
-        select_all=True, height=master_grid_height(nrows),
+        select_all=True, height=master_grid_height(nrows), row_class_rules=row_rules,
     )
 
 
