@@ -964,7 +964,7 @@ def _render_summary_chips(rows: pd.DataFrame, params: dict, dept_names: dict) ->
 
     filt = ""
     if params.get("active") and params["active"] != "전체":
-        filt += chip_html(f"재직: {params['active']}", "lock")
+        filt += chip_html(f"재직 여부: {params['active']}", "lock")
     if params.get("dept") and params["dept"] != _ALL:
         filt += chip_html(f"부서: {dept_names.get(params['dept'], params['dept'])}", "lock")
     if params.get("role") and params["role"] != _ALL:

@@ -164,15 +164,49 @@ def test_unified_redesign_features() -> None:
     dup_src = str(m._DUP_REFRESH.js_code)
     check("변경 셀이 약칭/사용일 때 약칭 열 refresh", "refreshCells" in dup_src and "약칭" in dup_src)
 
-    # 필터 요약칩 — 전체 데이터 기준 사용중/미사용 카운트.
-    from modules import db
-    store = db.get_work_types()
-    total = int(len(store))
-    active = int(store["is_active"].astype(bool).sum()) if total else 0
-    html = m._filter_summary_html()
-    check("요약칩 클래스(ms-filt-sum) 사용", "ms-filt-sum" in html)
-    check("요약칩에 사용 중 카운트 반영", f"<b>{active}</b>" in html)
-    check("요약칩에 미사용 카운트 반영", f"<b>{total - active}</b>" in html)
+    # 요약칩 — 현재 필터결과(로드된 기존 행) 기준 사용/미사용 분포(전체 카운트 아님).
+    frame = _meta([
+        {"코드": "A", "명칭": "가", "분류": "주간", "약칭": "가", "색상": "#111111",
+         "실근무": True, "특근수당": False, "설명": "", "표시순서": "1", "사용": True},
+        {"코드": "B", "명칭": "나", "분류": "주간", "약칭": "나", "색상": "#222222",
+         "실근무": True, "특근수당": False, "설명": "", "표시순서": "2", "사용": True},
+        {"코드": "C", "명칭": "다", "분류": "주간", "약칭": "다", "색상": "#333333",
+         "실근무": True, "특근수당": False, "설명": "", "표시순서": "3", "사용": False},
+    ])
+    active, inactive = m._summary_counts(frame)
+    check("요약 카운트는 필터결과(프레임) 기준 사용 중", active == 2)
+    check("요약 카운트는 필터결과(프레임) 기준 미사용", inactive == 1)
+    # 신규 행은 저장 전이므로 분포에서 제외.
+    frame_new = _meta([
+        {"코드": "N", "명칭": "신규", "분류": "", "약칭": "", "색상": "", "실근무": False,
+         "특근수당": False, "설명": "", "표시순서": "9", "사용": True},
+    ])
+    frame_new["_row_state"] = "new"
+    check("신규 행은 요약 분포에서 제외", m._summary_counts(frame_new) == (0, 0))
+
+    summary_src = inspect.getsource(m._render_summary_chips)
+    check("요약칩이 공통 chip_html 사용", "chip_html" in summary_src)
+    check("요약칩에 사용 중/미사용 라벨", "사용 중" in summary_src and "미사용" in summary_src)
+    check("요약칩은 필터결과 기준(_summary_counts 사용, 전체 db 카운트 아님)",
+          "_summary_counts" in summary_src and "get_work_types" not in summary_src)
+    check("요약칩을 그리드 위 슬롯에서 렌더", "_render_summary_chips" in render_src
+          and 0 <= render_src.find("summary_slot = st.container()") < render_src.find("render_master_grid(spec"))
+
+
+# ===== 1-5) 미리보기 색·약칭 계약 (DESIGN.md §150) =====
+def test_preview_color_short_label_contract() -> None:
+    print("미리보기 색·약칭 계약(DESIGN.md §150) — 색 스와치 + 약칭, 명칭·시간 중복 없음")
+    import inspect
+    from views import master_work_types as m
+    src = inspect.getsource(m._render_preview)
+    # 계약 정보: 색상 스와치 + 약칭이 반드시 노출된다.
+    check("미리보기 라벨은 약칭 우선(계약 정보)", 'row.get("약칭")' in src)
+    check("미리보기에 솔리드 색상 스와치 노출", "class='d'" in src and "background:{color};" in src)
+    check("약칭 셀에 근무형태 색 적용(근무표 렌더 시연)", "{color}22" in src and "color:{color};" in src)
+    check("미리보기 계약 제목(색·약칭)", "색·약칭" in src)
+    # 밀도: 편집 그리드와 겹치는 명칭·시간 pill 반복은 하지 않는다(과다 세로 제거).
+    check("명칭·시간 중복 pill 미노출", "class='nm'" not in src and "class='tm'" not in src)
+    check("조밀 스트립 스타일 유지(.ms-sw)", ".ms-sw" in m._EXTRA_CSS)
 
 
 # ===== 2) _validate 하위호환 =====
@@ -299,6 +333,7 @@ def main() -> int:
         test_render_smoke,
         test_action_bar_above_grid,
         test_unified_redesign_features,
+        test_preview_color_short_label_contract,
         test_partial_success_ledger_wiring,
         test_delete_error_handling,
         test_validate_backward_compat,

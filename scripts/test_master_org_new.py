@@ -214,12 +214,29 @@ print("Wave B 폴리시 — 잠김 밀도 완화·계층 통합·읽기전용 �
 check("잠긴 하위 시트 액션바 숨김(반복·밀도 완화)", ":has(.ms-locked)" in src and "display:none" in src)
 check("잠긴 플레이스홀더 슬림화(.ms-locked 재정의)", ".ms-locked" in src and "min-height:118px" in src)
 check("선택 컨텍스트·계층 통합 브레드크럼 강조(.ms-ctx)", ".ms-ctx" in src and "drilldown_context" in src)
-check("드릴다운 단계 배지(1·2·3) 카드 넘버링",
-      "content:'1'" in src and "content:'2'" in src and "content:'3'" in src)
+check("장식 제거(ERP) — 단계 배지 원형 1·2·3·시트 커넥터 없음(계층은 .ms-ctx 브레드크럼으로 충분)",
+      "content:'1'" not in src and "content:'2'" not in src and "content:'3'" not in src
+      and "\\203A" not in src)
+check("활성/잠김 상태 표시는 유지(활성 시트 네이비 액센트 + 잠긴 시트 디엠퍼시스)",
+      "border-top:2px solid var(--ms-navy)" in src and "opacity:.72" in src)
 check("저장코드 읽기전용 어포던스(공통 .ms-cell-readonly 소비)",
       "ms-cell-readonly" in src and "_CODE_READONLY_RULES" in src)
 check("bool(사용) native 유지 — JsCode bool 렌더러 미사용(3.14 배포 회귀 방지)",
       "BOOL_DISPLAY_RENDERER" not in src and "_BOOL_RENDERER" not in src)
+
+
+# ===== 3c-3) Codex 디자인 리뷰 2차 — ERP 밀도·일관성 =====
+# 액션바는 표 위(placeholder) 통일 / 필터결과 요약 상단 통일(사용자 관리와 동일) /
+# ▸ 열림 중복칩 제거(행 강조로 충분) / 최소 열폭 축소로 1366·1280px 3열 적합.
+print("Codex 2차 — 액션바 표 위·필터결과 요약·중복칩 제거·열폭 축소")
+check("액션바 표 위(placeholder)로 3시트 통일(그리드 렌더 앞 bar_slot)",
+      src.count("bar_slot = st.container()") == 3 and src.count("with bar_slot:") == 3)
+check("필터/스코프 결과 요약 상단 통일(_summary_chips + chip_html, 3시트)",
+      "chip_html" in src and src.count("_summary_chips(rows, params)") == 3)
+check("▸ 열림 중복칩 제거 — 행 강조(ms-row-linked)로 충분",
+      "_LINK_CHIP" not in src and "▸ 열림" not in src and "include_linked_rows=True" in src)
+check("최소 열폭 축소(1366·1280px 3열 가로스크롤·잘림 방지) — 코드명 minWidth 완화",
+      "minWidth\": 116" not in src and "minWidth\": 106" not in src)
 
 
 # ===== 3d) 부분성공 원장 API + 삭제 예외 처리 =====

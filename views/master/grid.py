@@ -45,9 +45,22 @@ def live_rows(grid_df: pd.DataFrame) -> pd.DataFrame:
     return grid_df[grid_df["_removed"].fillna("").astype(str).str.strip() != "1"]
 
 
+# 그리드 높이 산정 상수 — _build_grid_options 의 headerHeight/rowHeight 와 일치시킨다.
+_GRID_HEADER_PX = 44   # headerHeight
+_GRID_ROW_PX = 40      # rowHeight
+_GRID_CHROME_PX = 16   # 테두리·가로 스크롤바 여유(불필요한 세로 스크롤바 방지)
+_GRID_MIN_PX = 132     # 0~1행에서도 헤더+빈 상태 오버레이가 답답하지 않은 적정 최소
+_GRID_MAX_PX = 460     # 다수 행: 이 이상은 그리드 내부에서 스크롤
+
+
 def master_grid_height(nrows: int) -> int:
-    """행 수 기반 동적 높이(240~460px). 하단 저장 버튼·상태 스트립 겹침을 방지한다."""
-    return max(240, min(35 * (int(nrows) + 1) + 64, 460))
+    """헤더+실제 행 수에 맞춘 동적 높이(≈132~460px).
+
+    소수 행(0~1건)일 때 큰 빈 표가 남지 않도록 실제 행 수에 적응하되, 빈 상태에서도
+    답답하지 않은 최소를 유지하고 다수 행은 그리드 내부 스크롤로 넘긴다.
+    """
+    natural = _GRID_HEADER_PX + max(int(nrows), 1) * _GRID_ROW_PX + _GRID_CHROME_PX
+    return max(_GRID_MIN_PX, min(natural, _GRID_MAX_PX))
 
 
 # ---------------------------------------------------------------------------

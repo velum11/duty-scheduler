@@ -255,14 +255,52 @@ _COL_WIDTHS = {
 }
 
 
-def _filter_summary_html() -> str:
-    """필터바 우측 요약칩(사용 중 N · 미사용 M) — 전체 데이터 기준(현재 필터 무관, 목업)."""
-    store = db.get_work_types()
-    total = int(len(store))
-    active = int(store["is_active"].astype(bool).sum()) if total else 0
-    inactive = total - active
-    return (f"<div class='ms-filt-sum'>사용 중 <b>{active}</b>"
-            f"<span class='ms-filt-sep'>·</span>미사용 <b>{inactive}</b></div>")
+def _summary_counts(frame: pd.DataFrame) -> tuple[int, int]:
+    """현재 필터결과(표에 로드된 기존 행) 기준 (사용 중, 미사용) 건수.
+
+    사용자관리와 동일하게 '지금 표에 보이는' 결과 기준 분포를 낸다(필터 무관 전체
+    카운트가 아님). 신규 행은 아직 저장 전이므로 제외한다.
+    """
+    if frame is None or frame.empty:
+        return 0, 0
+    existing = frame[frame["_row_state"] == "existing"] if "_row_state" in frame else frame
+    if existing.empty:
+        return 0, 0
+    active = int(existing["사용"].map(grid_bool).sum())
+    return active, len(existing) - active
+
+
+def _render_summary_chips(frame: pd.DataFrame, params: dict) -> None:
+    """상단 요약 스트립 — 좌: 활성 필터 칩, 우: 현재 필터결과의 사용/미사용 분포.
+
+    사용자관리(_render_summary_chips)와 동일한 어휘/배치. 필터가 모두 기본이면 좌측
+    칩은 비운다. 결과 0건이어도 활성 필터 칩은 남겨 왜 비었는지 알린다.
+    """
+    if frame is None:
+        return
+    filt = ""
+    if params.get("active") and params["active"] != "전체":
+        filt += master.chip_html(f"사용 여부: {params['active']}", "lock")
+    if params.get("search"):
+        filt += master.chip_html(f"검색: {params['search']}", "lock")
+
+    active, inactive = _summary_counts(frame)
+    cnt = ""
+    if active or inactive:
+        cnt = master.chip_html(f"사용 중 {active}", "ok")
+        if inactive:
+            cnt += master.chip_html(f"미사용 {inactive}", "mute")
+
+    if not filt and not cnt:
+        return
+    st.markdown(
+        "<div style='display:flex;justify-content:space-between;align-items:center;"
+        "gap:.5rem;margin:.1rem 0 .2rem'>"
+        f"<div style='display:flex;gap:.3rem;flex-wrap:wrap'>{filt}</div>"
+        f"<div style='display:flex;gap:.3rem;flex:0 0 auto'>{cnt}</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _col_config() -> dict:
@@ -298,7 +336,6 @@ def render(user: dict) -> None:
         active = f1.selectbox("사용 여부", _STATUS, key=state.key("f_active"), label_visibility="collapsed")
         search = f2.text_input("검색", key=state.key("f_search"),
                                placeholder="코드·명칭·약칭 검색", label_visibility="collapsed")
-        _sp.markdown(_filter_summary_html(), unsafe_allow_html=True)
     params = {"active": active, "search": search.strip()}
 
     # ---- 재적재 결정(dirty 무경고 소실 금지, §17) ----
@@ -309,11 +346,14 @@ def render(user: dict) -> None:
 
     # ---- 표 위 슬롯(§7): 액션바 → 배너 → 표 순서 확정. 건수는 그리드 후 계산하므로
     #      슬롯을 먼저 확보하고 나중에 채운다(사용자·조직 화면과 동일 배치). ----
+    summary_slot = st.container()  # 요약 칩(필터결과 사용/미사용 분포) — 표 위 최상단
     bar_slot = st.container()     # 액션바(필터 아래·표 위)
     banner_slot = st.container()  # 배너(삭제 확인/폐기 확인/원장/오류/flash 중 1개)
 
     # ---- 그리드 ----
     frame = _render_frame(state)
+    with summary_slot:
+        _render_summary_chips(frame, params)
     spec = MasterGridSpec(
         page_id=PAGE_ID, columns=_GRID_COLUMNS, order=_USER_COLS,
         col_config=_col_config(), select_all=True,
@@ -902,75 +942,61 @@ def _normalize_hex(value: str):
 # 근무표 미리보기 — color/약칭 단일 기준이 근무표·대시보드·개인 화면 색을 구동함을 시연.
 # ---------------------------------------------------------------------------
 def _render_preview(live: pd.DataFrame) -> None:
+    """근무표/대시보드 색·약칭 미리보기(DESIGN.md §150 계약) — 조밀 한 줄.
+
+    색상 스와치 + 약칭이 근무표·대시보드·개인 화면에 그대로 적용됨을 미리 보인다.
+    편집 그리드와 겹치는 명칭·시간은 반복하지 않고 계약 정보(색·약칭)만 조밀하게 노출한다.
+    약칭 셀은 근무표 렌더처럼 근무형태 색을 입혀(틴트 배경+색 텍스트) 적용 결과를 시연한다.
+    약칭이 비면 코드로 대체한다(색은 코드에 귀속).
+    """
     if live is None or live.empty:
         return
-    pills = []
+    sws = []
     for _, row in live.iterrows():
         if not grid_bool(row.get("사용")):
             continue
         color = _normalize_hex(str(row.get("색상") or ""))
         if not color:
             continue
-        label = str(row.get("약칭") or "").strip() or str(row.get("코드") or "").strip()
+        code = str(row.get("코드") or "").strip()
+        label = str(row.get("약칭") or "").strip() or code
         if not label:
             continue
         name = str(row.get("명칭") or "").strip()
-        start = str(row.get("시작") or "").strip()
-        end = str(row.get("종료") or "").strip()
-        span = f"{start}~{end}" if (start and end) else (start or end)
-        meta = []
-        if name:
-            meta.append(f"<span class='nm'>{style.escape(name)}</span>")
-        if span:
-            meta.append(f"<span class='tm'>{style.escape(span)}</span>")
-        meta_html = f"<span class='meta'>{''.join(meta)}</span>" if meta else ""
-        pills.append(
-            "<span class='ms-wpill'>"
-            f"<span class='sw' style='background:{color};'></span>"
-            f"<span class='cell' style='background:{color}22;color:{color};'>{style.escape(label)}</span>"
-            f"{meta_html}</span>"
+        title = " · ".join(x for x in (code, name) if x) or label
+        sws.append(
+            f"<span class='ms-sw' title='{style.escape(title)}'>"
+            f"<span class='d' style='background:{color};'></span>"
+            f"<span class='c' style='background:{color}22;color:{color};'>{style.escape(label)}</span>"
+            f"</span>"
         )
-        if len(pills) >= 40:
+        if len(sws) >= 40:
             break
-    if not pills:
+    if not sws:
         return
     st.markdown(
         "<div class='ms-preview'>"
-        "<div class='ms-preview-head'><span class='t'>근무표 미리보기</span>"
-        "<span class='d'>색상 스와치·약칭·시간은 근무표·대시보드·개인 화면에 그대로 적용됩니다</span></div>"
-        f"<div class='ms-pills'>{''.join(pills)}</div>"
-        "<div class='ms-hintline'>색은 코드에 귀속됩니다(약칭이 바뀌어도 같은 코드=같은 색). "
-        "저장 전 #RRGGBB·HH:MM 형식을 검증합니다.</div></div>",
+        "<span class='ms-preview-t'>근무표 색·약칭 미리보기</span>"
+        f"<span class='ms-sws'>{''.join(sws)}</span></div>",
         unsafe_allow_html=True,
     )
 
 
 _EXTRA_CSS = """
 <style>
-.ms-preview { margin-top:.9rem; background:var(--ms-surface); border:1px solid var(--ms-line);
-  border-radius:8px; padding:.7rem .85rem; }
-.ms-preview-head { display:flex; align-items:baseline; gap:.5rem; flex-wrap:wrap; margin:0 0 .55rem;
-  padding-bottom:.45rem; border-bottom:1px solid var(--ms-line); }
-.ms-preview-head .t { font-size:.82rem; font-weight:700; color:var(--ms-ink); letter-spacing:-.01em; }
-.ms-preview-head .d { font-size:.71rem; color:var(--ms-ink-3); }
-.ms-pills { display:flex; flex-wrap:wrap; gap:.4rem; }
-.ms-wpill { display:inline-flex; align-items:center; gap:.4rem; background:var(--ms-surface-2);
-  border:1px solid var(--ms-line); border-radius:6px; padding:.24rem .5rem .24rem .34rem; }
-.ms-wpill .sw { width:14px; height:14px; border-radius:4px; flex:0 0 auto;
-  border:1px solid rgba(0,0,0,.16); box-shadow:inset 0 0 0 1px rgba(255,255,255,.35); }
-.ms-wpill .cell { font-size:.74rem; font-weight:700; line-height:1; padding:.16rem .34rem;
-  border-radius:4px; letter-spacing:.01em; }
-.ms-wpill .meta { display:inline-flex; align-items:baseline; gap:.35rem; }
-.ms-wpill .nm { font-size:.72rem; color:var(--ms-ink-2); }
-.ms-wpill .tm { font-size:.68rem; color:var(--ms-ink-3); font-variant-numeric:tabular-nums;
-  letter-spacing:.02em; }
-.ms-hintline { font-size:.68rem; color:var(--ms-ink-3); margin-top:.55rem; padding-top:.45rem;
-  border-top:1px solid var(--ms-line); }
+.ms-preview { margin-top:.5rem; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;
+  background:var(--ms-surface); border:1px solid var(--ms-line); border-radius:8px;
+  padding:.38rem .6rem; }
+.ms-preview-t { flex:0 0 auto; font-size:.72rem; font-weight:700; color:var(--ms-ink-2);
+  letter-spacing:-.01em; }
+.ms-sws { display:flex; flex-wrap:wrap; gap:.26rem; }
+.ms-sw { display:inline-flex; align-items:center; gap:.3rem; padding:.09rem .42rem .09rem .3rem;
+  background:var(--ms-surface-2); border:1px solid var(--ms-line); border-radius:5px; }
+.ms-sw .d { width:11px; height:11px; border-radius:3px; flex:0 0 auto;
+  border:1px solid rgba(0,0,0,.16); box-shadow:inset 0 0 0 1px rgba(255,255,255,.3); }
+.ms-sw .c { font-size:.7rem; font-weight:700; line-height:1; padding:.12rem .34rem;
+  border-radius:4px; font-variant-numeric:tabular-nums; letter-spacing:.01em; }
 .ms-errlist { margin:.25rem 0 0; padding-left:1.1rem; font-size:.76rem; color:var(--ms-ink-2); }
 .ms-absorb { color:var(--ms-ink-2); font-size:.72rem; margin-top:.3rem; }
-.ms-filt-sum { text-align:right; font-size:.78rem; color:var(--ms-ink-2); white-space:nowrap;
-  padding-bottom:.35rem; }
-.ms-filt-sum b { color:var(--ms-ink); font-weight:700; }
-.ms-filt-sep { color:var(--ms-line-strong); margin:0 .4rem; }
 </style>
 """

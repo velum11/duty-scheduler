@@ -50,6 +50,7 @@ from views.master import (
     Readiness,
     ReadinessState,
     banner,
+    chip_html,
     confirm_bar,
     count_strip,
     dirty_total,
@@ -111,23 +112,15 @@ _EDIT_NEW_ONLY = JsCode("function(p){ return !!(p.data && p.data._row_state === 
 _EDIT_UNLESS_PROTECTED = JsCode(
     "function(p){ return !(p.data && (p.data._protected === '1' || p.data._protected === 1)); }"
 )
-# 드릴다운 활성 행(현재 하위 시트를 열어둔 상위 행) — 코드명 옆에 link 칩을 붙인다.
-_LINK_CHIP = JsCode(
-    """
-    function(p){
-      var v = (p.value == null) ? '' : p.value;
-      if (p.data && (p.data._linked === '1' || p.data._linked === 1)) {
-        return v + " <span class='ms-chip link'>▸ 열림</span>";
-      }
-      return v;
-    }
-    """
-)
+# 선택된 상위 행은 공통 ``ms-row-linked`` 행 강조(네이비 틴트)로만 표시한다 — 코드명 옆
+# 코드명 옆에 붙던 별도 '열림' 표시 칩은 상단 브레드크럼·헤더 컨텍스트와 중복돼 제거한다(ERP).
+# 행 강조는 spec ``include_linked_rows`` + ``_linked`` 플래그로 구동되므로 칩 없이도 유지된다.
 
 # 조직 전용 페이지 크롬 — 공통 크롬(views/master/style)을 소비만 하고, 이 화면 고유의
 # Wave B 폴리시만 페이지 스코프로 얹는다:
 #   (1) 선택 컨텍스트·계층(그룹›부서›조) 통합 브레드크럼 강조(.ms-ctx),
-#   (2) 행 클릭 드릴다운 흐름 시각화(단계 배지 1·2·3·커넥터·활성 체인 액센트),
+#   (2) 활성/잠김 상태 표시(활성 시트 상단 네이비 액센트 + 잠긴 시트 디엠퍼시스) —
+#       계층 순서는 (1) 브레드크럼이 표현하므로 단계 배지·커넥터 장식은 두지 않는다,
 #   (3) 잠김 상태 밀도 완화(슬림 플레이스홀더 + 잠긴 시트의 비활성 액션바 숨김 →
 #       시트별 액션바 반복 소음 축소), (4) 저장코드 읽기전용 어포던스는 공통 .ms-cell-readonly
 #       클래스를 col_config cellClassRules 로 소비.
@@ -150,8 +143,10 @@ _ORG_PAGE_CSS = """
 .ms-ctx .arw { font-size:.92rem; color:var(--ms-line-strong); }
 .ms-ctx .none { font-style:normal; color:var(--ms-ink-3); }
 
-/* ── (2) 행 클릭 드릴다운 흐름 시각화 — 상위→하위 진행 체인 ── */
-.st-key-org_group__sheet, .st-key-org_dept__sheet, .st-key-org_unit__sheet { position:relative; }
+/* ── (2) 활성/잠김 상태 표시 — 지금 편집 가능한 시트를 즉시 식별(편집 안전성) ──
+   계층 순서(그룹›부서›조)는 상단 .ms-ctx 브레드크럼이 이미 표현하므로 단계 배지·시트
+   커넥터 같은 장식은 두지 않는다(ERP: 정보 중복·장식 배제). 여기서는 어느 시트가 활성
+   이고 어느 시트가 아직 잠겼는지만 상태로 알린다. */
 /* 활성 시트(잠기지 않음 = 상위 선택돼 열린 시트) — 상단 네이비 액센트 */
 .st-key-org_group__sheet:not(:has(.ms-locked)),
 .st-key-org_dept__sheet:not(:has(.ms-locked)),
@@ -159,25 +154,6 @@ _ORG_PAGE_CSS = """
 /* 비활성(잠긴) 하위 시트 — 디엠퍼시스로 아직 진행 전임을 표현 */
 .st-key-org_dept__sheet:has(.ms-locked),
 .st-key-org_unit__sheet:has(.ms-locked) { opacity:.72; }
-/* 단계 배지(1·2·3) — 헤더 제목 앞 원형 숫자(카드 계층 순서를 상시 노출) */
-.st-key-org_group__sheet .ms-sheet-head::before,
-.st-key-org_dept__sheet .ms-sheet-head::before,
-.st-key-org_unit__sheet .ms-sheet-head::before {
-  display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;
-  width:1.2rem; height:1.2rem; border-radius:50%; font-size:.68rem; font-weight:700;
-  color:#FFF; background:var(--ms-navy); }
-.st-key-org_group__sheet .ms-sheet-head::before { content:'1'; }
-.st-key-org_dept__sheet .ms-sheet-head::before { content:'2'; }
-.st-key-org_unit__sheet .ms-sheet-head::before { content:'3'; }
-/* 잠긴 하위 시트의 배지는 중립색(진행 전) */
-.st-key-org_dept__sheet:has(.ms-locked) .ms-sheet-head::before,
-.st-key-org_unit__sheet:has(.ms-locked) .ms-sheet-head::before { background:var(--ms-ink-3); }
-/* 카드 사이 커넥터(›) — 넓은 폭에서만(세로 스택 시 숨김) */
-@media (min-width:1101px){
-  .st-key-org_dept__sheet::before, .st-key-org_unit__sheet::before {
-    content:'\\203A'; position:absolute; left:-.85rem; top:1.9rem;
-    color:var(--ms-line-strong); font-size:1.25rem; font-weight:700; line-height:1; pointer-events:none; }
-}
 
 /* ── (3) 잠김 상태 밀도 완화 ──
    ① 잠긴 하위 시트의 큰 빈 플레이스홀더를 슬림하게(높이·여백 축소),
@@ -452,38 +428,40 @@ def _plan_codes(plan) -> set:
 _CODE_READONLY_RULES = {"ms-cell-readonly": "data._row_state !== 'new'"}
 
 
-def _code_name_config(with_link: bool) -> dict:
-    """그룹·부서 시트 공통 컬럼 설정(코드=신규만·코드명 link 칩·순서/비고/사용)."""
-    name_cfg = {"flex": 1.4, "minWidth": 116, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED}
-    if with_link:
-        name_cfg["cellRenderer"] = _LINK_CHIP
+def _code_name_config() -> dict:
+    """그룹·부서 시트 공통 컬럼 설정(코드=신규만·코드명·순서/비고/사용).
+
+    최소 열폭 합(≈254px)을 낮춰 3시트가 1366·1280px 데스크톱(사이드바 제외)에서
+    가로스크롤·열잘림 없이 맞도록 한다. 넓은 폭에서는 flex(코드명·비고)로 채운다.
+    """
     return {
-        "코드": {"flex": 0, "width": 108, "minWidth": 84, "cellClass": "md-c-left",
+        "코드": {"flex": 0, "width": 54, "minWidth": 44, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
-        "코드명": name_cfg,
-        "순서": {"flex": 0, "width": 66, "minWidth": 54, "maxWidth": 88,
+        "코드명": {"flex": 1.4, "minWidth": 44, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
+        "순서": {"flex": 0, "width": 40, "minWidth": 34, "maxWidth": 72,
                 "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
-        "비고": {"flex": 1.1, "minWidth": 84, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
-        "사용": {"flex": 0, "width": 58, "minWidth": 50, "maxWidth": 82,
+        "비고": {"flex": 1.1, "minWidth": 38, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
+        "사용": {"flex": 0, "width": 42, "minWidth": 36, "maxWidth": 64,
                 "cellClass": "md-c-center", "editable": _EDIT_UNLESS_PROTECTED},
     }
 
 
+# 조 시트는 유형 컬럼이 하나 더 있어 6열이다 — 최소 열폭을 더 조여 1280px에서도 맞춘다.
 _UNIT_COL_CONFIG = {
-    "코드": {"flex": 0, "width": 96, "minWidth": 74, "cellClass": "md-c-left",
+    "코드": {"flex": 0, "width": 46, "minWidth": 40, "cellClass": "md-c-left",
             "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
-    "명칭": {"headerName": "코드명", "flex": 1.4, "minWidth": 106, "cellClass": "md-c-left",
+    "명칭": {"headerName": "코드명", "flex": 1.4, "minWidth": 42, "cellClass": "md-c-left",
            "editable": _EDIT_UNLESS_PROTECTED},
     "유형": {
-        "headerName": "유형", "flex": 0, "width": 82, "minWidth": 68, "maxWidth": 104,
+        "headerName": "유형", "flex": 0, "width": 50, "minWidth": 44, "maxWidth": 96,
         "cellClass": "md-c-center", "cellEditor": "agSelectCellEditor",
         "cellEditorParams": {"values": ["교대", "일반"]},
         "cellClassRules": {"ms-unit-shift": "value == '교대'", "ms-unit-general": "value == '일반'"},
     },
-    "표시순서": {"headerName": "순서", "flex": 0, "width": 66, "minWidth": 54, "maxWidth": 88,
+    "표시순서": {"headerName": "순서", "flex": 0, "width": 40, "minWidth": 34, "maxWidth": 72,
              "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
-    "비고": {"flex": 1.1, "minWidth": 84, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
-    "사용": {"flex": 0, "width": 58, "minWidth": 50, "maxWidth": 82, "cellClass": "md-c-center",
+    "비고": {"flex": 1.1, "minWidth": 34, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
+    "사용": {"flex": 0, "width": 40, "minWidth": 36, "maxWidth": 64, "cellClass": "md-c-center",
            "editable": _EDIT_UNLESS_PROTECTED},
 }
 
@@ -496,6 +474,37 @@ def _locked_action_bar(state: DraftState, readiness: ReadinessState) -> None:
     """상위 미선택 잠금 시트의 액션바 — 모든 write 비활성(버튼 키는 유지)."""
     reason = _write_reason(readiness) or "상위 항목을 먼저 선택하세요."
     master_action_bar(state, sel_count=0, dirty_total=0, can_write=False, write_disabled_reason=reason)
+
+
+def _summary_chips(rows: pd.DataFrame, params: dict) -> None:
+    """표 위 요약 스트립 — 좌: 활성 필터 칩(사용 여부·검색), 우: 결과 사용/미사용 분포.
+
+    사용자 관리(_render_summary_chips)와 동일하게 **현재 스코프/필터 결과** 기준으로 센다
+    (전체수 아님). 모든 필터가 기본이고 결과도 없으면 비운다.
+    """
+    existing = rows[rows["_row_state"].astype(str) == "existing"] if rows is not None and not rows.empty \
+        else pd.DataFrame(columns=["사용"])
+    left = ""
+    if params.get("active") and params["active"] != "전체":
+        left += chip_html(f"사용 여부: {params['active']}", "lock")
+    if params.get("search"):
+        left += chip_html(f"검색: {params['search']}", "lock")
+    right = ""
+    if not existing.empty:
+        on = int(existing["사용"].map(grid_bool).sum())
+        off = len(existing) - on
+        right = chip_html(f"사용 {on}", "ok")
+        if off:
+            right += chip_html(f"미사용 {off}", "mute")
+    if not left and not right:
+        return
+    st.markdown(
+        "<div style='display:flex;justify-content:space-between;align-items:center;"
+        "gap:.5rem;margin:.1rem 0 .2rem'>"
+        f"<div style='display:flex;gap:.3rem;flex-wrap:wrap'>{left}</div>"
+        f"<div style='display:flex;gap:.3rem;flex:0 0 auto'>{right}</div></div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ---------- 그룹 시트 ----------
@@ -556,14 +565,16 @@ def _render_group_sheet(params: dict, readiness: ReadinessState, sel_group: str)
 
     plan = st.session_state.get(_GRP.delete_plan_key)
     rows = _GRP.get_rows()
-    existing_n = _existing_count(rows)
-    sheet_head("그룹", count=existing_n)
+    sheet_head("그룹", count=_existing_count(rows))
     if plan:
         _group_confirm_bar(plan, params, readiness)
 
+    _summary_chips(rows, params)           # 표 위 요약(현재 필터 결과 기준)
+    bar_slot = st.container()              # 액션바(표 위) — 건수 계산 후 채운다
+
     spec = MasterGridSpec(
         page_id=_GRP.page_id, columns=_GROUP_GRID_COLUMNS, order=_GROUP_COLS,
-        col_config=_code_name_config(with_link=True), select_all=True, include_linked_rows=True,
+        col_config=_code_name_config(), select_all=True, include_linked_rows=True,
         grid_options={"onCellClicked": _DRILL_CLICK},  # 행 클릭 → 그룹 드릴다운 선택
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
@@ -575,10 +586,11 @@ def _render_group_sheet(params: dict, readiness: ReadinessState, sel_group: str)
     new_cnt, changed_cnt = _dirty_counts(_GRP, live, _GROUP_COLS)
     total = dirty_total(new_cnt, changed_cnt)
     _GRP.set_dirty(total > 0)
-    master_action_bar(
-        _GRP, sel_count=sel_count, dirty_total=total,
-        can_write=readiness.write_enabled, write_disabled_reason=_write_reason(readiness),
-    )
+    with bar_slot:
+        master_action_bar(
+            _GRP, sel_count=sel_count, dirty_total=total,
+            can_write=readiness.write_enabled, write_disabled_reason=_write_reason(readiness),
+        )
     count_strip(len(existing), new_cnt, changed_cnt, sel_count)
     return grid_df
 
@@ -803,9 +815,12 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
     if plan:
         _dept_confirm_bar(plan, params, readiness)
 
+    _summary_chips(rows, params)           # 표 위 요약(현재 필터 결과 기준)
+    bar_slot = st.container()              # 액션바(표 위) — 건수 계산 후 채운다
+
     spec = MasterGridSpec(
         page_id=_OD.page_id, columns=_DEPT_GRID_COLUMNS, order=_DEPT_COLS,
-        col_config=_code_name_config(with_link=True), select_all=True, include_linked_rows=True,
+        col_config=_code_name_config(), select_all=True, include_linked_rows=True,
         grid_options={"onCellClicked": _DRILL_CLICK},  # 행 클릭 → 부서 드릴다운 선택
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
@@ -819,10 +834,11 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
     _OD.set_dirty(total > 0)
     can_write = readiness.write_enabled and not pending
     reason = _write_reason(readiness) or ("위의 미저장 변경 안내를 먼저 처리하세요." if pending else None)
-    master_action_bar(
-        _OD, sel_count=sel_count, dirty_total=total,
-        can_write=can_write, write_disabled_reason=reason,
-    )
+    with bar_slot:
+        master_action_bar(
+            _OD, sel_count=sel_count, dirty_total=total,
+            can_write=can_write, write_disabled_reason=reason,
+        )
     count_strip(len(existing), new_cnt, changed_cnt, sel_count)
     return grid_df
 
@@ -1070,6 +1086,9 @@ def _render_unit_sheet(params: dict, readiness: ReadinessState, dept_code: str, 
     if plan:
         _unit_confirm_bar(plan, dept_code, readiness)
 
+    _summary_chips(rows, params)           # 표 위 요약(현재 필터 결과 기준)
+    bar_slot = st.container()              # 액션바(표 위) — 건수 계산 후 채운다
+
     spec = MasterGridSpec(
         page_id=_OU.page_id, columns=_UNIT_GRID_COLUMNS, order=_UNIT_COLS,
         col_config=_UNIT_COL_CONFIG, select_all=True,
@@ -1088,10 +1107,11 @@ def _render_unit_sheet(params: dict, readiness: ReadinessState, dept_code: str, 
     _OU.set_dirty(total > 0)
     can_write = readiness.write_enabled and not pending
     reason = _write_reason(readiness) or ("위의 미저장 변경 안내를 먼저 처리하세요." if pending else None)
-    master_action_bar(
-        _OU, sel_count=sel_count, dirty_total=total,
-        can_write=can_write, write_disabled_reason=reason,
-    )
+    with bar_slot:
+        master_action_bar(
+            _OU, sel_count=sel_count, dirty_total=total,
+            can_write=can_write, write_disabled_reason=reason,
+        )
     count_strip(len(existing), new_cnt, changed_cnt, sel_count)
     return grid_df
 
