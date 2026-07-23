@@ -124,10 +124,14 @@ _LINK_CHIP = JsCode(
     """
 )
 
-# 조직 전용 페이지 크롬 — 공통 크롬(views/master/style) 위에 (1)시트 액션바 버튼
-# nowrap, (2)행 클릭 드릴다운의 흐름 시각화(단계 배지·커넥터·활성/비활성 시트 대비)를
-# 얹는다. 3시트 세로 스택(≤1100px)은 공통 style 의
-# `stHorizontalBlock:has([class*="__sheet"])` 규칙이 담당한다.
+# 조직 전용 페이지 크롬 — 공통 크롬(views/master/style)을 소비만 하고, 이 화면 고유의
+# Wave B 폴리시만 페이지 스코프로 얹는다:
+#   (1) 선택 컨텍스트·계층(그룹›부서›조) 통합 브레드크럼 강조(.ms-ctx),
+#   (2) 행 클릭 드릴다운 흐름 시각화(단계 배지 1·2·3·커넥터·활성 체인 액센트),
+#   (3) 잠김 상태 밀도 완화(슬림 플레이스홀더 + 잠긴 시트의 비활성 액션바 숨김 →
+#       시트별 액션바 반복 소음 축소), (4) 저장코드 읽기전용 어포던스는 공통 .ms-cell-readonly
+#       클래스를 col_config cellClassRules 로 소비.
+# 3시트 세로 스택(≤1100px)은 공통 style 의 `stHorizontalBlock:has([class*="__sheet"])` 규칙.
 _ORG_PAGE_CSS = """
 <style>
 /* 시트 액션바 버튼은 절대 세로로 줄바꿈하지 않는다(좁은 폭에서도 눌림 방지). */
@@ -136,27 +140,32 @@ _ORG_PAGE_CSS = """
 .st-key-org_unit__sheet div.stButton > button {
   white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 
-/* ── 행 클릭 드릴다운 흐름 시각화 ─────────────────────────────────────────
-   세 시트가 '동등한 독립 표'로 보이지 않도록 상위→하위 진행을 표현한다:
-   ① 각 시트 헤더 왼쪽에 단계 배지(1·2·3),
-   ② 활성 시트(상위가 선택돼 열린 시트)는 네이비 상단 액센트로 강조,
-   ③ 비선택(잠긴) 하위 시트는 디엠퍼시스(흐리게),
-   ④ 카드 사이 커넥터(›) 로 순차 흐름을 명시(넓은 폭에서만). */
+/* ── (1) 선택 컨텍스트·계층 통합 브레드크럼 — 상단 .ms-ctx 를 스텝 경로로 강조 ── */
+.ms-ctx { padding:.5rem .8rem; font-size:.8rem; box-shadow:0 1px 0 rgba(0,0,0,.02); }
+.ms-ctx > span:first-child { font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+  font-size:.66rem; color:var(--ms-ink-3); }
+.ms-ctx b { padding:.04rem .45rem; border-radius:5px; background:#E5EAF2; border:1px solid #C6D2E4;
+  color:var(--ms-navy); }
+.ms-ctx b.pin { background:var(--ms-navy); color:#FFF; border-color:var(--ms-navy); }
+.ms-ctx .arw { font-size:.92rem; color:var(--ms-line-strong); }
+.ms-ctx .none { font-style:normal; color:var(--ms-ink-3); }
+
+/* ── (2) 행 클릭 드릴다운 흐름 시각화 — 상위→하위 진행 체인 ── */
 .st-key-org_group__sheet, .st-key-org_dept__sheet, .st-key-org_unit__sheet { position:relative; }
-/* 활성 시트(잠기지 않은 시트 = 상위가 선택돼 데이터가 열린 시트) — 상단 네이비 액센트 */
+/* 활성 시트(잠기지 않음 = 상위 선택돼 열린 시트) — 상단 네이비 액센트 */
 .st-key-org_group__sheet:not(:has(.ms-locked)),
 .st-key-org_dept__sheet:not(:has(.ms-locked)),
 .st-key-org_unit__sheet:not(:has(.ms-locked)) { border-top:2px solid var(--ms-navy); }
 /* 비활성(잠긴) 하위 시트 — 디엠퍼시스로 아직 진행 전임을 표현 */
 .st-key-org_dept__sheet:has(.ms-locked),
-.st-key-org_unit__sheet:has(.ms-locked) { opacity:.6; }
-/* 단계 배지 — 헤더 제목 앞 원형 숫자 */
+.st-key-org_unit__sheet:has(.ms-locked) { opacity:.72; }
+/* 단계 배지(1·2·3) — 헤더 제목 앞 원형 숫자(카드 계층 순서를 상시 노출) */
 .st-key-org_group__sheet .ms-sheet-head::before,
 .st-key-org_dept__sheet .ms-sheet-head::before,
 .st-key-org_unit__sheet .ms-sheet-head::before {
   display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;
-  width:1.15rem; height:1.15rem; border-radius:50%; font-size:.68rem; font-weight:700;
-  color:#FFF; background:var(--ms-navy); margin-right:.1rem; }
+  width:1.2rem; height:1.2rem; border-radius:50%; font-size:.68rem; font-weight:700;
+  color:#FFF; background:var(--ms-navy); }
 .st-key-org_group__sheet .ms-sheet-head::before { content:'1'; }
 .st-key-org_dept__sheet .ms-sheet-head::before { content:'2'; }
 .st-key-org_unit__sheet .ms-sheet-head::before { content:'3'; }
@@ -166,9 +175,22 @@ _ORG_PAGE_CSS = """
 /* 카드 사이 커넥터(›) — 넓은 폭에서만(세로 스택 시 숨김) */
 @media (min-width:1101px){
   .st-key-org_dept__sheet::before, .st-key-org_unit__sheet::before {
-    content:'\\203A'; position:absolute; left:-.85rem; top:50%; transform:translateY(-50%);
-    color:var(--ms-ink-3); font-size:1.3rem; font-weight:700; line-height:1; pointer-events:none; }
+    content:'\\203A'; position:absolute; left:-.85rem; top:1.9rem;
+    color:var(--ms-line-strong); font-size:1.25rem; font-weight:700; line-height:1; pointer-events:none; }
 }
+
+/* ── (3) 잠김 상태 밀도 완화 ──
+   ① 잠긴 하위 시트의 큰 빈 플레이스홀더를 슬림하게(높이·여백 축소),
+   ② 잠긴 시트의 비활성 액션바(저장 버튼을 품은 행)는 숨겨 헤더+슬림 안내만 남긴다 →
+      3개 시트 액션바 반복의 시각 소음을 줄이고 '아직 못 여는' 상태를 가볍게 표현한다.
+      버튼 위젯 자체는 DOM 에 남아(page-scoped 키·비활성 계약 보존) 접근성·회귀에 영향 없다. */
+.st-key-org_dept__sheet .ms-locked,
+.st-key-org_unit__sheet .ms-locked { min-height:118px; padding:1.25rem 1rem; gap:.35rem; }
+.st-key-org_dept__sheet .ms-locked .glyph,
+.st-key-org_unit__sheet .ms-locked .glyph { font-size:1.1rem; }
+.st-key-org_dept__sheet:has(.ms-locked) div[data-testid="stHorizontalBlock"]:has(.st-key-org_dept__save),
+.st-key-org_unit__sheet:has(.ms-locked) div[data-testid="stHorizontalBlock"]:has(.st-key-org_unit__save) {
+  display:none !important; }
 </style>
 """
 
@@ -424,13 +446,20 @@ def _plan_codes(plan) -> set:
     return codes
 
 
+# 저장된 코드(=신규 아님)는 수정 불가 — 공통 .ms-cell-readonly(Wave A) 로 읽기전용
+# 어포던스(중립 틴트 + 기본 커서)를 준다. 상태 행 배경(!important)이 우선하므로 선택/신규/
+# 삭제/오류 시각과 충돌하지 않는다(색만으로 상태 표시 금지 계약 유지).
+_CODE_READONLY_RULES = {"ms-cell-readonly": "data._row_state !== 'new'"}
+
+
 def _code_name_config(with_link: bool) -> dict:
     """그룹·부서 시트 공통 컬럼 설정(코드=신규만·코드명 link 칩·순서/비고/사용)."""
     name_cfg = {"flex": 1.4, "minWidth": 116, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED}
     if with_link:
         name_cfg["cellRenderer"] = _LINK_CHIP
     return {
-        "코드": {"flex": 0, "width": 108, "minWidth": 84, "cellClass": "md-c-left", "editable": _EDIT_NEW_ONLY},
+        "코드": {"flex": 0, "width": 108, "minWidth": 84, "cellClass": "md-c-left",
+                "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
         "코드명": name_cfg,
         "순서": {"flex": 0, "width": 66, "minWidth": 54, "maxWidth": 88,
                 "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
@@ -441,7 +470,8 @@ def _code_name_config(with_link: bool) -> dict:
 
 
 _UNIT_COL_CONFIG = {
-    "코드": {"flex": 0, "width": 96, "minWidth": 74, "cellClass": "md-c-left", "editable": _EDIT_NEW_ONLY},
+    "코드": {"flex": 0, "width": 96, "minWidth": 74, "cellClass": "md-c-left",
+            "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
     "명칭": {"headerName": "코드명", "flex": 1.4, "minWidth": 106, "cellClass": "md-c-left",
            "editable": _EDIT_UNLESS_PROTECTED},
     "유형": {

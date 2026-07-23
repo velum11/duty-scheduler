@@ -207,6 +207,21 @@ check("시트 카드 컨테이너 키(org_group/dept/unit __sheet)",
 check("액션바 버튼 white-space:nowrap(눌림 방지)", "white-space:nowrap" in src)
 
 
+# ===== 3c-2) Wave B 통일 디자인 폴리시 마커 =====
+# Codex UI 지적 반영: 시트별 액션바 반복·잠김 밀도 완화 / 선택 컨텍스트·계층 통합 /
+# 저장코드 읽기전용 어포던스(공통 .ms-cell-readonly 소비) / bool 은 native 유지.
+print("Wave B 폴리시 — 잠김 밀도 완화·계층 통합·읽기전용 코드·native bool")
+check("잠긴 하위 시트 액션바 숨김(반복·밀도 완화)", ":has(.ms-locked)" in src and "display:none" in src)
+check("잠긴 플레이스홀더 슬림화(.ms-locked 재정의)", ".ms-locked" in src and "min-height:118px" in src)
+check("선택 컨텍스트·계층 통합 브레드크럼 강조(.ms-ctx)", ".ms-ctx" in src and "drilldown_context" in src)
+check("드릴다운 단계 배지(1·2·3) 카드 넘버링",
+      "content:'1'" in src and "content:'2'" in src and "content:'3'" in src)
+check("저장코드 읽기전용 어포던스(공통 .ms-cell-readonly 소비)",
+      "ms-cell-readonly" in src and "_CODE_READONLY_RULES" in src)
+check("bool(사용) native 유지 — JsCode bool 렌더러 미사용(3.14 배포 회귀 방지)",
+      "BOOL_DISPLAY_RENDERER" not in src and "_BOOL_RENDERER" not in src)
+
+
 # ===== 3d) 부분성공 원장 API + 삭제 예외 처리 =====
 print("저장 원장(save_*_report) 사용 · 시트별 독립 ledger · 삭제 예외 처리")
 check("그룹 저장이 save_org_groups_report 사용", "save_org_groups_report" in src)

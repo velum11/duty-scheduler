@@ -147,24 +147,10 @@ _COLOR_EDITOR = JsCode(
     """
 )
 
-# 불리언 셀 — 가운데 체크박스(표시 전용). 편집은 더블클릭 체크박스 에디터/Space.
-_BOOL_RENDERER = JsCode(
-    """
-    (class {
-      init(p) {
-        const v = (p.value === true || p.value === 'true' || p.value === 1 || p.value === '사용' || p.value === '재직');
-        const g = document.createElement('div');
-        g.style.display='flex'; g.style.alignItems='center'; g.style.justifyContent='center'; g.style.height='100%';
-        const cb = document.createElement('input');
-        cb.type='checkbox'; cb.checked=v; cb.style.width='16px'; cb.style.height='16px';
-        cb.style.margin='0'; cb.style.accentColor='#1E3A6E'; cb.style.pointerEvents='none';
-        g.appendChild(cb); this.eGui = g;
-      }
-      getGui() { return this.eGui; }
-      refresh() { return false; }
-    })
-    """
-)
+# 불리언 셀(실근무·특근수당·사용) — 공통 native ``cellDataType='boolean'`` 로 표시·편집한다.
+# ag-grid 자체 boolean 렌더러/에디터를 쓰므로 별도 JsCode 렌더러를 주입하지 않는다.
+# (JsCode 셀 렌더러는 Streamlit Cloud Python 3.14 배포에서 실행되지 않아 체크박스가 사라지는
+#  High 회귀가 있었다 — grid.py 의 [LEGACY] BOOL_DISPLAY_RENDERER 주석 참조.)
 
 # ---------------------------------------------------------------------------
 # 약칭 셀 — 값 + 라이브 중복 경고칩(공통 `.ms-chip warn`). 활성 행끼리 같은 약칭이
@@ -261,11 +247,11 @@ _COL_WIDTHS = {
     "종료": {"width": 80, "minWidth": 66, "cellClass": "md-c-center ms-num"},
     "색상": {"width": 156, "minWidth": 130, "cellClass": "md-c-left",
             "cellRenderer": _COLOR_RENDERER, "cellEditor": _COLOR_EDITOR},
-    "실근무": {"width": 76, "minWidth": 64, "cellClass": "md-c-center", "cellRenderer": _BOOL_RENDERER},
-    "특근수당": {"width": 84, "minWidth": 72, "cellClass": "md-c-center", "cellRenderer": _BOOL_RENDERER},
+    "실근무": {"width": 76, "minWidth": 64, "cellClass": "md-c-center"},
+    "특근수당": {"width": 84, "minWidth": 72, "cellClass": "md-c-center"},
     "설명": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left"},
     "표시순서": {"width": 92, "minWidth": 78, "cellClass": "md-c-center ms-num"},
-    "사용": {"width": 66, "minWidth": 58, "cellClass": "md-c-center", "cellRenderer": _BOOL_RENDERER},
+    "사용": {"width": 66, "minWidth": 58, "cellClass": "md-c-center"},
 }
 
 
@@ -926,21 +912,32 @@ def _render_preview(live: pd.DataFrame) -> None:
         if not color:
             continue
         label = str(row.get("약칭") or "").strip() or str(row.get("코드") or "").strip()
-        name = str(row.get("명칭") or "").strip()
-        text = (label + (" " + name if name else "")).strip()
-        if not text:
+        if not label:
             continue
+        name = str(row.get("명칭") or "").strip()
+        start = str(row.get("시작") or "").strip()
+        end = str(row.get("종료") or "").strip()
+        span = f"{start}~{end}" if (start and end) else (start or end)
+        meta = []
+        if name:
+            meta.append(f"<span class='nm'>{style.escape(name)}</span>")
+        if span:
+            meta.append(f"<span class='tm'>{style.escape(span)}</span>")
+        meta_html = f"<span class='meta'>{''.join(meta)}</span>" if meta else ""
         pills.append(
-            f"<span class='ms-wpill' style='background:{color}26;color:{color};'>"
-            f"{style.escape(text)}</span>"
+            "<span class='ms-wpill'>"
+            f"<span class='sw' style='background:{color};'></span>"
+            f"<span class='cell' style='background:{color}22;color:{color};'>{style.escape(label)}</span>"
+            f"{meta_html}</span>"
         )
         if len(pills) >= 40:
             break
     if not pills:
         return
     st.markdown(
-        "<div class='ms-preview'><h3>근무표 미리보기 — 색상·약칭은 근무표·대시보드·개인 화면에 "
-        "그대로 적용됩니다</h3>"
+        "<div class='ms-preview'>"
+        "<div class='ms-preview-head'><span class='t'>근무표 미리보기</span>"
+        "<span class='d'>색상 스와치·약칭·시간은 근무표·대시보드·개인 화면에 그대로 적용됩니다</span></div>"
         f"<div class='ms-pills'>{''.join(pills)}</div>"
         "<div class='ms-hintline'>색은 코드에 귀속됩니다(약칭이 바뀌어도 같은 코드=같은 색). "
         "저장 전 #RRGGBB·HH:MM 형식을 검증합니다.</div></div>",
@@ -952,11 +949,23 @@ _EXTRA_CSS = """
 <style>
 .ms-preview { margin-top:.9rem; background:var(--ms-surface); border:1px solid var(--ms-line);
   border-radius:8px; padding:.7rem .85rem; }
-.ms-preview h3 { margin:0 0 .5rem; font-size:.76rem; font-weight:600; color:var(--ms-ink-2); }
-.ms-pills { display:flex; flex-wrap:wrap; gap:.45rem; }
-.ms-wpill { display:inline-flex; align-items:center; gap:.35rem; border-radius:5px;
-  padding:.2rem .55rem; font-size:.74rem; font-weight:600; }
-.ms-hintline { font-size:.68rem; color:var(--ms-ink-3); margin-top:.5rem; }
+.ms-preview-head { display:flex; align-items:baseline; gap:.5rem; flex-wrap:wrap; margin:0 0 .55rem;
+  padding-bottom:.45rem; border-bottom:1px solid var(--ms-line); }
+.ms-preview-head .t { font-size:.82rem; font-weight:700; color:var(--ms-ink); letter-spacing:-.01em; }
+.ms-preview-head .d { font-size:.71rem; color:var(--ms-ink-3); }
+.ms-pills { display:flex; flex-wrap:wrap; gap:.4rem; }
+.ms-wpill { display:inline-flex; align-items:center; gap:.4rem; background:var(--ms-surface-2);
+  border:1px solid var(--ms-line); border-radius:6px; padding:.24rem .5rem .24rem .34rem; }
+.ms-wpill .sw { width:14px; height:14px; border-radius:4px; flex:0 0 auto;
+  border:1px solid rgba(0,0,0,.16); box-shadow:inset 0 0 0 1px rgba(255,255,255,.35); }
+.ms-wpill .cell { font-size:.74rem; font-weight:700; line-height:1; padding:.16rem .34rem;
+  border-radius:4px; letter-spacing:.01em; }
+.ms-wpill .meta { display:inline-flex; align-items:baseline; gap:.35rem; }
+.ms-wpill .nm { font-size:.72rem; color:var(--ms-ink-2); }
+.ms-wpill .tm { font-size:.68rem; color:var(--ms-ink-3); font-variant-numeric:tabular-nums;
+  letter-spacing:.02em; }
+.ms-hintline { font-size:.68rem; color:var(--ms-ink-3); margin-top:.55rem; padding-top:.45rem;
+  border-top:1px solid var(--ms-line); }
 .ms-errlist { margin:.25rem 0 0; padding-left:1.1rem; font-size:.76rem; color:var(--ms-ink-2); }
 .ms-absorb { color:var(--ms-ink-2); font-size:.72rem; margin-top:.3rem; }
 .ms-filt-sum { text-align:right; font-size:.78rem; color:var(--ms-ink-2); white-space:nowrap;

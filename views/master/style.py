@@ -243,6 +243,12 @@ GRID_CSS: dict[str, dict] = {
         "box-shadow": "0 0 0 6px transparent", "outline-offset": "6px",
     },
     ".md-act-rm:hover": {"background": TOKENS["danger-bg"], "border-color": "#C77B6B"},
+    # ---- native bool 체크박스(cellDataType='boolean') — accent=테마 primaryColor(navy) ----
+    # JsCode 없이 ag-grid 자체 렌더러가 전 행 일관 체크박스를 그린다(배포 3.14 회귀 방지).
+    # 편집 가능 셀은 포인터, 보호/비활성 행은 흐림으로 읽기전용 어포던스(상태 cascade 와 정합).
+    ".ag-checkbox-input-wrapper": {"cursor": "pointer"},
+    ".ms-row-inactive .ag-checkbox-input-wrapper, "
+    ".ms-row-protected .ag-checkbox-input-wrapper": {"opacity": ".5", "cursor": "default"},
     # ---- 행 상태 배경(상호 배타, 우선순위: error>delete>new>inactive>selected) ----
     # 합성 규칙(#5/#6): 배경은 셀(.ag-cell)에, 좌측 상태 바는 행(.ag-row)에 둔다. 상태 바와
     # 셀 box-shadow(dirty/error)가 서로 다른 요소를 써 box-shadow 슬롯이 겹치지 않으므로,

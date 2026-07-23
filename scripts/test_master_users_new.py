@@ -301,12 +301,14 @@ def test_editable_gate():
         ed = cc[c]["editable"].js_code
         check(f"{c} editable=보호행만 잠금", "_protected" in ed and "function(p)" in ed)
 
-    # 읽기전용 시각(ms-cell-readonly)은 잠금 조건과 동일 식으로 켜진다(외형·동작 일치).
-    check("사번 읽기전용 규칙(기존행)", "ms-cell-readonly" in cc["사번"]["cellClassRules"]
-          and "_row_state" in cc["사번"]["cellClassRules"]["ms-cell-readonly"])
+    # 읽기전용 시각(ms-cell-readonly): 보호행에만(사번 포함) — 저장행 과잉 틴트 회피(org 코드열과 동일).
+    check("사번 읽기전용 규칙(보호행)", "ms-cell-readonly" in cc["사번"]["cellClassRules"]
+          and "_protected" in cc["사번"]["cellClassRules"]["ms-cell-readonly"])
     check("성명 읽기전용 규칙(보호행)", "ms-cell-readonly" in cc["성명"]["cellClassRules"]
           and "_protected" in cc["성명"]["cellClassRules"]["ms-cell-readonly"])
     check("재직 읽기전용 규칙(보호행)", "ms-cell-readonly" in cc["재직"]["cellClassRules"])
+    # 재직 bool 은 native(cellDataType) — 화면에서 JsCode cellRenderer 를 지정하지 않는다.
+    check("재직 화면 JsCode 렌더러 미지정(native bool)", "cellRenderer" not in cc["재직"])
 
     # 셀 오류/변경 마커는 읽기전용과 병존한다(약화 금지).
     check("사번 오류·변경 마커 병존", "ms-cell-error" in cc["사번"]["cellClassRules"]
