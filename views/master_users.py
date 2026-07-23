@@ -88,7 +88,6 @@ _CONTENT_COLS = ["사번", "성명", "부서", "조", "직급"]
 # _EDIT_UNLESS_PROTECTED). 자연키(사번)는 신규행만 편집(저장행 잠금), 보호행(_protected)은
 # 데이터셀·재직토글을 잠근다. 일반 저장행의 성명/부서/조/권한/표시순서/재직 편집은 유지한다.
 _IS_PROTECTED_JS = "(data._protected === '1' || data._protected === 1)"
-_IS_EXISTING_JS = "(data._row_state !== 'new')"
 _EDIT_NEW_ONLY = JsCode("function(p){ return !!(p.data && p.data._row_state === 'new'); }")
 _EDIT_UNLESS_PROTECTED = JsCode(
     "function(p){ return !(p.data && (p.data._protected === '1' || p.data._protected === 1)); }"
@@ -436,8 +435,8 @@ _NAME_STATUS_RENDERER = JsCode(
         var hasErr = (d._error != null && d._error !== '' && d._error !== '{}');
         if(hasErr){ label = '오류'; fg = '#9A3B2E'; }
         else if(d._delete === '1' || d._delete === 1){ label = '퇴직예정'; fg = '#9A3B2E'; }
-        else if(d._protected === '1' || d._protected === 1){ label = '보호'; fg = '#5F5C55'; }
-        else if(d._inactive === '1' || d._inactive === 1){ label = '퇴직'; fg = '#908C83'; }
+        else if(d._protected === '1' || d._protected === 1){ label = '보호'; fg = '#1E3A6E'; }
+        else if(d._inactive === '1' || d._inactive === 1){ label = '퇴직'; fg = '#5F5C55'; }
         if(label){
           // 배경은 .ms-badge(transparent)로 행 상태색을 상속하고, 색·테두리(currentColor)만
           // 지정한다 — 틴트행(퇴직/삭제/보호/신규) 위 흰배지 충돌 해소(#2/#5).
@@ -807,7 +806,7 @@ def render(user: dict) -> None:
     if rows is None:
         _load_editor(state, params, dept_names, team_display)
         rows = state.get_rows()
-    _render_summary_chips(rows)
+    _render_summary_chips(rows, params, dept_names)
 
     bar_slot = st.container()      # 액션바(건수 계산 후 채움)
     banner_slot = st.container()   # 배너(삭제 확인/폐기 확인/원장/오류/flash 중 1)
@@ -903,9 +902,11 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str) -> MasterGrid
     # 데이터셀 편집 게이트: 사번(자연키)=신규행만, 그 외=보호행만 잠금(일반 저장행 편집 유지).
     # 읽기전용 시각(ms-cell-readonly)은 각 컬럼의 잠금 조건과 동일 식으로 켠다.
     col_config = {
+        # 사번(자연키)은 저장행에서 편집 불가(신규행만)지만, 읽기전용 틴트는 보호행에만 준다 —
+        # org 코드열과 동일(모든 저장행 과잉 틴트 회피). editable=false 자체가 키 잠금 어포던스.
         "사번": {"width": 128, "minWidth": 104, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY,
-                "cellClassRules": _cell_rules("사번", readonly=_IS_EXISTING_JS)},
+                "cellClassRules": _cell_rules("사번", readonly=_IS_PROTECTED_JS)},
         "성명": {"width": 132, "minWidth": 100, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellRenderer": _NAME_STATUS_RENDERER,
@@ -951,19 +952,42 @@ def _dept_option_values(state: DraftState) -> list:
     return list(_dept_labels(dept_names).values())
 
 
-def _render_summary_chips(rows: pd.DataFrame) -> None:
+def _render_summary_chips(rows: pd.DataFrame, params: dict, dept_names: dict) -> None:
+    """상단 요약 스트립 — 좌: 활성(비기본) 필터 상태 칩, 우: 결과 재직/퇴직 분포.
+
+    필터가 어떤 조건으로 좁혀졌는지 라벨로 명시한다(색만 아님). 모든 필터가 기본(전체)이면
+    좌측은 비운다. 결과 0건이어도 활성 필터 칩은 표시해 왜 비었는지 알린다.
+    """
     if rows is None or rows.empty:
         return
     existing = rows[rows["_row_state"] == "existing"]
-    if existing.empty:
+
+    filt = ""
+    if params.get("active") and params["active"] != "전체":
+        filt += chip_html(f"재직: {params['active']}", "lock")
+    if params.get("dept") and params["dept"] != _ALL:
+        filt += chip_html(f"부서: {dept_names.get(params['dept'], params['dept'])}", "lock")
+    if params.get("role") and params["role"] != _ALL:
+        filt += chip_html(f"권한: {_ROLE_TO_LABEL.get(params['role'], params['role'])}", "lock")
+    if params.get("search"):
+        filt += chip_html(f"검색: {params['search']}", "lock")
+
+    cnt = ""
+    if not existing.empty:
+        active = int(existing["재직"].map(grid_bool).sum())
+        retired = len(existing) - active
+        cnt = chip_html(f"재직 {active}", "ok")
+        if retired:
+            cnt += chip_html(f"퇴직 {retired}", "mute")
+
+    if not filt and not cnt:
         return
-    active = int(existing["재직"].map(grid_bool).sum())
-    retired = len(existing) - active
-    chips = chip_html(f"재직 {active}", "ok")
-    if retired:
-        chips += chip_html(f"퇴직 {retired}", "mute")
     st.markdown(
-        f"<div style='display:flex;justify-content:flex-end;gap:.3rem;margin:.1rem 0 .2rem'>{chips}</div>",
+        "<div style='display:flex;justify-content:space-between;align-items:center;"
+        "gap:.5rem;margin:.1rem 0 .2rem'>"
+        f"<div style='display:flex;gap:.3rem;flex-wrap:wrap'>{filt}</div>"
+        f"<div style='display:flex;gap:.3rem;flex:0 0 auto'>{cnt}</div>"
+        "</div>",
         unsafe_allow_html=True,
     )
 

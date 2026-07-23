@@ -155,12 +155,11 @@ _ROW_ACTION_CLICK = JsCode(
 )
 
 # ---------------------------------------------------------------------------
-# 공통 bool 표시 렌더러 — 가운데 고정 체크박스(표시 전용, navy accent, 클릭 불가).
-# ag-grid v34 자동 타입추론에 맡기면 빈 그리드·신규 행에서 값이 text 로 렌더돼 체크박스가
-# 사라지므로, bool 컬럼은 이 렌더러를 명시 지정한다(_build_column_defs 가 기본 적용).
-# 편집은 agCheckboxCellEditor(더블클릭/Space). null/None 은 표시상 미체크(false)로 일관
-# 처리하되 저장값은 변형하지 않는다(표시 전용 — pointerEvents:none, tabIndex:-1).
-# 화면이 col_config 로 cellRenderer 를 지정하면 그 값이 우선한다(setdefault).
+# [LEGACY / 미사용] 공통 bool 표시 렌더러(JsCode). **더 이상 기본 적용하지 않는다.**
+# JsCode 셀 렌더러는 Streamlit Cloud Python 3.14 배포 환경에서 실행되지 않아 체크박스가
+# 행마다 사라지는 High 회귀가 있었다(로컬 3.13 만 정상). 그래서 bool 표시는 native
+# ``cellDataType='boolean'``(ag-grid 자체 렌더러 — 환경·버전 무관)로 전환했다.
+# 이 심볼은 하위호환(외부 import 안전)을 위해 남겨두나 신규 사용 금지 — 배포에서 깨진다.
 # ---------------------------------------------------------------------------
 BOOL_DISPLAY_RENDERER = JsCode(
     """
@@ -275,7 +274,10 @@ def _build_column_defs(spec: MasterGridSpec) -> list[dict]:
                 if k != "cellClass":
                     col[k] = v
         if kind == "bool":
-            col.setdefault("cellRenderer", BOOL_DISPLAY_RENDERER)
+            # native bool: ag-grid 자체 boolean 렌더러/에디터를 쓴다(JsCode 미실행 배포에서도
+            # 전 행 일관 체크박스). 자동 타입추론에 맡기지 않고 명시해 빈 그리드·신규 행에서도
+            # text 로 흐르지 않게 한다. 화면 col_config 의 cellRenderer/cellDataType 는 우선.
+            col.setdefault("cellDataType", "boolean")
             col.setdefault("cellEditor", "agCheckboxCellEditor")
         defs.append(col)
     for meta in META_COLUMNS:
