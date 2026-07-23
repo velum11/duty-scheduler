@@ -642,8 +642,8 @@ def test_dashboard_render_scope_gate() -> None:
 
 def test_schedule_view_manager_scope_enforced() -> None:
     print("schedule_view MANAGER 잔존 조회조건 fail-closed(권한범위 재적용)")
-    from datetime import date as _date
     from streamlit.testing.v1 import AppTest
+    from views import workspace
 
     def run(user, stale_q):
         at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
@@ -665,22 +665,37 @@ def test_schedule_view_manager_scope_enforced() -> None:
                 return d.value
         return None
 
-    # 이전 사용자(ADMIN)가 남긴 dept=ALL 조회조건. MANAGER(1002, PET1)로 재진입.
-    stale = {"year": 2026, "month": 7, "dept": "(전체)", "team": "(전체)", "keyword": ""}
+    def md_of(at):
+        return " ".join(m.value for m in at.markdown)
+
+    ALL = workspace.ALL  # "(전체)" 센티널
+    # 이전 사용자(ADMIN)가 남긴 dept=ALL 조회조건. 이 잔존조회로 각 역할·부서를 검증.
+    stale = {"year": 2026, "month": 7, "dept": ALL, "team": ALL, "keyword": ""}
+
+    # (d) 유효 dept MANAGER(1002/PET1) → scoped(잔존 ALL 을 본인 부서로 축소)
     at = run({"role": "MANAGER", "dept_code": "PET1", "emp_no": "1002", "name": "이책임"}, stale)
-    check("MANAGER 잔존조회: 예외 없음", not at.exception)
+    check("유효 MANAGER 잔존조회: 예외 없음", not at.exception)
     grid = grid_of(at)
-    check("MANAGER 잔존조회: 그리드 렌더", grid is not None)
+    check("유효 MANAGER 잔존조회: 그리드 렌더", grid is not None)
     if grid is not None:
         emps = set(grid["사번"].astype(str))
         depts_shown = set(grid["부서"].astype(str))
-        check("잔존 ALL → 본인 부서(PET1)로 축소: 타 부서 직원(1005/PET2) 제외",
-              "1005" not in emps)
+        check("잔존 ALL → PET1 축소: 타 부서 직원(1005/PET2) 제외", "1005" not in emps)
         check("잔존 ALL 축소: 본인 부서 직원(1003) 포함", "1003" in emps)
-        check("표시 부서는 PET1 단일(권한범위 강제)",
-              depts_shown == {db.dept_name("PET1")})
+        check("표시 부서 PET1 단일(권한범위 강제)", depts_shown == {db.dept_name("PET1")})
 
-    # 대비: ADMIN 은 잔존 ALL 로 전체(PET1+PET2) 조회 유지
+    # 차단 케이스: dept 가 유효하지 않으면 전체조회로 새지 않고 blocked(그리드 미렌더).
+    for label, bad_dept in [
+        ("빈 dept", ""),
+        ("미존재 dept 코드", "NOPE"),
+        ("ALL 센티널 dept", ALL),
+    ]:
+        at_b = run({"role": "MANAGER", "dept_code": bad_dept, "emp_no": "9002", "name": "부서이상"}, stale)
+        check(f"MANAGER {label}: 예외 없음", not at_b.exception)
+        check(f"MANAGER {label}: 그리드 미렌더(전체조회 아님)", grid_of(at_b) is None)
+        check(f"MANAGER {label}: 차단 안내 표시", "소속 부서가 유효하지 않아" in md_of(at_b))
+
+    # (e) ADMIN 은 잔존 ALL 로 전체(PET1+PET2) 조회 유지(부서 미확정이어도 무영향)
     at2 = run({"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"}, stale)
     grid2 = grid_of(at2)
     check("ADMIN: 잔존 ALL 전체 유지(다중 부서 표시)",

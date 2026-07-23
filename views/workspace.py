@@ -797,13 +797,18 @@ def schedule_screen(user: dict, page_id: str) -> None:
 
     # MANAGER 권한범위 fail-closed 재적용: run_query 가 돌려준 저장 조회조건(이전
     # 사용자·타 부서·ALL 일 수 있음)에도 항상 본인 부서로 축소한다. 위젯 잠금만
-    # 믿지 않는다(잠금은 UX, 실제 데이터 경계는 여기서 강제). 유효 부서가 없으면 차단.
+    # 믿지 않는다(잠금은 UX, 실제 데이터 경계는 여기서 강제).
+    #
+    # scoped 되려면 본인 dept_code 가 (a) ALL 센티널이 아니고 (b) 실제 존재하는 부서
+    # 코드여야 한다. 빈값·ALL 센티널("(전체)")·미존재 코드는 모두 차단(blocked)한다 —
+    # 그러지 않으면 dept_code==ALL 인 부서를 배정/조작해 q["dept"]=ALL 로 부서 필터를
+    # 통째 건너뛰는 전체 노출 우회가 가능하다(_build_month_grid 는 ALL 이면 필터 생략).
     role = str(user.get("role") or "").strip().upper()
     if role == "MANAGER":
         manager_dept = str(user.get("dept_code") or "").strip()
-        if not manager_dept:
+        if not manager_dept or manager_dept == ALL or manager_dept not in dept_names:
             ui.empty_state(
-                "소속 부서가 지정되지 않아 근무표를 표시할 수 없습니다. "
+                "소속 부서가 유효하지 않아 근무표를 표시할 수 없습니다. "
                 "관리자에게 부서 지정을 요청하세요.",
                 head="월별 근무표",
             )
