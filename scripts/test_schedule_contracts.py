@@ -445,6 +445,13 @@ def test_dashboard_scope_and_safety() -> None:
     import numpy as _np
     check("NaN dept MANAGER → 차단(NA-safe)",
           dash._scope_for({"role": "MANAGER", "dept_code": _np.nan}) == ("blocked", None))
+    # 미지/비정상 역할은 유효 dept 가 있어도 scoped 로 새지 않고 차단(fail-closed)
+    check("미지 역할+유효 dept → 차단(scoped 아님)",
+          dash._scope_for({"role": "SUPERVISOR", "dept_code": "PET1"}) == ("blocked", None))
+    check("역할 공백+dept 있음 → 차단",
+          dash._scope_for({"role": "", "dept_code": "PET1"}) == ("blocked", None))
+    check("USER 역할도 _scope_for 상 차단(방어; render 는 상위서 개인요약 분기)",
+          dash._scope_for({"role": "USER", "dept_code": "PET1"}) == ("blocked", None))
     # 차단 MANAGER 는 결코 전체(ADMIN) 보드로 열리지 않는다: manager_dept 로 None 이
     # 넘어가지 않음을 계약으로 고정(전체 집계와 비교).
     admin_board, _, _ = dash._build_board(day, users, wt, manager_dept=None)
@@ -588,6 +595,51 @@ def test_month_grid_snapshot() -> None:
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
 
 
+def test_dashboard_render_scope_gate() -> None:
+    print("views.dashboard.render scope 게이트 회귀(blocked → _build_board 미호출)")
+    from datetime import date as _date
+    from views import dashboard as dash
+
+    # render() 를 직접 호출해 scope 게이트만 격리 검증한다(app.dispatch 라우팅·app_shell
+    # 과 무관). _build_board 를 spy 로 교체해 blocked 케이스에서 호출 0회(=데이터 미구성)
+    # 를, 허용 케이스에서 호출 발생을 확인한다. 읽기 전용 검증이라 어떤 저장도 없다.
+    calls = {"n": 0}
+    orig = dash._build_board
+
+    def _spy(*a, **k):
+        calls["n"] += 1
+        return ([], set(), {b: 0 for b in dash._BUCKET_ORDER})
+
+    st.session_state["dashboard_date"] = _date(2026, 7, 1)
+    st.session_state["dash_date_input"] = _date(2026, 7, 1)
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+
+    dash._build_board = _spy
+    try:
+        # blocked 케이스: 어느 것도 _build_board 를 호출하지 않는다(데이터 미노출).
+        for label, user in [
+            ("MANAGER 공백 dept", {"role": "MANAGER", "dept_code": "", "emp_no": "9998", "name": "공백부서장"}),
+            ("MANAGER None dept", {"role": "MANAGER", "dept_code": None, "emp_no": "9995", "name": "무부서장"}),
+            ("미지 역할+유효 dept", {"role": "SUPERVISOR", "dept_code": "PET1", "emp_no": "9997", "name": "미지역할"}),
+            ("역할 공백+유효 dept", {"role": "", "dept_code": "PET1", "emp_no": "9996", "name": "역할없음"}),
+        ]:
+            calls["n"] = 0
+            dash.render(user)
+            check(f"blocked({label}): _build_board 0회(fail-open 아님)", calls["n"] == 0)
+
+        # 허용 케이스: ADMIN·유효 MANAGER 는 _build_board 를 호출한다.
+        calls["n"] = 0
+        dash.render({"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"})
+        check("ADMIN: _build_board 호출(전체)", calls["n"] >= 1)
+
+        calls["n"] = 0
+        dash.render({"role": "MANAGER", "dept_code": "PET1", "emp_no": "1002", "name": "이책임"})
+        check("유효 MANAGER: _build_board 호출(부서 한정)", calls["n"] >= 1)
+    finally:
+        dash._build_board = orig
+
+
 def main() -> int:
     for test in (
         test_normalize_schedule_month,
@@ -601,6 +653,7 @@ def main() -> int:
         test_day_schedules,
         test_dashboard_board_contracts,
         test_dashboard_scope_and_safety,
+        test_dashboard_render_scope_gate,
         test_month_grid_snapshot,
     ):
         test()
