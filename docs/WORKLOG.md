@@ -4,6 +4,12 @@
 
 새 항목은 맨 위에 1~3개 bullet로 작성하고 오래된 항목은 제거합니다. 상세 과정은 Git diff와 작업 보고서에서 확인합니다.
 
+## 2026-07-24 · 아침 "다 돌리자" 마무리 — 미결 3건 해소 + feature push
+
+- 아침 "다 돌리자" 처리 완료(Codex 교차검증 게이트): ①그룹모델 문서충돌 → **사용자 결정 "migration 004(organization_groups) 정본화"** → requirements§104·database.md·CLAUDE.md 불변계약 참조를 004 모델로 정합(문서만). ②P1-2: schedule_view MANAGER 잔존 조회조건 **fail-closed 재적용 + auth.logout q_* 삭제 + 부서 유효성 ALL센티널·미존재 차단 하드닝**(Codex 승인). ③dept_group_map 조직조회 오류 전파(int(NaN) 크래시 부수 해소, Codex 승인). 회귀 all-green(schedule 124·login 29·unified 195 등), feature push.
+- §98(비활성 직원 과거근무): **무결성 계약(참조 유지)이며 데이터 계층이 이미 충족** — 조회화면 표시 변경은 별도 제품 판단이라 미변경(follow-up). .venv 깨진 참조는 이 머신에선 정상 확인(수정 안 함).
+- 남은 follow-up(비차단): §98 조회화면 표시 여부 제품 결정 · database.md §7에 004 후속(005 group_id NOT NULL·003 컬럼 제거) 목록화 · 대시보드 비차단 P3.
+
 ## 2026-07-24 · 밤샘 lee-mode 마무리 — 대시보드·조회 스냅샷 계약수정 + 거버넌스 SoT
 
 - 밤샘 lee-mode 운영을 Codex 교차검증 게이트로 마무리: 대시보드 재설계(MANAGER 부서범위 fail-closed·과거소속 월편성 스냅샷 우선·그룹 004 유지·P2 견고화, Codex 승인)와 `schedule_view` 월그리드(스냅샷 소속 우선 표시·필터 + repository 오류 전파로 빈 월 위장 제거·NA-safe, Codex 승인) 모두 반영. 회귀 all-green, feature push(Cloud=deploy 구조라 prod 미영향).
