@@ -795,6 +795,22 @@ def schedule_screen(user: dict, page_id: str) -> None:
         ui.empty_state("조회 조건을 선택한 후 조회하세요.", head="월별 근무표")
         return
 
+    # MANAGER 권한범위 fail-closed 재적용: run_query 가 돌려준 저장 조회조건(이전
+    # 사용자·타 부서·ALL 일 수 있음)에도 항상 본인 부서로 축소한다. 위젯 잠금만
+    # 믿지 않는다(잠금은 UX, 실제 데이터 경계는 여기서 강제). 유효 부서가 없으면 차단.
+    role = str(user.get("role") or "").strip().upper()
+    if role == "MANAGER":
+        manager_dept = str(user.get("dept_code") or "").strip()
+        if not manager_dept:
+            ui.empty_state(
+                "소속 부서가 지정되지 않아 근무표를 표시할 수 없습니다. "
+                "관리자에게 부서 지정을 요청하세요.",
+                head="월별 근무표",
+            )
+            return
+        if str(q.get("dept") or "") != manager_dept:
+            q = {**q, "dept": manager_dept, "team": ALL}  # 부서 밖 조 조건은 초기화
+
     display_of, color_of = work_type_display()
     grid, month_rows = _build_month_grid(q, display_of)
     if grid.empty:

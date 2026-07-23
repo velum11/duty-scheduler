@@ -146,6 +146,11 @@ def logout() -> None:
     _cookie_clear()
     for k in ("user", "auth_token", "nav_page"):
         st.session_state.pop(k, None)
+    # 화면별 저장 조회조건(run_query 의 q_* — 예: q_schedule_view/q_schedule_edit)을
+    # 지운다. 이전 사용자의 조회범위(부서 등)가 로그인 간 잔존해 다음 사용자에게
+    # 노출되는 stale 권한범위 누출을 막는다(fail-closed).
+    for k in [key for key in list(st.session_state.keys()) if str(key).startswith("q_")]:
+        st.session_state.pop(k, None)
 
 
 def get_current_user():
