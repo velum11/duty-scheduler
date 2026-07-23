@@ -4,6 +4,12 @@
 
 새 항목은 맨 위에 1~3개 bullet로 작성하고 오래된 항목은 제거합니다. 상세 과정은 Git diff와 작업 보고서에서 확인합니다.
 
+## 2026-07-23 · 밤샘 루프 — 대시보드 재설계 + 화면수정 통합 (feature 스테이징)
+
+- 조직형 위임(임원→부장→과장)으로 병렬 진행: 대시보드 부장(당일 그룹별 주간/야간/휴무 버킷 보드·‹전일/익일›+date_input·`get_day_schedules` SELECT-only, `2e8c24e`)·화면 대비수정 3건(선택대비 2.89→5.76·조직버튼 잘림0·사용자 인라인 3.35→6.67)·근무형태 부장(측정 결과 게이트 충족으로 무변경 결정). 모두 feature에 순차 merge(`c7132a5`, 8커밋 ahead·**미push**). 통합 회귀 all-green(schedule 61·sidebar 42·org 67·users·work_types 81·login 22)·compileall OK.
+- 워크스테이션 진단 확정: ORCA 네이티브 `worktree create`가 `runtime_unavailable`("Restart Orca") — 읽기(list)는 되나 생성 실패 = **Orca 앱 재시작(사용자 조치) 필요**. 해결안은 md·skill(lee-mode §4.6·§7.2·§3.1 조직형 위임, 프로젝트 PLAYBOOK, skill 파일)에 반영 완료, 실발동은 내장 isolation으로 폴백.
+- 열린 확인: 대시보드 supabase 분기(private `_schedule_rows`) 미측정, sample 데이터 07-01~12만 존재(오늘=빈 상태 정상). 최종 확정·deploy 승격은 **아침 사용자 실브라우저 sign-off** 후. 사용량 5시간 창 절약 페이싱 중(opus 서브 아껴 씀).
+
 ## 2026-07-23 · 디자인 QA 실패 → 거버넌스·프로세스 정비
 
 - 배포된 사용자·조직 관리 화면에서 명백한 시각 결함(행 선택 시 글씨=음영 대비 붕괴로 판독 불가, 조직 3열 액션바의 `새로고침` 버튼 잘림, 빈칸 과다)이 발견됨. 이 결함이 회귀 green + Codex 코드 점수 + DOM 구조 마커로 "5/5 DESIGN_GOOD"로 통과한 근본 원인 = **실렌더 시각 검증을 코드·DOM 구조 확인으로 대체하고 사용자 시각 승인 게이트를 생략**한 것.

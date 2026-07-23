@@ -25,6 +25,15 @@
 
 현재 미커밋 변경에 의존하는 작업은 active worktree에서 수행한다. 사용자의 명시적 요청이나 실제 checkout 충돌 없이 새 worktree를 만들지 않는다.
 
+## 병렬 worktree
+
+병렬 화면/기능 수정은 ORCA 네이티브 worktree로 발동한다(글로벌 §4.6·§7.2).
+
+- `orca worktree create --name <기능> --base-branch feature/supabase-crud --agent claude --prompt "<spec>" --json`로 만들어 보드에 노출한다. 메인 worktree에 claude를 여러 개 쌓지 않는다.
+- writeScope는 화면 파일 경계로 비중첩한다. 공용 `app.py`, `modules/ui.py`, `modules/nav.py`를 두 worktree가 동시에 수정하지 않는다.
+- 통합은 Coordinator가 메인 `feature/supabase-crud`에서 순차 `git merge` → 브라우저 육안 검증 → 사용자 승인 후에만 push한다(push는 곧 Streamlit Cloud 배포).
+- 머지 완료 후 `orca worktree rm`으로 정리한다. 커밋·머지·push는 사용자 승인 범위에서만 한다.
+
 ## 화면 목업
 
 레이아웃, 정보 구조, 시각 위계 또는 주요 상호작용을 바꾸는 화면 개발은 구현 전에 눈으로 확인할 수 있는 목업을 만든다.
