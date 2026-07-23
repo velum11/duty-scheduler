@@ -4,6 +4,12 @@
 
 새 항목은 맨 위에 1~3개 bullet로 작성하고 오래된 항목은 제거합니다. 상세 과정은 Git diff와 작업 보고서에서 확인합니다.
 
+## 2026-07-24 · 밤샘 lee-mode 마무리 — 대시보드·조회 스냅샷 계약수정 + 거버넌스 SoT
+
+- 밤샘 lee-mode 운영을 Codex 교차검증 게이트로 마무리: 대시보드 재설계(MANAGER 부서범위 fail-closed·과거소속 월편성 스냅샷 우선·그룹 004 유지·P2 견고화, Codex 승인)와 `schedule_view` 월그리드(스냅샷 소속 우선 표시·필터 + repository 오류 전파로 빈 월 위장 제거·NA-safe, Codex 승인) 모두 반영. 회귀 all-green, feature push(Cloud=deploy 구조라 prod 미영향).
+- 거버넌스: 위임·조직 룰을 lee-mode §1.3 단일 SoT로 통합(직급체계 4부장+Codex 거래처이사+운영기능·재귀 계층·순수위임+예외·모델 티어 haiku/sonnet/opus·Codex verify-not-veto·이의제기 의무·재개 안전), skill 항목7 조건부 Enter 정합.
+- 미결(아침 사용자 결정): ①그룹모델 문서충돌 — `requirements.md`§104/`docs/database.md`의 003 파생 표현 vs 적용된 migration 004(organization_groups 1급 테이블, 앱 전체 사용): 004 정본화 권장 vs 롤백, 파생 불변계약 변경이라 사용자 결정 필요. ②P1-2: schedule_view MANAGER `q_schedule_view` 잔존 + logout 미삭제 권한누출(`auth.py`, HIGH_RISK). ③전체 sign-off. follow-up: 대시보드 P2(render-skip spy·미지역할·dept_group_map 이중조회)·비활성 직원 과거근무 미표시(§98)·`.venv` 깨진 Python313 참조 정리.
+
 ## 2026-07-23 · 밤샘 루프 — 대시보드 재설계 + 화면수정 통합 (feature 스테이징)
 
 - 조직형 위임(임원→부장→과장)으로 병렬 진행: 대시보드 부장(당일 그룹별 주간/야간/휴무 버킷 보드·‹전일/익일›+date_input·`get_day_schedules` SELECT-only, `2e8c24e`)·화면 대비수정 3건(선택대비 2.89→5.76·조직버튼 잘림0·사용자 인라인 3.35→6.67)·근무형태 부장(측정 결과 게이트 충족으로 무변경 결정). 모두 feature에 순차 merge(`c7132a5`, 8커밋 ahead·**미push**). 통합 회귀 all-green(schedule 61·sidebar 42·org 67·users·work_types 81·login 22)·compileall OK.
