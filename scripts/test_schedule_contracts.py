@@ -307,6 +307,11 @@ def test_day_schedules() -> None:
     day_str = db.get_day_schedules("2026-07-01")
     check("ISO 문자열 입력 동등", len(day_str) == len(day))
 
+    # datetime(시간부 포함) 입력도 날짜로 정규화 — Supabase eq 어긋남 방지(P2-2)
+    from datetime import datetime as _dtm
+    day_dt = db.get_day_schedules(_dtm(2026, 7, 1, 13, 30))
+    check("datetime 시간부 정규화 동등", len(day_dt) == len(day))
+
     # 근무 없는 일자는 빈 계약 유지(오류 아님)
     empty = db.get_day_schedules(_date(2030, 1, 1))
     check("빈 일자 컬럼 계약", list(empty.columns) == db.SCHEDULE_COLUMNS)
@@ -317,6 +322,72 @@ def test_day_schedules() -> None:
     check("주간 코드 분류", db.classify_work_group("주", wt.get("주", {})) == "주간")
     check("야간 코드 분류", db.classify_work_group("야", wt.get("야", {})) == "야간")
     check("OFF 코드 분류", db.classify_work_group("OFF", wt.get("OFF", {})) == "OFF")
+
+
+def test_dashboard_board_contracts() -> None:
+    print("views.dashboard 보드 계약 (MANAGER 범위·스냅샷 소속·비활성 표시)")
+    from datetime import date as _date
+    from views import dashboard as dash
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    _seed_shift_groups()
+
+    day = db.get_day_schedules(_date(2026, 7, 1))
+    users = db.get_users()
+    wt = db.work_types_map()
+    merged = day.merge(users, on="emp_no", how="left")
+
+    # ADMIN(범위 없음): 근무행 전원 집계
+    board, present, totals = dash._build_board(day, users, wt)
+    admin_total = sum(g["total"] for g in board)
+    check("ADMIN 전체 집계 = 근무행 수", admin_total == len(day))
+    check("요약 totals 합 = 근무행 수", sum(totals.values()) == len(day))
+
+    # MANAGER 범위: 담당 부서만
+    some_dept = str(merged["dept_code"].dropna().astype(str).iloc[0])
+    mboard, _, _ = dash._build_board(day, users, wt, manager_dept=some_dept)
+    m_total = sum(g["total"] for g in mboard)
+    expected = int((merged["dept_code"].astype(str) == some_dept).sum())
+    check("MANAGER 부서 범위 필터 = 해당 부서 근무행", m_total == expected)
+    check("MANAGER 범위 < ADMIN 전체(부서 2개 이상 데이터)", m_total < admin_total)
+
+    def has_person(bd, person_name):
+        return any(
+            p["name"] == person_name
+            for g in bd for lst in g["buckets"].values() for p in lst
+        )
+
+    # 스냅샷 소속 우선: 1005(현재 PET2)에 2026-07 PET1 편성 → PET1 로 그룹핑
+    teams = db.get_teams()
+    t = str(teams[teams["dept_code"] == "PET1"].iloc[0]["team_code"])
+    db.upsert_month_assignments([{
+        "emp_no": "1005", "schedule_month": "2026-07",
+        "dept_code": "PET1", "team_code": t, "shift_group_code": "A",
+    }])
+    snap = dash._month_snapshot(_date(2026, 7, 1))
+    check("스냅샷 emp→dept 조회", snap.get("1005", ("", ""))[0] == "PET1")
+    b_pet1, _, _ = dash._build_board(day, users, wt, snap=snap, manager_dept="PET1")
+    b_pet2, _, _ = dash._build_board(day, users, wt, snap=snap, manager_dept="PET2")
+    check("스냅샷 부서(PET1)로 그룹핑", has_person(b_pet1, "정근무"))
+    check("현재 부서(PET2) 아님(스냅샷 우선·자동저장 없음)", not has_person(b_pet2, "정근무"))
+    # 스냅샷은 users 를 바꾸지 않는다(표시용)
+    check("스냅샷이 users 현재 소속 불변", db.find_user_by_emp_no("1005")["dept_code"] == "PET2")
+
+    # P2-4: 비활성 그룹은 재출현하지 않고 부서명으로 폴백(그룹 권위=활성 organization_groups)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    groups = db.get_org_groups().copy()
+    groups.loc[groups["group_code"] == "PET2", "group_name"] = "구분되는그룹명"
+    groups.loc[groups["group_code"] == "PET2", "is_active"] = False
+    db.save_org_groups(groups)
+    day2 = db.get_day_schedules(_date(2026, 7, 1))
+    board2, _, _ = dash._build_board(day2, db.get_users(), wt)
+    pet2_names = [g["name"] for g in board2 if g["code"] == "PET2"]
+    check("비활성 그룹명 미사용(재출현 방지)", "구분되는그룹명" not in pet2_names)
+    check("비활성 그룹 부서는 부서명으로 폴백", bool(pet2_names) and pet2_names[0] == db.dept_name("PET2"))
+
+    st.session_state.pop(db._ORG_GROUPS_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
 
 
 def main() -> int:
@@ -330,6 +401,7 @@ def main() -> int:
         test_snapshot_immune_to_user_master_change,
         test_month_roster,
         test_day_schedules,
+        test_dashboard_board_contracts,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")
