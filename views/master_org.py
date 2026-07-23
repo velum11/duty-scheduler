@@ -86,6 +86,12 @@ _PROBE_ERROR_MSG = "조직 스키마 상태 확인 실패 — 재확인이 필�
 
 _SYSTEM_CODES = {"ADMIN"}  # 화면 보호 대상(코드수정·미사용·삭제 차단)
 
+# 조직 3시트 전용 액션바 비율 — 공통 기본값 (1.5,1.3,1.4,3.2,1.6) 은 넓은 단일 컬럼
+# 화면(사용자·근무형태)용이라 우측 스페이서(3.2)가 크다. 좁은 3열 시트에서는 그 여백이
+# 4버튼을 밀어 '새로고침' 등이 잘리므로, 스페이서를 줄여 4버튼에 폭을 돌려준다(좌 3버튼
+# ·우 새로고침 그룹핑은 작은 스페이서로 유지 — 타 화면과 배치 일관성 보존).
+_ORG_BAR_RATIOS = (1.28, 1.0, 1.12, 0.2, 1.42)
+
 # 공통 컬럼(그룹·부서 시트). field 명이 곧 표시 헤더다.
 _GROUP_COLS = ["코드", "코드명", "순서", "비고", "사용"]
 _GROUP_ROW_COLS = ["_row_id", "_row_state", "_sel", *_GROUP_COLS]
@@ -127,11 +133,20 @@ _EDIT_UNLESS_PROTECTED = JsCode(
 # 3시트 세로 스택(≤1100px)은 공통 style 의 `stHorizontalBlock:has([class*="__sheet"])` 규칙.
 _ORG_PAGE_CSS = """
 <style>
-/* 시트 액션바 버튼은 절대 세로로 줄바꿈하지 않는다(좁은 폭에서도 눌림 방지). */
+/* 시트 액션바 버튼 — 좁은 3열 시트에서도 4버튼(행추가·삭제·저장·새로고침) 라벨이
+   전부 보이도록 압축 레이아웃으로 맞춘다. 세로 줄바꿈은 계속 금지(눌림 방지)하되,
+   라벨을 잘라내지 않는다(overflow:visible·clip 금지 — DESIGN.md §8 텍스트/버튼 잘림 금지).
+   폭 확보는 (1) 낭비되던 우측 스페이서를 줄인 org 전용 액션바 비율(_ORG_BAR_RATIOS)과
+   (2) 아래 패딩·간격·아이콘 축소를 함께 쓴다. 다른 화면(사용자·근무형태)은 이 스코프
+   (.st-key-org_*__sheet)를 쓰지 않으므로 영향받지 않는다. */
 .st-key-org_group__sheet div.stButton > button,
 .st-key-org_dept__sheet div.stButton > button,
 .st-key-org_unit__sheet div.stButton > button {
-  white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  white-space:nowrap; min-width:0; overflow:visible; text-overflow:clip;
+  padding-left:.34rem; padding-right:.34rem; gap:.2rem; }
+.st-key-org_group__sheet div.stButton > button [data-testid="stIconMaterial"],
+.st-key-org_dept__sheet div.stButton > button [data-testid="stIconMaterial"],
+.st-key-org_unit__sheet div.stButton > button [data-testid="stIconMaterial"] { font-size:15px; }
 
 /* ── (1) 선택 컨텍스트·계층 통합 브레드크럼 — 상단 .ms-ctx 를 스텝 경로로 강조 ── */
 .ms-ctx { padding:.5rem .8rem; font-size:.8rem; box-shadow:0 1px 0 rgba(0,0,0,.02); }
@@ -473,7 +488,8 @@ def _write_reason(readiness: ReadinessState) -> str | None:
 def _locked_action_bar(state: DraftState, readiness: ReadinessState) -> None:
     """상위 미선택 잠금 시트의 액션바 — 모든 write 비활성(버튼 키는 유지)."""
     reason = _write_reason(readiness) or "상위 항목을 먼저 선택하세요."
-    master_action_bar(state, sel_count=0, dirty_total=0, can_write=False, write_disabled_reason=reason)
+    master_action_bar(state, sel_count=0, dirty_total=0, can_write=False,
+                      write_disabled_reason=reason, ratios=_ORG_BAR_RATIOS)
 
 
 def _summary_chips(rows: pd.DataFrame, params: dict) -> None:
@@ -584,6 +600,7 @@ def _render_group_sheet(params: dict, readiness: ReadinessState, sel_group: str)
         master_action_bar(
             _GRP, sel_count=sel_count, dirty_total=total,
             can_write=readiness.write_enabled, write_disabled_reason=_write_reason(readiness),
+            ratios=_ORG_BAR_RATIOS,
         )
     with banner_slot:
         if pending:
@@ -834,7 +851,7 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
     with bar_slot, st.container(key=f"{_OD.page_id}__bar"):
         master_action_bar(
             _OD, sel_count=sel_count, dirty_total=total,
-            can_write=can_write, write_disabled_reason=reason,
+            can_write=can_write, write_disabled_reason=reason, ratios=_ORG_BAR_RATIOS,
         )
     with banner_slot:
         if pending:
@@ -1110,7 +1127,7 @@ def _render_unit_sheet(params: dict, readiness: ReadinessState, dept_code: str, 
     with bar_slot, st.container(key=f"{_OU.page_id}__bar"):
         master_action_bar(
             _OU, sel_count=sel_count, dirty_total=total,
-            can_write=can_write, write_disabled_reason=reason,
+            can_write=can_write, write_disabled_reason=reason, ratios=_ORG_BAR_RATIOS,
         )
     with banner_slot:
         if pending:
