@@ -141,7 +141,7 @@ _PAGE_CSS = """
 .ms-chip.del    { background:var(--ms-danger-bg);  color:var(--ms-danger);  border:1px solid #E7CDC7; }
 .ms-chip.ok     { background:var(--ms-success-bg); color:var(--ms-success); border:1px solid #C7DfCF; }
 .ms-chip.warn   { background:var(--ms-warn-bg);    color:var(--ms-warn);    border:1px solid #E7D9A8; }
-.ms-chip.mute   { background:var(--ms-surface-3);  color:var(--ms-ink-3);   border:1px solid var(--ms-line); }
+.ms-chip.mute   { background:var(--ms-surface-3);  color:var(--ms-ink-2);   border:1px solid var(--ms-line); } /* ink-3→ink-2: surface-3 위 대비 2.89→5.76 (§2) */
 .ms-chip.lock   { background:var(--ms-surface-3);  color:var(--ms-ink-2);   border:1px solid var(--ms-line-strong); }
 /* readiness 배지 — 모드 배지와 분리 */
 .ms-ready { display:inline-flex; align-items:center; gap:.35rem; padding:.22rem .55rem; border-radius:6px;
@@ -252,8 +252,12 @@ GRID_CSS: dict[str, dict] = {
     # 셀 box-shadow(dirty/error)가 서로 다른 요소를 써 box-shadow 슬롯이 겹치지 않으므로,
     # 행 상태와 셀 dirty/error 신호가 동시에 사라지지 않고 함께 유지된다.
     ".ms-row-selected .ag-cell": {"background": TOKENS["selected-bg"] + " !important"},
+    # 비활성/보호 행 본문: 상태 배경(surface-3) 위에서도 본문 대비 ≥4.5:1 을 유지해야 하므로
+    # 가장 옅은 ink-3(surface-3 위 2.89:1, 선택 틴트 위 2.87:1 — §2 위반)이 아니라 대응 진한색
+    # ink-2(surface-3 위 5.76:1, 선택 틴트 위 5.70:1)를 쓴다. '미사용/퇴직/보호' 배지로 상태를
+    # 이중부호화하므로 톤을 낮추되 글자는 읽힌다(§2 본문 대비·색만으로 상태표현 금지 동시 충족).
     ".ms-row-inactive .ag-cell": {"background": TOKENS["surface-3"] + " !important",
-                                  "color": TOKENS["ink-3"] + " !important"},
+                                  "color": TOKENS["ink-2"] + " !important"},
     ".ms-row-new .ag-cell": {"background": TOKENS["info-bg"] + " !important"},
     ".ms-row-delete .ag-cell": {"background": TOKENS["danger-bg"] + " !important"},
     ".ms-row-error .ag-cell": {"background": TOKENS["danger-bg"] + " !important"},
@@ -286,7 +290,8 @@ GRID_CSS: dict[str, dict] = {
     ".ms-chip.del": {"background": TOKENS["danger-bg"], "color": TOKENS["danger"], "border": "1px solid #E7CDC7"},
     ".ms-chip.ok": {"background": TOKENS["success-bg"], "color": TOKENS["success"], "border": "1px solid #C7DFCF"},
     ".ms-chip.warn": {"background": TOKENS["warn-bg"], "color": TOKENS["warn"], "border": "1px solid #E7D9A8"},
-    ".ms-chip.mute": {"background": TOKENS["surface-3"], "color": TOKENS["ink-3"], "border": "1px solid " + TOKENS["line"]},
+    # mute 칩: surface-3 배경 위 ink-3 은 2.89:1 로 §2(보조 ≥3:1) 미만 → 대응 진한 ink-2(5.76:1).
+    ".ms-chip.mute": {"background": TOKENS["surface-3"], "color": TOKENS["ink-2"], "border": "1px solid " + TOKENS["line"]},
     ".ms-chip.lock": {"background": TOKENS["surface-3"], "color": TOKENS["ink-2"], "border": "1px solid " + TOKENS["line-strong"]},
     # ---- 렌더러 상태 배지(행 상태색 인지) — 인라인 #FFFFFF 배경 대신 이 class 사용 ----
     # 배경 transparent 로 행 상태 배경(선택/신규/삭제/오류)을 그대로 상속하고, 색/테두리는
