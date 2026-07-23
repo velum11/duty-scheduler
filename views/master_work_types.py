@@ -237,9 +237,17 @@ _DUP_REFRESH = JsCode(
 )
 
 
+# 자연키(코드) 잠금 — org/users 와 동일 계약. 코드는 근무표 스케줄이 참조하는 FK 안정키라
+# 저장행에서 편집을 막는다(저장은 upsert 라 코드 변경 = 신규 간주 → 참조 orphan 위험).
+# 신규 행에서만 편집 가능하고, 저장행엔 읽기전용 틴트(공통 .ms-cell-readonly)를 켠다.
+_EDIT_NEW_ONLY = JsCode("function(p){ return !!(p.data && p.data._row_state === 'new'); }")
+_CODE_READONLY_RULES = {"ms-cell-readonly": "data._row_state !== 'new'"}
+
+
 # ---- 컬럼 폭·정렬(디자인 계약 §4·mockup) ----
 _COL_WIDTHS = {
-    "코드": {"width": 108, "minWidth": 88, "pinned": "left", "cellClass": "md-c-left"},
+    "코드": {"width": 108, "minWidth": 88, "pinned": "left", "cellClass": "md-c-left",
+            "editable": _EDIT_NEW_ONLY},
     "명칭": {"width": 118, "minWidth": 96, "cellClass": "md-c-left"},
     "분류": {"width": 96, "minWidth": 76, "cellClass": "md-c-left", "cellRenderer": _CATEGORY_RENDERER},
     "약칭": {"width": 130, "minWidth": 96, "cellClass": "md-c-left", "cellRenderer": _SHORT_LABEL_RENDERER},
@@ -309,6 +317,8 @@ def _col_config() -> dict:
     for col in _USER_COLS:
         entry = dict(_COL_WIDTHS.get(col, {"cellClass": "md-c-left"}))
         rules = {**style.cell_error_rule(col), **style.cell_dirty_rule(col)}
+        if col == "코드":
+            rules.update(_CODE_READONLY_RULES)  # 저장행 코드 읽기전용 어포던스(org/users 계약)
         entry["cellClassRules"] = rules
         cfg[col] = entry
     return cfg

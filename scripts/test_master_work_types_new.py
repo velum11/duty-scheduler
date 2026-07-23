@@ -209,6 +209,27 @@ def test_preview_color_short_label_contract() -> None:
     check("조밀 스트립 스타일 유지(.ms-sw)", ".ms-sw" in m._EXTRA_CSS)
 
 
+# ===== 1-6) 자연키(코드) 저장행 잠금 계약 (org/users 동일) =====
+def test_code_natural_key_locked() -> None:
+    print("코드(자연키) 저장행 잠금 — editable=_EDIT_NEW_ONLY + 저장행 읽기전용 틴트")
+    from views import master_work_types as m
+
+    # 신규행만 편집 가능한 predicate 정의(org/users 와 동일 식).
+    pred = str(m._EDIT_NEW_ONLY.js_code)
+    check("_EDIT_NEW_ONLY predicate 정의", "_row_state === 'new'" in pred)
+    check("저장행 읽기전용 룰(ms-cell-readonly)", m._CODE_READONLY_RULES ==
+          {"ms-cell-readonly": "data._row_state !== 'new'"})
+
+    cfg = m._col_config()
+    check("코드 열 editable 게이트 = 신규행만", cfg["코드"].get("editable") is m._EDIT_NEW_ONLY)
+    check("코드 열에 저장행 읽기전용 틴트 룰 병합",
+          cfg["코드"]["cellClassRules"].get("ms-cell-readonly") == "data._row_state !== 'new'")
+    # 다른 편집 컬럼(명칭)은 저장행 잠금 대상이 아님(자연키만 잠금).
+    check("명칭 열은 자연키 잠금 미적용", "ms-cell-readonly" not in cfg["명칭"]["cellClassRules"])
+    check("코드 열 error/dirty 하이라이트 유지",
+          any(k for k in cfg["코드"]["cellClassRules"] if k != "ms-cell-readonly"))
+
+
 # ===== 2) _validate 하위호환 =====
 def test_validate_backward_compat() -> None:
     print("_validate 하위호환 ((records, errors), 색상 보존, 필수값)")
@@ -334,6 +355,7 @@ def main() -> int:
         test_action_bar_above_grid,
         test_unified_redesign_features,
         test_preview_color_short_label_contract,
+        test_code_natural_key_locked,
         test_partial_success_ledger_wiring,
         test_delete_error_handling,
         test_validate_backward_compat,
