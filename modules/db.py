@@ -1312,6 +1312,32 @@ def get_month_schedules(emp_nos, year: int, month: int) -> pd.DataFrame:
     ].copy()
 
 
+def get_day_schedules(the_date) -> pd.DataFrame:
+    """지정 일자의 전체 근무내역(long format, SCHEDULE_COLUMNS)을 조회한다.
+
+    대시보드 그룹 보드 전용 **읽기 전용** 조회이며 저장 계약과 무관하다.
+    the_date 는 ``datetime.date`` 또는 ISO 문자열('YYYY-MM-DD') 를 받는다.
+
+    sample 모드는 세션 스토어를 일자로 필터하고, supabase 모드는 근무일자 eq
+    조건으로 조회한다(get_month_schedules 와 같은 _schedule_rows 패턴 준용).
+    문자열 접두어 비교 대신 실제 날짜로 해석해, ISO 가 아닌 문자열이나
+    datetime 으로 저장된 기존 행 누락을 피한다.
+    """
+    iso = the_date.isoformat() if hasattr(the_date, "isoformat") else str(the_date).strip()
+    if not is_sample_mode():
+        return supabase_repository._schedule_rows(
+            lambda query: query.eq("work_date", iso).order("user_id")
+        )
+    df = get_schedules()
+    if df.empty:
+        return df.iloc[0:0].copy()
+    target = pd.to_datetime(iso, errors="coerce")
+    if pd.isna(target):
+        return df.iloc[0:0].copy()
+    duty_dates = pd.to_datetime(df["duty_date"], errors="coerce")
+    return df[duty_dates.dt.normalize() == target.normalize()].reset_index(drop=True).copy()
+
+
 # --- Supabase 운영·검증 API ---
 def test_connection() -> dict[str, int]:
     if is_sample_mode():

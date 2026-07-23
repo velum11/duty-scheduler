@@ -293,6 +293,32 @@ def test_month_roster() -> None:
     check("빈 근무 계약", list(schedules.columns) == db.SCHEDULE_ASSIGNED_COLUMNS)
 
 
+def test_day_schedules() -> None:
+    print("db.get_day_schedules (sample 모드, 대시보드 조회 전용)")
+    from datetime import date as _date
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    day = db.get_day_schedules(_date(2026, 7, 1))
+    check("일자 조회 컬럼 계약", list(day.columns) == db.SCHEDULE_COLUMNS)
+    check("샘플 07-01 근무 5건", len(day) == 5)
+    check("모든 행이 대상 일자", set(day["duty_date"].astype(str).str[:10]) == {"2026-07-01"})
+
+    # ISO 문자열 입력도 date 와 동일하게 동작
+    day_str = db.get_day_schedules("2026-07-01")
+    check("ISO 문자열 입력 동등", len(day_str) == len(day))
+
+    # 근무 없는 일자는 빈 계약 유지(오류 아님)
+    empty = db.get_day_schedules(_date(2030, 1, 1))
+    check("빈 일자 컬럼 계약", list(empty.columns) == db.SCHEDULE_COLUMNS)
+    check("빈 일자 0건", empty.empty)
+
+    # 버킷 분류 계약: OFF→휴무, 주간/야간, 휴가(연차·출산 등)
+    wt = db.work_types_map()
+    check("주간 코드 분류", db.classify_work_group("주", wt.get("주", {})) == "주간")
+    check("야간 코드 분류", db.classify_work_group("야", wt.get("야", {})) == "야간")
+    check("OFF 코드 분류", db.classify_work_group("OFF", wt.get("OFF", {})) == "OFF")
+
+
 def main() -> int:
     for test in (
         test_normalize_schedule_month,
@@ -303,6 +329,7 @@ def main() -> int:
         test_facade_upsert_assignments,
         test_snapshot_immune_to_user_master_change,
         test_month_roster,
+        test_day_schedules,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")
