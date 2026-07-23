@@ -26,7 +26,6 @@ from datetime import date
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 from st_aggrid import JsCode
 
 from modules import db, ui
@@ -76,12 +75,17 @@ def render(user: dict) -> None:
         st.session_state["se_d"] = q_prev["dept"]
         st.session_state["se_t"] = q_prev["team"]
 
+    # 위젯 key 를 session_state 로 관리하므로 default(index)를 함께 주지 않는다
+    # (Streamlit "default value + Session State API" 경고 방지). 값은 여기서 초기화.
+    st.session_state.setdefault("se_y", today.year)
+    st.session_state.setdefault("se_m", today.month)
+
     # 조회 조건 카드 (기존 디자인 유지)
     with ui.card():
         c1, c2, c3, c4, c5 = st.columns([1, 1, 1.6, 1.2, 0.9], vertical_alignment="bottom")
-        year = c1.selectbox("연도", years, index=years.index(today.year), key="se_y")
+        year = c1.selectbox("연도", years, key="se_y")
         month = c2.selectbox(
-            "월", list(range(1, 13)), index=today.month - 1,
+            "월", list(range(1, 13)),
             format_func=lambda m: f"{m}월", key="se_m",
         )
         if manager_locked:
@@ -232,12 +236,13 @@ def render(user: dict) -> None:
     elif st.session_state.get("nav_guard", {}).get("owner") == "schedule_edit":
         st.session_state.pop("nav_guard", None)
 
-    # 브라우저 새로고침/탭 닫기 경고 (best effort — 브라우저 기본 문구 표시)
-    components.html(
-        "<script>window.parent.onbeforeunload = "
+    # 브라우저 새로고침/탭 닫기 경고 (best effort — 브라우저 기본 문구 표시).
+    # st.html 은 iframe 이 아니라 메인 문서에 삽입되므로 window(=앱 최상위)에 직접 건다.
+    st.html(
+        "<script>window.onbeforeunload = "
         + ("function(e){e.preventDefault(); e.returnValue='';};" if dirty else "null;")
         + "</script>",
-        height=0,
+        unsafe_allow_javascript=True,
     )
 
     # 미저장 이탈 확인 (사이드바 이동/로그아웃 = ui.request_nav 보류분, 조건 변경 = scope).
