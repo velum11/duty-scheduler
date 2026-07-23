@@ -839,30 +839,40 @@ def schedule_screen(user: dict, page_id: str) -> None:
         )
 
 
+def _clean(value) -> str:
+    """pandas NA-safe 문자열 정규화 — None/NaN/pd.NA → ''(폴백), 그 외 str.strip()."""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass  # 배열·비스칼라 등 isna 판정 불가 값은 그대로 문자열화
+    return str(value).strip()
+
+
 def _month_assignment_snapshot(year: int, month: int) -> dict:
     """대상 월의 부서·조 편성 스냅샷 {emp_no: (dept_code, team_code)}.
 
     영속 저장(schedule_assignments — 직원·월 편성 1건)을 조회한다. 스냅샷은 근무표
     작성 당시의 소속을 보존하므로, 과거 월을 조회할 때 인사이동 이후의 현재 소속이
     아니라 그 당시 소속으로 표시·필터하기 위한 기준이다(requirements.md §5·불변계약).
-    테이블 미적용/조회 실패 시 빈 맵을 반환해 호출부가 현재 소속으로 폴백한다.
-    (schedule_edit._assignment_snapshots 와 같은 '스냅샷 우선, 현재는 폴백' 패턴 —
-    단 조회 화면은 편집 세션 draft 를 읽지 않고 영속 스냅샷만 사용한다.)
+
+    조회 계약(정상 빈 결과 vs repository 오류 구분): **정상 빈 월은 빈 맵({})** 으로
+    폴백해 호출부가 현재 소속을 표시하게 하되, **repository 오류(네트워크·인증·매핑
+    등 DATA_SOURCE_ERRORS)는 삼키지 않고 전파**한다 — app.main 상위 핸들러가 오류로
+    표시하고, 스냅샷이 있는데 조회만 실패한 상황을 '빈 월'로 위장하지 않는다.
+    dashboard._month_snapshot 와 동일한 무-스왈로우 패턴이며, 행 변환(맵 구성)도
+    별도 try 로 감싸지 않아 매핑 오류까지 전파된다.
     """
-    try:
-        assigns = db.get_month_assignments(int(year), int(month))
-    except Exception:
-        return {}  # 002 미적용 등 — 조회 실패는 현재 소속 폴백
+    assigns = db.get_month_assignments(int(year), int(month))
     snaps: dict = {}
     if assigns is None or assigns.empty:
         return snaps
     for _, r in assigns.iterrows():
-        emp = str(r.get("emp_no") or "").strip()
+        emp = _clean(r.get("emp_no"))
         if emp:
-            snaps[emp] = (
-                str(r.get("dept_code") or "").strip(),
-                str(r.get("team_code") or "").strip(),
-            )
+            snaps[emp] = (_clean(r.get("dept_code")), _clean(r.get("team_code")))
     return snaps
 
 
@@ -883,9 +893,9 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     snaps = _month_assignment_snapshot(q["year"], q["month"])
     eff_depts, eff_teams = [], []
     for _, u in users.iterrows():
-        emp = str(u["emp_no"]).strip()
+        emp = _clean(u.get("emp_no"))
         dept_code, team_code = snaps.get(
-            emp, (str(u["dept_code"] or "").strip(), str(u.get("team_code") or "").strip())
+            emp, (_clean(u.get("dept_code")), _clean(u.get("team_code")))
         )
         eff_depts.append(dept_code)
         eff_teams.append(team_code)

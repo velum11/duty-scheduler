@@ -541,6 +541,50 @@ def test_month_grid_snapshot() -> None:
     check("스냅샷 없는 월 → 빈 맵(현재 소속 폴백)",
           workspace._month_assignment_snapshot(2030, 1) == {})
 
+    # (b) 조(team)만 이동한 케이스도 스냅샷 우선 — 1002 를 같은 PET1 안에서 A→B 로 이동
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    check("전제: 1002 현재 조 A", db.find_user_by_emp_no("1002")["team_code"] == "A")
+    db.upsert_month_assignments([{
+        "emp_no": "1002", "schedule_month": "2026-07",
+        "dept_code": "PET1", "team_code": "B", "shift_group_code": "",
+    }], require_shift=False)
+
+    def grid_team(dept, team):
+        q = {"year": 2026, "month": 7, "dept": dept, "team": team, "keyword": ""}
+        g, _ = workspace._build_month_grid(q, disp)
+        return g
+
+    g_b = grid_team("PET1", "B")
+    emps_b = set(g_b["사번"].astype(str)) if not g_b.empty else set()
+    check("조 이동: 스냅샷 조(B)로 조회에 1002 포함", "1002" in emps_b)
+    if "1002" in emps_b:
+        team_cell = g_b[g_b["사번"].astype(str) == "1002"].iloc[0]["조"]
+        check("조 열이 스냅샷 조(B) 이름 표시", team_cell == db.team_name("PET1", "B"))
+    g_a = grid_team("PET1", "A")
+    emps_a = set(g_a["사번"].astype(str)) if not g_a.empty else set()
+    check("조 이동: 현재 조(A) 조회에서 1002 제외", "1002" not in emps_a)
+    check("조 이동: 미이동 A조 직원(1003) 유지", "1003" in emps_a)
+    check("조 이동도 users 마스터 불변(무쓰기)", db.find_user_by_emp_no("1002")["team_code"] == "A")
+
+    # (a) repository 오류는 조용한 현재소속 폴백이 아니라 DATA_SOURCE_ERRORS 전파
+    orig = db.get_month_assignments
+
+    def _repo_boom(*a, **k):
+        raise db.supabase_repository.SupabaseDataError("편성 조회 실패(모의)")
+
+    db.get_month_assignments = _repo_boom
+    try:
+        prop1 = raises(lambda: workspace._month_assignment_snapshot(2026, 7),
+                       db.DATA_SOURCE_ERRORS)
+        check("스냅샷 조회 repository 오류 전파(빈 월 위장 아님)", prop1 is not None)
+        prop2 = raises(
+            lambda: workspace._build_month_grid(
+                {"year": 2026, "month": 7, "dept": ALL, "team": ALL, "keyword": ""}, disp),
+            db.DATA_SOURCE_ERRORS)
+        check("월 그리드도 repository 오류 전파(현재소속 조용한 폴백 아님)", prop2 is not None)
+    finally:
+        db.get_month_assignments = orig
+
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
 
 
