@@ -44,6 +44,8 @@ Supabase 설정과 원격 테스트 절차는 `docs/supabase-setup.md`를 참고
 
 ## 테스트
 
+프로젝트 안전경계의 정본(SoT)은 `AGENTS.md`이며, 아래 테스트·원격 실행 관련 규칙은 원격 테스트/migration/Supabase 운영에 필요한 도메인별 구체화입니다.
+
 일반적인 변경은 수정 범위에 맞는 스크립트만 실행합니다.
 
 ```powershell

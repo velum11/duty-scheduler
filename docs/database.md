@@ -4,6 +4,8 @@
 
 ## 1. 데이터 접근
 
+프로젝트 안전경계의 정본(SoT)은 `AGENTS.md`이며, 아래 데이터 접근·보안·삭제 관련 규칙은 migration/Supabase 운영에 필요한 도메인별 구체화입니다.
+
 - 앱은 브라우저가 아니라 Streamlit 서버에서 Supabase에 접근합니다.
 - 현재 인증은 Supabase Auth가 아닌 사번 기반 앱 세션입니다.
 - service role key는 서버 환경변수 또는 `.streamlit/secrets.toml`에만 둡니다.

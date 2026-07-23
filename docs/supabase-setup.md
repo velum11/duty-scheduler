@@ -57,6 +57,8 @@ python scripts/test_migration_003_audit.py
 
 ## 3. 테스트 프로젝트 보호
 
+프로젝트 안전경계의 정본(SoT)은 `AGENTS.md`이며, 아래 §3·§4의 원격·쓰기 관련 규칙은 원격 테스트/migration/Supabase 운영에 필요한 도메인별 구체화입니다.
+
 원격 seed와 CRUD 테스트는 전용 테스트 프로젝트에서만 실행합니다. 코드가 쓰기를 허용하려면 다음 두 조건이 모두 필요합니다.
 
 - `[supabase].test_project = true` 또는 `DUTY_SUPABASE_TEST_PROJECT=true`
