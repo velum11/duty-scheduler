@@ -14,13 +14,22 @@
 
 ## 2. 현재 테이블
 
+### `organization_groups`
+
+조직 그룹 기준정보입니다(migration 004). 그룹은 부서 데이터에서 파생되는 값이 아니라 이 테이블이 SoT인 1급 레코드이며, 귀속 부서가 없어도 존속할 수 있습니다.
+
+- 자연키: `group_code`
+- 기본 정보: `group_name`, `sort_order`, `description`, `is_active`
+- 003의 `departments.department_group`/`group_sort_order` 컬럼 모델은 이 테이블로 대체되었습니다.
+
 ### `departments`
 
 부서 기준정보입니다.
 
 - 자연키: `dept_code`
 - 기본 정보: `dept_name`, `sort_order`, `is_active`
-- 조직 확장: `department_group`, `group_sort_order`
+- 조직 확장(004): `group_id`(FK → `organization_groups.id`, `on delete restrict`), `description`
+- 003의 `department_group`/`group_sort_order` 컬럼 서술은 004로 대체되었습니다(위 `organization_groups` 참고).
 
 ### `teams`
 
@@ -77,12 +86,13 @@
 ## 3. 관계
 
 ```text
-departments
-├─ teams
-├─ users
-├─ shift_groups
-└─ schedule_assignments
-   └─ work_schedules (선택적 연결)
+organization_groups
+└─ departments (group_id FK, on delete restrict)
+   ├─ teams
+   ├─ users
+   ├─ shift_groups
+   └─ schedule_assignments
+      └─ work_schedules (선택적 연결)
 
 users ── work_schedules
 work_types ── work_schedules
@@ -96,7 +106,8 @@ work_types ── work_schedules
 |---|---|---|---|
 | `001_initial_schema.sql` | 기본 5개 테이블·제약·인덱스·트리거 | 기준 migration | 적용됨 |
 | `002_schedule_assignments.sql` | `shift_groups`, `schedule_assignments`, 근무 연결 컬럼 | DDL 전용, 자동 백필 없음 | 2026-07-16 적용·종단 확인 |
-| `003_org_structure.sql` | 조직 그룹·운영단위 유형·사용자 표시순서 | guarded DDL + 제한적 안전 백필 | 2026-07-20 기준 미적용 |
+| `003_org_structure.sql` | 조직 그룹(→004로 대체됨)·운영단위 유형·사용자 표시순서 | guarded DDL + 제한적 안전 백필 | 2026-07-20 기준 미적용 — 그룹 컬럼(`department_group`/`group_sort_order`)은 004가 대체. `unit_type`/`display_order`는 004가 호환용으로 재추가하므로 003 미적용 상태에서도 앱은 정상 동작 |
+| `004_org_groups.sql` | `organization_groups` 1급 테이블 신설 + `departments.group_id` FK + 무손실 백필(경로 B) | guarded DDL + 무손실 백필, 003의 그룹 컬럼 모델 대체 | 2026-07-22 테스트 프로젝트 read-only probe 확인. 앱 코드(`modules/db.py`·`supabase_repository.py`·조직/사용자/근무형태/대시보드 화면)는 004를 권위로 전면 전환 완료 — 프로덕션 live schema 적용 여부는 세션별 read-only 확인 필요 |
 
 위의 환경 상태는 마지막 검증 기록입니다. 새로운 세션에서 적용 또는 미적용을 단정하기 전에 반드시 live schema를 다시 확인합니다.
 
@@ -109,7 +120,7 @@ work_types ── work_schedules
 - 사용자 승인 없이 migration을 실행하지 않습니다.
 - 부분 적용이 의심되면 DROP으로 맞추지 않고 read-only probe 후 forward completion 가능성을 먼저 판단합니다.
 - 002는 기존 근무를 현재 사용자 소속으로 자동 백필하지 않습니다.
-- 003 적용 뒤에는 앱 프로세스를 재시작해 조직 확장 readiness cache를 다시 확인합니다.
+- 004 적용 뒤에는 앱 프로세스를 재시작하거나 화면의 "스키마 재확인" 동작으로 조직 그룹 확장(`organization_groups` + `departments.group_id`) readiness cache를 다시 확인합니다.
 
 ## 6. Sample 데이터
 

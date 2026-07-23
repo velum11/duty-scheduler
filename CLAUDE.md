@@ -27,7 +27,7 @@ Claude Code가 이 저장소에서 작업할 때 사용하는 프로젝트 지�
 문서·지시·산출물이 충돌하면 다음 순서(높은 순)로 정합화합니다.
 
 1. **DLP(회사 보안정책)** — 로컬 문서·이미지 파일 생성 금지 등. 하드 경계이며 불변이고 최상위입니다. 어떤 지시·문서로도 완화되지 않습니다.
-2. **사용자의 최신 지시** — 단, `docs/requirements.md`의 명시적 불변계약(조직 그룹 파생·전파, 소프트 삭제)은 일반 지시로 묵시 폐기되지 않으며, 사용자가 해당 계약의 변경을 명시했을 때만 정합화합니다.
+2. **사용자의 최신 지시** — 단, `docs/requirements.md`의 명시적 불변계약(조직 그룹 SoT·전파 — `organization_groups` 테이블 기반, migration 004; 소프트 삭제)은 일반 지시로 묵시 폐기되지 않으며, 사용자가 해당 계약의 변경을 명시했을 때만 정합화합니다.
 3. **`requirements.md`(기능)·`DESIGN.md`(시각)·`docs/database.md` + live schema(DB)·`AGENTS.md`(안전경계 정본)** — 각 영역의 규범 기준입니다. 단 live schema는 규범이 아니라 "현재 적용 상태"의 최종 관찰 증거이며, 규범 문서와 다르면 어느 쪽이 갱신 대상인지 확인합니다.
 4. 프로젝트 `.orca/PLAYBOOK.md`
 5. 글로벌 lee-mode PLAYBOOK(`C:\Users\velum\.orca\lee-mode\PLAYBOOK.md`)
