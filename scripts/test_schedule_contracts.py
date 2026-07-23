@@ -640,6 +640,53 @@ def test_dashboard_render_scope_gate() -> None:
         dash._build_board = orig
 
 
+def test_schedule_view_manager_scope_enforced() -> None:
+    print("schedule_view MANAGER 잔존 조회조건 fail-closed(권한범위 재적용)")
+    from datetime import date as _date
+    from streamlit.testing.v1 import AppTest
+
+    def run(user, stale_q):
+        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+        at.session_state["user"] = user
+        at.session_state["nav_page"] = "schedule_view"
+        at.session_state[db._ASSIGNMENTS_STORE] = db._typed_empty_frame(
+            db.SCHEDULE_ASSIGNMENT_COLUMNS
+        )  # 스냅샷 없음 → 현재 소속 표시
+        at.session_state["q_schedule_view"] = stale_q
+        return at.run()
+
+    def grid_of(at):
+        for d in at.dataframe:
+            try:
+                cols = list(d.value.columns)
+            except Exception:
+                continue
+            if "사번" in cols and "부서" in cols:
+                return d.value
+        return None
+
+    # 이전 사용자(ADMIN)가 남긴 dept=ALL 조회조건. MANAGER(1002, PET1)로 재진입.
+    stale = {"year": 2026, "month": 7, "dept": "(전체)", "team": "(전체)", "keyword": ""}
+    at = run({"role": "MANAGER", "dept_code": "PET1", "emp_no": "1002", "name": "이책임"}, stale)
+    check("MANAGER 잔존조회: 예외 없음", not at.exception)
+    grid = grid_of(at)
+    check("MANAGER 잔존조회: 그리드 렌더", grid is not None)
+    if grid is not None:
+        emps = set(grid["사번"].astype(str))
+        depts_shown = set(grid["부서"].astype(str))
+        check("잔존 ALL → 본인 부서(PET1)로 축소: 타 부서 직원(1005/PET2) 제외",
+              "1005" not in emps)
+        check("잔존 ALL 축소: 본인 부서 직원(1003) 포함", "1003" in emps)
+        check("표시 부서는 PET1 단일(권한범위 강제)",
+              depts_shown == {db.dept_name("PET1")})
+
+    # 대비: ADMIN 은 잔존 ALL 로 전체(PET1+PET2) 조회 유지
+    at2 = run({"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"}, stale)
+    grid2 = grid_of(at2)
+    check("ADMIN: 잔존 ALL 전체 유지(다중 부서 표시)",
+          grid2 is not None and len(set(grid2["부서"].astype(str))) >= 2)
+
+
 def main() -> int:
     for test in (
         test_normalize_schedule_month,
@@ -655,6 +702,7 @@ def main() -> int:
         test_dashboard_scope_and_safety,
         test_dashboard_render_scope_gate,
         test_month_grid_snapshot,
+        test_schedule_view_manager_scope_enforced,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")

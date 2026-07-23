@@ -100,6 +100,25 @@ check("login: form_submit_button(Enter=버튼 동일 제출)", "form_submit_butt
 check("login: auth.login 단일 경로", login_src.count("auth.login(") == 1)
 check("login: 성공 시 rerun 전환", "st.rerun()" in login_src)
 
+# 5) logout: 화면별 조회조건(q_*) 삭제로 stale 권한범위가 로그인 간 잔존하지 않음
+import streamlit as st  # noqa: E402
+
+st.session_state["user"] = {"emp_no": "1001", "role": "ADMIN"}
+st.session_state["auth_token"] = "tkn-x"
+st.session_state["nav_page"] = "schedule_view"
+st.session_state["q_schedule_view"] = {"dept": "(전체)", "team": "(전체)",
+                                       "year": 2026, "month": 7, "keyword": ""}
+st.session_state["q_schedule_edit"] = {"dept": "PET1", "team": "A"}
+st.session_state["keep_me"] = "preserve"  # 비-q 키는 보존
+auth.logout()
+check("logout: user 삭제", "user" not in st.session_state)
+check("logout: auth_token 삭제", "auth_token" not in st.session_state)
+check("logout: nav_page 삭제", "nav_page" not in st.session_state)
+check("logout: q_schedule_view(조회조건) 삭제", "q_schedule_view" not in st.session_state)
+check("logout: q_schedule_edit(조회조건) 삭제", "q_schedule_edit" not in st.session_state)
+check("logout: 무관 세션키는 보존", st.session_state.get("keep_me") == "preserve")
+check("logout 소스: q_ 접두 세션키 정리", 'startswith("q_")' in inspect.getsource(auth.logout))
+
 print(f"\n{PASS} passed, {len(FAIL)} failed")
 if FAIL:
     for f in FAIL:
