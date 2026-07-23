@@ -477,10 +477,12 @@ def _locked_action_bar(state: DraftState, readiness: ReadinessState) -> None:
 
 
 def _summary_chips(rows: pd.DataFrame, params: dict) -> None:
-    """표 위 요약 스트립 — 좌: 활성 필터 칩(사용 여부·검색), 우: 결과 사용/미사용 분포.
+    """표 위 요약 스트립 — 좌: 활성 필터 칩(사용 여부·검색), 우: 결과 사용 중/사용 안 함 분포.
 
-    사용자 관리(_render_summary_chips)와 동일하게 **현재 스코프/필터 결과** 기준으로 센다
-    (전체수 아님). 모든 필터가 기본이고 결과도 없으면 비운다.
+    사용자 관리(_render_summary_chips)와 동일 규칙: **현재 스코프/필터 결과** 기준으로 세고
+    (전체수 아님), 분포 칩 어휘는 필터 옵션어(사용 중/사용 안 함)와 통일한다. 결과가 0건이어도
+    활성(비기본) 필터 칩은 남겨 "왜 비었는지"를 알리고, 분포 칩만 결과가 있을 때 렌더한다.
+    모든 필터가 기본이고 결과도 없으면 비운다.
     """
     existing = rows[rows["_row_state"].astype(str) == "existing"] if rows is not None and not rows.empty \
         else pd.DataFrame(columns=["사용"])
@@ -493,9 +495,9 @@ def _summary_chips(rows: pd.DataFrame, params: dict) -> None:
     if not existing.empty:
         on = int(existing["사용"].map(grid_bool).sum())
         off = len(existing) - on
-        right = chip_html(f"사용 {on}", "ok")
+        right = chip_html(f"사용 중 {on}", "ok")
         if off:
-            right += chip_html(f"미사용 {off}", "mute")
+            right += chip_html(f"사용 안 함 {off}", "mute")
     if not left and not right:
         return
     st.markdown(
@@ -552,25 +554,17 @@ def _group_display(rows: pd.DataFrame, sel_group: str) -> pd.DataFrame:
 
 def _render_group_sheet(params: dict, readiness: ReadinessState, sel_group: str) -> pd.DataFrame:
     show_flash(_GRP)
-    if _GRP.has_pending_reload():
-        gate = discard_confirm_bar(_GRP)
-        if gate == "discard":
-            p = _GRP.apply_pending_reload()
-            st.session_state.pop(_GRP.delete_plan_key, None)
-            _load_groups(p if p is not None else params)
-            st.rerun()
-        elif gate == "cancel":
-            _GRP.cancel_pending_reload()
-            st.rerun()
-
+    # 폐기 게이트 대기 여부는 여기서 읽되(액션바 can_write 판단), 배너 렌더는 표준 순서대로
+    # 액션바 뒤 banner_slot 에서 한다.
+    pending = _GRP.has_pending_reload()
     plan = st.session_state.get(_GRP.delete_plan_key)
     rows = _GRP.get_rows()
     sheet_head("그룹", count=_existing_count(rows))
-    if plan:
-        _group_confirm_bar(plan, params, readiness)
 
-    _summary_chips(rows, params)           # 표 위 요약(현재 필터 결과 기준)
-    bar_slot = st.container()              # 액션바(표 위) — 건수 계산 후 채운다
+    # 표준 순서(users/worktype 통일): 요약칩 → __bar 액션바 → 확인/결과 배너 → 그리드.
+    _summary_chips(rows, params)
+    bar_slot = st.container()      # 액션바(keyed __bar) — 건수 계산 후 채운다
+    banner_slot = st.container()   # 확인/폐기 배너 — 액션바 뒤·그리드 앞
 
     spec = MasterGridSpec(
         page_id=_GRP.page_id, columns=_GROUP_GRID_COLUMNS, order=_GROUP_COLS,
@@ -586,11 +580,24 @@ def _render_group_sheet(params: dict, readiness: ReadinessState, sel_group: str)
     new_cnt, changed_cnt = _dirty_counts(_GRP, live, _GROUP_COLS)
     total = dirty_total(new_cnt, changed_cnt)
     _GRP.set_dirty(total > 0)
-    with bar_slot:
+    with bar_slot, st.container(key=f"{_GRP.page_id}__bar"):
         master_action_bar(
             _GRP, sel_count=sel_count, dirty_total=total,
             can_write=readiness.write_enabled, write_disabled_reason=_write_reason(readiness),
         )
+    with banner_slot:
+        if pending:
+            gate = discard_confirm_bar(_GRP)
+            if gate == "discard":
+                p = _GRP.apply_pending_reload()
+                st.session_state.pop(_GRP.delete_plan_key, None)
+                _load_groups(p if p is not None else params)
+                st.rerun()
+            elif gate == "cancel":
+                _GRP.cancel_pending_reload()
+                st.rerun()
+        if plan:
+            _group_confirm_bar(plan, params, readiness)
     count_strip(len(existing), new_cnt, changed_cnt, sel_count)
     return grid_df
 
@@ -797,26 +804,16 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
 
     # 상위(그룹) 전환 중 미저장 draft 폐기 게이트. 해소 전까지 pending 이 유지되며,
     # 그동안 이 시트의 write(행추가·삭제·저장)를 비활성해 옛 행 오귀속을 차단한다(§17).
+    # 게이트 배너 렌더는 표준 순서대로 액션바 뒤 banner_slot 에서 한다.
     pending = _OD.has_pending_reload()
-    if pending:
-        gate = discard_confirm_bar(_OD)
-        if gate == "discard":
-            _OD.apply_pending_reload()
-            st.session_state.pop(_OD.delete_plan_key, None)
-            _load_depts(params)
-            st.rerun()
-        elif gate == "cancel":
-            _OD.cancel_pending_reload()
-            st.rerun()
-
     plan = st.session_state.get(_OD.delete_plan_key)
     rows = _OD.get_rows()
     sheet_head("부서", count=_existing_count(rows), context=group_name)
-    if plan:
-        _dept_confirm_bar(plan, params, readiness)
 
-    _summary_chips(rows, params)           # 표 위 요약(현재 필터 결과 기준)
-    bar_slot = st.container()              # 액션바(표 위) — 건수 계산 후 채운다
+    # 표준 순서(users/worktype 통일): 요약칩 → __bar 액션바 → 확인/결과 배너 → 그리드.
+    _summary_chips(rows, params)
+    bar_slot = st.container()      # 액션바(keyed __bar) — 건수 계산 후 채운다
+    banner_slot = st.container()   # 확인/폐기 배너 — 액션바 뒤·그리드 앞
 
     spec = MasterGridSpec(
         page_id=_OD.page_id, columns=_DEPT_GRID_COLUMNS, order=_DEPT_COLS,
@@ -833,12 +830,25 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
     total = dirty_total(new_cnt, changed_cnt)
     _OD.set_dirty(total > 0)
     can_write = readiness.write_enabled and not pending
-    reason = _write_reason(readiness) or ("위의 미저장 변경 안내를 먼저 처리하세요." if pending else None)
-    with bar_slot:
+    reason = _write_reason(readiness) or ("미저장 변경 안내를 먼저 처리하세요." if pending else None)
+    with bar_slot, st.container(key=f"{_OD.page_id}__bar"):
         master_action_bar(
             _OD, sel_count=sel_count, dirty_total=total,
             can_write=can_write, write_disabled_reason=reason,
         )
+    with banner_slot:
+        if pending:
+            gate = discard_confirm_bar(_OD)
+            if gate == "discard":
+                _OD.apply_pending_reload()
+                st.session_state.pop(_OD.delete_plan_key, None)
+                _load_depts(params)
+                st.rerun()
+            elif gate == "cancel":
+                _OD.cancel_pending_reload()
+                st.rerun()
+        if plan:
+            _dept_confirm_bar(plan, params, readiness)
     count_strip(len(existing), new_cnt, changed_cnt, sel_count)
     return grid_df
 
@@ -1068,26 +1078,16 @@ def _render_unit_sheet(params: dict, readiness: ReadinessState, dept_code: str, 
 
     # 상위(부서) 전환 중 미저장 draft 폐기 게이트. 해소 전까지 이 시트의 write 를 비활성해
     # 옛 조 행이 새 부서 밑으로 오귀속·중복 생성되는 것을 차단한다(§17).
+    # 게이트 배너 렌더는 표준 순서대로 액션바 뒤 banner_slot 에서 한다.
     pending = _OU.has_pending_reload()
-    if pending:
-        gate = discard_confirm_bar(_OU)
-        if gate == "discard":
-            _OU.apply_pending_reload()
-            st.session_state.pop(_OU.delete_plan_key, None)
-            _load_units(dept_code, params)
-            st.rerun()
-        elif gate == "cancel":
-            _OU.cancel_pending_reload()
-            st.rerun()
-
     plan = st.session_state.get(_OU.delete_plan_key)
     rows = _OU.get_rows()
     sheet_head("조", count=_existing_count(rows), context=dept_name)
-    if plan:
-        _unit_confirm_bar(plan, dept_code, readiness)
 
-    _summary_chips(rows, params)           # 표 위 요약(현재 필터 결과 기준)
-    bar_slot = st.container()              # 액션바(표 위) — 건수 계산 후 채운다
+    # 표준 순서(users/worktype 통일): 요약칩 → __bar 액션바 → 확인/결과 배너 → 그리드.
+    _summary_chips(rows, params)
+    bar_slot = st.container()      # 액션바(keyed __bar) — 건수 계산 후 채운다
+    banner_slot = st.container()   # 확인/폐기 배너 — 액션바 뒤·그리드 앞
 
     spec = MasterGridSpec(
         page_id=_OU.page_id, columns=_UNIT_GRID_COLUMNS, order=_UNIT_COLS,
@@ -1106,12 +1106,25 @@ def _render_unit_sheet(params: dict, readiness: ReadinessState, dept_code: str, 
     total = dirty_total(new_cnt, changed_cnt)
     _OU.set_dirty(total > 0)
     can_write = readiness.write_enabled and not pending
-    reason = _write_reason(readiness) or ("위의 미저장 변경 안내를 먼저 처리하세요." if pending else None)
-    with bar_slot:
+    reason = _write_reason(readiness) or ("미저장 변경 안내를 먼저 처리하세요." if pending else None)
+    with bar_slot, st.container(key=f"{_OU.page_id}__bar"):
         master_action_bar(
             _OU, sel_count=sel_count, dirty_total=total,
             can_write=can_write, write_disabled_reason=reason,
         )
+    with banner_slot:
+        if pending:
+            gate = discard_confirm_bar(_OU)
+            if gate == "discard":
+                _OU.apply_pending_reload()
+                st.session_state.pop(_OU.delete_plan_key, None)
+                _load_units(dept_code, params)
+                st.rerun()
+            elif gate == "cancel":
+                _OU.cancel_pending_reload()
+                st.rerun()
+        if plan:
+            _unit_confirm_bar(plan, dept_code, readiness)
     count_strip(len(existing), new_cnt, changed_cnt, sel_count)
     return grid_df
 

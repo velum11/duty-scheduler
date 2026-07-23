@@ -143,8 +143,6 @@ _PAGE_CSS = """
 .ms-chip.warn   { background:var(--ms-warn-bg);    color:var(--ms-warn);    border:1px solid #E7D9A8; }
 .ms-chip.mute   { background:var(--ms-surface-3);  color:var(--ms-ink-3);   border:1px solid var(--ms-line); }
 .ms-chip.lock   { background:var(--ms-surface-3);  color:var(--ms-ink-2);   border:1px solid var(--ms-line-strong); }
-/* 드릴다운 활성(상위 시트에서 현재 하위를 열어둔 행) — 신규(info)와 물리적 구분: navy 틴트 */
-.ms-chip.link   { background:#E5EAF2;              color:var(--ms-navy);    border:1px solid #C6D2E4; }
 /* readiness 배지 — 모드 배지와 분리 */
 .ms-ready { display:inline-flex; align-items:center; gap:.35rem; padding:.22rem .55rem; border-radius:6px;
   font-size:.72rem; font-weight:600; }
@@ -290,8 +288,6 @@ GRID_CSS: dict[str, dict] = {
     ".ms-chip.warn": {"background": TOKENS["warn-bg"], "color": TOKENS["warn"], "border": "1px solid #E7D9A8"},
     ".ms-chip.mute": {"background": TOKENS["surface-3"], "color": TOKENS["ink-3"], "border": "1px solid " + TOKENS["line"]},
     ".ms-chip.lock": {"background": TOKENS["surface-3"], "color": TOKENS["ink-2"], "border": "1px solid " + TOKENS["line-strong"]},
-    # 드릴다운 활성(상위 시트에서 현재 하위를 열어둔 행) — navy 틴트(신규 info 와 구분)
-    ".ms-chip.link": {"background": "#E5EAF2", "color": TOKENS["navy"], "border": "1px solid #C6D2E4"},
     # ---- 렌더러 상태 배지(행 상태색 인지) — 인라인 #FFFFFF 배경 대신 이 class 사용 ----
     # 배경 transparent 로 행 상태 배경(선택/신규/삭제/오류)을 그대로 상속하고, 색/테두리는
     # 렌더러가 element.style.color 한 번만 지정한다(테두리 currentColor). 색+텍스트 이중부호화.

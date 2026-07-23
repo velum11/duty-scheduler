@@ -230,13 +230,23 @@ check("bool(사용) native 유지 — JsCode bool 렌더러 미사용(3.14 배�
 # ▸ 열림 중복칩 제거(행 강조로 충분) / 최소 열폭 축소로 1366·1280px 3열 적합.
 print("Codex 2차 — 액션바 표 위·필터결과 요약·중복칩 제거·열폭 축소")
 check("액션바 표 위(placeholder)로 3시트 통일(그리드 렌더 앞 bar_slot)",
-      src.count("bar_slot = st.container()") == 3 and src.count("with bar_slot:") == 3)
+      src.count("bar_slot = st.container()") == 3 and src.count("with bar_slot, st.container") == 3)
 check("필터/스코프 결과 요약 상단 통일(_summary_chips + chip_html, 3시트)",
       "chip_html" in src and src.count("_summary_chips(rows, params)") == 3)
+check("요약칩 분포 어휘를 필터 옵션(사용 중/사용 안 함)과 통일 — 옛 사용/미사용 칩 제거",
+      "사용 중 {on}" in src and "사용 안 함 {off}" in src
+      and "미사용 {off}" not in src and "사용 {on}" not in src)
+check("요약칩 0건 규칙 통일 — 활성 필터칩은 결과 0건에도 유지, 분포칩만 결과 있을 때",
+      'pd.DataFrame(columns=["사용"])' in src and "if not existing.empty:" in src
+      and "if not left and not right:" in src)
 check("▸ 열림 중복칩 제거 — 행 강조(ms-row-linked)로 충분",
       "_LINK_CHIP" not in src and "▸ 열림" not in src and "include_linked_rows=True" in src)
 check("최소 열폭 축소(1366·1280px 3열 가로스크롤·잘림 방지) — 코드명 minWidth 완화",
       "minWidth\": 116" not in src and "minWidth\": 106" not in src)
+check("액션바 keyed __bar 컨테이너로 3시트 통일(공통 여백·포커스 재사용)",
+      src.count(".page_id}__bar\")") == 3)
+check("표준 배너 순서 — 확인/폐기 배너를 액션바 뒤 banner_slot 로 이동(3시트)",
+      src.count("banner_slot = st.container()") == 3 and src.count("with banner_slot:") == 3)
 
 
 # ===== 3d) 부분성공 원장 API + 삭제 예외 처리 =====

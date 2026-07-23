@@ -951,17 +951,21 @@ def _normalize_hex(value: str):
 # ---------------------------------------------------------------------------
 # 근무표 미리보기 — color/약칭 단일 기준이 근무표·대시보드·개인 화면 색을 구동함을 시연.
 # ---------------------------------------------------------------------------
-def _render_preview(live: pd.DataFrame) -> None:
-    """근무표/대시보드 색·약칭 미리보기(DESIGN.md §150 계약) — 조밀 한 줄.
+_PREVIEW_CAP = 40  # 미리보기 스와치 상한(초과분은 '외 N개' 표식으로 알린다)
+
+
+def _preview_html(live: pd.DataFrame) -> str:
+    """근무표/대시보드 색·약칭 미리보기 HTML(순수, DESIGN.md §150 계약) — 조밀 한 줄.
 
     색상 스와치 + 약칭이 근무표·대시보드·개인 화면에 그대로 적용됨을 미리 보인다.
     편집 그리드와 겹치는 명칭·시간은 반복하지 않고 계약 정보(색·약칭)만 조밀하게 노출한다.
     약칭 셀은 근무표 렌더처럼 근무형태 색을 입혀(틴트 배경+색 텍스트) 적용 결과를 시연한다.
-    약칭이 비면 코드로 대체한다(색은 코드에 귀속).
+    약칭이 비면 코드로 대체한다(색은 코드에 귀속). 표시 대상이 상한을 넘으면 마지막에
+    '외 N개' 표식(전체 건수 tooltip)을 붙여 잘림을 알린다. 대상이 없으면 빈 문자열.
     """
     if live is None or live.empty:
-        return
-    sws = []
+        return ""
+    sws, total = [], 0
     for _, row in live.iterrows():
         if not grid_bool(row.get("사용")):
             continue
@@ -972,6 +976,9 @@ def _render_preview(live: pd.DataFrame) -> None:
         label = str(row.get("약칭") or "").strip() or code
         if not label:
             continue
+        total += 1
+        if len(sws) >= _PREVIEW_CAP:
+            continue  # 계속 세되(전체 건수), 렌더는 상한까지만
         name = str(row.get("명칭") or "").strip()
         title = " · ".join(x for x in (code, name) if x) or label
         sws.append(
@@ -980,16 +987,26 @@ def _render_preview(live: pd.DataFrame) -> None:
             f"<span class='c' style='background:{color}22;color:{color};'>{style.escape(label)}</span>"
             f"</span>"
         )
-        if len(sws) >= 40:
-            break
     if not sws:
-        return
-    st.markdown(
+        return ""
+    shown = len(sws)
+    more = total - shown
+    if more > 0:
+        sws.append(
+            f"<span class='ms-sw more' title='전체 {total}개 중 {shown}개 표시 · {more}개 더 있음'>"
+            f"<span class='c'>외 {more}개</span></span>"
+        )
+    return (
         "<div class='ms-preview'>"
         "<span class='ms-preview-t'>근무표 색·약칭 미리보기</span>"
-        f"<span class='ms-sws'>{''.join(sws)}</span></div>",
-        unsafe_allow_html=True,
+        f"<span class='ms-sws'>{''.join(sws)}</span></div>"
     )
+
+
+def _render_preview(live: pd.DataFrame) -> None:
+    html = _preview_html(live)
+    if html:
+        st.markdown(html, unsafe_allow_html=True)
 
 
 _EXTRA_CSS = """
@@ -1006,6 +1023,8 @@ _EXTRA_CSS = """
   border:1px solid rgba(0,0,0,.16); box-shadow:inset 0 0 0 1px rgba(255,255,255,.3); }
 .ms-sw .c { font-size:.7rem; font-weight:700; line-height:1; padding:.12rem .34rem;
   border-radius:4px; font-variant-numeric:tabular-nums; letter-spacing:.01em; }
+.ms-sw.more { border-style:dashed; }
+.ms-sw.more .c { color:var(--ms-ink-3); font-weight:600; padding:.12rem .2rem; }
 .ms-errlist { margin:.25rem 0 0; padding-left:1.1rem; font-size:.76rem; color:var(--ms-ink-2); }
 .ms-absorb { color:var(--ms-ink-2); font-size:.72rem; margin-top:.3rem; }
 </style>

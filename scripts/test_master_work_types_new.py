@@ -198,7 +198,7 @@ def test_preview_color_short_label_contract() -> None:
     print("미리보기 색·약칭 계약(DESIGN.md §150) — 색 스와치 + 약칭, 명칭·시간 중복 없음")
     import inspect
     from views import master_work_types as m
-    src = inspect.getsource(m._render_preview)
+    src = inspect.getsource(m._preview_html)
     # 계약 정보: 색상 스와치 + 약칭이 반드시 노출된다.
     check("미리보기 라벨은 약칭 우선(계약 정보)", 'row.get("약칭")' in src)
     check("미리보기에 솔리드 색상 스와치 노출", "class='d'" in src and "background:{color};" in src)
@@ -207,6 +207,38 @@ def test_preview_color_short_label_contract() -> None:
     # 밀도: 편집 그리드와 겹치는 명칭·시간 pill 반복은 하지 않는다(과다 세로 제거).
     check("명칭·시간 중복 pill 미노출", "class='nm'" not in src and "class='tm'" not in src)
     check("조밀 스트립 스타일 유지(.ms-sw)", ".ms-sw" in m._EXTRA_CSS)
+
+
+def _wt_rows(n: int):
+    """미리보기 대상 자격(사용·유효색·약칭)을 갖춘 n개 행 프레임."""
+    return _meta([
+        {"코드": f"C{i}", "명칭": f"근무{i}", "분류": "주간", "약칭": f"약{i}", "시작": "",
+         "종료": "", "색상": "#1E6FD9", "실근무": True, "특근수당": False, "설명": "",
+         "표시순서": str(i), "사용": True}
+        for i in range(n)
+    ])
+
+
+# ===== 1-5b) 미리보기 상한 초과 잘림 안내 (P3) =====
+def test_preview_truncation_notice() -> None:
+    print("미리보기 상한 초과 '외 N개' 표식(P3) — 상한 이하면 표식 없음")
+    from views import master_work_types as m
+    cap = m._PREVIEW_CAP
+    # 상한 이하: 표식 없음.
+    html_small = m._preview_html(_wt_rows(cap - 5))
+    check("상한 이하면 스와치 렌더", html_small.count("class='ms-sw'") == cap - 5)
+    check("상한 이하면 '외' 잘림 표식 없음", "외 " not in html_small and "ms-sw more" not in html_small)
+    # 정확히 상한: 표식 없음(잘림 아님).
+    html_exact = m._preview_html(_wt_rows(cap))
+    check("정확히 상한이면 잘림 표식 없음", "ms-sw more" not in html_exact)
+    # 상한 초과: 상한개 렌더 + '외 N개' 표식 + 전체 건수 tooltip.
+    over = cap + 7
+    html_big = m._preview_html(_wt_rows(over))
+    check("상한 초과 시 렌더는 상한까지만", html_big.count("class='ms-sw'") == cap)
+    check("상한 초과 시 '외 N개' 표식 추가", f"외 {over - cap}개" in html_big and "ms-sw more" in html_big)
+    check("잘림 표식 tooltip에 전체 건수 노출", f"전체 {over}개 중 {cap}개 표시" in html_big)
+    # 대상 없음: 빈 문자열.
+    check("미리보기 대상 없으면 빈 문자열", m._preview_html(_wt_rows(0)) == "")
 
 
 # ===== 1-6) 자연키(코드) 저장행 잠금 계약 (org/users 동일) =====
@@ -355,6 +387,7 @@ def main() -> int:
         test_action_bar_above_grid,
         test_unified_redesign_features,
         test_preview_color_short_label_contract,
+        test_preview_truncation_notice,
         test_code_natural_key_locked,
         test_partial_success_ledger_wiring,
         test_delete_error_handling,

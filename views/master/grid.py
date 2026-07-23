@@ -45,7 +45,8 @@ def live_rows(grid_df: pd.DataFrame) -> pd.DataFrame:
     return grid_df[grid_df["_removed"].fillna("").astype(str).str.strip() != "1"]
 
 
-# 그리드 높이 산정 상수 — _build_grid_options 의 headerHeight/rowHeight 와 일치시킨다.
+# 그리드 높이 산정·gridOptions 공통 단일 소스 — _build_grid_options 가 아래 상수를
+# headerHeight/rowHeight 로 그대로 사용한다(리터럴 중복 제거, 높이 계산과 값 불일치 방지).
 _GRID_HEADER_PX = 44   # headerHeight
 _GRID_ROW_PX = 40      # rowHeight
 _GRID_CHROME_PX = 16   # 테두리·가로 스크롤바 여유(불필요한 세로 스크롤바 방지)
@@ -311,7 +312,7 @@ def _build_grid_options(spec: MasterGridSpec) -> dict:
         "defaultColDef": {"resizable": True, "sortable": False, "filter": False},
         "suppressRowClickSelection": True,
         "suppressDragLeaveHidesColumns": True,
-        "rowHeight": 40, "headerHeight": 44,
+        "rowHeight": _GRID_ROW_PX, "headerHeight": _GRID_HEADER_PX,
         "overlayNoRowsTemplate": _NO_ROWS,
         "onCellClicked": _ROW_ACTION_CLICK,
         "rowClassRules": rules,

@@ -98,7 +98,7 @@ _F_ACTIVE, _F_DEPT, _F_ROLE, _F_SEARCH = "mu_active", "mu_dept", "mu_role", "mu_
 
 # readiness(migration 003 확장) 안내 문구 — 표시순서(display_order) 저장이 이 확장에 의존한다.
 _NOT_READY_MSG = (
-    "조직 확장 migration(003)이 아직 적용되지 않아 표시순서를 저장할 수 없습니다 — 조회·편집만 가능합니다."
+    "표시순서 기능이 아직 준비되지 않아 표시순서를 저장할 수 없습니다 — 조회·편집만 가능합니다."
 )
 _PROBE_ERROR_MSG = (
     "스키마 상태를 확인하지 못했습니다(권한·네트워크). '스키마 재확인' 후 다시 시도하세요."
@@ -693,7 +693,7 @@ def _save(state, grid_df, q, dept_names, team_resolve, team_display, ready: bool
         ]
         if blocked:
             row_errors = row_errors + [
-                "migration 003 미적용 상태에서는 표시순서를 저장할 수 없습니다: " + ", ".join(blocked)
+                "표시순서 기능이 준비되지 않아 다음 항목의 표시순서를 저장할 수 없습니다: " + ", ".join(blocked)
             ]
 
     ctx: dict = {}
@@ -854,7 +854,7 @@ def render(user: dict) -> None:
         master_action_bar(
             state, sel_count=sel_count, dirty_total=total_dirty, can_save=can_save,
             save_disabled_reason=(
-                None if can_save else "조직 확장 migration 003 적용 후 표시순서를 저장할 수 있습니다"
+                None if can_save else "표시순서 기능이 준비되면 저장할 수 있습니다 — 시스템 관리자에게 문의하세요"
             ),
         )
 
@@ -865,11 +865,11 @@ def render(user: dict) -> None:
 
     # ---- 푸터 상태 스트립 + 안내 캡션 ----
     count_strip(len(existing), new_filled, changed_count, sel_count)
-    st.caption("표시순서(display_order)는 부서 셀의 소속 그룹 기준으로 정렬·중복을 검증합니다.")
+    st.caption("표시순서는 부서의 소속 그룹별로 정렬하며, 같은 그룹 안에서 중복되지 않는지 확인합니다.")
     if not ready:
         st.caption(
-            "표시순서 컬럼(users.display_order, migration 003)이 아직 적용되지 않아 "
-            "표시순서를 입력하면 저장이 차단됩니다 — supabase/migrations/003_org_structure.sql 적용 후 사용하세요."
+            "표시순서 기능이 아직 준비되지 않아, 표시순서를 입력하면 저장이 차단됩니다 — "
+            "시스템 관리자에게 표시순서 사용 설정을 요청한 뒤 이용하세요."
         )
 
     # ---- 액션 처리(셀 편집 blur 와 경합해도 다음 rerun 에서 반드시 처리) ----
@@ -958,9 +958,13 @@ def _render_summary_chips(rows: pd.DataFrame, params: dict, dept_names: dict) ->
     필터가 어떤 조건으로 좁혀졌는지 라벨로 명시한다(색만 아님). 모든 필터가 기본(전체)이면
     좌측은 비운다. 결과 0건이어도 활성 필터 칩은 표시해 왜 비었는지 알린다.
     """
-    if rows is None or rows.empty:
-        return
-    existing = rows[rows["_row_state"] == "existing"]
+    # 결과가 0건이어도 활성 필터 칩은 남겨 "왜 비었는지"를 알린다(org _summary_chips 와 동일).
+    # 분포 칩(재직/퇴직)만 결과가 있을 때 렌더한다.
+    existing = (
+        rows[rows["_row_state"] == "existing"]
+        if rows is not None and not rows.empty
+        else pd.DataFrame(columns=["재직"])
+    )
 
     filt = ""
     if params.get("active") and params["active"] != "전체":

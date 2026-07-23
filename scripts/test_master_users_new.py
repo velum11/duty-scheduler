@@ -444,6 +444,40 @@ def test_readiness_gate_wired():
     check("저장 게이트가 readiness.write_enabled 로 통일", "ready = readiness.write_enabled" in src)
 
 
+def test_summary_chips_empty_keeps_filter():
+    """0건 결과에서도 활성(비기본) 필터 칩은 유지하되 분포 칩은 결과 있을 때만(P2b 통일)."""
+    captured: list[str] = []
+    orig = mu.st.markdown
+    mu.st.markdown = lambda html, **k: captured.append(html)
+    try:
+        empty = pd.DataFrame(columns=["_row_state", "재직"])
+        default = {"active": "전체", "dept": mu._ALL, "role": mu._ALL, "search": ""}
+
+        # (a) 0건 + 활성 필터: 필터 칩(lock) 유지, 분포 칩(ok/mute) 없음
+        mu._render_summary_chips(empty, {**default, "active": "퇴직"}, {})
+        html_a = captured[-1] if captured else ""
+        check("0건이어도 활성 필터 칩 표시", "ms-chip lock" in html_a and "재직 여부: 퇴직" in html_a)
+        check("0건이면 분포 칩(ok/mute) 미표시",
+              "ms-chip ok" not in html_a and "ms-chip mute" not in html_a)
+
+        # (b) 활성 필터 전무 + 0건: 아무것도 렌더 안 함(markdown 미호출)
+        before = len(captured)
+        mu._render_summary_chips(empty, default, {})
+        check("필터 없고 0건이면 아무 칩도 렌더 안 함", len(captured) == before)
+
+        # (c) 결과 있음 + 필터: 필터 칩과 분포 칩 공존(기존 계약 유지)
+        rows = pd.DataFrame([
+            {"_row_state": "existing", "재직": True},
+            {"_row_state": "existing", "재직": False},
+        ])
+        mu._render_summary_chips(rows, {**default, "search": "김"}, {})
+        html_c = captured[-1]
+        check("결과 있으면 필터 칩+분포 칩 공존",
+              "ms-chip lock" in html_c and "ms-chip ok" in html_c and "ms-chip mute" in html_c)
+    finally:
+        mu.st.markdown = orig
+
+
 def main():
     test_transform_ok()
     test_role_variants()
@@ -470,6 +504,7 @@ def main():
     test_readiness_state()
     test_head_badges_compose()
     test_readiness_gate_wired()
+    test_summary_chips_empty_keeps_filter()
 
     print("-" * 60)
     if _failures:
