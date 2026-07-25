@@ -137,7 +137,7 @@
 | 상태 | write control | 표시 |
 |---|---|---|
 | READY | 전체 활성 | 모드 배지만 |
-| NOT_READY | 전체 비활성(조회만) | warn 배너 `조직 확장(migration 003) 적용 전 — 조회만 가능` |
+| NOT_READY | 전체 비활성(조회만) | warn 배너 `조직 확장(migration 004) 적용 전 — 조회만 가능` |
 | PROBE_ERROR | 비활성 + 재확인 | danger 배너 `스키마 상태 확인 실패 — 재확인 필요` |
 
 - 모드 배지 점 색은 데이터 모드 전용입니다: 연결됨 `--success`, 미연결/오류 `--danger`, 샘플 중립. migration/네트워크 경고를 배지 색으로 표현하지 않습니다.

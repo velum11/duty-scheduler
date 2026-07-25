@@ -824,7 +824,7 @@ def save_users(df: pd.DataFrame) -> None:
 def save_users_report(df: pd.DataFrame) -> BatchWriteResult:
     """save_users 의 부분성공 원장 반환 변형. 기존 save_users 는 그대로 둔다.
 
-    supabase 모드에서 003 미적용 + 표시순서 입력이 있으면 repository 가 전체
+    supabase 모드에서 004 미적용 + 표시순서 입력이 있으면 repository 가 전체
     failed(비재시도) 원장을 반환한다(부분 저장 금지 계약 유지)."""
     keep = [c for c in USER_COLUMNS if c in df.columns]
     normalized = df[keep].reset_index(drop=True).copy()

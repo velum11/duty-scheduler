@@ -137,7 +137,7 @@ def reset_client() -> None:
 def reset_org_readiness() -> None:
     """org 확장 스키마 readiness 캐시를 비운다(다음 확인에서 재프로브).
 
-    실행 중 migration 003 이 적용된 뒤 프로세스 재시작 없이 재평가하려면 이
+    실행 중 migration 004 가 적용된 뒤 프로세스 재시작 없이 재평가하려면 이
     경로를 쓴다(Phase2 blocking 6 — readiness cache 재평가 절차)."""
     global _ORG_READY, _ORG_PROBE
     _ORG_READY = None
@@ -791,7 +791,7 @@ def _clean_order(value):
 
 
 def get_users() -> pd.DataFrame:
-    """사용자 목록. display_order 는 003 적용 시 실제 값, 미적용이면 NULL 컬럼."""
+    """사용자 목록. display_order 는 조직 확장(004) 적용 시 실제 값, 미적용이면 NULL 컬럼."""
     _, dept_by_id = _department_maps()
     _, team_by_id = _team_maps()
     with_order = org_extensions_ready()
@@ -835,7 +835,7 @@ def _users_payload(records: list[dict]) -> list[dict]:
     ] if not with_order else []
     if blocked_emp_nos:
         raise SupabaseDataError(
-            "migration 003 미적용 상태에서는 사용자 표시순서를 저장할 수 없습니다: "
+            "migration 004 미적용 상태에서는 사용자 표시순서를 저장할 수 없습니다: "
             + ", ".join(blocked_emp_nos)
         )
 
@@ -873,7 +873,7 @@ def _users_payload(records: list[dict]) -> list[dict]:
 
 
 def upsert_users(records: list[dict]) -> None:
-    """사용자 upsert. 003 미적용 상태의 display_order 입력은 전체 차단한다.
+    """사용자 upsert. 004 미적용 상태의 display_order 입력은 전체 차단한다.
 
     표시순서가 모두 NULL이면 기존 사용자 필드만 저장할 수 있지만, 값이 하나라도
     있으면 일부 필드만 성공하는 상태를 만들지 않도록 DB 조회 전에 실패시킨다.
@@ -884,7 +884,7 @@ def upsert_users(records: list[dict]) -> None:
 
 
 def upsert_users_reported(records: list[dict]) -> BatchWriteResult:
-    """사용자 upsert(부분성공 원장). 003 미적용 + 표시순서 입력은 전체 failed(비재시도)."""
+    """사용자 upsert(부분성공 원장). 004 미적용 + 표시순서 입력은 전체 failed(비재시도)."""
     return _reported_write("users", records, "emp_no", ["emp_no"], _users_payload)
 
 

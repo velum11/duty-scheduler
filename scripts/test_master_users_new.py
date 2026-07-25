@@ -239,7 +239,7 @@ def test_source_guards():
     check("구형 통계/카드/독립저장 없음", not any(
         t in src for t in ("summary_cards", "ui.card(", "editable_aggrid", "ui.action_bar")))
     check("render 소스에 '신규' 리터럴 없음(계약)", '"신규"' not in render_src)
-    check("표시순서 003 차단 안내 문구 유지", "표시순서를 입력하면 저장이 차단됩니다" in src)
+    check("표시순서 004 차단 안내 문구 유지", "표시순서를 입력하면 저장이 차단됩니다" in src)
     check("소프트 삭제 라벨 '퇴직 처리' 사용", "퇴직 처리" in src)
 
 

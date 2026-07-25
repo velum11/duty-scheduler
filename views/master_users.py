@@ -20,7 +20,7 @@
   권한 분기 코드는 기존 값을 유지한다.
 
 보존 계약(Phase1 §5): 변경 행만 저장(_changed_records), 완전 빈 행 skip, 소프트 삭제,
-필터 미표시 사용자 자동 퇴직 금지(loaded_keys 비움), 사번 중복 차단, display_order 003
+필터 미표시 사용자 자동 퇴직 금지(loaded_keys 비움), 사번 중복 차단, display_order 004
 게이트(화면·저장소 이중 방어), 저장 실패 시 초안 보존.
 """
 from __future__ import annotations
@@ -96,7 +96,7 @@ _EDIT_UNLESS_PROTECTED = JsCode(
 # 필터 위젯 세션 key (이 화면 전용 — 취소 시 위젯 복원에 사용).
 _F_ACTIVE, _F_DEPT, _F_ROLE, _F_SEARCH = "mu_active", "mu_dept", "mu_role", "mu_search"
 
-# readiness(migration 003 확장) 안내 문구 — 표시순서(display_order) 저장이 이 확장에 의존한다.
+# readiness(migration 004 조직 확장) 안내 문구 — 표시순서(display_order) 저장이 이 확장에 의존한다.
 _NOT_READY_MSG = (
     "표시순서 기능이 아직 준비되지 않아 표시순서를 저장할 수 없습니다 — 조회·편집만 가능합니다."
 )
@@ -190,7 +190,7 @@ def _group_hints(group_of: dict, dept_names: dict, dept_labels: dict) -> dict[st
 
 
 def _readiness() -> ReadinessState:
-    """migration 003 확장 스키마 준비 상태를 3-state(READY/NOT_READY/PROBE_ERROR)로 승격한다.
+    """migration 004 조직 확장 스키마 준비 상태를 3-state(READY/NOT_READY/PROBE_ERROR)로 승격한다.
 
     표시순서(display_order) 저장은 이 확장에 의존한다. sample 모드는 항상 READY.
     실제 write 차단은 ``ReadinessState.write_enabled``(READY 에서만 True)가 담당하므로
@@ -685,7 +685,7 @@ def _save(state, grid_df, q, dept_names, team_resolve, team_display, ready: bool
     live = live_rows(grid_df)
     records, row_errors, cell_errors = _scan(live, _dept_resolver(dept_names), team_resolve)
 
-    # display_order 003 게이트 — 화면 방어(저장소 upsert_users 와 이중 방어).
+    # display_order 004 게이트 — 화면 방어(저장소 upsert_users 와 이중 방어).
     if not ready:
         blocked = [
             str(rec.get("emp_no") or "(사번 없음)")
