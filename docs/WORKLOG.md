@@ -2,6 +2,14 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-25 · Codex+Opus 재감사(P2 반영분) — blocking 2건 정정·5시간 페이싱 조항 제거
+
+- lee-mode 교차검증(독립 2계열: Opus `recon` + Codex read-only, 사실만 전달·선호결론 미주입). 1차 P2 5건 중 **worktree 승인·감사부채 흐름 종결 확인**. 재감사 신규 blocking 2건 정정(사용자 승인):
+  - **① capability 누출**: `supabase_repository.py` `_ORG_NOT_READY_MESSAGE`가 사용자 문구에 "migration 004/파일명"을 노출 — 1차 "사용자 노출 5건 제거"가 놓친 repository 계층 경로. 문구 일반화, 번호는 코드 주석에만.
+  - **② 안전경계 SoT 모순**: AGENTS.md "완결 단일 정본" 주장 vs `database.md §5`가 migration 안전 소유 + 승인 금지명령 중복. 결정=분할 유지+문구 정정 → AGENTS.md=상위 정본(승인 게이트), §5=실행 메커니즘, `database.md`의 승인 금지줄 참조화, CLAUDE.md 정합.
+- 사용자 지시: **5시간 사용량 창 페이싱·자율 재개 조항 제거** — Coordinator가 실제로 못 하는 능력(사용량 관측·창 리셋 자율 재개)을 규범처럼 적었던 것. 글로벌 PLAYBOOK §9(→"시간·진행 페이싱")·skill step 9에서 삭제. 메모리 `no-capability-overclaim` 신설.
+- 잔여 P3(비차단, BACKLOG): AST 렌더경로 미증명·`login` 암묵제외·`views/` 고정, QA 셸 내재 read-only 한계 명문화, `PowerShell`/`Skill` tool id 등록 확인, `.venv` 깨진 Python 3.13로 scaffold 테스트 독립 미실행(51 checks 자기보고). **커밋·push 없음.**
+
 ## 2026-07-25 · Codex 감사(P1 0/P2 5) 반영 — 안전경계 완결·승인 게이트·AST 집행·capability 일반화
 
 - **P2-1**: AGENTS.md를 완결 단일 정본으로(DLP 하드경계 편입·"참조만" 명문화·`.local_sessions`/QA 데이터 보호 이관·merge commit/worktree 승인 포함). CLAUDE.md·오버레이는 규칙 재서술 제거, "왜"만 잔류. **P2-2**: 글로벌 PLAYBOOK §7.3 "worktree는 조건 불문 사용자 승인, commit 생성 merge도 승인 필수" + skill·integrator 2종 정합(승인 근거 없으면 실행 거부). **P2-3**: visual-qa Write 제거(probe는 heredoc→scratchpad만), contract-qa shell 실행 전용 경계, 12개 정의 Agent/Task 부재 재검사 통과. **P2-4**: 감사부채=BACKLOG 정본 등록·WORKLOG는 당시 이력·사후감사 후 이관 흐름으로 글로벌 §5 교체. **P2-5**(ui-feature Opus): test_screen_scaffold를 AST·route연결·재귀 스캔·실호출·EDIT_GRID 스택 검증으로 재설계(우회 4경로 차단, 음성 검증 내장, 51 checks), scaffold·DESIGN §0 보장 수준 정직화.

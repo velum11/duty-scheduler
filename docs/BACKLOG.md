@@ -15,7 +15,10 @@
 | 사용자 실브라우저 sign-off | 3화면 크롬 표준화(`14d5963`)·근무형태 배지 대비 보수(`cc5f6e4`)·퇴직자 과거근무 표시(§98 구현) — 8502에서 확인 대기 | 게이트 |
 | 고아 빈 폴더 1개 | `.claude/worktrees/agent-a7f86db30e9513843` — 내용 없는 빈 폴더인데 타 프로세스 핸들 잠김으로 삭제 실패(07-25 정리 때 유일 잔존). 재부팅 후 또는 탐색기에서 수동 삭제 | 정리 |
 | worktree 물리 잔재 2개 | ORCA worktree 폐기 완료(git 등록·브랜치 3개 삭제)했으나 `worktype-improve`·`worktype-improve-2` 디렉터리가 프로세스 잠김으로 물리 삭제 실패 — 재부팅 후 또는 잠근 프로세스 종료 후 폴더 수동 삭제(`.claude/worktrees/agent-a7f8...` 빈 폴더와 동일 처리) | 정리 |
-| P2 반영분 Codex 재감사 | 07-25 Codex 감사 P2 5건 반영(안전경계 완결·worktree/merge 승인·QA read-only·감사부채 흐름·규약 AST 집행+capability 일반화) — 동일 Codex의 재감사 대기(§5 수정·재감사 loop). scaffold 감사부채는 이번 감사가 사후 감사 수행으로 해소 | 게이트 |
+| §0 규약 AST 집행 강건화 | 07-25 재감사 P3: `test_screen_scaffold.py`가 크롬 호출을 렌더 경로로 증명하지 않고(모듈 내 임의 위치 수집), `login`을 암묵 제외(my_schedule는 명시 allowlist), 화면 발견이 `views/`에 고정. false-negative 위주라 비차단이나 강건화 여지 | 코드 |
+| QA 셸 read-only 내재 한계 명문화 | 07-25 재감사(Codex P2→P3 재분류): `visual-qa`·`contract-qa`는 테스트·probe 실행에 셸이 필요해 소스 편집이 도구가 아닌 문구로만 차단(recon은 셸 없음=하드). "내재적 한계"로 정의 문서에 명문화 | 문서 |
+| 에이전트 tool id 검증 | 07-25 재감사 P3: 정의 파일 `tools:`의 `PowerShell`/`Skill`가 하네스 tool registry에 실제 등록되는지 확인(미등록이면 no-op, 셸은 `Bash`로 라이딩) | 확인 |
+| scaffold 테스트 독립 실행 불가 | 07-25 재감사 검증 공백: `.venv`가 없는 Python 3.13을 가리켜 두 감사 모두 `test_screen_scaffold.py`를 재현 못 함 — "51 checks GREEN"은 자기보고. sign-off 전 실행 환경 복구 | 환경 |
 
 ## 후보 (미채택 — 필요 시 재검토)
 

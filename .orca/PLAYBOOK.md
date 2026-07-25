@@ -36,4 +36,4 @@
 - ADMIN 기준정보 표시 메뉴는 사용자 관리, 조직 관리, 근무형태 관리다.
 - 레거시 `master_departments`, `master_teams` route는 `master_org`로 위임한다.
 - 조직 관계(그룹—부서—운영단위)는 기능 계약이지만 화면 표현은 사용자의 목업 승인으로 결정한다.
-- 조직 그룹 정본은 migration 004(`organization_groups`)다. 적용 여부는 문서 기록이 아니라 live schema를 read-only로 확인해 판단한다.
+- 조직 그룹 정본은 `organization_groups` 테이블(migration 004로 도입)이다. 적용 여부는 문서 기록이 아니라 live schema를 read-only로 확인해 판단한다.

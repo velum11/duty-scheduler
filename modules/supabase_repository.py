@@ -501,9 +501,11 @@ def upsert_teams_reported(records: list[dict]) -> BatchWriteResult:
 # 읽지도 쓰지도 않는다(물리 제거는 후속 migration).
 _ORG_READY: bool | None = None
 _ORG_PROBE: str | None = None
+# 사용자 노출 문구에는 migration 번호를 넣지 않는다(도입 이력: migration 004,
+# supabase/migrations/004_org_groups.sql — 코드 주석·진단에만 남긴다).
 _ORG_NOT_READY_MESSAGE = (
     "조직 스키마(조직 그룹)가 아직 준비되지 않아 저장할 수 없습니다. "
-    "조직 그룹 스키마(도입: migration 004, supabase/migrations/004_org_groups.sql) 적용 후 다시 시도하세요."
+    "조직 그룹 스키마를 적용한 뒤 다시 시도하세요."
 )
 
 

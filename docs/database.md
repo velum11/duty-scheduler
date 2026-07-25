@@ -117,7 +117,7 @@ work_types ── work_schedules
 - 이미 적용된 migration은 적용 이력과 실제 schema 확인 없이 수정하지 않습니다.
 - `create table if not exists`가 기존의 비호환 테이블을 보정해 주지는 않습니다.
 - 적용 전 대상 프로젝트, 현재 컬럼·제약·행 수, 백업 가능성을 확인합니다.
-- 사용자 승인 없이 migration을 실행하지 않습니다.
+- migration 실행·운영 DB 쓰기의 **승인 게이트는 `AGENTS.md` 안전경계 정본**을 따릅니다(여기서 재서술하지 않음). 이 절은 그 아래 적용 메커니즘만 정의합니다.
 - 부분 적용이 의심되면 DROP으로 맞추지 않고 read-only probe 후 forward completion 가능성을 먼저 판단합니다.
 - 002는 기존 근무를 현재 사용자 소속으로 자동 백필하지 않습니다.
 - 004 적용 뒤에는 앱 프로세스를 재시작하거나 화면의 "스키마 재확인" 동작으로 조직 그룹 확장(`organization_groups` + `departments.group_id`) readiness cache를 다시 확인합니다.
