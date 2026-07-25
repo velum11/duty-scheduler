@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -106,8 +107,12 @@ for label, src in _SRC.items():
         check(f"{label}: 구 전역 플래그 없음 [{flag}]", flag not in src)
     for ui_token in _LEGACY_UI:
         check(f"{label}: 구형 UI 없음 [{ui_token}]", ui_token not in src)
+    # 이 계약의 의도는 구형 '검정 저장 버튼' 스타일 금지다. WCAG 대비 계산 헬퍼
+    # (_text_on)가 배지 텍스트색으로 반환하는 '#000000' 리터럴은 정당한 사용이므로
+    # 해당 함수 블록만 제외하고 검사한다(#1B1B1D 는 예외 없이 전역 금지 유지).
+    scrub = re.sub(r"def _text_on\([^)]*\)[\s\S]*?(?=\ndef |\nclass |\Z)", "", src)
     check(f"{label}: 검정 저장 버튼 색(#1B1B1D/#000000) 없음",
-          "#1B1B1D" not in src and "#000000" not in src)
+          "#1B1B1D" not in src and "#000000" not in scrub)
 
 
 # ===========================================================================

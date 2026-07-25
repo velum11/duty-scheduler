@@ -199,14 +199,50 @@ def test_preview_color_short_label_contract() -> None:
     import inspect
     from views import master_work_types as m
     src = inspect.getsource(m._preview_html)
-    # 계약 정보: 색상 스와치 + 약칭이 반드시 노출된다.
+    # 계약 정보: 색상 배지 + 약칭이 반드시 노출된다.
     check("미리보기 라벨은 약칭 우선(계약 정보)", 'row.get("약칭")' in src)
-    check("미리보기에 솔리드 색상 스와치 노출", "class='d'" in src and "background:{color};" in src)
-    check("약칭 셀에 근무형태 색 적용(근무표 렌더 시연)", "{color}22" in src and "color:{color};" in src)
+    # 실제 근무표 배지(.duty-badge)처럼 solid 근무형태 색 배경으로 시연한다.
+    check("미리보기 배지에 solid 근무형태 색 배경", "background:{color};" in src)
+    # §8 대비 보수: 텍스트색은 배경 명도 기반 자동 선택(구 방식 {color}22 틴트/풀컬러 폐기).
+    check("배지 텍스트색은 명도기반 자동 선택(_text_on)", "_text_on(color)" in src)
+    check("구 저대비 틴트({color}22) 미사용", "{color}22" not in src)
     check("미리보기 계약 제목(색·약칭)", "색·약칭" in src)
     # 밀도: 편집 그리드와 겹치는 명칭·시간 pill 반복은 하지 않는다(과다 세로 제거).
     check("명칭·시간 중복 pill 미노출", "class='nm'" not in src and "class='tm'" not in src)
     check("조밀 스트립 스타일 유지(.ms-sw)", ".ms-sw" in m._EXTRA_CSS)
+
+
+# ===== 1-5c) 미리보기 배지 대비 계약 (DESIGN §8 시각 게이트 → 지속 계약) =====
+def test_preview_badge_contrast_contract() -> None:
+    print("미리보기 배지 대비(DESIGN §8) — 명도기반 자동 텍스트색이 본문 4.5:1을 보장")
+    from views import master_work_types as m
+
+    def _lin(v: int) -> float:
+        c = v / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    def _lum(hexc: str) -> float:
+        r, g, b = int(hexc[1:3], 16), int(hexc[3:5], 16), int(hexc[5:7], 16)
+        return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+
+    def _ratio(fg: str, bg: str) -> float:
+        a, b = _lum(fg), _lum(bg)
+        hi, lo = max(a, b), min(a, b)
+        return (hi + 0.05) / (lo + 0.05)
+
+    # 자동 선택 텍스트색은 흰/검 중 하나이며, 배경 대비 4.5:1 이상을 항상 만족한다.
+    check("_text_on 은 흰색 또는 순수 검정만 반환", set(
+        m._text_on(c) for c in ("#000000", "#FFFFFF", "#1E6FD9", "#E8862E", "#9AA0A6")
+    ) <= {"#FFFFFF", "#000000"})
+
+    # 실측에서 미달했던 색 + 극단/경계색을 포함한 표본에서 4.5:1 보장.
+    palette = [
+        "#1E6FD9", "#7B4FD8", "#9A7BE3", "#5A3DB8", "#E8862E", "#B4541B",
+        "#9AA0A6", "#2E9E5B", "#D64596", "#12A5A5", "#FFFFFF", "#000000",
+        "#808080", "#2B2B2B", "#7F7F7F", "#C0C0C0",
+    ]
+    worst = min(_ratio(m._text_on(c), c) for c in palette)
+    check(f"표본 전체 배지 대비 ≥ 4.5:1 (최저 {worst:.2f})", worst >= 4.5)
 
 
 def _wt_rows(n: int):
@@ -387,6 +423,7 @@ def main() -> int:
         test_action_bar_above_grid,
         test_unified_redesign_features,
         test_preview_color_short_label_contract,
+        test_preview_badge_contrast_contract,
         test_preview_truncation_notice,
         test_code_natural_key_locked,
         test_partial_success_ledger_wiring,

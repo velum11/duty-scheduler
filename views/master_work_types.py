@@ -951,6 +951,29 @@ def _normalize_hex(value: str):
     return None
 
 
+def _text_on(color: str) -> str:
+    """solid 배경색 ``#RRGGBB`` 위에서 4.5:1 이상을 보장하는 텍스트색(흰/검) 선택.
+
+    WCAG 상대명도를 계산해 흰색(#FFFFFF)과 순수 검정(#000000) 중 대비가 큰 쪽을 고른다.
+    두 후보의 대비 최댓값은 배경 명도 전 구간에서 ≈4.58:1 이상이라 본문 대비를 항상 만족한다
+    (미리보기 배지 저대비 §8 보수). 어두운 쪽을 #111 등으로 완화하면 크로스오버 근처에서
+    4.5 밑으로 떨어지므로 순수 검정을 사용한다.
+    """
+    try:
+        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+    except (ValueError, IndexError):
+        return "#FFFFFF"
+
+    def _lin(v: int) -> float:
+        c = v / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    lum = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+    contrast_white = 1.05 / (lum + 0.05)
+    contrast_black = (lum + 0.05) / 0.05
+    return "#FFFFFF" if contrast_white >= contrast_black else "#000000"
+
+
 # ---------------------------------------------------------------------------
 # 근무표 미리보기 — color/약칭 단일 기준이 근무표·대시보드·개인 화면 색을 구동함을 시연.
 # ---------------------------------------------------------------------------
@@ -984,10 +1007,12 @@ def _preview_html(live: pd.DataFrame) -> str:
             continue  # 계속 세되(전체 건수), 렌더는 상한까지만
         name = str(row.get("명칭") or "").strip()
         title = " · ".join(x for x in (code, name) if x) or label
+        # 실제 근무표 배지(.duty-badge)처럼 solid 색 배경으로 시연하되, 텍스트색은 배경
+        # 명도에 따라 흰/검을 자동 선택해 밝은 색에서도 4.5:1 이상을 보장한다(§8 대비 보수).
         sws.append(
             f"<span class='ms-sw' title='{style.escape(title)}'>"
-            f"<span class='d' style='background:{color};'></span>"
-            f"<span class='c' style='background:{color}22;color:{color};'>{style.escape(label)}</span>"
+            f"<span class='c' style='background:{color};color:{_text_on(color)};'>"
+            f"{style.escape(label)}</span>"
             f"</span>"
         )
     if not sws:
@@ -1020,12 +1045,11 @@ _EXTRA_CSS = """
 .ms-preview-t { flex:0 0 auto; font-size:.72rem; font-weight:700; color:var(--ms-ink-2);
   letter-spacing:-.01em; }
 .ms-sws { display:flex; flex-wrap:wrap; gap:.26rem; }
-.ms-sw { display:inline-flex; align-items:center; gap:.3rem; padding:.09rem .42rem .09rem .3rem;
+.ms-sw { display:inline-flex; align-items:center; padding:.12rem; flex:0 0 auto;
   background:var(--ms-surface-2); border:1px solid var(--ms-line); border-radius:5px; }
-.ms-sw .d { width:11px; height:11px; border-radius:3px; flex:0 0 auto;
-  border:1px solid rgba(0,0,0,.16); box-shadow:inset 0 0 0 1px rgba(255,255,255,.3); }
-.ms-sw .c { font-size:.7rem; font-weight:700; line-height:1; padding:.12rem .34rem;
-  border-radius:4px; font-variant-numeric:tabular-nums; letter-spacing:.01em; }
+.ms-sw .c { font-size:.7rem; font-weight:700; line-height:1; padding:.14rem .4rem;
+  border-radius:4px; font-variant-numeric:tabular-nums; letter-spacing:.01em;
+  border:1px solid rgba(0,0,0,.12); }
 .ms-sw.more { border-style:dashed; }
 .ms-sw.more .c { color:var(--ms-ink-3); font-weight:600; padding:.12rem .2rem; }
 .ms-errlist { margin:.25rem 0 0; padding-left:1.1rem; font-size:.76rem; color:var(--ms-ink-2); }

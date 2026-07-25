@@ -2,6 +2,11 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-25 · worktype-improve-2 잔재 회수 — 근무형태 배지 WCAG 대비 수정 포팅 (sign-off 대기)
+
+- recon 분석으로 ORCA worktree 3개 판정: brill·worktype-improve=병합된 클린 스냅샷(폐기 권고), **worktype-improve-2=미반영 완결 작업 발견**(근무형태 미리보기 배지 저대비 틴트 2.18~4.09:1 → solid+`_text_on` 자동 텍스트색 4.85~7.95:1, DESIGN §2 계약 위반 보수). ui-feature가 본 브랜치로 포팅(SCREEN_ARCHETYPE 등 후속 변경 보존), 신규 대비 계약 테스트 포함 work_types 84 all-green.
+- 부수 수정: unified의 "검정 저장버튼 색 금지" 검사가 `_text_on`의 정당한 `#000000` 리터럴에 오탐 → 검사 의도(버튼 스타일 금지)를 보존하며 `_text_on` 블록만 제외하도록 정밀화(#1B1B1D 전역 금지 유지). unified 195 all-green. 화면 수 비강제도 명문화(사용자 지시 — DESIGN §0·테스트 (a)절 존재 화면만 검증으로 완화).
+
 ## 2026-07-25 · 화면 규약 Phase B — ADMIN/MANAGER 3화면 크롬 표준화 (사용자 sign-off 대기)
 
 - 대시보드·근무표 편성·월간 근무표의 손제작 헤더를 기준정보 표준 크롬(브레드크럼→제목·설명→모드 배지)으로 통일 — `scaffold.page_chrome_for()`가 `modules/nav.py` 라벨을 단일 출처로 도출(ui-feature Opus 구현). `my_schedule`(USER 모바일)은 의도적 제외. 이제 ADMIN/MANAGER 6화면 크롬 동일.
