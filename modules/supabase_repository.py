@@ -37,6 +37,14 @@ class SupabaseDataError(RuntimeError):
     """A sanitized Supabase operation failure."""
 
 
+class SupabaseTransientError(SupabaseDataError):
+    """일시적(재시도 가능) 통신 오류로 판정된 실패.
+
+    ``SupabaseDataError`` 의 하위형이므로 기존 ``except SupabaseDataError`` 경로는
+    그대로 잡는다. 비멱등 쓰기(예: near-miss INSERT)에서 '결과 불명(ambiguous)'을
+    타입으로 신뢰성 있게 구분해, 맹목 재시도로 중복을 만들지 않게 하는 데 쓴다."""
+
+
 # --- 저장 부분성공 결과 계약 (Phase2 §8-1·§10-4, 위험 #1) ------------------
 # 프레임워크 비의존(=views 를 import 하지 않음) 결과 원장. 화면 controller 는
 # ``to_persist_kwargs()`` 로 ``views.master.lifecycle.PersistResult`` 를 만들 수
@@ -114,14 +122,17 @@ _MISSING_COLUMN_MARKERS = (
 )
 
 
-def _sanitized_error(action: str, table: str, exc: Exception) -> SupabaseDataError:
+def _sanitized_error(
+    action: str, table: str, exc: Exception, *, transient: bool = False
+) -> SupabaseDataError:
     message = str(exc)
     try:
         url, key = config.supabase_settings()
         message = message.replace(url, "<supabase>").replace(key, "<redacted>")
     except Exception:
         pass
-    return SupabaseDataError(f"Supabase {table} {action} 실패: {message}")
+    cls = SupabaseTransientError if transient else SupabaseDataError
+    return cls(f"Supabase {table} {action} 실패: {message}")
 
 
 @lru_cache(maxsize=1)
@@ -153,17 +164,51 @@ def reset_org_readiness() -> None:
 # 이런 오류는 영구 장애가 아니므로 1회에 한해 재시도한다 (무한 재시도 금지).
 _TRANSIENT_MARKERS = ("10035", "10054", "ConnectionResetError", "ReadError", "ConnectError")
 
+# PostgreSQL unique_violation SQLSTATE. PostgREST/postgrest-py 는 이 코드를 예외
+# 속성(code) 또는 details 에 담는다. report_no 채번 충돌을 텍스트("duplicate key")가
+# 아니라 이 구조적 코드로 판정한다(로케일/문구 변화에 견고).
+_UNIQUE_VIOLATION_SQLSTATE = "23505"
 
-def _execute(query, action: str, table: str):
+
+def _is_unique_violation(exc: Exception) -> bool:
+    """예외가 PostgreSQL unique_violation(23505)인지 구조적으로 판정한다.
+
+    원 예외(또는 __cause__ 로 연결된 원 예외)의 ``code``/``details`` 속성을 우선
+    확인하고, 없으면 sanitize 된 메시지 문자열에서 코드 문자열을 폴백 검사한다."""
+    seen = []
+    cursor: BaseException | None = exc
+    while cursor is not None and cursor not in seen and len(seen) < 8:
+        seen.append(cursor)
+        for attr in ("code", "details", "message"):
+            value = getattr(cursor, attr, None)
+            if value is not None and _UNIQUE_VIOLATION_SQLSTATE in str(value):
+                return True
+        cursor = getattr(cursor, "__cause__", None)
+    return _UNIQUE_VIOLATION_SQLSTATE in str(exc)
+
+
+def _execute(query, action: str, table: str, *, retry_transient: bool = True):
+    """query.execute() 를 실행하되 일시적 소켓 오류는 1회 재시도한다.
+
+    ``retry_transient=False`` 는 비멱등(non-idempotent) 쓰기(예: INSERT)에서 쓴다.
+    일시 오류로 실패한 INSERT 는 서버에 실제로 반영됐는지 불명(ambiguous)하므로
+    맹목 재시도하면 중복 레코드를 만들 수 있다 — 이 경우 재시도하지 않고 원 오류를
+    그대로 올려 호출부가 '재조회 필요'로 다루게 한다(fail-closed)."""
     try:
         return query.execute()
     except Exception as exc:
-        if any(marker in repr(exc) for marker in _TRANSIENT_MARKERS):
+        is_transient = any(marker in repr(exc) for marker in _TRANSIENT_MARKERS)
+        if is_transient and retry_transient:
             try:
-                return query.execute()  # 일시적 소켓 오류 1회 재시도
+                return query.execute()  # 일시적 소켓 오류 1회 재시도(멱등 연산만)
             except Exception as retry_exc:
-                raise _sanitized_error(action, table, retry_exc) from retry_exc
-        raise _sanitized_error(action, table, exc) from exc
+                retry_transient_marker = any(
+                    marker in repr(retry_exc) for marker in _TRANSIENT_MARKERS
+                )
+                raise _sanitized_error(
+                    action, table, retry_exc, transient=retry_transient_marker
+                ) from retry_exc
+        raise _sanitized_error(action, table, exc, transient=is_transient) from exc
 
 
 def _select_all(table: str, columns: str = "*", query_builder=None) -> list[dict]:
@@ -1374,3 +1419,453 @@ def hard_delete_test_team(dept_code: str, team_code: str) -> None:
 def hard_delete_test_department(dept_code: str) -> None:
     _require_test_key(dept_code, "TEST_DEPT_")
     _execute(client().table("departments").delete().eq("dept_code", dept_code), "테스트 정리", "departments")
+
+
+# =========================================================================
+# 아차사고(near-miss) — migration 006 (DRAFT: 실행/원격 write 승인 게이트 전)
+# =========================================================================
+# 006 적용 전 라이브 DB 에는 near_miss_reports 테이블과 users.is_safety_officer 가
+# 없다. 조회는 호출부(db 파사드)가 near_miss_extensions_ready() 로 분기해 안전한
+# 빈 결과로 폴백하고, 저장은 이 계층에서 명확한 오류로 차단한다(부분 저장·조용한
+# 무시 없음 — 004 조직 확장과 같은 관행).
+NEAR_MISS_TABLE = "near_miss_reports"
+# report_no 채번 unique 충돌 시 bounded 재채번 재시도 상한(무한 루프 금지).
+_NEAR_MISS_CREATE_RETRIES = 5
+NEAR_MISS_GRADES = ("S", "A", "B", "C", "D")
+NEAR_MISS_CAUSE_CODES = ("JAM", "FALL", "DROP", "HIT", "SLIP", "BURN", "PINCH", "ETC")
+NEAR_MISS_STATUSES = ("SUBMITTED", "IN_REVIEW", "EVALUATED", "CLOSED", "REJECTED")
+
+# 화면(파사드)이 보는 자연키 계약. id/report_no + 자연키(reporter_emp_no/
+# evaluator_emp_no/dept_code). reporter/evaluator/부서는 ID/FK 로 저장하고 여기서
+# 조인해 자연키로 되돌린다(다른 테이블 관행과 동일).
+NEAR_MISS_COLUMNS = [
+    "id", "report_no", "status",
+    "work_name", "work_content", "incident_content", "countermeasure", "site_description",
+    "proposed_grade", "confirmed_grade",
+    "cause_code", "cause_detail", "incident_date",
+    "reporter_emp_no", "evaluator_emp_no", "dept_code",
+    "photo_paths", "rejection_reason", "evaluated_at",
+    "is_active", "created_at", "updated_at",
+]
+
+_NM_READY: bool | None = None
+_NM_PROBE: str | None = None
+_NM_NOT_READY_MESSAGE = (
+    "아차사고 스키마가 아직 준비되지 않아 저장할 수 없습니다. "
+    "아차사고 스키마를 적용한 뒤 다시 시도하세요."
+)
+# 동시 평가/전이가 TOCTOU 로 서로의 결과를 덮어쓰는 것을 막기 위한 조건부 UPDATE
+# 실패(0행) 메시지. 상태가 이미 바뀌었거나 보고서가 사라진 경우다(lost update 금지).
+_NM_STALE_MESSAGE = (
+    "상태가 이미 변경되어 요청을 적용할 수 없습니다(다른 사용자가 먼저 처리). "
+    "목록을 재조회한 뒤 다시 시도하세요."
+)
+
+
+def reset_near_miss_readiness() -> None:
+    """near_miss readiness 캐시를 비운다(다음 확인에서 재프로브 — 006 적용 반영 경로)."""
+    global _NM_READY, _NM_PROBE
+    _NM_READY = None
+    _NM_PROBE = None
+
+
+def near_miss_extensions_ready() -> bool:
+    """006 아차사고 스키마(near_miss_reports 테이블 + users.is_safety_officer 컬럼)
+    사용 가능 여부를 확인한다(1회 probe 후 캐시). 한 파일(006)로 함께 적용되므로
+    둘을 묶어 판정한다.
+
+    3-state 판정과 정합화한다(org_extensions_ready 관행): 미적용(undefined
+    table/column)은 False 로 캐시하지만, probe 자체 실패(권한/네트워크 등 일시 장애)는
+    영구 부재로 캐시하지 않고 다음 호출에서 재프로브한다 — 일시 장애를 '빈 데이터'로
+    고착시키지 않기 위함(fail-closed: 이 경우에도 쓰기는 보수적으로 차단된다)."""
+    global _NM_READY, _NM_PROBE
+    if _NM_READY is None:
+        try:
+            client().table(NEAR_MISS_TABLE).select("id").limit(1).execute()
+            client().table("users").select("is_safety_officer").limit(1).execute()
+            _NM_READY = True
+            _NM_PROBE = READINESS_READY  # 성공 시 직전 PROBE_ERROR 캐시를 갱신(비고착)
+        except Exception as exc:
+            if any(marker in repr(exc) for marker in _MISSING_COLUMN_MARKERS):
+                _NM_READY = False  # 006 미적용 — 안정적으로 캐시
+                _NM_PROBE = READINESS_NOT_READY
+            else:
+                # PROBE_ERROR: 일시 장애를 영구 부재로 캐시하지 않는다(다음 호출 재프로브).
+                _NM_PROBE = None
+                return False
+    return _NM_READY
+
+
+def near_miss_extensions_probe(*, force: bool = False) -> str:
+    """006 아차사고 스키마 준비 상태를 3-state 로 확인한다(read-only, 1회 probe 후 캐시).
+
+    반환: ``READINESS_READY`` / ``READINESS_NOT_READY`` / ``READINESS_PROBE_ERROR``.
+      - READY: near_miss_reports 테이블 + users.is_safety_officer 가 존재한다(006 적용됨).
+      - NOT_READY: 확인은 성공했으나 없다(undefined-table/undefined-column/schema-cache).
+      - PROBE_ERROR: 확인 자체가 실패했다(권한/네트워크) — 미적용으로 단정 불가.
+
+    ``force=True`` 또는 ``reset_near_miss_readiness()`` 후 재프로브한다. bool
+    ``near_miss_extensions_ready()`` 와 캐시(_NM_READY)를 함께 정합화한다:
+    READY→True, NOT_READY→False, PROBE_ERROR→불명(쓰기는 보수적으로 차단).
+
+    PROBE_ERROR 는 **캐시하지 않는다**(sticky 방지). 일시 장애로 한 번 PROBE_ERROR 를
+    받아도 다음 호출은 다시 프로브하며, 장애가 풀려 READY/NOT_READY 로 확정되면 그
+    결과로 갱신된다 — outage 를 '미적용/빈 데이터'로 고착시키지 않는다."""
+    global _NM_READY, _NM_PROBE
+    if force:
+        _NM_PROBE = None
+    if _NM_PROBE is not None:
+        return _NM_PROBE
+    try:
+        client().table(NEAR_MISS_TABLE).select("id").limit(1).execute()
+        client().table("users").select("is_safety_officer").limit(1).execute()
+        _NM_PROBE = READINESS_READY
+        _NM_READY = True
+    except Exception as exc:
+        if any(marker in repr(exc) for marker in _MISSING_COLUMN_MARKERS):
+            _NM_PROBE = READINESS_NOT_READY
+            _NM_READY = False
+        else:
+            # PROBE_ERROR 는 캐시하지 않는다(_NM_PROBE=None) — 다음 호출 재프로브(비고착).
+            _NM_PROBE = None
+            _NM_READY = None
+            return READINESS_PROBE_ERROR
+    return _NM_PROBE
+
+
+def user_is_safety_officer(emp_no: str) -> bool:
+    """users.is_safety_officer 플래그를 사번으로 조회한다.
+
+    컬럼이 없거나(006 미적용) 사용자를 못 찾으면 False. 오류는 sanitize 되어
+    전파되므로 호출부(db._safety_officer_flag)가 안전하게 False 로 접는다."""
+    emp = str(emp_no).strip()
+    if not emp:
+        return False
+    rows = _select_all(
+        "users", "emp_no,is_safety_officer", lambda query: query.eq("emp_no", emp)
+    )
+    for row in rows:
+        return _clean_bool(row.get("is_safety_officer"))
+    return False
+
+
+def _near_miss_natural(rows: list[dict]) -> list[dict]:
+    """near_miss 행(ID/FK)을 화면 자연키 계약으로 변환한다."""
+    _, emp_by_id = _user_maps()
+    _, dept_by_id = _department_maps()
+    out = []
+    for row in rows:
+        reporter_id = row.get("reporter_user_id")
+        evaluator_id = row.get("evaluator_user_id")
+        dept_id = row.get("department_id")
+        photo = row.get("photo_paths")
+        if not isinstance(photo, list):
+            photo = []
+        out.append({
+            "id": row.get("id"),
+            "report_no": str(row.get("report_no") or ""),
+            "status": str(row.get("status") or ""),
+            "work_name": str(row.get("work_name") or ""),
+            "work_content": str(row.get("work_content") or ""),
+            "incident_content": str(row.get("incident_content") or ""),
+            "countermeasure": str(row.get("countermeasure") or ""),
+            "site_description": str(row.get("site_description") or ""),
+            "proposed_grade": row.get("proposed_grade") or None,
+            "confirmed_grade": row.get("confirmed_grade") or None,
+            "cause_code": str(row.get("cause_code") or ""),
+            "cause_detail": str(row.get("cause_detail") or ""),
+            "incident_date": str(row.get("incident_date") or ""),
+            "reporter_emp_no": emp_by_id.get(str(reporter_id), "") if reporter_id is not None else "",
+            "evaluator_emp_no": emp_by_id.get(str(evaluator_id), "") if evaluator_id is not None else "",
+            "dept_code": dept_by_id.get(str(dept_id), "") if dept_id is not None else "",
+            "photo_paths": photo,
+            "rejection_reason": row.get("rejection_reason") or None,
+            "evaluated_at": str(row.get("evaluated_at") or "") or None,
+            "is_active": _clean_bool(row.get("is_active")),
+            "created_at": str(row.get("created_at") or ""),
+            "updated_at": str(row.get("updated_at") or ""),
+        })
+    return out
+
+
+def get_near_miss_reports(filters: dict | None = None) -> list[dict]:
+    """아차사고 보고서 목록을 자연키 계약(dict 리스트)으로 반환한다.
+
+    filters(선택): include_archived(bool), status, dept_code, cause_code,
+    confirmed_grade, reporter_emp_no, date_from/date_to(ISO, incident_date 기준).
+    서버 측에서 가능한 필터를 적용한다. 006 미적용이면 빈 리스트."""
+    if not near_miss_extensions_ready():
+        return []
+    filters = filters or {}
+    dept_by_code, _ = _department_maps()
+    user_by_emp, _ = _user_maps()
+
+    def builder(query):
+        if not filters.get("include_archived"):
+            query = query.eq("is_active", True)
+        if filters.get("status"):
+            query = query.eq("status", str(filters["status"]).strip())
+        if filters.get("cause_code"):
+            query = query.eq("cause_code", str(filters["cause_code"]).strip())
+        if filters.get("confirmed_grade"):
+            query = query.eq("confirmed_grade", str(filters["confirmed_grade"]).strip())
+        dept_code = filters.get("dept_code")
+        if dept_code and str(dept_code).strip() in dept_by_code:
+            query = query.eq("department_id", dept_by_code[str(dept_code).strip()])
+        reporter = filters.get("reporter_emp_no")
+        if reporter and str(reporter).strip() in user_by_emp:
+            query = query.eq("reporter_user_id", user_by_emp[str(reporter).strip()])
+        if filters.get("date_from"):
+            query = query.gte("incident_date", str(filters["date_from"]).strip())
+        if filters.get("date_to"):
+            query = query.lte("incident_date", str(filters["date_to"]).strip())
+        return query.order("incident_date", desc=True).order("id", desc=True)
+
+    rows = _select_all(NEAR_MISS_TABLE, "*", builder)
+    return _near_miss_natural(rows)
+
+
+def get_near_miss_report(report_id) -> dict | None:
+    """단일 아차사고 보고서(자연키 dict) 또는 None."""
+    if not near_miss_extensions_ready():
+        return None
+    rows = _select_all(
+        NEAR_MISS_TABLE, "*", lambda query: query.eq("id", report_id).limit(1)
+    )
+    natural = _near_miss_natural(rows)
+    return natural[0] if natural else None
+
+
+def _near_miss_write_payload(payload: dict) -> dict:
+    """create 용 payload(자연키 입력)를 ID/FK 저장 레코드로 검증·변환한다.
+
+    reporter_emp_no·부서·시각은 서버측 값이다(화면이 세션에서 채워 넘긴다 —
+    클라이언트 임의값 신뢰 금지). 여기서는 관계 무결성만 재확인한다."""
+    if not near_miss_extensions_ready():
+        raise SupabaseDataError(_NM_NOT_READY_MESSAGE)
+    user_by_emp, _ = _user_maps()
+    dept_by_code, _ = _department_maps()
+
+    reporter_emp = _clean_text(payload.get("reporter_emp_no"))
+    if reporter_emp not in user_by_emp:
+        raise SupabaseDataError(f"아차사고 보고자 사번을 찾을 수 없습니다: {reporter_emp}")
+    work_name = _clean_text(payload.get("work_name"))
+    if not work_name:
+        raise SupabaseDataError("작업명은 비어 있을 수 없습니다.")
+    cause_code = _clean_text(payload.get("cause_code")).upper()
+    if cause_code not in NEAR_MISS_CAUSE_CODES:
+        raise SupabaseDataError(f"원인 코드가 유효하지 않습니다: {cause_code}")
+    proposed = _clean_text(payload.get("proposed_grade"), nullable=True)
+    if proposed is not None:
+        proposed = proposed.upper()
+        if proposed not in NEAR_MISS_GRADES:
+            raise SupabaseDataError(f"제안 등급이 유효하지 않습니다: {proposed}")
+    incident_date = _clean_text(payload.get("incident_date"))
+    try:
+        date.fromisoformat(incident_date)
+    except ValueError as exc:
+        raise SupabaseDataError(f"사고 발생일 형식이 유효하지 않습니다: {incident_date}") from exc
+    dept_code = _clean_text(payload.get("dept_code"), nullable=True)
+    department_id = None
+    if dept_code:
+        if dept_code not in dept_by_code:
+            raise SupabaseDataError(f"아차사고 부서코드를 찾을 수 없습니다: {dept_code}")
+        department_id = dept_by_code[dept_code]
+    photo_paths = payload.get("photo_paths") or []
+    if not isinstance(photo_paths, (list, tuple)):
+        raise SupabaseDataError("photo_paths 는 배열이어야 합니다.")
+    return {
+        "work_name": work_name,
+        "work_content": _clean_text(payload.get("work_content")),
+        "incident_content": _clean_text(payload.get("incident_content")),
+        "countermeasure": _clean_text(payload.get("countermeasure")),
+        "site_description": _clean_text(payload.get("site_description")),
+        "proposed_grade": proposed,
+        "cause_code": cause_code,
+        "cause_detail": _clean_text(payload.get("cause_detail")),
+        "incident_date": incident_date,
+        "reporter_user_id": user_by_emp[reporter_emp],
+        "department_id": department_id,
+        "photo_paths": [str(p) for p in photo_paths],
+        "status": "SUBMITTED",
+        "is_active": True,
+        "created_by": _clean_text(payload.get("created_by"), nullable=True),
+        "updated_by": _clean_text(payload.get("created_by"), nullable=True),
+    }
+
+
+def _next_report_no(year_month: str) -> str:
+    """대상 연월(YYYYMM)의 다음 순번 report_no. 충돌 시 재시도는 create 가 담당."""
+    prefix = str(year_month)
+    rows = _select_all(
+        NEAR_MISS_TABLE, "report_no",
+        lambda query: query.like("report_no", f"{prefix}-%"),
+    )
+    max_seq = 0
+    for row in rows:
+        try:
+            max_seq = max(max_seq, int(str(row.get("report_no")).rsplit("-", 1)[-1]))
+        except (TypeError, ValueError):
+            continue
+    return f"{prefix}-{max_seq + 1:04d}"
+
+
+def create_near_miss_report(payload: dict) -> dict:
+    """아차사고 보고서를 생성한다(status=SUBMITTED). 생성된 자연키 dict 반환.
+
+    report_no 는 incident_date 의 연월 기준으로 채번하며, **unique 충돌(SQLSTATE 23505)**
+    시에만 순번을 재계산해 최대 ``_NEAR_MISS_CREATE_RETRIES`` 회 bounded 재시도한다
+    (동시 삽입 collision-safe). 이 충돌은 DB 가 INSERT 를 거부한 것이므로(=미저장 확정)
+    새 순번으로 재시도해도 중복이 생기지 않는다. 재시도가 소진되면 무한 루프 대신
+    fail-closed '재조회 필요' 오류를 올린다.
+
+    반대로 INSERT 는 비멱등이므로 일시적 통신 오류로 실패하면 서버 반영 여부가
+    불명(ambiguous)하다. 이때는 재시도하지 않고 명시적 '재조회 필요' 오류를 올린다
+    — 맹목 재시도가 중복 보고서를 조용히 만드는 것을 막는다(fail-closed)."""
+    record = _near_miss_write_payload(payload)
+    year_month = record["incident_date"].replace("-", "")[:6]
+    for _ in range(_NEAR_MISS_CREATE_RETRIES):
+        record["report_no"] = _next_report_no(year_month)
+        try:
+            # retry_transient=False: 비멱등 INSERT 를 일시 오류로 맹목 재시도하지 않는다.
+            response = _execute(
+                client().table(NEAR_MISS_TABLE).insert(record), "생성", NEAR_MISS_TABLE,
+                retry_transient=False,
+            )
+            saved = (response.data or [None])[0]
+            if saved is None:
+                raise SupabaseDataError("아차사고 보고서 생성 결과가 비어 있습니다.")
+            return _near_miss_natural([saved])[0]
+        except SupabaseTransientError as exc:
+            # 저장 여부 불명(ambiguous) — 중복 방지를 위해 재시도하지 않고 재조회를 요구한다.
+            raise SupabaseDataError(
+                "아차사고 보고서 저장 결과가 불명확합니다(일시적 통신 오류). "
+                "중복 생성을 막기 위해 재시도하지 않았습니다. 목록을 재조회해 "
+                "저장 여부를 확인한 뒤 필요할 때만 다시 제출하세요."
+            ) from exc
+        except SupabaseDataError as exc:
+            if _is_unique_violation(exc):
+                continue  # report_no 충돌(23505, DB 거부=미저장) — 재채번 후 재시도(안전)
+            raise
+    # bounded 재시도 소진: 무한 루프 없이 fail-closed 로 종료한다.
+    raise SupabaseDataError(
+        "아차사고 보고서 번호가 반복 충돌하여 채번에 실패했습니다. "
+        "목록을 재조회한 뒤 다시 시도하세요."
+    )
+
+
+def update_near_miss_status(
+    report_id, status: str, *, expected_status=None, rejection_reason=None,
+    clear_evaluation: bool = False, updated_by=None,
+) -> dict | None:
+    """아차사고 상태를 변경한다(전이 검증은 파사드가 수행 후 호출).
+
+    clear_evaluation=True 면 평가 필드(확정등급/평가자/평가시각)를 NULL 로 되돌린다
+    (EVALUATED→IN_REVIEW 재개 시 near_miss_eval_consistency 제약 충족).
+
+    ``expected_status`` 가 주어지면 원자적 조건부 UPDATE(``where id=? and status=?``)로
+    수행하고 갱신 행 수를 확인한다. 0행이면 상태가 이미 바뀌었거나(다른 사용자가 먼저
+    처리 — TOCTOU) 보고서가 없어진 것이므로 덮어쓰지 않고 stale 오류를 올린다."""
+    if not near_miss_extensions_ready():
+        raise SupabaseDataError(_NM_NOT_READY_MESSAGE)
+    updates: dict = {"status": str(status).strip()}
+    if rejection_reason is not None:
+        updates["rejection_reason"] = _clean_text(rejection_reason, nullable=True)
+    if clear_evaluation:
+        updates["confirmed_grade"] = None
+        updates["evaluator_user_id"] = None
+        updates["evaluated_at"] = None
+    if updated_by is not None:
+        updates["updated_by"] = _clean_text(updated_by, nullable=True)
+    query = client().table(NEAR_MISS_TABLE).update(updates).eq("id", report_id)
+    if expected_status is not None:
+        query = query.eq("status", str(expected_status).strip())
+    response = _execute(query, "상태변경", NEAR_MISS_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
+        if expected_status is not None:
+            raise SupabaseDataError(_NM_STALE_MESSAGE)  # 조건부 0행 = lost update 방지
+        return get_near_miss_report(report_id)
+    return _near_miss_natural([saved])[0]
+
+
+def evaluate_near_miss(
+    report_id, confirmed_grade: str, *, evaluator_emp_no: str,
+    expected_status=None, updated_by=None,
+) -> dict | None:
+    """평가 확정: status=EVALUATED + 확정등급/평가자/평가시각 설정.
+
+    ``expected_status`` 가 주어지면 원자적 조건부 UPDATE(``where id=? and status=?``)로
+    수행한다 — 두 평가자가 동시에 같은 보고서를 평가해도 하나만 성공하고(0행 갱신 시
+    stale 오류) 다른 하나는 덮어쓰지 못한다(TOCTOU 방지)."""
+    if not near_miss_extensions_ready():
+        raise SupabaseDataError(_NM_NOT_READY_MESSAGE)
+    grade = _clean_text(confirmed_grade).upper()
+    if grade not in NEAR_MISS_GRADES:
+        raise SupabaseDataError(f"확정 등급이 유효하지 않습니다: {grade}")
+    user_by_emp, _ = _user_maps()
+    evaluator = _clean_text(evaluator_emp_no)
+    if evaluator not in user_by_emp:
+        raise SupabaseDataError(f"평가자 사번을 찾을 수 없습니다: {evaluator}")
+    from datetime import datetime, timezone
+    updates = {
+        "status": "EVALUATED",
+        "confirmed_grade": grade,
+        "evaluator_user_id": user_by_emp[evaluator],
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": _clean_text(updated_by, nullable=True),
+    }
+    query = client().table(NEAR_MISS_TABLE).update(updates).eq("id", report_id)
+    if expected_status is not None:
+        query = query.eq("status", str(expected_status).strip())
+    response = _execute(query, "평가", NEAR_MISS_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
+        if expected_status is not None:
+            raise SupabaseDataError(_NM_STALE_MESSAGE)  # 조건부 0행 = 이미 평가됨/변경됨
+        return get_near_miss_report(report_id)
+    return _near_miss_natural([saved])[0]
+
+
+def set_near_miss_active(report_id, is_active: bool, *, updated_by=None) -> None:
+    """보존(archival) 플래그 토글. 철회/반려는 상태로 표현하며 이 경로가 아니다."""
+    if not near_miss_extensions_ready():
+        raise SupabaseDataError(_NM_NOT_READY_MESSAGE)
+    updates: dict = {"is_active": bool(is_active)}
+    if updated_by is not None:
+        updates["updated_by"] = _clean_text(updated_by, nullable=True)
+    _execute(
+        client().table(NEAR_MISS_TABLE).update(updates).eq("id", report_id),
+        "보존변경", NEAR_MISS_TABLE,
+    )
+
+
+def near_miss_stats(by: str = "status", filters: dict | None = None) -> dict:
+    """서버 조회 결과를 by 기준으로 집계한다(등급/부서/기간/원인/상태)."""
+    rows = get_near_miss_reports(filters)
+    return _aggregate_near_miss(rows, by)
+
+
+def _aggregate_near_miss(rows: list[dict], by: str) -> dict:
+    """자연키 dict 리스트를 by 기준으로 count 집계(순수 함수 — sample/supabase 공용)."""
+    key_of = _near_miss_stat_key(by)
+    counts: dict = {}
+    for row in rows:
+        key = key_of(row)
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: (str(kv[0]))))
+
+
+def _near_miss_stat_key(by: str):
+    by = str(by or "status").strip().lower()
+    if by == "grade":
+        return lambda r: str(r.get("confirmed_grade") or "미확정")
+    if by == "dept":
+        return lambda r: str(r.get("dept_code") or "미지정")
+    if by == "cause":
+        return lambda r: str(r.get("cause_code") or "미지정")
+    if by == "period":
+        return lambda r: str(r.get("incident_date") or "")[:7]  # YYYY-MM
+    if by == "status":
+        return lambda r: str(r.get("status") or "")
+    raise ValueError(f"지원하지 않는 통계 기준입니다: {by}")

@@ -49,6 +49,7 @@
 - 권한: `ADMIN | MANAGER | USER`
 - 상태: `is_active`
 - 조직 확장: 선택적 `display_order`
+- 안전(006): `is_safety_officer`(기본 `false`) — 아차사고 평가 능력의 원천입니다.
 - `(team_id, department_id)` 복합 FK로 소속 불일치를 차단합니다.
 
 ### `work_types`
@@ -83,6 +84,22 @@
 
 부서별 근무조 선택지와 검증용 기준정보입니다. 현재 화면의 A/B/C 운영단위(`teams`)와 별개의 개념이며 편성 저장의 필수값이 아닙니다.
 
+### `near_miss_reports`
+
+아차사고(near-miss) 보고서입니다(migration 006, DRAFT). 보고자가 등급을 제안하고 평가자(관리자·안전담당자)가 확정하는 2단계 모델입니다.
+
+- 자연키: `report_no`(연월 `YYYYMM` + 월순번, 예 `202607-0007`). 채번은 애플리케이션이 대상 연월의 최대 순번+1로 계산하고, `unique` 제약을 충돌 최종 방어선으로 삼아 재시도합니다.
+- 본문: `work_name`(필수), `work_content`, `incident_content`, `countermeasure`, `site_description`
+- 등급: `proposed_grade`(보고자 제안, nullable), `confirmed_grade`(평가자 확정) — 각각 `S|A|B|C|D`
+- 사람·조직 관계값(ID/FK): `reporter_user_id`(필수, `on delete restrict`), `evaluator_user_id`(평가 후), `department_id`(보고 시점 부서 귀속 — 그룹은 저장하지 않고 부서→그룹은 004 `group_id`로 read-time 파생)
+- 원인: `cause_code`(통제 코드 `JAM|FALL|DROP|HIT|SLIP|BURN|PINCH|ETC`) + `cause_detail`
+- 기간: `incident_date`(사고 발생일). 기간 통계는 `created_at`이 아니라 이 컬럼을 씁니다.
+- 사진: `photo_paths`(jsonb 배열, Supabase Storage 경로 문자열만 — 바이너리 미저장). `jsonb_typeof = 'array'` 제약.
+- 상태: `status` = `SUBMITTED|IN_REVIEW|EVALUATED|CLOSED|REJECTED`, `rejection_reason`(반려 시 필수), `evaluated_at`
+- 무결성 제약: 평가 필드 3종(`confirmed_grade`/`evaluator_user_id`/`evaluated_at`)은 상태가 `EVALUATED|CLOSED`일 때만 모두 존재합니다(`near_miss_eval_consistency`).
+- 보존: `is_active`는 archival 전용입니다. 철회·반려는 **상태**로 표현하며 이 플래그로 표현하지 않습니다.
+- 인덱스: `(status) where is_active`(대기열), `(incident_date)`, `(department_id, incident_date)`, `(confirmed_grade)`, `(cause_code)`, `(reporter_user_id)`
+
 ## 3. 관계
 
 ```text
@@ -96,6 +113,11 @@ organization_groups
 
 users ── work_schedules
 work_types ── work_schedules
+
+near_miss_reports
+├─ reporter_user_id  → users (on delete restrict)
+├─ evaluator_user_id → users (on delete restrict)
+└─ department_id     → departments (보고 시점 귀속)
 ```
 
 삭제 동작은 기본적으로 `RESTRICT`입니다. 과거 근무와 편성을 보존해야 하는 기준정보는 비활성화를 우선합니다.
@@ -108,6 +130,7 @@ work_types ── work_schedules
 | `002_schedule_assignments.sql` | `shift_groups`, `schedule_assignments`, 근무 연결 컬럼 | DDL 전용, 자동 백필 없음 | 2026-07-16 적용·종단 확인 |
 | `003_org_structure.sql` | 조직 그룹(→004로 대체됨)·운영단위 유형·사용자 표시순서 | guarded DDL + 제한적 안전 백필 | 2026-07-20 기준 미적용 — 그룹 컬럼(`department_group`/`group_sort_order`)은 004가 대체. `unit_type`/`display_order`는 004가 호환용으로 재추가하므로 003 미적용 상태에서도 앱은 정상 동작 |
 | `004_org_groups.sql` | `organization_groups` 1급 테이블 신설 + `departments.group_id` FK + 무손실 백필(경로 B) | guarded DDL + 무손실 백필, 003의 그룹 컬럼 모델 대체 | 2026-07-22 테스트 프로젝트 read-only probe 확인. 앱 코드(`modules/db.py`·`supabase_repository.py`·조직/사용자/근무형태/대시보드 화면)는 004를 권위로 전면 전환 완료 — 프로덕션 live schema 적용 여부는 세션별 read-only 확인 필요 |
+| `006_near_miss.sql` | `near_miss_reports` 테이블 신설 + `users.is_safety_officer` 컬럼 | guarded DDL, no-drop, RLS enable(policyless) | DRAFT — **미적용**. 실행·원격 write는 독립 Codex 감사 + 사용자 승인 게이트 이후. 005는 004 후속 정리(§7)로 예약되어 있어 번호를 건너뜀 |
 
 위의 환경 상태는 마지막 검증 기록입니다. 새로운 세션에서 적용 또는 미적용을 단정하기 전에 반드시 live schema를 다시 확인합니다.
 
@@ -138,3 +161,22 @@ work_types ── work_schedules
 - 별도 변경 이력·import batch 테이블
 
 별도 사용자 요구와 migration 설계·승인 없이 선행 구현하지 않습니다.
+
+## 8. 아차사고 상태 전이 계약 (migration 006)
+
+상태는 `SUBMITTED → IN_REVIEW → EVALUATED → CLOSED` 진행을 기본으로 하며 `REJECTED`는 분기 상태입니다. 전이 규칙은 `modules/db.py::NEAR_MISS_TRANSITIONS`가 집행하고, DB `near_miss_eval_consistency` 제약이 평가 필드 정합을 강제합니다.
+
+| 현재 | 허용 전이 | 행위자 | 의미 |
+|---|---|---|---|
+| `SUBMITTED` | `IN_REVIEW`, `EVALUATED`, `REJECTED` | 평가자(ADMIN/MANAGER/안전담당자) | 검토 착수 / 즉시 확정 / 반려 |
+| `IN_REVIEW` | `EVALUATED`, `REJECTED`, `SUBMITTED` | 평가자 | 확정 / 반려 / 보고자에게 반송 |
+| `EVALUATED` | `CLOSED`, `IN_REVIEW` | 평가자 | 종결 / 재개(평가 필드 초기화) |
+| `REJECTED` | `SUBMITTED` | 평가자·보고자 | 재제출을 위한 재개 |
+| `CLOSED` | (없음) | — | 종결 상태 |
+
+- **보고자 수정 컷오프**: 보고자는 자신의 보고서를 `SUBMITTED` 상태에서만 수정할 수 있습니다. 검토가 착수(`IN_REVIEW`)된 뒤에는 수정할 수 없습니다.
+- **보존(is_active)은 archival 전용, 철회 아님**: `is_active`는 위 "보존" 항목(§2 `near_miss_reports`)대로 **archival 전용 관리 플래그**이며 상태(status)와 직교합니다. `is_active=false`는 목록에서 감추는 관리 조작(예: 오등록 정리)일 뿐 "철회"의 의미가 아닙니다(상태는 그대로 보존, 이력 미삭제). 006에는 별도의 `WITHDRAWN` 상태가 없으므로 **보고자 자기철회는 006 범위 밖**이며(보고자에게 철회 권한을 부여하지 않음), 필요하면 별도 설계·승인으로 다룹니다.
+- **행위자 신원(server-side)**: 보고자(`reporter_user_id`)·평가자(`evaluator_user_id`)·`evaluated_at`·보고 시점 부서(`department_id`)는 화면 위젯 값이 아니라 인증된 세션 사용자(`auth.get_current_user()`)에서 파사드가 서버측으로 확정합니다. 특히 부서는 세션 dict 의 값이 아니라 그 사번으로 조회한 **DB 권위 사용자 레코드**에서 다시 도출합니다(위조된 `current_user`로 타 부서 귀속 불가). 화면은 `modules/db.py::create_near_miss_report(..., current_user=...)`·`evaluate_near_miss(..., current_user=...)`에 세션 사용자를 넘겨야 하며, payload 의 신원·`created_by`/`updated_by` 필드는 무시됩니다(위조 방지·서버 확정).
+- **평가(confirm) 의미**: `evaluate_near_miss`는 **평가 이전 상태(`SUBMITTED`/`IN_REVIEW`)**에서만 `EVALUATED`로 전이하며 `confirmed_grade`·`evaluator_user_id`·`evaluated_at`을 함께 설정합니다. 이미 `EVALUATED`/`CLOSED`인 보고서를 재평가로 덮어쓸 수 없습니다(두 번째 평가자는 "상태가 이미 변경됨"을 받습니다 — 조건부 UPDATE 로 lost update 차단). 평가상태(`EVALUATED`/`CLOSED`)를 벗어나는 전이는 이 세 필드를 함께 초기화해 제약을 충족합니다.
+- **반려(reject) 의미**: `REJECTED`는 사유(`rejection_reason`)를 필수로 요구합니다(DB 제약). 반려는 삭제가 아니라 상태이며 이력을 보존합니다.
+- **종결(close) 의미**: `CLOSED`는 평가가 끝난 보고서의 최종 상태로, 이후 전이가 없습니다(재개가 필요하면 별도 승인 절차로 다룹니다).

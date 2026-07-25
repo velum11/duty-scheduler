@@ -9,6 +9,7 @@ user_id)이다. 화면은 자연키(dept_code / team_code / emp_no / duty_date)�
 DataFrame 을 훼손하지 않도록 항상 copy 후 컬럼을 추가한다.
 """
 import hashlib
+from datetime import date, datetime, timezone
 
 import pandas as pd
 import streamlit as st
@@ -138,6 +139,9 @@ _ASSIGNMENTS_STORE = "store_schedule_assignments"
 # supabase 모드는 실제 테이블(organization_groups/departments.group_id/teams.department_id)을
 # 쓰므로 이 스토어를 사용하지 않는다 — 모드별 경로를 명확히 분리한다.
 _ORG_GROUPS_STORE = "store_org_groups"
+# 아차사고(near-miss) 샘플 backing store (migration 006). supabase 모드는 실제
+# near_miss_reports 테이블을 쓰므로 이 스토어를 사용하지 않는다.
+_NEAR_MISS_STORE = "store_near_miss_reports"
 
 
 def datasource() -> str:
@@ -234,6 +238,16 @@ def _fetch_month_assignments(year: int, month: int, emp_nos: tuple) -> pd.DataFr
     return supabase_repository.get_month_assignments(year, month, list(emp_nos) or None)
 
 
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_near_miss(include_archived: bool) -> pd.DataFrame:
+    """활성(또는 전체) 아차사고 보고서를 원격에서 1회 조회해 짧게 캐시한다.
+
+    나머지 필터(상태/부서/원인/등급/기간/보고자)는 파사드가 프레임에서 적용한다.
+    쓰기 후에는 _invalidate_near_miss() 로 비운다."""
+    rows = supabase_repository.get_near_miss_reports({"include_archived": include_archived})
+    return _near_miss_frame(rows)
+
+
 # --- 쓰기 후 캐시 무효화 -----------------------------------------------------
 # 원칙: 미무효화 → stale 표시가 가장 큰 위험이므로, 변경 테이블이 파생시키는
 # 조회·매핑 캐시를 넉넉히(over-clear) 비운다. 과다 무효화는 재조회 1회 비용뿐이고
@@ -295,6 +309,10 @@ def _invalidate_assignments() -> None:
     _fetch_month_assignments.clear()
 
 
+def _invalidate_near_miss() -> None:
+    _fetch_near_miss.clear()
+
+
 def _invalidate_all() -> None:
     """모든 supabase 읽기·매핑 캐시를 비운다(클라이언트 재연결·스키마 재확인 등
     데이터 소스 자체가 바뀔 수 있는 경로에서 호출한다)."""
@@ -306,6 +324,7 @@ def _invalidate_all() -> None:
     _invalidate_shift_groups()
     _invalidate_schedules()
     _invalidate_assignments()
+    _invalidate_near_miss()
 
 
 def _typed_empty_frame(columns) -> pd.DataFrame:
@@ -1459,7 +1478,425 @@ def get_month_roster(emp_nos, year: int, month: int):
     return assignments, merged[SCHEDULE_ASSIGNED_COLUMNS].reset_index(drop=True)
 
 
+# --- 아차사고(near-miss) — migration 006 (DRAFT: 실행/원격 write 승인 게이트 전) ---
+# 파사드 계약(자연키): reporter_emp_no/evaluator_emp_no/dept_code. 화면은 이 함수만
+# 호출하고 repository 를 직접 부르지 않는다. sample 모드는 세션 스토어, supabase
+# 모드는 near_miss_reports 테이블(readiness-aware)로 분기한다.
+NEAR_MISS_GRADES = supabase_repository.NEAR_MISS_GRADES
+NEAR_MISS_CAUSE_CODES = supabase_repository.NEAR_MISS_CAUSE_CODES
+NEAR_MISS_STATUSES = supabase_repository.NEAR_MISS_STATUSES
+NEAR_MISS_COLUMNS = supabase_repository.NEAR_MISS_COLUMNS
+
+# 허용 상태 전이(actor 의미·컷오프는 docs/database.md 상태전이 계약 참조).
+#   SUBMITTED  → IN_REVIEW(검토 착수) / EVALUATED(평가 즉시확정) / REJECTED(반려)
+#   IN_REVIEW  → EVALUATED / REJECTED / SUBMITTED(반송)
+#   EVALUATED  → CLOSED(종결) / IN_REVIEW(재개 — 평가필드 초기화)
+#   REJECTED   → SUBMITTED(재개)
+#   CLOSED     → (종결, 전이 없음)
+NEAR_MISS_TRANSITIONS = {
+    "SUBMITTED": frozenset({"IN_REVIEW", "EVALUATED", "REJECTED"}),
+    "IN_REVIEW": frozenset({"EVALUATED", "REJECTED", "SUBMITTED"}),
+    "EVALUATED": frozenset({"CLOSED", "IN_REVIEW"}),
+    "REJECTED": frozenset({"SUBMITTED"}),
+    "CLOSED": frozenset(),
+}
+# 평가 필드(확정등급/평가자/평가시각)가 유지되는 상태. 이외로 전이하면 초기화한다
+# (near_miss_eval_consistency DB 제약 충족 — 006).
+_NEAR_MISS_EVAL_STATES = frozenset({"EVALUATED", "CLOSED"})
+
+# 클라이언트(화면 위젯)가 payload 로 보내도 파사드가 무시하고 서버측(세션 사용자·서버
+# 시각·상태머신)에서만 확정하는 필드. 다른 사람 이름으로 보고/평가했다고 위조하거나
+# 상태·평가값을 임의로 밀어넣는 것을 막는다(fail-closed 신원 계약).
+_NEAR_MISS_SERVER_FIELDS = frozenset({
+    "id", "report_no", "status",
+    "reporter_emp_no", "reporter_user_id",
+    "evaluator_emp_no", "evaluator_user_id",
+    "dept_code", "department_id",
+    "confirmed_grade", "evaluated_at",
+    "rejection_reason", "is_active",
+    "created_by", "updated_by", "created_at", "updated_at",
+})
+
+# 동시 전이/평가가 서로의 결과를 덮어쓰는 lost update 를 막는 조건부 UPDATE 실패 메시지.
+_NEAR_MISS_STALE_MESSAGE = (
+    "상태가 이미 변경되어 요청을 적용할 수 없습니다(다른 사용자가 먼저 처리). "
+    "목록을 재조회한 뒤 다시 시도하세요."
+)
+
+# 평가(EVALUATED 확정)를 시작할 수 있는 사전(pre-evaluation) 상태. 이미 평가/종결된
+# 보고서(EVALUATED/CLOSED)는 재평가로 덮어쓸 수 없다(lost update 방지).
+_NEAR_MISS_PRE_EVAL_STATES = frozenset({"SUBMITTED", "IN_REVIEW"})
+
+
+def _near_miss_actor(current_user, *, action: str) -> dict:
+    """세션 사용자에서 행위자 신원을 서버측으로 확정한다(위조 방지).
+
+    화면은 반드시 인증된 현재 사용자(auth.get_current_user 반환값)를 넘겨야 하며,
+    위젯 입력값이 아니다. **사번(emp_no)만** 신뢰하고, 사번·부서는 세션 dict 가 아니라
+    그 사번으로 조회한 DB 권위 사용자 레코드에서 다시 도출한다 — 위조된
+    current_user(예: 사번은 유효하나 dept_code 를 타 부서로 조작)로 다른 부서에 귀속시키는
+    것을 막는다. payload 의 신원 필드는 신뢰하지 않는다. 신원을 확인할 수 없으면 DB 요청
+    전에 차단한다."""
+    if not isinstance(current_user, dict):
+        raise ValueError(f"{action}에는 인증된 현재 사용자 정보가 필요합니다.")
+    emp_no = str(current_user.get("emp_no") or "").strip()
+    record = find_user_by_emp_no(emp_no) if emp_no else None
+    if not emp_no or record is None:
+        raise ValueError(f"{action} 행위자 사번을 확인할 수 없습니다: {emp_no!r}")
+    # 사번·부서 모두 권위 레코드에서 가져온다(세션 dict 의 dept_code 는 무시).
+    return {
+        "emp_no": str(record.get("emp_no") or emp_no).strip(),
+        "dept_code": str(record.get("dept_code") or "").strip(),
+    }
+
+
+def _near_miss_updated_by(current_user):
+    """감사(updated_by)용 행위자 사번을 세션 사용자에서 얻는다(없으면 None, 비강제)."""
+    if isinstance(current_user, dict):
+        emp = str(current_user.get("emp_no") or "").strip()
+        return emp or None
+    return None
+
+
+def near_miss_transition_allowed(current, target) -> bool:
+    """current → target 상태 전이가 허용되는지."""
+    return str(target).strip() in NEAR_MISS_TRANSITIONS.get(str(current).strip(), frozenset())
+
+
+def near_miss_schema_ready() -> bool:
+    """006 아차사고 스키마 사용 가능 여부. sample 은 항상 True."""
+    if is_sample_mode():
+        return True
+    return supabase_repository.near_miss_extensions_ready()
+
+
+def near_miss_schema_probe(*, force: bool = False) -> str:
+    """006 아차사고 스키마 준비 상태를 3-state 로 반환한다(배너/재확인 UX 용).
+
+    반환: READINESS_READY / READINESS_NOT_READY(미적용) / READINESS_PROBE_ERROR(확인 실패).
+    sample 은 항상 READY. 조직 스키마 3-state(org_extensions_probe)와 같은 관행이며,
+    PROBE_ERROR(일시 장애)를 '미적용/빈 데이터'로 단정하지 않는다."""
+    if is_sample_mode():
+        return supabase_repository.READINESS_READY
+    return supabase_repository.near_miss_extensions_probe(force=force)
+
+
+def _near_miss_frame(rows) -> pd.DataFrame:
+    """자연키 dict 리스트를 NEAR_MISS_COLUMNS 계약 프레임으로 만든다(photo_paths=list 보존)."""
+    if rows:
+        df = pd.DataFrame(list(rows))
+        for column in NEAR_MISS_COLUMNS:
+            if column not in df.columns:
+                df[column] = None
+        return df[NEAR_MISS_COLUMNS].reset_index(drop=True).copy()
+    return pd.DataFrame({
+        column: pd.Series(dtype="bool" if column == "is_active" else "object")
+        for column in NEAR_MISS_COLUMNS
+    })
+
+
+def _near_miss_store() -> pd.DataFrame:
+    """sample 모드 아차사고 backing store(세션 유지, 실DB 미변경)."""
+    if _NEAR_MISS_STORE not in st.session_state:
+        st.session_state[_NEAR_MISS_STORE] = _near_miss_frame([])
+    return st.session_state[_NEAR_MISS_STORE]
+
+
+def _sample_report_no(store: pd.DataFrame, incident_date: str) -> str:
+    """sample 채번 — 연월(YYYYMM)+월순번. supabase 는 repository._next_report_no."""
+    ym = str(incident_date).replace("-", "")[:6]
+    max_seq = 0
+    if not store.empty:
+        for value in store["report_no"].astype(str):
+            if value.startswith(ym + "-"):
+                try:
+                    max_seq = max(max_seq, int(value.rsplit("-", 1)[-1]))
+                except (TypeError, ValueError):
+                    continue
+    return f"{ym}-{max_seq + 1:04d}"
+
+
+def _sample_near_miss_record(payload: dict, store: pd.DataFrame) -> dict:
+    """create 입력(자연키)을 검증해 sample 스토어 레코드로 만든다.
+
+    reporter_emp_no·dept_code·시각은 서버측 값이다(화면이 세션에서 채워 넘긴다).
+    """
+    work_name = str(payload.get("work_name") or "").strip()
+    if not work_name:
+        raise ValueError("작업명은 비어 있을 수 없습니다.")
+    reporter = str(payload.get("reporter_emp_no") or "").strip()
+    if not reporter or find_user_by_emp_no(reporter) is None:
+        raise ValueError(f"아차사고 보고자 사번을 찾을 수 없습니다: {reporter}")
+    cause = str(payload.get("cause_code") or "").strip().upper()
+    if cause not in NEAR_MISS_CAUSE_CODES:
+        raise ValueError(f"원인 코드가 유효하지 않습니다: {cause}")
+    proposed = payload.get("proposed_grade")
+    proposed = str(proposed).strip().upper() if proposed not in (None, "") else None
+    if proposed is not None and proposed not in NEAR_MISS_GRADES:
+        raise ValueError(f"제안 등급이 유효하지 않습니다: {proposed}")
+    incident_date = str(payload.get("incident_date") or "").strip()
+    date.fromisoformat(incident_date)  # 형식 오류 시 ValueError
+    photo = payload.get("photo_paths") or []
+    if not isinstance(photo, (list, tuple)):
+        raise ValueError("photo_paths 는 배열이어야 합니다.")
+    ids = pd.to_numeric(store["id"], errors="coerce").dropna() if not store.empty else pd.Series([], dtype=float)
+    new_id = int(ids.max()) + 1 if not ids.empty else 1
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "id": new_id,
+        "report_no": _sample_report_no(store, incident_date),
+        "status": "SUBMITTED",
+        "work_name": work_name,
+        "work_content": str(payload.get("work_content") or ""),
+        "incident_content": str(payload.get("incident_content") or ""),
+        "countermeasure": str(payload.get("countermeasure") or ""),
+        "site_description": str(payload.get("site_description") or ""),
+        "proposed_grade": proposed,
+        "confirmed_grade": None,
+        "cause_code": cause,
+        "cause_detail": str(payload.get("cause_detail") or ""),
+        "incident_date": incident_date,
+        "reporter_emp_no": reporter,
+        "evaluator_emp_no": "",
+        "dept_code": str(payload.get("dept_code") or ""),
+        "photo_paths": [str(p) for p in photo],
+        "rejection_reason": None,
+        "evaluated_at": None,
+        "is_active": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _sample_update_near_miss(
+    report_id, *, expected_status=None, clear_eval: bool = False, **changes
+) -> bool:
+    """sample 스토어의 단일 보고서 필드를 변경한다(존재하는 컬럼만).
+
+    ``expected_status`` 가 주어지면 현재 상태가 일치할 때만 적용한다(supabase 조건부
+    UPDATE 와 동일한 원자 전이 계약을 sample 에서도 모사). 적용하면 True, 대상 없음·
+    상태 불일치(이미 전이됨)면 False 를 반환해 파사드가 stale 오류를 낼 수 있게 한다."""
+    store = _near_miss_store().copy()
+    mask = store["id"].astype(str) == str(report_id)
+    if not mask.any():
+        return False
+    if expected_status is not None:
+        current = store.loc[mask, "status"].astype(str).str.strip()
+        if not (current == str(expected_status).strip()).all():
+            return False
+    if clear_eval:
+        store.loc[mask, "confirmed_grade"] = None
+        store.loc[mask, "evaluator_emp_no"] = ""
+        store.loc[mask, "evaluated_at"] = None
+    for column, value in changes.items():
+        if column in store.columns and value is not None:
+            store.loc[mask, column] = value
+    store.loc[mask, "updated_at"] = datetime.now(timezone.utc).isoformat()
+    st.session_state[_NEAR_MISS_STORE] = store.reset_index(drop=True)
+    return True
+
+
+def get_near_miss_reports(filters: dict | None = None) -> pd.DataFrame:
+    """아차사고 보고서 목록(NEAR_MISS_COLUMNS).
+
+    filters(선택): include_archived(bool, 기본 False=활성만), status, dept_code,
+    cause_code, confirmed_grade, reporter_emp_no, date_from/date_to(incident_date 기준).
+    """
+    filters = dict(filters or {})
+    include_archived = bool(filters.get("include_archived"))
+    if is_sample_mode():
+        df = _near_miss_store().copy()
+        if not include_archived and not df.empty:
+            df = df[df["is_active"].astype(bool)]
+    else:
+        df = _fetch_near_miss(include_archived).copy()
+    if df.empty:
+        return _near_miss_frame([])
+    for column, value in (
+        ("status", filters.get("status")),
+        ("dept_code", filters.get("dept_code")),
+        ("cause_code", filters.get("cause_code")),
+        ("confirmed_grade", filters.get("confirmed_grade")),
+        ("reporter_emp_no", filters.get("reporter_emp_no")),
+    ):
+        if value is not None and str(value).strip() != "":
+            df = df[df[column].astype(str).str.strip() == str(value).strip()]
+    if filters.get("date_from"):
+        df = df[df["incident_date"].astype(str) >= str(filters["date_from"]).strip()]
+    if filters.get("date_to"):
+        df = df[df["incident_date"].astype(str) <= str(filters["date_to"]).strip()]
+    return _empty_contract(df.reset_index(drop=True).copy(), NEAR_MISS_COLUMNS)
+
+
+def get_near_miss_report(report_id) -> dict | None:
+    """단일 아차사고 보고서(자연키 dict) 또는 None."""
+    if is_sample_mode():
+        store = _near_miss_store()
+        match = store[store["id"].astype(str) == str(report_id)]
+        return None if match.empty else match.iloc[0].to_dict()
+    return supabase_repository.get_near_miss_report(report_id)
+
+
+def create_near_miss_report(payload: dict, *, current_user) -> dict:
+    """아차사고 보고서를 생성한다(status=SUBMITTED). 생성된 자연키 dict 반환.
+
+    보고자·부서·created_by 는 payload 가 아니라 인증된 ``current_user``(세션 사용자,
+    auth.get_current_user() 반환값)에서 **서버측으로 확정**한다. payload 의 신원·상태
+    필드(reporter_*, evaluator_*, dept_code, status, created_by 등)는 무시한다 —
+    클라이언트가 다른 사람 이름으로 보고하는 위조를 막는다. 화면은 위젯 값이 아니라
+    세션 사용자를 넘겨야 한다. 시각·상태·report_no 는 서버측에서 설정한다.
+    """
+    actor = _near_miss_actor(current_user, action="아차사고 보고 생성")
+    # 클라이언트가 보낸 신원/상태/서버측 필드를 제거하고 서버 확정값으로만 덮어쓴다.
+    safe = {k: v for k, v in dict(payload or {}).items() if k not in _NEAR_MISS_SERVER_FIELDS}
+    safe["reporter_emp_no"] = actor["emp_no"]
+    safe["dept_code"] = actor["dept_code"]
+    safe["created_by"] = actor["emp_no"]
+    if is_sample_mode():
+        store = _near_miss_store()
+        record = _sample_near_miss_record(safe, store)
+        st.session_state[_NEAR_MISS_STORE] = pd.concat(
+            [store, _near_miss_frame([record])], ignore_index=True
+        )
+        return record
+    try:
+        return supabase_repository.create_near_miss_report(safe)
+    finally:
+        _invalidate_near_miss()
+
+
+def update_near_miss_status(
+    report_id, status: str, *, rejection_reason=None, current_user=None, updated_by=None,
+) -> dict | None:
+    """아차사고 상태를 전이 규칙에 맞게 변경한다.
+
+    허용되지 않은 전이·반려 사유 누락은 ValueError. 평가상태(EVALUATED/CLOSED)를
+    벗어나면 평가 필드를 함께 초기화한다(DB 제약 충족). 전이는 읽은 현재 상태를
+    기대값으로 하는 원자적 조건부 UPDATE 로 수행하며, 그 사이 다른 사용자가 먼저
+    상태를 바꿨으면(TOCTOU) 덮어쓰지 않고 stale 오류를 낸다. ``current_user`` 는
+    감사(updated_by) 귀속에 쓰인다(세션 사용자, 위젯 값 아님).
+    """
+    target = str(status).strip()
+    if target not in NEAR_MISS_STATUSES:
+        raise ValueError(f"유효하지 않은 상태입니다: {target}")
+    current = get_near_miss_report(report_id)
+    if current is None:
+        raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
+    cur_status = str(current.get("status") or "").strip()
+    if cur_status != target and not near_miss_transition_allowed(cur_status, target):
+        raise ValueError(f"허용되지 않은 상태 전이입니다: {cur_status} → {target}")
+    if target == "REJECTED" and not str(rejection_reason or "").strip():
+        raise ValueError("반려하려면 반려 사유가 필요합니다.")
+    clear_eval = target not in _NEAR_MISS_EVAL_STATES
+    reason = str(rejection_reason).strip() if target == "REJECTED" else None
+    # updated_by 는 세션 사용자(서버측)에서 확정한다. 명시 인자는 세션이 없을 때만 폴백.
+    attribution = _near_miss_updated_by(current_user) or updated_by
+    if is_sample_mode():
+        ok = _sample_update_near_miss(
+            report_id, expected_status=cur_status, clear_eval=clear_eval,
+            status=target, rejection_reason=reason,
+        )
+        if not ok:
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        return get_near_miss_report(report_id)
+    try:
+        return supabase_repository.update_near_miss_status(
+            report_id, target, expected_status=cur_status, rejection_reason=reason,
+            clear_evaluation=clear_eval, updated_by=attribution,
+        )
+    finally:
+        _invalidate_near_miss()
+
+
+def evaluate_near_miss(
+    report_id, confirmed_grade: str, *, current_user, updated_by=None,
+) -> dict | None:
+    """평가 확정: status=EVALUATED + 확정등급/평가자/평가시각 설정.
+
+    평가자(evaluator)·평가시각은 payload/위젯이 아니라 인증된 ``current_user``에서
+    **서버측으로 확정**한다 — 다른 사람이 평가한 것처럼 위조하는 것을 막는다. 확정 등급
+    유효성을 검증하고, 보고서가 **평가 이전 상태(SUBMITTED/IN_REVIEW)**일 때만 평가한다.
+    이미 평가/종결된 보고서(EVALUATED/CLOSED)는 재평가로 덮어쓸 수 없으며 stale 오류를
+    낸다. 읽은 현재 상태를 기대값으로 하는 원자적 조건부 UPDATE 로 확정하므로 두 평가자가
+    동시에 확정해도 하나만 성공하고 다른 하나는 '상태가 이미 변경됨'을 받는다.
+    """
+    grade = str(confirmed_grade).strip().upper()
+    if grade not in NEAR_MISS_GRADES:
+        raise ValueError(f"확정 등급이 유효하지 않습니다: {grade}")
+    actor = _near_miss_actor(current_user, action="아차사고 평가")
+    evaluator = actor["emp_no"]
+    current = get_near_miss_report(report_id)
+    if current is None:
+        raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
+    cur_status = str(current.get("status") or "").strip()
+    # 평가 이전 상태에서만 확정 가능. 이미 EVALUATED/CLOSED 면 재평가 덮어쓰기를 막는다.
+    if cur_status not in _NEAR_MISS_PRE_EVAL_STATES:
+        raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+    # 평가 귀속(updated_by)은 세션 평가자로 확정한다(서버측).
+    attribution = evaluator
+    if is_sample_mode():
+        ok = _sample_update_near_miss(
+            report_id, expected_status=cur_status, status="EVALUATED",
+            confirmed_grade=grade, evaluator_emp_no=evaluator,
+            evaluated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        if not ok:
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        return get_near_miss_report(report_id)
+    try:
+        return supabase_repository.evaluate_near_miss(
+            report_id, grade, evaluator_emp_no=evaluator,
+            expected_status=cur_status, updated_by=attribution,
+        )
+    finally:
+        _invalidate_near_miss()
+
+
+def set_near_miss_active(
+    report_id, is_active: bool, *, current_user=None, updated_by=None
+) -> None:
+    """보존(archival) 플래그 토글. 철회/반려는 상태로 표현하며 이 경로가 아니다.
+
+    ``current_user`` 는 감사(updated_by) 귀속에 쓰인다(세션 사용자, 위젯 값 아님).
+    """
+    attribution = _near_miss_updated_by(current_user) or updated_by
+    if is_sample_mode():
+        _sample_update_near_miss(report_id, is_active=bool(is_active))
+        return
+    try:
+        supabase_repository.set_near_miss_active(
+            report_id, bool(is_active), updated_by=attribution
+        )
+    finally:
+        _invalidate_near_miss()
+
+
+def near_miss_stats(by: str = "status", filters: dict | None = None) -> dict:
+    """아차사고 통계 집계(by = grade|dept|period|cause|status). {키: 건수} 반환.
+
+    두 모드 모두 같은 자연키 프레임에서 집계하므로 결과 계약이 일치한다.
+    """
+    df = get_near_miss_reports(filters)
+    return supabase_repository._aggregate_near_miss(df.to_dict("records"), by)
+
+
 # --- 조회 헬퍼 ---
+def _safety_officer_flag(emp_no) -> bool:
+    """사용자의 안전담당자 지정 여부(users.is_safety_officer, migration 006).
+
+    sample 모드는 CSV 에 해당 컬럼이 없어 항상 False. supabase 모드는 원격 조회하며
+    컬럼 미적용(006 전)·오류는 안전하게 False 로 접는다.
+    주의(세션 캐시): 로그인 시점의 값이 세션 사용자 dict 에 실린다. 플래그를 바꾸면
+    재로그인해야 반영된다(get_current_user 가 세션 사용자를 우선 반환하기 때문).
+    """
+    if is_sample_mode():
+        return False
+    try:
+        return supabase_repository.user_is_safety_officer(str(emp_no).strip())
+    except DATA_SOURCE_ERRORS:
+        return False
+
+
 def find_user_by_emp_no(emp_no: str):
     """사번으로 사용자 1명을 dict 로 반환. 없으면 None.
 
@@ -1486,8 +1923,13 @@ def find_user_by_emp_no(emp_no: str):
         exact = pool[norm.loc[pool.index] == raw]
         if not exact.empty:
             pool = exact
-        return pool.iloc[0].to_dict()
-    return match.iloc[0].to_dict()
+        record = pool.iloc[0].to_dict()
+    else:
+        record = match.iloc[0].to_dict()
+    # 안전담당자 지정 플래그(006)를 세션 사용자 dict 에 실어 능력 헬퍼가 읽게 한다.
+    # USER_COLUMNS/get_users 계약은 건드리지 않는다(그 컬럼 계약은 테스트로 고정).
+    record["is_safety_officer"] = _safety_officer_flag(record.get("emp_no"))
+    return record
 
 
 def dept_name(dept_code: str) -> str:

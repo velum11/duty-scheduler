@@ -168,3 +168,40 @@ def get_current_user():
         st.session_state.user = user
         st.session_state.auth_token = token
     return user
+
+
+# --- 능력(권한) 헬퍼 — 아차사고 평가 (migration 006) ---
+# nav.allowed(화면 접근)와 별개의 '행위 능력' 판정 함수만 제공한다. nav 렌더/라우팅은
+# 바꾸지 않으며(UI 담당), 화면이 평가 버튼 노출·차단에 이 함수를 호출한다.
+# 참(True)로 볼 값 집합(canonical). 문자열 "false"/"0"/"" 등은 False 로 접는다
+# (bool("false") 가 True 가 되는 파이썬 함정 방지 — supabase_repository._clean_bool 과 정합).
+_TRUE_TOKENS = frozenset({"true", "1", "yes", "y", "t", "on"})
+
+
+def _as_bool(value) -> bool:
+    """실제 True / 1 / "true" 계열만 참으로 본다. 그 외(문자열 "false" 포함)는 거짓."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    return str(value).strip().lower() in _TRUE_TOKENS
+
+
+def is_safety_officer(user) -> bool:
+    """사용자가 안전담당자로 지정됐는지. user dict 의 is_safety_officer 를 읽는다.
+
+    이 플래그는 로그인 시 db.find_user_by_emp_no 가 세션 사용자 dict 에 실어준다.
+    세션 캐시 주의: 플래그를 바꾸면 재로그인해야 반영된다(get_current_user 가 세션
+    사용자를 우선 반환하기 때문).
+    """
+    if not user:
+        return False
+    return _as_bool(user.get("is_safety_officer", False))
+
+
+def can_evaluate_near_miss(user) -> bool:
+    """아차사고 평가(확정 등급 부여) 능력: ADMIN 또는 MANAGER 또는 안전담당자."""
+    if not user:
+        return False
+    role = str(user.get("role", "")).strip().upper()
+    return role in ("ADMIN", "MANAGER") or is_safety_officer(user)
