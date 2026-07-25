@@ -718,9 +718,37 @@ def weekend_color(d: date) -> str:
     return "#26282B"
 
 
+def _badge_text_color(color: str) -> str:
+    """solid 배지 배경색(``#RRGGBB``) 위에서 4.5:1 이상을 보장하는 텍스트색(흰/검) 선택.
+
+    WCAG 상대명도를 계산해 흰색(#FFFFFF)과 순수 검정(#000000) 중 대비가 큰 쪽을 고른다.
+    두 후보 중 큰 값은 배경 명도 전 구간에서 ≈4.5:1 이상이라 항상 기준을 만족한다
+    (views/master_work_types.py::_text_on 과 동일 로직 — 배지 저대비 보수).
+    배경색 파싱에 실패하면 기존 기본 배지색(#9AA0A6)에 맞춰 흰색 대신 어두운 텍스트로
+    안전 측(더 밝은 배경 가정)으로 fallback한다.
+    """
+    try:
+        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+    except (ValueError, IndexError, TypeError):
+        return "#1F2937"
+
+    def _lin(v: int) -> float:
+        c = v / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    lum = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+    contrast_white = 1.05 / (lum + 0.05)
+    contrast_black = (lum + 0.05) / 0.05
+    return "#FFFFFF" if contrast_white >= contrast_black else "#000000"
+
+
 def badge_html(code: str, color: str = "#9AA0A6", name: str = None) -> str:
     color = color or "#9AA0A6"
-    html = f"<span class='duty-badge' style='background:{color}'>{code}</span>"
+    text_color = _badge_text_color(color)
+    html = (
+        f"<span class='duty-badge' style='background:{color};color:{text_color}'>"
+        f"{code}</span>"
+    )
     if name:
         html += f"<span class='duty-name'>{name}</span>"
     return html
