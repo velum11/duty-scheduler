@@ -2,6 +2,11 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-25 · 화면 규약 Phase B — ADMIN/MANAGER 3화면 크롬 표준화 (사용자 sign-off 대기)
+
+- 대시보드·근무표 편성·월간 근무표의 손제작 헤더를 기준정보 표준 크롬(브레드크럼→제목·설명→모드 배지)으로 통일 — `scaffold.page_chrome_for()`가 `modules/nav.py` 라벨을 단일 출처로 도출(ui-feature Opus 구현). `my_schedule`(USER 모바일)은 의도적 제외. 이제 ADMIN/MANAGER 6화면 크롬 동일.
+- 검증: 계약 테스트 all-green(scaffold 34·schedule 124·sidebar 42·unified 195) + ui-feature 자가측정 + **visual-qa 독립 QA 전 항목 PASS**(6화면×2 viewport: 크롬 3요소 일치, 페이지 가로스크롤 0, 잘림 0, AG Grid 셀 정렬 델타 0.0px, 제목 대비 13.08:1). 특이: 월간 근무표는 AG Grid가 아닌 `st.dataframe`(기존 구현) — 내부 위젯 스크롤은 기존 동작. **최종 게이트: 사용자 실브라우저 sign-off 대기.**
+
 ## 2026-07-25 · 잔존 worktree 정리 완료 (integrator 검증→사용자 승인→실행)
 
 - `.claude/worktrees/` 등록 worktree 5개 `git worktree remove` + 병합 완료 `worktree-agent-*` 브랜치 6개 `-d` 안전 삭제(전건 feature 병합·미커밋 0 검증 후 사용자 승인 게이트 거침). 구버전 규범 문서 스냅샷 오염원 제거. 잔존: 빈 고아 폴더 1개(핸들 잠김 — 수동 삭제 필요, BACKLOG).

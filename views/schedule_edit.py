@@ -32,6 +32,7 @@ import streamlit as st
 from st_aggrid import JsCode
 
 from modules import db, ui
+from views.common import scaffold
 from views.workspace import (
     grid_bool,
     selectable_master_grid,
@@ -48,7 +49,7 @@ _EMP_EDITABLE = JsCode("function(p){ return p.data && p.data._row_state !== 'exi
 
 # ---------- 진입점 ----------
 def render(user: dict) -> None:
-    ui.page_header("schedule_edit")
+    scaffold.page_chrome_for("schedule_edit", SCREEN_ARCHETYPE, role=user.get("role"))
 
     depts = db.get_departments()
     teams = db.get_teams()

@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+from modules import db as _db
+from modules import nav as _nav
 from views import master as _master
 
 #: 강제되는 4개 화면 유형 코드(DESIGN.md §0 표와 1:1 대응).
@@ -82,4 +84,44 @@ def page_chrome(
     return archetype
 
 
-__all__ = ["ARCHETYPES", "page_chrome"]
+def mode_badge() -> str:
+    """현재 데이터 모드 배지 HTML(기준정보 화면과 동일한 샘플/연결 배지).
+
+    ``master_users`` 등 기준정보 화면의 헤더 배지와 동일 계약을 재사용한다: sample
+    모드면 '샘플 데이터', 아니면 'Supabase 연결'. readiness/health 신호는 섞지
+    않는다(§5) — 이 배지는 데이터 모드(persistence 연결) 전용이다.
+    """
+    sample = _db.is_sample_mode()
+    return _master.mode_badge_html(connected=(None if sample else True), sample=sample)
+
+
+def page_chrome_for(page_id: str, archetype: str, *, role: str | None = None) -> str:
+    """``page_id`` 의 표준 페이지 크롬(브레드크럼·제목·설명·모드 배지)을 렌더한다.
+
+    브레드크럼·제목·설명은 ``modules/nav.py`` 의 실제 메뉴 그룹·라벨·설명에서
+    도출해(예: ``근무표 › 근무표 편성``) 화면 간 표기를 단일 출처로 통일한다. 우측
+    배지는 :func:`mode_badge` 로 기준정보 화면과 동일하게 노출한다. 유형별 나머지
+    크롬(조회 조건바·액션바·그리드·지표 카드 등)은 각 화면이 §0 순서대로 이어서
+    구성한다.
+
+    Parameters
+    ----------
+    page_id:
+        ``modules/nav.py`` 의 화면 id(예: ``"schedule_edit"``).
+    archetype:
+        :data:`ARCHETYPES` 중 하나. 허용 외 값이면 :class:`ValueError`.
+    role:
+        중복 page(그룹 여러 곳 소속)를 role 기준으로 해소한다(``nav.group_of``).
+    """
+    group = _nav.group_of(page_id, role)
+    breadcrumb = f"{group['label']} › {_nav.page_label(page_id)}"
+    return page_chrome(
+        archetype,
+        title=_nav.page_label(page_id),
+        desc=_nav.page_desc(page_id),
+        breadcrumb=breadcrumb,
+        badges=mode_badge(),
+    )
+
+
+__all__ = ["ARCHETYPES", "page_chrome", "page_chrome_for", "mode_badge"]

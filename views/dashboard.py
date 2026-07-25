@@ -15,6 +15,7 @@ import streamlit as st
 
 from modules import db, ui
 from views import workspace
+from views.common import scaffold
 
 # 버킷 표시 순서와 대표 색상(카테고리 accent — 색만이 아닌 라벨 병기로 이중 부호화).
 # classify_work_group 은 주간/야간/OFF/휴가/None 을 반환한다. OFF→휴무(라벨만),
@@ -75,7 +76,7 @@ def render(user: dict) -> None:
         _render_user(user)
         return
 
-    ui.page_header("dashboard")
+    scaffold.page_chrome_for("dashboard", SCREEN_ARCHETYPE, role=role)
     the_date = _date_nav_bar()
     _inject_board_style()
 
