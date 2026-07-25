@@ -361,6 +361,11 @@ _SELECT_ALL_HEADER = JsCode(
           params.api.refreshCells({ columns: ['_action'], force: true });
           this.refreshState();
         });
+        // 키보드(WCAG 2.1.1): 네이티브 체크박스는 Space 로 이미 토글되며 click 을 발생시킨다.
+        // Enter 는 기본 동작이 없으므로 click 으로 위임해 마우스와 동일 경로를 태운다.
+        cb.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !cb.disabled) { e.preventDefault(); cb.click(); }
+        });
         params.api.addEventListener('cellValueChanged', this.refreshState);
         params.api.addEventListener('modelUpdated', this.refreshState);
         params.api.addEventListener('filterChanged', this.refreshState);
@@ -401,6 +406,52 @@ _ROW_ACTION_CLICK = JsCode(
       } else if (t.classList.contains('md-act-cb')) {
         e.node.setDataValue('_sel', !!t.checked);
       }
+    }
+    """
+)
+
+# 첫 열 키보드 처리(WCAG 2.1.1) — AG Grid 셀 내비게이션은 .ag-cell 래퍼로만 Tab 이동하고
+# cellRenderer 내부의 네이티브 입력은 Tab 순서에 없다. 포커스된 _action 셀에서 Enter/Space 가
+# 마우스 클릭과 동일한 동작(기존 행=_sel 토글, 신규 행=_removed)을 하도록 한다.
+# onCellClicked(마우스)는 그대로 두고, 여기서는 셀 데이터로 동작을 판정한다(포커스는 래퍼에
+# 있어 e.event.target 이 입력 요소가 아니기 때문). preventDefault 로 AG Grid 기본 키 동작
+# (Enter 세로 이동 등)을 막는다. _sel 은 숨김 컬럼이라 setDataValue 만으로는 체크박스 표시가
+# 갱신되지 않으므로 해당 행 _action 셀을 강제 리렌더한다(마우스 클릭은 네이티브 토글로 이미 반영).
+_ROW_ACTION_KEYDOWN = JsCode(
+    """
+    function(e) {
+      if (!e.colDef || e.colDef.field !== '_action') { return; }
+      const ev = e.event;
+      if (!ev) { return; }
+      const key = ev.key;
+      if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') { return; }
+      const d = (e.node && e.node.data) || {};
+      if (d._row_state === 'group') { return; }
+      ev.preventDefault();
+      if (d._row_state === 'existing') {
+        const cur = (d._sel === true || d._sel === 'true' || d._sel === 1);
+        e.node.setDataValue('_sel', !cur);
+        if (e.api) { e.api.refreshCells({ rowNodes: [e.node], columns: ['_action'], force: true }); }
+      } else {
+        e.node.setDataValue('_removed', '1');
+      }
+    }
+    """
+)
+
+# _action 컬럼 전용 키 억제 — AG Grid 34.x 는 자체 셀 키 동작(Enter=아래 이동 등)을
+# cellKeyDown 디스패치보다 먼저 처리하므로 onCellKeyDown 안의 preventDefault 만으로는
+# 기본 내비게이션을 막지 못한다. suppressKeyboardEvent 는 기본 처리 이전에 호출되어
+# Enter/Space 에 대해 true 를 반환하면 AG Grid 가 그 키의 기본 동작을 수행하지 않는다.
+# 실제 _sel/_removed 동작은 여전히 _ROW_ACTION_KEYDOWN(onCellKeyDown)이 담당한다.
+# Tab·화살표 등 다른 키는 false 로 통과시켜 셀 내비게이션을 보존한다.
+_ACTION_SUPPRESS_KEYBOARD = JsCode(
+    """
+    function(params) {
+      const ev = params.event;
+      if (!ev) { return false; }
+      const key = ev.key;
+      return (key === 'Enter' || key === ' ' || key === 'Spacebar');
     }
     """
 )
@@ -504,6 +555,7 @@ def selectable_master_grid(
         "editable": False, "sortable": False, "filter": False, "resizable": False,
         "suppressMovable": True,
         "cellRenderer": _ROW_ACTION_RENDERER,
+        "suppressKeyboardEvent": _ACTION_SUPPRESS_KEYBOARD,
         "headerClass": "md-h-center", "cellClass": "md-c-center",
     }
     if select_all_header:
@@ -550,6 +602,7 @@ def selectable_master_grid(
         "overlayNoRowsTemplate": "<span style='color:#8A8880;font-size:0.82rem;'>표시할 데이터가 없습니다</span>",
         "onGridReady": _NATIVE_PASTE_HANDLER,
         "onCellClicked": _ROW_ACTION_CLICK,
+        "onCellKeyDown": _ROW_ACTION_KEYDOWN,
         # 자동 빈 행 추가는 쓰지 않는다 — 신규 행은 [＋ 행 추가]/붙여넣기로만 생성.
     }
     if extra_grid_options:
