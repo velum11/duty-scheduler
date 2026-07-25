@@ -80,6 +80,7 @@ modules/
   ui.py                        App Shell과 공용 UI
   validators.py                저장 계약 검증
 views/
+  login.py                     로그인 화면
   dashboard.py                 대시보드
   schedule_edit.py             근무표 편성
   schedule_view.py             월간 근무표
@@ -88,6 +89,8 @@ views/
   master_org.py                조직 관리
   master_work_types.py         근무형태 관리
   workspace.py                 공용 그리드·조회 UI
+  master/                      기준정보 3화면 공통 기반(크롬·상태·그리드·저장)
+  common/                      화면 유형 규약 스캐폴드(DESIGN.md §0)
 supabase/migrations/           순서가 있는 스키마 변경
 scripts/                       로컬 계약 테스트와 승인형 원격 도구
 docs/                          제품·데이터·운영 문서

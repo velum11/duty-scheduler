@@ -78,6 +78,7 @@ python scripts/test_login_auth.py
 python scripts/test_sidebar_ui.py
 python scripts/test_master_org.py
 python scripts/test_schedule_contracts.py
+python scripts/test_screen_scaffold.py
 python -m compileall -q app.py modules views scripts
 git diff --check
 ```
@@ -86,7 +87,7 @@ git diff --check
 
 ## ORCA 사용
 
-`/lee-mode`의 역할 분리, worker 상한, 중단 조건은 글로벌 `C:\Users\velum\.orca\lee-mode\PLAYBOOK.md`와 프로젝트 `.orca/PLAYBOOK.md`를 따릅니다. 전문 서브에이전트(조사·화면·데이터계약·시각QA·계약QA·통합 6종)의 도구·모델 제한은 `.claude/agents/`가 집행 SoT입니다. supervised 작업의 Coordinator는 구현하지 않고 결과를 취합합니다. DIRECT 작업은 현재 Agent가 끝낼 수 있습니다.
+`/lee-mode`의 역할 분리, worker 상한, 중단 조건은 글로벌 `C:\Users\velum\.orca\lee-mode\PLAYBOOK.md`와 프로젝트 `.orca/PLAYBOOK.md`를 따릅니다. 전문 서브에이전트(조사·화면·데이터계약·시각QA·계약QA·통합 6종)의 역할·도구 제한은 `.claude/agents/` 특화판이 집행 SoT이며, 글로벌 `~/.claude/agents` 범용판을 이 저장소에서 오버라이드합니다(모델은 임원이 dispatch마다 지정). supervised 작업의 Coordinator는 구현하지 않고 결과를 취합합니다. DIRECT 작업은 현재 Agent가 끝낼 수 있습니다.
 
 같은 증상에서 10분 이상 진전이 없거나 가설이 두 번 틀리면 반복을 멈추고 증상, 성공 지점, 실패 지점, 실행한 확인을 정리해 독립 진단으로 전환합니다.
 

@@ -17,6 +17,7 @@ tools: Glob, Grep, Read, Bash, PowerShell
 | 근무형태 | `python scripts/test_master_work_types_new.py` |
 | 기준정보 공통 | `python scripts/test_master_unified.py` |
 | 근무표 계약 | `python scripts/test_schedule_contracts.py` |
+| 화면 구조 변경·신규 화면 | `python scripts/test_screen_scaffold.py` (DESIGN.md §0 유형 규약) |
 | 모든 Python 변경 | `python -m compileall -q app.py modules views scripts` + `git diff --check` |
 
 실행은 `.venv/Scripts/python.exe` 기준. 전체 suite는 위험이 정당화할 때만(단, `test_supabase_crud.py`는 원격 쓰기라 **절대 실행 금지** — 전용 승인 절차 필요).
