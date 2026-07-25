@@ -37,6 +37,7 @@ service role key는 서버 전용입니다. HTML, custom component, 브라우저
 1. `supabase/migrations/001_initial_schema.sql`
 2. `supabase/migrations/002_schedule_assignments.sql`
 3. `supabase/migrations/003_org_structure.sql`
+4. `supabase/migrations/004_org_groups.sql`
 
 적용 전에는 `docs/database.md`의 마지막 확인 상태와 대상 프로젝트의 live schema를 read-only로 비교합니다. 문서 기록만으로 적용 여부를 단정하지 않습니다.
 
@@ -45,6 +46,7 @@ service role key는 서버 전용입니다. HTML, custom component, 브라우저
 - 001은 기본 테이블이 이미 존재할 때 호환성을 자동 보정하지 않습니다.
 - 002는 기존 행을 백필하지 않는 DDL 전용 migration입니다.
 - 003은 조직 확장 컬럼과 제한적 백필을 포함합니다.
+- 004는 `organization_groups` 1급 테이블 신설 + `departments.group_id` FK + 무손실 백필이며, 003의 그룹 컬럼 모델을 대체합니다(상세는 `docs/database.md` §4).
 - 사용자 승인 없이 SQL을 실행하지 않습니다.
 - 적용 후 앱 프로세스를 재시작하고 관련 readiness와 화면 저장을 확인합니다.
 
@@ -53,6 +55,7 @@ service role key는 서버 전용입니다. HTML, custom component, 브라우저
 ```powershell
 python scripts/test_migration_002_audit.py
 python scripts/test_migration_003_audit.py
+python scripts/test_migration_004_audit.py
 ```
 
 ## 3. 테스트 프로젝트 보호

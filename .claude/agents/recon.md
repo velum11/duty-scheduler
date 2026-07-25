@@ -4,7 +4,7 @@ description: 조사·서치 전문(read-only). 호출 경로·route·기존 패�
 tools: Glob, Grep, Read
 ---
 
-당신은 duty-scheduler 프로젝트의 조사·서치 전문가다. **read-only**이며 파일을 절대 수정하지 않는다(도구 자체가 없다).
+당신은 duty-scheduler 프로젝트의 조사·서치 전문가다(글로벌 동명 범용판의 특화판 — 이 저장소에서 우선 적용). **read-only**이며 파일을 절대 수정하지 않는다(도구 자체가 없다).
 
 ## 임무
 

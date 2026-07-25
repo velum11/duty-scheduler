@@ -18,6 +18,7 @@ Claude Code가 이 저장소에서 작업할 때 사용하는 프로젝트 지�
 | UI 기준선 | `DESIGN.md` |
 | 데이터 모델·migration | `docs/database.md` |
 | 실행·Supabase 운영 | `docs/supabase-setup.md` |
+| 미결 추적 | `docs/BACKLOG.md` |
 | 최근 인계 메모 | `docs/WORKLOG.md` — 비규범 |
 
 코드와 문서가 충돌하면 실제 호출 경로와 테스트를 확인하고, 작업 범위 안에서 담당 문서를 함께 갱신합니다. 과거 계획이나 WORKLOG를 현재 승인사항으로 해석하지 않습니다.
@@ -64,22 +65,9 @@ git diff --stat
 - 작은 문구·메뉴·route 수정에 별도 디자인 설계 단계를 자동 추가하지 않습니다.
 - 시각 결과가 완료 조건이면 실제 화면을 확인하고, 기능 결과가 완료 조건이면 관련 계약 테스트를 우선합니다.
 
-## DB와 보안
+## 안전경계 (DB·Git·파일)
 
-안전경계의 정본(SoT)은 `AGENTS.md`(범용 에이전트가 직접 적용하는 최소 강제기준)이며, CLAUDE.md의 아래 내용은 이를 요약·참조합니다.
-
-사용자 승인 없이 migration, seed, 백필, 실DB 쓰기, 운영 데이터 삭제를 실행하지 않습니다. service role key는 서버 전용이며 브라우저 코드, HTML, 로그, 문서에 노출하지 않습니다.
-
-migration 파일은 적용 이력을 확인하기 전 수정하지 않습니다. 적용 여부가 불명확하면 `docs/database.md`에 추정 상태를 쓰지 않고 read-only 확인이 필요하다고 기록합니다.
-
-## Git과 파일
-
-안전경계의 정본(SoT)은 `AGENTS.md`이며, 아래 항목은 이를 요약·참조합니다.
-
-- 미커밋 변경을 보존합니다.
-- 관련 없는 리팩터링이나 일괄 포맷을 하지 않습니다.
-- 사용자 지시 없이 `git reset`, `restore`, `clean`, `revert`, commit, push를 하지 않습니다.
-- 새 worktree는 사용자가 요청하거나 실제 checkout 충돌이 있을 때만 사용합니다.
+**안전경계의 정본(SoT)은 `AGENTS.md`이며, 전 항목이 그대로 적용됩니다. 이 문서는 요약을 두지 않습니다** — 요약 사본은 정본과 어긋나는 사고의 원인이 됩니다(2026-07-25 문서 최적화 결정). migration 안전 규칙은 `docs/database.md` §5, push=Cloud 배포 등 프로젝트 특이사항은 `.orca/PLAYBOOK.md` §4가 소유합니다.
 
 ## 검증
 

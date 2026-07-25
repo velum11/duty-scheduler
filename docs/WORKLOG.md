@@ -4,6 +4,12 @@
 
 새 항목은 맨 위에 1~3개 bullet로 작성하고 오래된 항목은 제거합니다. 상세 과정은 Git diff와 작업 보고서에서 확인합니다.
 
+## 2026-07-25 · md 최적화 — 에이전트 2계층 범용화·안전경계 참조화·오버레이 델타화·BACKLOG 신설
+
+- 인터뷰(3차 4문항)로 확정 적용: **① 2계층 범용화** — 글로벌 `~/.claude/agents/` 범용판 6종 신설(프로그램 개발 한정, 이미지·홈페이지류 제외 — 별도 체계 예정), 프로젝트 특화판은 유지(동명 우선 적용). **② 안전경계 참조화** — CLAUDE.md의 DB·Git 요약 2개 절을 "AGENTS.md 전 항목 적용" 참조로 축소(요약 사본 drift 차단). **③ 오버레이 델타 재작성** — 07-24 부서 구조 확장본(미커밋)을 6종 체계 델타로 대체(원본은 `~/.orca/lee-mode/duty-overlay.bak-20260725.md` 백업), 글로벌 중복(감사기준·위임규칙) 제거. **④ `docs/BACKLOG.md` 신설** — WORKLOG에만 있던 미결(§98·005 목록화·P3·worktree 정리)을 이관, 미채택 후보(정합 스크립트·artifacts INDEX·글로벌 버전기록)도 보관.
+- 모순 수정: supabase-setup.md migration 목록에 004 추가(003까지만 나열되던 낡은 기록 — 중복 서술 drift의 실증 사례), 004 audit 스크립트 명령 추가. 오버레이 호환사항의 003 서술을 004 정본으로 정정.
+- 프로세스 교훈(메모리 저장): **사용자가 문제를 던지면 분석·인터뷰까지만 — 편집은 명시 승인 후.** 선택지 제시는 장단점 포함 상세 설명.
+
 ## 2026-07-25 · 서브에이전트 전문화 체계 확정 — PLAYBOOK·skill 재작성 + .claude/agents 6종
 
 - 사용자 인터뷰(8문항+2차 3문항)로 위임 거버넌스 재설계 확정: **직무 6종 전문 에이전트(`.claude/agents/` = 집행 SoT: recon·ui-feature·data-contract·visual-qa·contract-qa·integrator, 도구 하드 제한) · 1단 위임(재spawn 차단, ORCA 포함 — 부장 하위계층 폐기) · 혼합 발동(DIRECT 직접/STANDARD+ 위임) · 모델은 임원(Fable)이 매 dispatch 필수 지정(정의 파일 기본값 없음, Fable 할당 자유 허용) · 하이브리드 플레인(일상=내장, 밤샘급=ORCA)**. 글로벌 PLAYBOOK(헤딩 `ORCA Lean Multi-Agent Playbook`, §1.3 거버넌스·§7.2 조건부 Enter 앵커)과 lee-mode skill을 정합 재작성해 skill-PLAYBOOK 불일치(헤딩 검증 실패로 /lee-mode 중단되는 상태) 해소. 구버전은 `.bak-20260725` 백업. Codex 불가 시 폴백(사용자 게이트+감사부채 기록) 신설.

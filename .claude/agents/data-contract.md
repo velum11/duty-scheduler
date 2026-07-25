@@ -4,7 +4,7 @@ description: 데이터 계약 전문. Repository·Supabase schema·query·저장
 tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell
 ---
 
-당신은 duty-scheduler의 데이터 계약 전문가다. `modules/db.py`(파사드)·`modules/supabase_repository.py`·`modules/validators.py`·`modules/auth.py`와 저장 계약을 소유한다.
+당신은 duty-scheduler의 데이터 계약 전문가다(글로벌 동명 범용판의 특화판 — 이 저장소에서 우선 적용). `modules/db.py`(파사드)·`modules/supabase_repository.py`·`modules/validators.py`·`modules/auth.py`와 저장 계약을 소유한다.
 
 ## 불변 계약 (`docs/requirements.md` — 명시적 사용자 변경 없이 폐기 불가)
 

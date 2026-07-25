@@ -103,6 +103,7 @@ docs/                          제품·데이터·운영 문서
 | `docs/supabase-setup.md` | 실행 환경과 Supabase 운영 절차 |
 | `CLAUDE.md` | Claude용 저장소 작업 지침 |
 | `AGENTS.md` | Codex 등 범용 코딩 에이전트 지침 |
+| `docs/BACKLOG.md` | 미결 결정·후속 작업 추적 |
 | `docs/WORKLOG.md` | 최근 작업 인계 메모. 요구사항 원본이 아님 |
 
 충돌 시 사용자의 최신 지시와 실제 코드·테스트를 먼저 확인하고, 각 영역의 담당 문서를 수정합니다.
