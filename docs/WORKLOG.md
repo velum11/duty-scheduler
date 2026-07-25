@@ -4,6 +4,11 @@
 
 새 항목은 맨 위에 1~3개 bullet로 작성하고 오래된 항목은 제거합니다. 상세 과정은 Git diff와 작업 보고서에서 확인합니다.
 
+## 2026-07-25 · 기준정보 그리드 "값 누락" 실체 규명 — CSS 1속성 레이아웃 붕괴 수정
+
+- 사용자 관리 그리드의 "조/직급/권한/재직 값 누락·타행 값 표시" 원인 확정: `views/master/style.py`의 `.ms-cell-select { position: relative }`(07-21 `90a3450` 도입)가 AG Grid의 absolute 셀 배치를 깨서 부서 이후 컬럼이 39~118px 아래 행으로 밀려 그려진 것. **데이터·정렬 로직은 정상, DOM에는 값이 전부 존재** → innerText 기반 DOM QA·계약 테스트가 전부 green으로 통과해 수차례 수정 시도가 표적을 빗나감(07-23 QA 실패와 동일 실패 모드). 해당 속성 제거로 수정(▾ 표식은 `::after` absolute가 positioned인 `.ag-cell`에 그대로 앵커됨), `streamlit-aggrid<1.3` 상한 추가(`>=` float로 구버전 검증이 무효화되는 재발 방지).
+- 검증: 신규 서버(8510, sample)에서 3화면 전행 셀 bounding-box 정렬 ALL-ALIGNED + 값=CSV 일치, ▾ 유지 확인, users_new·org·work_types_new 계약 테스트 all-green, compileall·diff-check OK. **교훈: 그리드 QA는 innerText가 아니라 셀 y좌표=행 y좌표(픽셀 지오메트리) 검사 필수. 장수 streamlit 프로세스는 모듈 캐시로 수정 미반영 가능 — 수정 후 서버 재시작·서빙 코드 확인 필수**(8502/8503 구코드 서빙 실증).
+
 ## 2026-07-24 · 아침 "다 돌리자" 마무리 — 미결 3건 해소 + feature push
 
 - 아침 "다 돌리자" 처리 완료(Codex 교차검증 게이트): ①그룹모델 문서충돌 → **사용자 결정 "migration 004(organization_groups) 정본화"** → requirements§104·database.md·CLAUDE.md 불변계약 참조를 004 모델로 정합(문서만). ②P1-2: schedule_view MANAGER 잔존 조회조건 **fail-closed 재적용 + auth.logout q_* 삭제 + 부서 유효성 ALL센티널·미존재 차단 하드닝**(Codex 승인). ③dept_group_map 조직조회 오류 전파(int(NaN) 크래시 부수 해소, Codex 승인). 회귀 all-green(schedule 124·login 29·unified 195 등), feature push.

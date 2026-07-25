@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv\\Scripts\\python.exe",
       "runtimeArgs": ["-m", "streamlit", "run", "app.py", "--server.port", "8503", "--server.headless", "true"],
       "port": 8503
+    },
+    {
+      "name": "duty-scheduler-sample-verify",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-NoProfile", "-Command", "$env:DUTY_DATA_MODE='sample'; & .\\.venv\\Scripts\\python.exe -m streamlit run app.py --server.port 8510 --server.headless true"],
+      "port": 8510
     }
   ]
 }

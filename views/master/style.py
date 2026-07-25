@@ -277,8 +277,11 @@ GRID_CSS: dict[str, dict] = {
     # ---- 셀 상태(행 배경/좌측 바 위에 겹침 — dirty/error 가 함께 유지) ----
     ".ms-cell-error": {"box-shadow": "inset 0 0 0 1.5px " + TOKENS["danger"], "background": "#FFF6F4"},
     ".ms-cell-dirty": {"box-shadow": "inset 2px 0 " + TOKENS["warn"]},
-    # 드롭다운 셀 ▾ 표식(선택형임을 상시 노출)
-    ".ms-cell-select": {"position": "relative"},
+    # 드롭다운 셀 ▾ 표식(선택형임을 상시 노출).
+    # 주의: .ag-cell 은 AG Grid 가 position:absolute 로 배치하므로 여기서 position 을
+    # 재지정하면 안 된다(relative 지정 시 셀이 flow 로 떨어져 이후 컬럼 전체가 행 아래로
+    # 밀리는 레이아웃 붕괴 — 2026-07-25 사용자 관리 화면 실증). ::after 앵커는 이미
+    # positioned 인 .ag-cell 에 그대로 걸린다.
     ".ms-cell-select::after": {"content": "'\\25BE'", "position": "absolute", "right": "8px",
                                "color": TOKENS["ink-3"], "font-size": "10px", "pointer-events": "none"},
     # ---- 그리드 내부 칩(cellRenderer HTML 용) — iframe 은 --ms-* var 를 못 보므로 리터럴 색 ----
