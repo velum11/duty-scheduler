@@ -2,6 +2,11 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-25 · 잔존 worktree 정리 완료 (integrator 검증→사용자 승인→실행)
+
+- `.claude/worktrees/` 등록 worktree 5개 `git worktree remove` + 병합 완료 `worktree-agent-*` 브랜치 6개 `-d` 안전 삭제(전건 feature 병합·미커밋 0 검증 후 사용자 승인 게이트 거침). 구버전 규범 문서 스냅샷 오염원 제거. 잔존: 빈 고아 폴더 1개(핸들 잠김 — 수동 삭제 필요, BACKLOG).
+- 부수 발견: ORCA workspace `worktype-improve-2`에 미커밋 잔재(근무형태 화면·테스트·WORKLOG) — 보존/폐기 판단 대기(BACKLOG). `brill`·`worktype-improve` worktree도 잔존(범위 밖, 미접촉).
+
 ## 2026-07-25 · agent-reach 스킬 불채택 — recon에 네이티브 웹조사 부여
 
 - 사용자 설치 agent-reach 스킬을 분석 후 **불채택**(CLI·백엔드 미설치로 미동작, 개발 조사 능력은 내장 WebSearch/WebFetch로 대체 가능, 고유 가치는 소셜·영상 등 개발 범위 밖, r.jina.ai 프록시·서드파티 CLI 등 DLP 감점). 스킬은 휴면 보존(참조 에이전트 없음=토큰 소모 0). 대신 recon 특화판에 WebSearch·WebFetch 부여(read-only 유지 — Bash 미부여), ui-feature는 라이브러리 결함 의심 시 recon 조사 요청을 보고하도록 규정.
