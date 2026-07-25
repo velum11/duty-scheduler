@@ -5,7 +5,8 @@
 (``views/common/scaffold.py``) 또는 ``views/master`` 공통 기반으로만 만들도록
 강제한다. 이 스위트는 그 집행 장치를 검증한다:
 
-  (a) 알려진 9개 화면 모듈이 유효한 ``SCREEN_ARCHETYPE`` 을 선언한다.
+  (a) 알려진 화면 모듈(존재하는 것만 — 화면 추가·분리·통합은 자유)이 유효한
+      ``SCREEN_ARCHETYPE`` 을 선언한다.
   (b) ``views/`` 최상위에 알려진 목록(9개 화면 + login + workspace) 밖의 **새**
       화면 .py 파일이 생기면, ``SCREEN_ARCHETYPE`` 선언 + 스캐폴드/공통 기반 사용이
       둘 다 없을 때 실패시킨다(신규 화면 강제 장치). 하위 패키지(views/master,
@@ -64,8 +65,13 @@ NOT_A_SCREEN = {"__init__"}
 # ===========================================================================
 # (a) 알려진 9개 화면이 유효한 SCREEN_ARCHETYPE 을 선언
 # ===========================================================================
-print("(a) 화면 유형 선언 — 9개 화면이 유효한 SCREEN_ARCHETYPE 선언")
+print("(a) 화면 유형 선언 — 존재하는 알려진 화면이 유효한 SCREEN_ARCHETYPE 선언")
+# 화면 수는 규약 대상이 아니다(DESIGN.md §0) — 기준정보 화면의 추가·분리·통합은 자유이며,
+# 제거·통합된 화면은 검사에서 제외한다. 새 화면은 (b) 강제 장치가 커버한다.
 for name, expected in EXPECTED.items():
+    if not (ROOT / "views" / f"{name}.py").exists():
+        print(f"  (views.{name} 없음 — 통합/제거된 화면, 검사 생략)")
+        continue
     mod = importlib.import_module(f"views.{name}")
     declared = getattr(mod, "SCREEN_ARCHETYPE", None)
     check(f"views.{name}: SCREEN_ARCHETYPE 선언됨", declared is not None)

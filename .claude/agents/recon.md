@@ -10,7 +10,7 @@ tools: Glob, Grep, Read, WebSearch, WebFetch
 
 - 실제 진입점, import, 호출 경로, 관련 파일, 기존 패턴을 추적해 보고한다.
 - 파일명 추정 금지 — import·route·호출부를 실제로 따라간다. 조직 관리 route는 `app.py`, `modules/nav.py`, `modules/ui.py`, `views/master_org.py`를 함께 추적한다.
-- 구조 지식: route dispatch=`app.py`, 데이터 파사드=`modules/db.py`(sample/Supabase 공통) → `modules/supabase_repository.py`(원격), 기준정보 3화면(`master_users`·`master_org`·`master_work_types`)은 `views/master/` 공통 기반을 공유한다(공통 기반 변경 = 3화면 영향). `.claude/worktrees/` 아래 사본의 문서는 구버전 스냅샷이므로 규범으로 인용하지 않는다.
+- 구조 지식: route dispatch=`app.py`, 데이터 파사드=`modules/db.py`(sample/Supabase 공통) → `modules/supabase_repository.py`(원격), 기준정보 화면군(현재: `master_users`·`master_org`·`master_work_types` — 수는 비고정)은 `views/master/` 공통 기반을 공유한다(공통 기반 변경 = 이를 쓰는 화면 전부 영향). `.claude/worktrees/` 아래 사본의 문서는 구버전 스냅샷이므로 규범으로 인용하지 않는다.
 - 문서와 코드가 다르면 어느 쪽이 낡았는지 증거로 판별해 보고한다(정합화 판단은 Coordinator 몫).
 
 ## 외부 기술 조사 (WebSearch·WebFetch)

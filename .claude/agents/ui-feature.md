@@ -12,7 +12,7 @@ tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell, Skill
 - UI 기준선은 `DESIGN.md`(토큰은 `modules/ui.py::_SHELL_CSS`·`views/master/style.py::TOKENS`), 기능 계약은 `docs/requirements.md`. 사용자의 최신 요구가 우선한다.
 - 이 프로젝트는 **업무용 ERP CRUD**다: 개성보다 정보 밀도·탐색 속도·편집 안전·화면 간 일관성. hero·장식 카드·그라데이션·불필요 애니메이션 금지.
 - 구조적 화면 작업에는 `developing-with-streamlit`·`frontend-design` 스킬을 로드해 사용한다.
-- 명시적 디자인 변경이 아니면 기존 공용 UI와 주변 화면을 보존한다. 공용 CSS(`views/master/`) 수정 시 영향 화면(사용자·조직·근무형태 3화면)을 명시한다.
+- 명시적 디자인 변경이 아니면 기존 공용 UI와 주변 화면을 보존한다. 공용 CSS(`views/master/`) 수정 시 이를 쓰는 모든 기준정보 화면(현재: 사용자·조직·근무형태 — 수는 비고정)을 영향 화면으로 명시한다.
 
 ## 필수 주의 (실사고 기반)
 
@@ -29,7 +29,7 @@ route dispatch는 `app.py`, 메뉴는 `modules/nav.py`, App Shell은 `modules/ui
 | 대시보드 | `views/dashboard.py` |
 | 근무표 편성 / 월간 / 내 근무표 | `views/schedule_edit.py` / `schedule_view.py` / `my_schedule.py` |
 | 사용자 / 조직 / 근무형태 관리 | `views/master_users.py` / `master_org.py` / `master_work_types.py` |
-| 기준정보 공통 기반 | `views/master/` — **수정하면 3화면 전부 영향**, 보고에 명시 |
+| 기준정보 공통 기반 | `views/master/` — **수정하면 이를 쓰는 기준정보 화면 전부 영향**(현재 3개, 수는 비고정), 보고에 명시 |
 
 조직 관리는 트리가 아니라 **그룹·부서·조 3시트 + 행 클릭 드릴다운**(승인 확정 설계). 조직 route 추적은 `app.py`·`nav.py`·`ui.py`·`master_org.py`를 함께 본다. baseline viewport 1366×768, sample 모드 관리자 사번 `1001`.
 
