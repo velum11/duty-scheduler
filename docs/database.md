@@ -130,6 +130,7 @@ work_types ── work_schedules
 
 다음은 현재 schema 요구사항이 아닙니다.
 
+- migration 005(가칭) — 004 후속 정리: `departments.group_id`의 NOT NULL 승격, 003 잔여 그룹 컬럼(`department_group`/`group_sort_order`) 제거. 별도 설계·사용자 승인 전 구현하지 않습니다.
 - `work_schedules.schedule_assignment_id`의 NOT NULL 승격
 - `work_schedules.user_id` 제거
 - 운영용 RLS 정책과 Supabase Auth

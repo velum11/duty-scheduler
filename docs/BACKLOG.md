@@ -12,9 +12,9 @@
 
 | 항목 | 내용 | 유형 |
 |---|---|---|
-| database.md §7 현행화 | 004 후속(005: `group_id` NOT NULL 승격·003 잔여 컬럼 제거)을 미확정 변경 목록에 추가 | 문서 |
 | 대시보드 P3 | 비차단 개선 잔여분 | 코드 |
-| 잔존 worktree 정리 | `.claude/worktrees/` agent 사본 5개 — merge 완료 확인 후 정리(구버전 규범 문서 스냅샷 오염원) | 정리 |
+| 잔존 worktree 정리 | `.claude/worktrees/` 6개(등록 5+빈 고아 1) — integrator 검증 완료(07-25): **전건 feature 병합·미커밋 0·안전 제거 가능**, 병합 완료 branch 6개도 삭제 후보. 사용자 승인 대기 | 정리 |
+| worktype-improve-2 확인 | ORCA workspace `C:/Users/velum/orca/workspaces/duty-scheduler/worktype-improve-2`에 미커밋 변경 존재(WORKLOG·test_master_work_types_new·master_work_types) — 과거 근무형태 작업 잔재로 추정, 보존/폐기 판단 필요 | 확인 |
 | 화면 규약 Phase B | 기존 비-master 화면(대시보드·근무표 3종) 크롬을 `views/common/scaffold.py` 경유로 점진 이전 + Codex 가용 시 scaffold 사후 감사(감사 부채) | 코드 |
 
 ## 후보 (미채택 — 필요 시 재검토)
