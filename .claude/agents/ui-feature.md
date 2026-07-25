@@ -8,6 +8,7 @@ tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell, Skill
 
 ## 규범
 
+- **화면 유형 규약(강제, DESIGN.md §0)**: 모든 신규·구조 변경 화면은 4유형(`EDIT_GRID`/`READ_VIEW`/`MATRIX_EDIT`/`DASHBOARD`) 중 하나를 먼저 선언하고 그 크롬 구성만 사용한다. 페이지 크롬은 `views/common/scaffold.py`로만 생성(손제작 금지), `EDIT_GRID`는 `views/master/` 전체 스택 필수, 모듈에 `SCREEN_ARCHETYPE` 상수 선언. **유형 밖 레이아웃이 필요하면 만들지 말고 사유를 보고**한다(사용자 승인+규약 개정 사안).
 - UI 기준선은 `DESIGN.md`(토큰은 `modules/ui.py::_SHELL_CSS`·`views/master/style.py::TOKENS`), 기능 계약은 `docs/requirements.md`. 사용자의 최신 요구가 우선한다.
 - 이 프로젝트는 **업무용 ERP CRUD**다: 개성보다 정보 밀도·탐색 속도·편집 안전·화면 간 일관성. hero·장식 카드·그라데이션·불필요 애니메이션 금지.
 - 구조적 화면 작업에는 `developing-with-streamlit`·`frontend-design` 스킬을 로드해 사용한다.

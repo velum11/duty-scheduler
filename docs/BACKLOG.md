@@ -15,6 +15,7 @@
 | database.md §7 현행화 | 004 후속(005: `group_id` NOT NULL 승격·003 잔여 컬럼 제거)을 미확정 변경 목록에 추가 | 문서 |
 | 대시보드 P3 | 비차단 개선 잔여분 | 코드 |
 | 잔존 worktree 정리 | `.claude/worktrees/` agent 사본 5개 — merge 완료 확인 후 정리(구버전 규범 문서 스냅샷 오염원) | 정리 |
+| 화면 규약 Phase B | 기존 비-master 화면(대시보드·근무표 3종) 크롬을 `views/common/scaffold.py` 경유로 점진 이전 + Codex 가용 시 scaffold 사후 감사(감사 부채) | 코드 |
 
 ## 후보 (미채택 — 필요 시 재검토)
 

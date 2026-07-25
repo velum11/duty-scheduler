@@ -19,6 +19,9 @@ Phase4 Lane C. 기능 계약(조회/신규행/편집/선택삭제/저장/새로�
 """
 from __future__ import annotations
 
+# DESIGN.md §0 화면 유형 규약 — 기준정보 편집형.
+SCREEN_ARCHETYPE = "EDIT_GRID"
+
 import json
 import re
 

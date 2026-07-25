@@ -2,6 +2,12 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-25 · 화면 유형 규약(§0) 확정 — 디자인 발산 원천 차단 (문서+스캐폴드+테스트 3중 강제)
+
+- 사용자 결정(인터뷰 4문항): 종전 "레이아웃 미강제" 원칙 **폐지** → 모든 신규·구조 변경 화면은 4유형(`EDIT_GRID`/`READ_VIEW`/`MATRIX_EDIT`/`DASHBOARD`) 중 하나를 선언하고 그 크롬만 사용(표준 원본=기준정보 3화면, 유형 밖은 사용자 승인+규약 개정 필수). DESIGN.md §0 신설, CLAUDE.md·requirements.md 미강제 조항 교체, ui-feature 특화판에 하드 규칙.
+- 집행 장치(ui-feature 부장 Opus 위임, 첫 실전 — 셀프 검증 포함 완료 보고): `views/common/scaffold.py`(`page_chrome`+archetype 검증), 9개 화면 `SCREEN_ARCHETYPE` 선언(렌더 무변경), `scripts/test_screen_scaffold.py`(34 checks — 선언 검사+미등록 신규 화면 강제+스캐폴드 단위). 회귀 unified 195·sidebar 42·users_new all-green, compileall OK.
+- **감사 부채**: 공용 모듈 신설이라 글로벌 §5 기준 Codex 감사 대상이나 Codex 불가 → 폴백(사용자 게이트)으로 대체. 추가 무해(렌더 0 변경·additive)이며 기존 화면 크롬의 scaffold 이전은 Phase B(BACKLOG).
+
 ## 2026-07-25 · 부장(전문 에이전트) 역할 강화 — 셀프 검증 의무 + 도메인 지식 내장
 
 - 인터뷰(4차 3문항) 확정 적용(프로젝트 특화판 6종만, 도구 확장 없음): **① 셀프 검증 의무** — ui-feature(focused test+compileall+UI 변경 시 Playwright headless 자가측정: 셀 정렬·잘림 스모크·서버 신선도 확인), data-contract(계약 테스트 해당분), integrator(통합 후 직접 재검증). 독립 QA(visual-qa·contract-qa)·Codex 감사는 대체하지 않음. **② 도메인 지식 내장** — ui-feature 화면 오너십 맵(공통 기반 `views/master/`=3화면 영향 명시)·조직 3시트 확정 설계·1366×768, data-contract 파사드 구조·자연키·004 probe 대상·display_order 게이트, recon 구조 지식, integrator 기본 브랜치·worktree 구버전 스냅샷 주의, visual-qa 공통 기반 변경 시 3화면 전수 측정.

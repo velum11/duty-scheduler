@@ -4,6 +4,9 @@ ADMIN/MANAGER 는 당일 조직 그룹별 근무 보드(주간·야간·휴무�
 근무 현황을 표시한다. 데이터는 db 파사드를 통해 조회한다 (샘플/Supabase 공통).
 대시보드는 조회 전용이며 저장 계약과 무관하다.
 """
+# DESIGN.md §0 화면 유형 규약 — 대시보드형.
+SCREEN_ARCHETYPE = "DASHBOARD"
+
 from datetime import date, timedelta
 from html import escape
 

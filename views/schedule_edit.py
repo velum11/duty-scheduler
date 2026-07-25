@@ -20,6 +20,9 @@
 dirty tracking: 원본 스냅샷과 현재 편집 상태를 정규화 비교해 판단하며, dirty 상태에서
 사이드바 이동·로그아웃(modules/ui.request_nav 가드)·조회 조건 변경 시 확인을 거친다.
 """
+# DESIGN.md §0 화면 유형 규약 — 매트릭스 편집형.
+SCREEN_ARCHETYPE = "MATRIX_EDIT"
+
 import calendar
 import json
 from datetime import date

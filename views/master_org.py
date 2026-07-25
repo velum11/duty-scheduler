@@ -31,6 +31,9 @@ drilldown_context/공통 style)을 그대로 사용하고, migration 004 미적�
 그중 ``_validate_units``/``_unit_structure_errors``/``_group_structure_errors`` 는
 교차 화면 회귀 테스트가 참조하는 시그니처라 보존한다.
 """
+# DESIGN.md §0 화면 유형 규약 — 기준정보 편집형.
+SCREEN_ARCHETYPE = "EDIT_GRID"
+
 from html import escape
 
 import pandas as pd

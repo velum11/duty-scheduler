@@ -25,6 +25,9 @@
 """
 from __future__ import annotations
 
+# DESIGN.md §0 화면 유형 규약 — 기준정보 편집형.
+SCREEN_ARCHETYPE = "EDIT_GRID"
+
 import json
 from html import escape
 

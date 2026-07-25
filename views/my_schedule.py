@@ -1,4 +1,7 @@
 """모바일 우선 개인 근무표 조회 화면."""
+# DESIGN.md §0 화면 유형 규약 — 조회형.
+SCREEN_ARCHETYPE = "READ_VIEW"
+
 import calendar
 from datetime import date
 from functools import partial
