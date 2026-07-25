@@ -18,7 +18,6 @@
 | §0 규약 AST 집행 강건화 | 07-25 재감사 P3: `test_screen_scaffold.py`가 크롬 호출을 렌더 경로로 증명하지 않고(모듈 내 임의 위치 수집), `login`을 암묵 제외(my_schedule는 명시 allowlist), 화면 발견이 `views/`에 고정. false-negative 위주라 비차단이나 강건화 여지 | 코드 |
 | QA 셸 read-only 내재 한계 명문화 | 07-25 재감사(Codex P2→P3 재분류): `visual-qa`·`contract-qa`는 테스트·probe 실행에 셸이 필요해 소스 편집이 도구가 아닌 문구로만 차단(recon은 셸 없음=하드). "내재적 한계"로 정의 문서에 명문화 | 문서 |
 | 에이전트 tool id 검증 | 07-25 재감사 P3: 정의 파일 `tools:`의 `PowerShell`/`Skill`가 하네스 tool registry에 실제 등록되는지 확인(미등록이면 no-op, 셸은 `Bash`로 라이딩) | 확인 |
-| scaffold 테스트 독립 실행 불가 | 07-25 재감사 검증 공백: `.venv`가 없는 Python 3.13을 가리켜 두 감사 모두 `test_screen_scaffold.py`를 재현 못 함 — "51 checks GREEN"은 자기보고. sign-off 전 실행 환경 복구 | 환경 |
 
 ## 후보 (미채택 — 필요 시 재검토)
 

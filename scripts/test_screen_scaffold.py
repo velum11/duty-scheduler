@@ -41,13 +41,20 @@ Codex 감사(P2-5)가 지적한 4개 우회 경로를 각각 다음으로 차단
 ``master_departments`` → ``master_org``)은, 위임 대상이 규약 준수 화면이면
 통과시킨다.
 
-실행: PYTHONUTF8=1 .venv/Scripts/python.exe scripts/test_screen_scaffold.py
+실행: .venv/Scripts/python.exe scripts/test_screen_scaffold.py (stdout 은 UTF-8 자동 설정)
 """
 from __future__ import annotations
 
 import ast
 import sys
 from pathlib import Path
+
+# Windows 기본 콘솔(cp949)에서도 유형표·em dash 출력이 UnicodeEncodeError 로
+# 멈추지 않도록 stdout 을 UTF-8 로 재설정한다(PYTHONUTF8=1 없이도 실행 가능).
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
