@@ -595,6 +595,77 @@ def test_month_grid_snapshot() -> None:
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
 
 
+def test_retired_employee_month_display() -> None:
+    print("퇴직(비활성) 직원: 근무 기록 있는 월만 조회 포함 + 퇴직 라벨/행 음영")
+    from views import workspace
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+
+    ALL = workspace.ALL
+    disp, _ = workspace.work_type_display()
+
+    retiree = db.find_user_by_emp_no("2001")
+    check("전제: 2001 은 비활성(퇴직) 사용자", retiree is not None and not bool(retiree["is_active"]))
+
+    def grid_for(year, month, dept=ALL):
+        q = {"year": year, "month": month, "dept": dept, "team": ALL, "keyword": ""}
+        g, _ = workspace._build_month_grid(q, disp)
+        return g
+
+    # 기록 없는 달(2026-06) 조회 → 퇴직자 미표시(빈 행 생성 금지)
+    g_no_record = grid_for(2026, 6)
+    emps_no_record = set(g_no_record["사번"].astype(str)) if not g_no_record.empty else set()
+    check("기록 없는 달: 퇴직자(2001) 미표시", "2001" not in emps_no_record)
+
+    # 2026-07 에 퇴직자 근무 기록 추가(공개 API — db.save_schedules)
+    scheds = db.get_schedules()
+    new_row = pd.DataFrame([{
+        "emp_no": "2001", "duty_date": "2026-07-10", "work_type_code": "주", "note": "",
+    }])
+    db.save_schedules(pd.concat([scheds, new_row], ignore_index=True))
+
+    g_with_record = grid_for(2026, 7)
+    row_2001 = g_with_record[g_with_record["사번"].astype(str) == "2001"]
+    check("기록 있는 달: 퇴직자(2001) 표시", len(row_2001) == 1)
+    if len(row_2001) == 1:
+        name_cell = str(row_2001.iloc[0]["성명"])
+        check("퇴직 라벨 접미(성명+RETIRED_LABEL)", name_cell.endswith(workspace.RETIRED_LABEL))
+        day_col = next(c for c in g_with_record.columns if c.startswith("10("))
+        check("근무일 셀에 근무형태 약칭 표시", row_2001.iloc[0][day_col] == disp.get("주", "주"))
+
+    # 재직자는 영향 없음 — 같은 달 재직자(1003) 계속 포함, 라벨 없음
+    row_1003 = g_with_record[g_with_record["사번"].astype(str) == "1003"]
+    check("재직자(1003) 계속 포함", len(row_1003) == 1)
+    if len(row_1003) == 1:
+        check("재직자는 퇴직 라벨 없음",
+              not str(row_1003.iloc[0]["성명"]).endswith(workspace.RETIRED_LABEL))
+
+    # 행 음영 — 색+라벨 이중부호화(퇴직자 행에만 css 적용, 재직자 행은 미적용)
+    if len(row_2001) == 1:
+        css_retired = workspace._retired_row_style(row_2001.iloc[0])
+        check("퇴직자 행: 음영 css 적용", all(c == workspace._RETIRED_ROW_CSS for c in css_retired))
+    if len(row_1003) == 1:
+        css_active = workspace._retired_row_style(row_1003.iloc[0])
+        check("재직자 행: 음영 css 미적용", all(c == "" for c in css_active))
+
+    # 부서 스코프도 퇴직자에게 동일 적용(소속 불일치 부서 조회에는 노출되지 않음)
+    g_pet1 = grid_for(2026, 7, dept="PET1")
+    check("부서 필터(소속 PET1) 조회: 퇴직자 포함",
+          "2001" in (set(g_pet1["사번"].astype(str)) if not g_pet1.empty else set()))
+    g_pet2 = grid_for(2026, 7, dept="PET2")
+    check("부서 필터(타 부서 PET2) 조회: 퇴직자 제외",
+          "2001" not in (set(g_pet2["사번"].astype(str)) if not g_pet2.empty else set()))
+
+    # 다른 달(기록 없음)에는 여전히 미표시 — 기록 추가가 전체 노출로 새지 않음
+    g_other_month = grid_for(2026, 6)
+    emps_other = set(g_other_month["사번"].astype(str)) if not g_other_month.empty else set()
+    check("타 월(기록 없음)에는 여전히 미표시", "2001" not in emps_other)
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+
+
 def test_dashboard_render_scope_gate() -> None:
     print("views.dashboard.render scope 게이트 회귀(blocked → _build_board 미호출)")
     from datetime import date as _date
@@ -717,6 +788,7 @@ def main() -> int:
         test_dashboard_scope_and_safety,
         test_dashboard_render_scope_gate,
         test_month_grid_snapshot,
+        test_retired_employee_month_display,
         test_schedule_view_manager_scope_enforced,
     ):
         test()

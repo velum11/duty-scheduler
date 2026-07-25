@@ -2,6 +2,11 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-25 · §98 제품 결정·구현 + ORCA worktree 폐기 + push
+
+- **§98 확정(사용자)**: 퇴직 직원 과거 근무는 기록 있는 월에 한해 조회 표시 + 퇴직 구분(라벨+음영 이중부호화, 색 단독 금지) — requirements §5 반영. 구현(ui-feature): `workspace.py::_build_month_grid` 필터를 "기록 있는 비활성 포함"으로 확장, 성명 `(퇴직)` 라벨 + 메타 셀 음영(ms-row-inactive 동일 토큰), MANAGER fail-closed·스냅샷 우선 계약 불변. `test_schedule_contracts` 신규 12체크 포함 136 all-green.
+- **ORCA worktree 폐기 실행**(integrator, 승인 게이트 후): brill·worktype-improve·worktype-improve-2 — git 등록 해제·브랜치 3개 `-d` 삭제 완전, 단 물리 디렉터리 2건은 프로세스 잠김으로 잔존(BACKLOG — 재부팅 후 수동 삭제). worktype-improve-2는 삭제 전 포팅(`cc5f6e4`) diff 일치를 에이전트가 독립 재검증. 미푸시 10커밋 push(`ff601c5..165c170`).
+
 ## 2026-07-25 · worktype-improve-2 잔재 회수 — 근무형태 배지 WCAG 대비 수정 포팅 (sign-off 대기)
 
 - recon 분석으로 ORCA worktree 3개 판정: brill·worktype-improve=병합된 클린 스냅샷(폐기 권고), **worktype-improve-2=미반영 완결 작업 발견**(근무형태 미리보기 배지 저대비 틴트 2.18~4.09:1 → solid+`_text_on` 자동 텍스트색 4.85~7.95:1, DESIGN §2 계약 위반 보수). ui-feature가 본 브랜치로 포팅(SCREEN_ARCHETYPE 등 후속 변경 보존), 신규 대비 계약 테스트 포함 work_types 84 all-green.

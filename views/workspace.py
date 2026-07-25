@@ -19,6 +19,10 @@ from st_aggrid import AgGrid, DataReturnMode, GridOptionsBuilder, JsCode
 from modules import db, ui
 
 ALL = "(전체)"
+RETIRED_LABEL = "(퇴직)"
+# 퇴직 행 배경/글자색 — master_users.py 의 .ms-row-inactive 와 동일 토큰
+# (surface-3 / ink-2, views/master/style.py TOKENS) 로 화면 간 시각 일관성을 맞춘다.
+_RETIRED_ROW_CSS = "background-color:#F1EEE7; color:#5F5C55"
 
 
 def work_type_display() -> tuple[dict, dict]:
@@ -835,8 +839,10 @@ def schedule_screen(user: dict, page_id: str) -> None:
 
     # 데이터 그리드 (근무 약칭 + 지정 색상, 읽기 전용)
     day_cols = [c for c in grid.columns if c[0].isdigit()]
+    meta_cols = [c for c in grid.columns if c not in day_cols]
     ui.panel_head("월간 근무표", f"조회 결과 {len(grid)}건")
     styled = grid.style.map(lambda v: _cell_style(v, color_of), subset=day_cols)
+    styled = styled.apply(_retired_row_style, axis=1, subset=meta_cols)
     st.dataframe(styled, width="stretch", hide_index=True, height=grid_height(len(grid)))
     st.markdown(_label_legend_html(display_of, color_of), unsafe_allow_html=True)
 
@@ -905,10 +911,29 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     조회 조건의 부서·조 필터도 같은 스냅샷 기준으로 일관 적용해, 과거 월 조회 시
     인사이동한 직원이 현재 소속으로 오분류되지 않게 한다. 날짜 셀은 내부 코드가 아니라
     근무형태 약칭(display_of)으로 표시한다.
+
+    재직자는 항상 포함한다. 퇴직(비활성) 직원은 해당 월에 저장된 근무 기록이 있는
+    경우에만 포함한다(requirements.md §5 조회·§7 소프트 삭제=참조 보존의 취지 —
+    과거 편성 이력은 조회 가능해야 하되, 기록 없는 퇴직자를 위한 빈 행은 만들지
+    않는다). 포함된 퇴직자는 성명에 RETIRED_LABEL 을 덧붙여 표시한다.
     """
     display_of = display_of or {}
     users = db.get_users()
-    users = users[users["is_active"]].copy()
+
+    active_mask = users["is_active"].astype(bool)
+    inactive_emp_nos = set(
+        users.loc[~active_mask, "emp_no"].astype(str).str.strip()
+    )
+    all_emp_nos = users["emp_no"].astype(str).str.strip()
+    scheds_all = db.get_month_schedules(all_emp_nos, q["year"], q["month"])
+    emp_with_records = (
+        set(scheds_all["emp_no"].astype(str).str.strip()) if not scheds_all.empty else set()
+    )
+    retired_with_records = inactive_emp_nos & emp_with_records
+
+    keep_mask = active_mask | all_emp_nos.isin(retired_with_records)
+    users = users[keep_mask].copy()
+    users["_retired"] = ~users["is_active"].astype(bool)
 
     # 스냅샷 우선으로 '그 당시 부서/조'를 해석한다(없으면 현재 소속 폴백).
     snaps = _month_assignment_snapshot(q["year"], q["month"])
@@ -938,7 +963,12 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
         users = users[emp_match | name_match]
     users = users.sort_values(["_eff_dept", "_eff_team", "emp_no"])
 
-    scheds = db.get_month_schedules(users["emp_no"], q["year"], q["month"])
+    kept_emp_nos = set(users["emp_no"].astype(str).str.strip())
+    scheds = (
+        scheds_all[scheds_all["emp_no"].astype(str).str.strip().isin(kept_emp_nos)].copy()
+        if not scheds_all.empty
+        else scheds_all
+    )
 
     lookup = {(r["emp_no"], r["duty_date"]): r["work_type_code"] for _, r in scheds.iterrows()}
     ndays = calendar.monthrange(q["year"], q["month"])[1]
@@ -947,9 +977,12 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     rows = []
     for _, u in users.iterrows():
         dept_code, team_code = u["_eff_dept"], u["_eff_team"]
+        name = u["name"]
+        if bool(u.get("_retired")):
+            name = f"{name}{RETIRED_LABEL}"
         row = {
             "사번": u["emp_no"],
-            "성명": u["name"],
+            "성명": name,
             "부서": db.dept_name(dept_code),
             "조": db.team_name(dept_code, team_code),
         }
@@ -987,6 +1020,18 @@ def _cell_style(value, color_of: dict) -> str:
     if not color:
         return ""
     return f"background-color:{color}26; color:#1F2328; font-weight:600"
+
+
+def _retired_row_style(row: pd.Series) -> list[str]:
+    """퇴직자 행의 사번·성명·부서·조 셀에 음영을 입힌다(색+텍스트 라벨 이중부호화).
+
+    성명에 RETIRED_LABEL 접미사가 붙은 행만 대상이며, 날짜 셀(근무형태 색상)에는
+    적용하지 않는다 — 같은 셀에 두 배경 스타일이 겹치면 나중에 적용된 쪽이 우선돼
+    _cell_style 의 근무형태 색상 구분이 사라지기 때문이다.
+    """
+    is_retired = str(row.get("성명", "")).strip().endswith(RETIRED_LABEL)
+    css = _RETIRED_ROW_CSS if is_retired else ""
+    return [css] * len(row)
 
 
 def _label_legend_html(display_of: dict, color_of: dict) -> str:
