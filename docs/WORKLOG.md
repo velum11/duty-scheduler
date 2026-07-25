@@ -2,6 +2,13 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-25 · Phase 1 성능 — supabase 읽기 캐싱 + 로딩 스피너·잔상 클리어
+
+- 증상(사용자): supabase 모드 전환 후 로컬 느림 + 화면 전환 시 이전 화면 잔상. recon 진단: supabase 읽기에 캐시 전무 → 매 rerun 네트워크 재조회(조직관리 첫 로드 8~10 왕복), nav가 `st.empty` 미사용이라 새 화면 느린 로드 동안 이전 DOM 잔류.
+- 수정(위임): data-contract — `db.py` 읽기 13종 `st.cache_data(ttl=30, supabase 전용)` + 모든 write `finally` 무효화(부분저장 stale 방지), `supabase_repository.py` id↔코드 맵 4종 메모이즈. ui-feature — `app.py` dispatch를 `st.empty()`+공용 스피너("불러오는 중…")로 감싸 화면 전환 잔상 즉시 클리어.
+- 검증: 계약 ALL GREEN(master_org 67·schedule 136·login 29·sidebar 42·scaffold 51). Codex 2회 감사 — 초기 P1(부분저장 시 무효화 누락) 지적 → `finally` 전환 수정 → 재검토 P1 Closed·신규결함 0·예외 전파 유지. 원격 쓰기·데이터 변경 없음.
+- 미결: supabase 캐시/무효화는 코드리뷰+계약(테스트는 sample 경로)로 검증 — 라이브 fault-injection 스모크는 후속. 디자인 완성도 평가(전 항목 ≥8) 진행 중.
+
 ## 2026-07-25 · Codex+Opus 재감사(P2 반영분) — blocking 2건 정정·5시간 페이싱 조항 제거
 
 - lee-mode 교차검증(독립 2계열: Opus `recon` + Codex read-only, 사실만 전달·선호결론 미주입). 1차 P2 5건 중 **worktree 승인·감사부채 흐름 종결 확인**. 재감사 신규 blocking 2건 정정(사용자 승인):

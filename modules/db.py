@@ -113,6 +113,165 @@ def is_sample_mode() -> bool:
     return datasource() == "sample"
 
 
+# --- Supabase 읽기 캐시 (supabase 모드 전용) ---------------------------------
+# 문제: sample_data 와 달리 supabase 읽기에는 캐시가 없어 매 Streamlit rerun 마다
+# db.get_* 가 네트워크를 다시 친다. 아래 _fetch_* 는 지연 무거운 원격 조회만
+# ``st.cache_data`` 로 짧게(30s) 캐시하는 staleness 안전망이다.
+#
+# 계약 유지:
+#  - sample 모드는 이 캐시를 절대 쓰지 않는다. 각 파사드가 is_sample_mode() 로
+#    세션 편집 스토어를 먼저 반환하므로 로컬 편집은 즉시 반영된다(edit-first).
+#  - ``st.cache_data`` 는 함수가 성공적으로 끝났을 때만 결과를 저장한다. 예외는
+#    캐시하지 않으므로 Supabase 오류가 빈/성공 결과로 위장되지 않는다(모듈 docstring
+#    의 오류 은폐 금지 계약 유지).
+#  - 반환값은 호출마다 복사본이므로(cache_data 계약) 파사드의 후처리(필터·컬럼
+#    추가)가 원본 캐시를 훼손하지 않는다.
+#  - 쓰기 후에는 반드시 아래 _invalidate_* 로 관련 캐시를 비워 편집 결과가 다음
+#    렌더에 즉시 보이게 한다(누락 시 stale 표시 — 이 캐시의 최대 위험).
+_READ_TTL = 30
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_departments() -> pd.DataFrame:
+    return supabase_repository.get_departments()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_teams() -> pd.DataFrame:
+    return supabase_repository.get_teams()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_users() -> pd.DataFrame:
+    return supabase_repository.get_users()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_work_types() -> pd.DataFrame:
+    return supabase_repository.get_work_types()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_shift_groups() -> pd.DataFrame:
+    return supabase_repository.get_shift_groups()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_organization_groups() -> pd.DataFrame:
+    return supabase_repository.get_organization_groups()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_departments_org() -> pd.DataFrame:
+    return supabase_repository.get_departments_org()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_teams_org() -> pd.DataFrame:
+    return supabase_repository.get_teams_org()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_schedules() -> pd.DataFrame:
+    return supabase_repository.get_schedules()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_user_schedules(emp_no: str) -> pd.DataFrame:
+    return supabase_repository.get_user_schedules(emp_no)
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_month_schedules(emp_nos: tuple, year: int, month: int) -> pd.DataFrame:
+    return supabase_repository.get_month_schedules(list(emp_nos), year, month)
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_day_schedules(iso: str) -> pd.DataFrame:
+    return supabase_repository._schedule_rows(
+        lambda query: query.eq("work_date", iso).order("user_id")
+    )
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_month_assignments(year: int, month: int, emp_nos: tuple) -> pd.DataFrame:
+    return supabase_repository.get_month_assignments(year, month, list(emp_nos) or None)
+
+
+# --- 쓰기 후 캐시 무효화 -----------------------------------------------------
+# 원칙: 미무효화 → stale 표시가 가장 큰 위험이므로, 변경 테이블이 파생시키는
+# 조회·매핑 캐시를 넉넉히(over-clear) 비운다. 과다 무효화는 재조회 1회 비용뿐이고
+# 정확성을 해치지 않는다. supabase_repository 의 id↔code 매핑 캐시도 같은 무효화에
+# 묶어 신선도를 일치시킨다(조직 2단계 저장에서 부서 저장 후 조 저장이 새 부서를
+# 보게 하는 교차단계 정합성 포함).
+def _invalidate_departments() -> None:
+    _fetch_departments.clear()
+    _fetch_departments_org.clear()
+    _fetch_teams.clear()            # 조 조회의 dept_code 해석(_department_maps)
+    _fetch_teams_org.clear()
+    _fetch_users.clear()            # 사용자 조회의 dept_code 해석
+    _fetch_shift_groups.clear()     # 근무조 조회의 dept_code 해석
+    _fetch_month_assignments.clear()  # 편성 조회의 dept_code 해석
+    supabase_repository._department_maps.clear()
+    supabase_repository._team_maps.clear()
+
+
+def _invalidate_teams() -> None:
+    _fetch_teams.clear()
+    _fetch_teams_org.clear()
+    _fetch_users.clear()            # 사용자 조회의 team_code 해석
+    _fetch_month_assignments.clear()  # 편성 조회의 team_code 해석
+    supabase_repository._team_maps.clear()
+
+
+def _invalidate_groups() -> None:
+    _fetch_organization_groups.clear()
+    _fetch_departments_org.clear()  # 부서 뷰의 group_code 파생
+    supabase_repository._group_maps.clear()
+
+
+def _invalidate_users() -> None:
+    _fetch_users.clear()
+    _fetch_schedules.clear()        # 근무 조회의 emp_no 해석(_user_maps)
+    _fetch_user_schedules.clear()
+    _fetch_month_schedules.clear()
+    _fetch_day_schedules.clear()
+    _fetch_month_assignments.clear()  # 편성 조회의 emp_no 해석
+    supabase_repository._user_maps.clear()
+
+
+def _invalidate_work_types() -> None:
+    _fetch_work_types.clear()
+
+
+def _invalidate_shift_groups() -> None:
+    _fetch_shift_groups.clear()
+
+
+def _invalidate_schedules() -> None:
+    _fetch_schedules.clear()
+    _fetch_user_schedules.clear()
+    _fetch_month_schedules.clear()
+    _fetch_day_schedules.clear()
+
+
+def _invalidate_assignments() -> None:
+    _fetch_month_assignments.clear()
+
+
+def _invalidate_all() -> None:
+    """모든 supabase 읽기·매핑 캐시를 비운다(클라이언트 재연결·스키마 재확인 등
+    데이터 소스 자체가 바뀔 수 있는 경로에서 호출한다)."""
+    _invalidate_departments()
+    _invalidate_teams()
+    _invalidate_groups()
+    _invalidate_users()
+    _invalidate_work_types()
+    _invalidate_shift_groups()
+    _invalidate_schedules()
+    _invalidate_assignments()
+
+
 def _typed_empty_frame(columns) -> pd.DataFrame:
     """빈 기준정보도 화면 필터가 가능한 컬럼/dtype 계약으로 반환한다."""
     return pd.DataFrame({
@@ -246,7 +405,7 @@ def get_departments(is_active: bool | None = None) -> pd.DataFrame:
     if is_sample_mode():
         store = _dept_store()
         return _empty_contract(store[DEPT_COLUMNS].reset_index(drop=True).copy(), DEPT_COLUMNS)
-    df = supabase_repository.get_departments()
+    df = _fetch_departments()
     if is_active is not None:
         df = df[df["is_active"].astype(bool) == bool(is_active)]
     return _empty_contract(df.reset_index(drop=True), DEPT_COLUMNS)
@@ -264,9 +423,14 @@ def save_departments(df: pd.DataFrame) -> None:
         st.session_state[_DEPTS_STORE] = normalized
         return
     changed = _changed_records(
-        supabase_repository.get_departments(), normalized, ["dept_code"], DEPT_COLUMNS
+        _fetch_departments(), normalized, ["dept_code"], DEPT_COLUMNS
     )
-    supabase_repository.upsert_departments(changed)
+    # finally 무효화: 배치가 중간에 커밋된 뒤 예외가 나도 방금 저장된 행이 stale
+    # 캐시에 가려지지 않게 한다(예외는 그대로 전파 — 오류를 숨기지 않는다).
+    try:
+        supabase_repository.upsert_departments(changed)
+    finally:
+        _invalidate_departments()
 
 
 def save_departments_report(df: pd.DataFrame) -> BatchWriteResult:
@@ -277,11 +441,14 @@ def save_departments_report(df: pd.DataFrame) -> BatchWriteResult:
         st.session_state[_DEPTS_STORE] = normalized
         return _sample_report(normalized.to_dict("records"), ["dept_code"])
     changed = _changed_records(
-        supabase_repository.get_departments(), normalized, ["dept_code"], DEPT_COLUMNS
+        _fetch_departments(), normalized, ["dept_code"], DEPT_COLUMNS
     )
     if not changed:
         return BatchWriteResult()
-    return supabase_repository.upsert_departments_reported(changed)
+    try:
+        return supabase_repository.upsert_departments_reported(changed)
+    finally:
+        _invalidate_departments()
 
 
 def _base_teams() -> pd.DataFrame:
@@ -304,7 +471,7 @@ def get_teams(dept_code: str | None = None, is_active: bool | None = None) -> pd
     if is_sample_mode():
         store = _team_store()
         return _empty_contract(store[TEAM_COLUMNS].reset_index(drop=True).copy(), TEAM_COLUMNS)
-    df = supabase_repository.get_teams()
+    df = _fetch_teams()
     if dept_code is not None:
         df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
     if is_active is not None:
@@ -324,12 +491,15 @@ def save_teams(df: pd.DataFrame) -> None:
         st.session_state[_TEAMS_STORE] = normalized
         return
     changed = _changed_records(
-        supabase_repository.get_teams(),
+        _fetch_teams(),
         normalized,
         ["dept_code", "team_code"],
         TEAM_COLUMNS,
     )
-    supabase_repository.upsert_teams(changed)
+    try:
+        supabase_repository.upsert_teams(changed)
+    finally:
+        _invalidate_teams()
 
 
 def save_teams_report(df: pd.DataFrame) -> BatchWriteResult:
@@ -340,11 +510,14 @@ def save_teams_report(df: pd.DataFrame) -> BatchWriteResult:
         st.session_state[_TEAMS_STORE] = normalized
         return _sample_report(normalized.to_dict("records"), ["dept_code", "team_code"])
     changed = _changed_records(
-        supabase_repository.get_teams(), normalized, ["dept_code", "team_code"], TEAM_COLUMNS
+        _fetch_teams(), normalized, ["dept_code", "team_code"], TEAM_COLUMNS
     )
     if not changed:
         return BatchWriteResult()
-    return supabase_repository.upsert_teams_reported(changed)
+    try:
+        return supabase_repository.upsert_teams_reported(changed)
+    finally:
+        _invalidate_teams()
 
 
 # --- 조직 관리 (그룹·부서·운영단위, migration 004: group_id/FK 기반) ---
@@ -380,6 +553,9 @@ def reset_org_schema_cache() -> None:
     '스키마 재확인' 동작) 이 경로를 쓴다. sample 모드는 캐시가 없어 no-op."""
     if not is_sample_mode():
         supabase_repository.reset_org_readiness()
+        # readiness 가 바뀌면 조직 조회의 분기(폴백↔완전 조직 뷰)가 달라지므로 관련
+        # 읽기·매핑 캐시를 함께 비워 다음 렌더가 새 분기로 재조회하게 한다.
+        _invalidate_all()
 
 
 def org_team_defaults(df: pd.DataFrame) -> pd.DataFrame:
@@ -459,7 +635,7 @@ def get_org_groups(is_active: bool | None = None) -> pd.DataFrame:
             st.session_state[_ORG_GROUPS_STORE] = _sample_org_groups()
         df = st.session_state[_ORG_GROUPS_STORE].copy()
     elif supabase_repository.org_extensions_ready():
-        df = supabase_repository.get_organization_groups()
+        df = _fetch_organization_groups()
     else:
         df = _typed_empty_frame(ORG_GROUP_COLUMNS)  # 조직 스키마 capability 미준비(도입: migration 004) — 조회 전용 빈 그룹
     if is_active is not None and not df.empty:
@@ -477,7 +653,10 @@ def save_org_groups(df: pd.DataFrame) -> None:
     changed = _changed_records(
         get_org_groups(), normalized, ["group_code"], ORG_GROUP_COLUMNS
     )
-    supabase_repository.upsert_organization_groups(changed)
+    try:
+        supabase_repository.upsert_organization_groups(changed)
+    finally:
+        _invalidate_groups()
 
 
 def save_org_groups_report(df: pd.DataFrame) -> BatchWriteResult:
@@ -492,7 +671,10 @@ def save_org_groups_report(df: pd.DataFrame) -> BatchWriteResult:
     )
     if not changed:
         return BatchWriteResult()
-    return supabase_repository.upsert_organization_groups_reported(changed)
+    try:
+        return supabase_repository.upsert_organization_groups_reported(changed)
+    finally:
+        _invalidate_groups()
 
 
 def deactivate_org_group(group_code: str) -> None:
@@ -505,7 +687,10 @@ def deactivate_org_group(group_code: str) -> None:
             store.loc[mask, "is_active"] = False
             st.session_state[_ORG_GROUPS_STORE] = store.reset_index(drop=True)
         return
-    supabase_repository.deactivate_organization_group(code)
+    try:
+        supabase_repository.deactivate_organization_group(code)
+    finally:
+        _invalidate_groups()
 
 
 def delete_org_group(group_code: str) -> None:
@@ -521,7 +706,10 @@ def delete_org_group(group_code: str) -> None:
                 store[store["group_code"].astype(str).str.strip() != code].reset_index(drop=True)
             )
         return
-    supabase_repository.delete_organization_group(code)
+    try:
+        supabase_repository.delete_organization_group(code)
+    finally:
+        _invalidate_groups()
 
 
 def org_group_reference_counts(group_code: str) -> dict:
@@ -548,10 +736,10 @@ def get_org_departments(
     if is_sample_mode():
         df = _org_dept_view(_dept_store())
     elif supabase_repository.org_extensions_ready():
-        df = supabase_repository.get_departments_org()
+        df = _fetch_departments_org()
     else:
         # 조직 스키마 capability 미준비(도입: migration 004) — 그룹 정보 없이 부서만 표시(조회 전용, 저장은 차단됨)
-        df = supabase_repository.get_departments().copy()
+        df = _fetch_departments().copy()
         df["group_code"] = ""
         df["description"] = ""
     if group_code is not None and not df.empty:
@@ -575,7 +763,10 @@ def save_org_departments(df: pd.DataFrame) -> None:
     changed = _changed_records(
         get_org_departments(), normalized, ["dept_code"], ORG_DEPT_COLUMNS
     )
-    supabase_repository.upsert_departments_org(changed)
+    try:
+        supabase_repository.upsert_departments_org(changed)
+    finally:
+        _invalidate_departments()
 
 
 def save_org_departments_report(df: pd.DataFrame) -> BatchWriteResult:
@@ -593,7 +784,10 @@ def save_org_departments_report(df: pd.DataFrame) -> BatchWriteResult:
     )
     if not changed:
         return BatchWriteResult()
-    return supabase_repository.upsert_departments_org_reported(changed)
+    try:
+        return supabase_repository.upsert_departments_org_reported(changed)
+    finally:
+        _invalidate_departments()
 
 
 # --- 운영단위(teams, dept_code→department_id FK) ---
@@ -605,10 +799,10 @@ def get_org_teams(dept_code: str | None = None, is_active: bool | None = None) -
     if is_sample_mode():
         df = _org_team_view(_team_store())
     elif supabase_repository.org_extensions_ready():
-        df = supabase_repository.get_teams_org()
+        df = _fetch_teams_org()
     else:
         # 조직 스키마 capability 미준비(도입: migration 004) — unit_type/비고 기본값으로 폴백(조회 전용, 저장은 차단됨)
-        df = org_team_defaults(supabase_repository.get_teams())
+        df = org_team_defaults(_fetch_teams())
         df["description"] = ""
     if dept_code is not None and not df.empty:
         df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
@@ -627,7 +821,10 @@ def save_org_teams(df: pd.DataFrame) -> None:
     changed = _changed_records(
         get_org_teams(), normalized, ["dept_code", "team_code"], ORG_TEAM_COLUMNS
     )
-    supabase_repository.upsert_teams_org(changed)
+    try:
+        supabase_repository.upsert_teams_org(changed)
+    finally:
+        _invalidate_teams()
 
 
 def save_org_teams_report(df: pd.DataFrame) -> BatchWriteResult:
@@ -642,7 +839,10 @@ def save_org_teams_report(df: pd.DataFrame) -> BatchWriteResult:
     )
     if not changed:
         return BatchWriteResult()
-    return supabase_repository.upsert_teams_org_reported(changed)
+    try:
+        return supabase_repository.upsert_teams_org_reported(changed)
+    finally:
+        _invalidate_teams()
 
 
 def save_org_structure_report(
@@ -795,7 +995,7 @@ def get_users(
         if _USERS_STORE not in st.session_state:
             st.session_state[_USERS_STORE] = _base_users()
         return _empty_contract(st.session_state[_USERS_STORE].copy(), USER_COLUMNS)
-    df = supabase_repository.get_users()
+    df = _fetch_users()
     if dept_code is not None:
         df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
     if team_code is not None:
@@ -817,9 +1017,12 @@ def save_users(df: pd.DataFrame) -> None:
         st.session_state[_USERS_STORE] = normalized
         return
     changed = _changed_records(
-        supabase_repository.get_users(), normalized, ["emp_no"], USER_COLUMNS
+        _fetch_users(), normalized, ["emp_no"], USER_COLUMNS
     )
-    supabase_repository.upsert_users(changed)
+    try:
+        supabase_repository.upsert_users(changed)
+    finally:
+        _invalidate_users()
 
 
 def save_users_report(df: pd.DataFrame) -> BatchWriteResult:
@@ -834,11 +1037,14 @@ def save_users_report(df: pd.DataFrame) -> BatchWriteResult:
         st.session_state[_USERS_STORE] = normalized
         return _sample_report(normalized.to_dict("records"), ["emp_no"])
     changed = _changed_records(
-        supabase_repository.get_users(), normalized, ["emp_no"], USER_COLUMNS
+        _fetch_users(), normalized, ["emp_no"], USER_COLUMNS
     )
     if not changed:
         return BatchWriteResult()
-    return supabase_repository.upsert_users_reported(changed)
+    try:
+        return supabase_repository.upsert_users_reported(changed)
+    finally:
+        _invalidate_users()
 
 
 def _base_work_types() -> pd.DataFrame:
@@ -864,7 +1070,7 @@ def get_work_types(active_only: bool = False) -> pd.DataFrame:
         if _WORK_TYPES_STORE not in st.session_state:
             st.session_state[_WORK_TYPES_STORE] = _base_work_types()
         return _empty_contract(st.session_state[_WORK_TYPES_STORE].copy(), WORK_TYPE_COLUMNS)
-    df = supabase_repository.get_work_types()
+    df = _fetch_work_types()
     if active_only:
         df = df[df["is_active"].astype(bool)]
     return _empty_contract(df.reset_index(drop=True), WORK_TYPE_COLUMNS)
@@ -882,9 +1088,12 @@ def save_work_types(df: pd.DataFrame) -> None:
         st.session_state[_WORK_TYPES_STORE] = normalized
         return
     changed = _changed_records(
-        supabase_repository.get_work_types(), normalized, ["code"], WORK_TYPE_COLUMNS
+        _fetch_work_types(), normalized, ["code"], WORK_TYPE_COLUMNS
     )
-    supabase_repository.upsert_work_types(changed)
+    try:
+        supabase_repository.upsert_work_types(changed)
+    finally:
+        _invalidate_work_types()
 
 
 def save_work_types_report(df: pd.DataFrame) -> BatchWriteResult:
@@ -895,11 +1104,14 @@ def save_work_types_report(df: pd.DataFrame) -> BatchWriteResult:
         st.session_state[_WORK_TYPES_STORE] = normalized
         return _sample_report(normalized.to_dict("records"), ["code"])
     changed = _changed_records(
-        supabase_repository.get_work_types(), normalized, ["code"], WORK_TYPE_COLUMNS
+        _fetch_work_types(), normalized, ["code"], WORK_TYPE_COLUMNS
     )
     if not changed:
         return BatchWriteResult()
-    return supabase_repository.upsert_work_types_reported(changed)
+    try:
+        return supabase_repository.upsert_work_types_reported(changed)
+    finally:
+        _invalidate_work_types()
 
 
 def upsert_records(store, records, loaded_keys, key_cols, status_col, columns):
@@ -979,7 +1191,7 @@ def get_schedules() -> pd.DataFrame:
         if _SCHEDULES_STORE not in st.session_state:
             st.session_state[_SCHEDULES_STORE] = _base_schedules()
         return st.session_state[_SCHEDULES_STORE].copy()
-    return supabase_repository.get_schedules()
+    return _fetch_schedules()
 
 
 def save_schedules(df: pd.DataFrame) -> None:
@@ -995,7 +1207,10 @@ def save_schedules(df: pd.DataFrame) -> None:
     if is_sample_mode():
         st.session_state[_SCHEDULES_STORE] = normalized
         return
-    supabase_repository.upsert_schedules(normalized.to_dict("records"))
+    try:
+        supabase_repository.upsert_schedules(normalized.to_dict("records"))
+    finally:
+        _invalidate_schedules()
 
 
 def upsert_month_schedules(records) -> None:
@@ -1018,7 +1233,10 @@ def upsert_month_schedules(records) -> None:
             by_key[(str(r["emp_no"]).strip(), str(r["duty_date"]))] = r
         save_schedules(pd.DataFrame(list(by_key.values()), columns=SCHEDULE_COLUMNS))
         return
-    supabase_repository.upsert_schedules(normalized.to_dict("records"))
+    try:
+        supabase_repository.upsert_schedules(normalized.to_dict("records"))
+    finally:
+        _invalidate_schedules()
 
 
 def replace_month_schedules(emp_nos, year: int, month: int, records) -> None:
@@ -1037,9 +1255,14 @@ def replace_month_schedules(emp_nos, year: int, month: int, records) -> None:
         )
         save_schedules(pd.concat([store[~in_scope], normalized], ignore_index=True))
         return
-    supabase_repository.replace_month_schedules(
-        normalized_emp_nos, int(year), int(month), normalized.to_dict("records")
-    )
+    # replace_month_schedules 는 upsert 후 개별 삭제를 수행하므로 중간 실패 시 일부만
+    # 반영될 수 있다 — finally 로 어떤 결과든 캐시를 비운다(예외는 전파).
+    try:
+        supabase_repository.replace_month_schedules(
+            normalized_emp_nos, int(year), int(month), normalized.to_dict("records")
+        )
+    finally:
+        _invalidate_schedules()
 
 
 # --- 근무조 기준정보 / 직원별 월 편성 (docs/database.md §4.5·§5.1) ---
@@ -1060,7 +1283,7 @@ def get_shift_groups(dept_code: str | None = None, is_active: bool | None = None
             st.session_state[_SHIFT_GROUPS_STORE] = _base_shift_groups()
         df = st.session_state[_SHIFT_GROUPS_STORE].copy()
     else:
-        df = supabase_repository.get_shift_groups()
+        df = _fetch_shift_groups()
     if dept_code is not None:
         df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
     if is_active is not None:
@@ -1100,9 +1323,7 @@ def get_month_assignments(year: int, month: int, emp_nos=None) -> pd.DataFrame:
         emp_nos = [emp_nos]
     normalized = {str(e).strip() for e in (emp_nos or []) if str(e).strip()}
     if not is_sample_mode():
-        return supabase_repository.get_month_assignments(
-            int(year), int(month), sorted(normalized) or None
-        )
+        return _fetch_month_assignments(int(year), int(month), tuple(sorted(normalized)))
     schedule_month = validators.normalize_schedule_month((int(year), int(month)))
     df = _assignments_store().copy()
     if df.empty:
@@ -1130,7 +1351,10 @@ def upsert_month_assignments(records, require_shift: bool = True) -> dict:
     """
     records = list(records)
     if not is_sample_mode():
-        return supabase_repository.upsert_month_assignments(records, require_shift=require_shift)
+        try:
+            return supabase_repository.upsert_month_assignments(records, require_shift=require_shift)
+        finally:
+            _invalidate_assignments()
     users = get_users()
     depts = get_departments()
     teams = get_teams()
@@ -1281,7 +1505,7 @@ def classify_work_group(code: str, work_type: dict) -> str | None:
 def get_user_schedules(emp_no: str) -> pd.DataFrame:
     """특정 사번의 근무표 레코드(long format). 컬럼: emp_no, duty_date, work_type_code, note."""
     if not is_sample_mode():
-        return supabase_repository.get_user_schedules(str(emp_no).strip())
+        return _fetch_user_schedules(str(emp_no).strip())
     df = get_schedules()
     if df.empty:
         return df
@@ -1298,7 +1522,7 @@ def get_month_schedules(emp_nos, year: int, month: int) -> pd.DataFrame:
         emp_nos = [emp_nos]
     emp_nos = {str(emp_no).strip() for emp_no in emp_nos if str(emp_no).strip()}
     if not is_sample_mode():
-        return supabase_repository.get_month_schedules(emp_nos, int(year), int(month))
+        return _fetch_month_schedules(tuple(sorted(emp_nos)), int(year), int(month))
     df = get_schedules()
     if df.empty or not emp_nos:
         return df.iloc[0:0].copy()
@@ -1336,9 +1560,7 @@ def get_day_schedules(the_date) -> pd.DataFrame:
         return _typed_empty_frame(SCHEDULE_COLUMNS)
     iso = target.strftime("%Y-%m-%d")  # 시간부 제거 — sample/Supabase 일관
     if not is_sample_mode():
-        return supabase_repository._schedule_rows(
-            lambda query: query.eq("work_date", iso).order("user_id")
-        )
+        return _fetch_day_schedules(iso)
     df = get_schedules()
     if df.empty:
         return df.iloc[0:0].copy()
@@ -1354,35 +1576,59 @@ def test_connection() -> dict[str, int]:
 
 
 def upsert_department(record: dict) -> None:
-    supabase_repository.upsert_departments([record])
+    try:
+        supabase_repository.upsert_departments([record])
+    finally:
+        _invalidate_departments()
 
 
 def upsert_team(record: dict) -> None:
-    supabase_repository.upsert_teams([record])
+    try:
+        supabase_repository.upsert_teams([record])
+    finally:
+        _invalidate_teams()
 
 
 def upsert_user(record: dict) -> None:
-    supabase_repository.upsert_users([record])
+    try:
+        supabase_repository.upsert_users([record])
+    finally:
+        _invalidate_users()
 
 
 def upsert_work_type(record: dict) -> None:
-    supabase_repository.upsert_work_types([record])
+    try:
+        supabase_repository.upsert_work_types([record])
+    finally:
+        _invalidate_work_types()
 
 
 def upsert_schedule(record: dict) -> None:
-    supabase_repository.upsert_schedules([record])
+    try:
+        supabase_repository.upsert_schedules([record])
+    finally:
+        _invalidate_schedules()
 
 
 def upsert_shift_group(record: dict) -> None:
-    supabase_repository.upsert_shift_groups([record])
+    try:
+        supabase_repository.upsert_shift_groups([record])
+    finally:
+        _invalidate_shift_groups()
 
 
 def delete_schedule(emp_no: str, duty_date: str) -> None:
-    supabase_repository.delete_schedule(str(emp_no).strip(), str(duty_date).strip())
+    try:
+        supabase_repository.delete_schedule(str(emp_no).strip(), str(duty_date).strip())
+    finally:
+        _invalidate_schedules()
 
 
 def deactivate_department(dept_code: str) -> None:
-    supabase_repository.deactivate_department(str(dept_code).strip())
+    try:
+        supabase_repository.deactivate_department(str(dept_code).strip())
+    finally:
+        _invalidate_departments()
 
 
 def delete_department(dept_code: str) -> None:
@@ -1398,7 +1644,10 @@ def delete_department(dept_code: str) -> None:
                 store[store["dept_code"].astype(str) != code].reset_index(drop=True)
             )
         return
-    supabase_repository.delete_department(code)
+    try:
+        supabase_repository.delete_department(code)
+    finally:
+        _invalidate_departments()
 
 
 def department_reference_counts(dept_code: str) -> dict:
@@ -1426,7 +1675,10 @@ def department_reference_counts(dept_code: str) -> dict:
 
 
 def deactivate_team(dept_code: str, team_code: str) -> None:
-    supabase_repository.deactivate_team(str(dept_code).strip(), str(team_code).strip())
+    try:
+        supabase_repository.deactivate_team(str(dept_code).strip(), str(team_code).strip())
+    finally:
+        _invalidate_teams()
 
 
 def delete_team(dept_code: str, team_code: str) -> None:
@@ -1441,7 +1693,10 @@ def delete_team(dept_code: str, team_code: str) -> None:
             )
             st.session_state[_TEAMS_STORE] = store[keep].reset_index(drop=True)
         return
-    supabase_repository.delete_team(dc, tc)
+    try:
+        supabase_repository.delete_team(dc, tc)
+    finally:
+        _invalidate_teams()
 
 
 def team_reference_counts(dept_code: str, team_code: str) -> dict:
@@ -1461,11 +1716,17 @@ def team_reference_counts(dept_code: str, team_code: str) -> dict:
 
 
 def deactivate_user(emp_no: str) -> None:
-    supabase_repository.deactivate_user(str(emp_no).strip())
+    try:
+        supabase_repository.deactivate_user(str(emp_no).strip())
+    finally:
+        _invalidate_users()
 
 
 def deactivate_work_type(code: str) -> None:
-    supabase_repository.deactivate_work_type(str(code).strip())
+    try:
+        supabase_repository.deactivate_work_type(str(code).strip())
+    finally:
+        _invalidate_work_types()
 
 
 def delete_work_type(code: str) -> None:
@@ -1478,7 +1739,10 @@ def delete_work_type(code: str) -> None:
                 store[store["code"].astype(str) != c].reset_index(drop=True)
             )
         return
-    supabase_repository.delete_work_type(c)
+    try:
+        supabase_repository.delete_work_type(c)
+    finally:
+        _invalidate_work_types()
 
 
 def work_type_reference_counts(code: str) -> dict:
@@ -1495,31 +1759,52 @@ def work_type_reference_counts(code: str) -> dict:
 
 def cleanup_test_records(dept_code: str, team_code: str, emp_no: str, work_type_codes) -> None:
     """의존성 역순으로 TEST_* 레코드만 물리 삭제한다."""
-    supabase_repository.hard_delete_test_user(emp_no)
-    for code in work_type_codes:
-        supabase_repository.hard_delete_test_work_type(str(code).strip())
-    supabase_repository.hard_delete_test_team(dept_code, team_code)
-    supabase_repository.hard_delete_test_department(dept_code)
+    try:
+        supabase_repository.hard_delete_test_user(emp_no)
+        for code in work_type_codes:
+            supabase_repository.hard_delete_test_work_type(str(code).strip())
+        supabase_repository.hard_delete_test_team(dept_code, team_code)
+        supabase_repository.hard_delete_test_department(dept_code)
+    finally:
+        # 순차 삭제 중 일부만 커밋된 뒤 예외가 나도 관련 캐시를 모두 비운다.
+        _invalidate_users()
+        _invalidate_work_types()
+        _invalidate_teams()
+        _invalidate_departments()
 
 
 def hard_delete_test_user(emp_no: str) -> None:
-    supabase_repository.hard_delete_test_user(str(emp_no).strip())
+    try:
+        supabase_repository.hard_delete_test_user(str(emp_no).strip())
+    finally:
+        _invalidate_users()
 
 
 def hard_delete_test_work_type(code: str) -> None:
-    supabase_repository.hard_delete_test_work_type(str(code).strip())
+    try:
+        supabase_repository.hard_delete_test_work_type(str(code).strip())
+    finally:
+        _invalidate_work_types()
 
 
 def hard_delete_test_team(dept_code: str, team_code: str) -> None:
-    supabase_repository.hard_delete_test_team(str(dept_code).strip(), str(team_code).strip())
+    try:
+        supabase_repository.hard_delete_test_team(str(dept_code).strip(), str(team_code).strip())
+    finally:
+        _invalidate_teams()
 
 
 def hard_delete_test_department(dept_code: str) -> None:
-    supabase_repository.hard_delete_test_department(str(dept_code).strip())
+    try:
+        supabase_repository.hard_delete_test_department(str(dept_code).strip())
+    finally:
+        _invalidate_departments()
 
 
 def reset_supabase_client() -> None:
     supabase_repository.reset_client()
+    # 클라이언트가 새 연결로 교체되면 이전 연결로 캐시된 읽기 결과는 무효다.
+    _invalidate_all()
 
 
 def sample_seed_frames() -> dict[str, pd.DataFrame]:

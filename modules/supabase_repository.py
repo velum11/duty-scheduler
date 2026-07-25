@@ -11,9 +11,14 @@ from functools import lru_cache
 from typing import Callable, Iterable
 
 import pandas as pd
+import streamlit as st
 from supabase import Client, create_client
 
 from modules import config, validators
+
+# id↔자연키 매핑 memoize 의 ttl(초). db.py 파사드 읽기 캐시와 같은 짧은 staleness
+# 안전망을 쓴다 — 쓰기 후에는 db.py 의 _invalidate_* 가 이 매핑 캐시도 함께 비운다.
+_MAP_CACHE_TTL = 30
 
 PAGE_SIZE = 1000
 WRITE_BATCH_SIZE = 500
@@ -332,6 +337,7 @@ def _mapped(mapping: dict, key, relation: str):
     return value
 
 
+@st.cache_data(ttl=_MAP_CACHE_TTL, show_spinner=False)
 def _department_maps() -> tuple[dict[str, int], dict[str, str]]:
     rows = _select_all("departments", "id,dept_code")
     by_code = {
@@ -342,7 +348,10 @@ def _department_maps() -> tuple[dict[str, int], dict[str, str]]:
     return by_code, by_id
 
 
+@st.cache_data(ttl=_MAP_CACHE_TTL, show_spinner=False)
 def _team_maps() -> tuple[dict[tuple[str, str], int], dict[str, str]]:
+    # _department_maps() 도 memoize 되어 있어 조 매핑이 두 번째 departments 조회를
+    # 유발하지 않는다(같은 렌더 내 중복 fetch 제거).
     _, dept_by_id = _department_maps()
     rows = _select_all("teams", "id,department_id,team_code")
     by_key: dict[tuple[str, str], int] = {}
@@ -358,6 +367,7 @@ def _team_maps() -> tuple[dict[tuple[str, str], int], dict[str, str]]:
     return by_key, by_id
 
 
+@st.cache_data(ttl=_MAP_CACHE_TTL, show_spinner=False)
 def _user_maps(emp_nos: Iterable[str] | None = None) -> tuple[dict[str, int], dict[str, str]]:
     normalized = sorted({str(value).strip() for value in (emp_nos or []) if str(value).strip()})
 
@@ -556,6 +566,7 @@ def org_extensions_probe(*, force: bool = False) -> str:
 
 
 # --- 그룹(organization_groups) — 조직 1급 테이블 ---
+@st.cache_data(ttl=_MAP_CACHE_TTL, show_spinner=False)
 def _group_maps() -> tuple[dict[str, int], dict[str, str]]:
     """(group_code→id, id→group_code) 매핑. departments.group_id FK 해석용."""
     rows = _select_all("organization_groups", "id,group_code")
