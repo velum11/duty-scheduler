@@ -827,10 +827,16 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
         try:
             db.upsert_month_assignments(assign_rows, require_shift=False)
             assign_persisted = True
-        except Exception as exc:
+        except db.DATA_SOURCE_ERRORS as exc:
             st.error(
                 "편성(부서·조) 저장 단계에서 실패했습니다. 근무는 저장하지 않았습니다.\n\n"
-                f"편집 내용은 화면에 유지됩니다. [새로고침]으로 확인 후 다시 시도하세요.\n\n{exc}"
+                f"편집 내용은 화면에 유지됩니다. [새로고침]으로 확인 후 다시 시도하세요.\n\n({exc})"
+            )
+            return
+        except Exception:
+            st.error(
+                "편성(부서·조) 저장 단계에서 실패했습니다. 근무는 저장하지 않았습니다.\n\n"
+                "편집 내용은 화면에 유지됩니다. [새로고침]으로 확인 후 다시 시도하세요."
             )
             return
         cache = st.session_state.setdefault("se_assign_cache", {})
@@ -856,11 +862,18 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
         step = "신규·수정 저장"
         if records_plain:
             db.upsert_month_schedules(records_plain)
-    except Exception as exc:
+    except db.DATA_SOURCE_ERRORS as exc:
         prefix = "편성(부서·조)은 저장되었으나, " if assign_persisted else ""
         st.error(
             f"{prefix}근무 저장이 '{step}' 단계에서 실패했습니다. 이전 단계까지는 반영되었을 수 있습니다.\n\n"
-            f"편집 내용은 화면에 유지됩니다. [새로고침]으로 실제 저장 상태를 확인한 뒤 다시 시도하세요.\n\n{exc}"
+            f"편집 내용은 화면에 유지됩니다. [새로고침]으로 실제 저장 상태를 확인한 뒤 다시 시도하세요.\n\n({exc})"
+        )
+        return
+    except Exception:
+        prefix = "편성(부서·조)은 저장되었으나, " if assign_persisted else ""
+        st.error(
+            f"{prefix}근무 저장이 '{step}' 단계에서 실패했습니다. 이전 단계까지는 반영되었을 수 있습니다.\n\n"
+            "편집 내용은 화면에 유지됩니다. [새로고침]으로 실제 저장 상태를 확인한 뒤 다시 시도하세요."
         )
         return
 

@@ -212,11 +212,14 @@ def render(user: dict) -> None:
         work_types = db.work_types_map()
         display_of, color_of = work_type_display()
         rows["d"] = pd.to_datetime(rows["duty_date"], errors="coerce").dt.date
-    except Exception as exc:
+    except db.DATA_SOURCE_ERRORS as exc:
         st.error(
             "근무표 또는 기준정보를 불러오지 못했습니다(일시적 연결 문제일 수 있습니다). "
-            "잠시 후 다시 조회하세요.\n\n" + str(exc)
+            f"잠시 후 다시 조회하세요. ({exc})"
         )
+        return
+    except Exception:
+        st.error("근무표 또는 기준정보를 불러오지 못했습니다. 잠시 후 다시 조회하세요.")
         return
 
     # 소속(부서·조)은 선택 월 편성 스냅샷 우선, 없으면 users 현재 소속으로 표시 fallback.
