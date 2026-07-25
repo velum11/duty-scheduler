@@ -1,7 +1,7 @@
 """화면 유형 규약(DESIGN.md §0) 집행 계약 테스트 — AST 기반, 우회 불가.
 
-§0 는 모든 화면이 4유형(EDIT_GRID/READ_VIEW/MATRIX_EDIT/DASHBOARD) 중 하나를
-``SCREEN_ARCHETYPE`` 상수로 선언하고, 페이지 크롬을 공용 스캐폴드
+§0 는 모든 화면이 5유형(EDIT_GRID/READ_VIEW/MATRIX_EDIT/DASHBOARD/FORM_ENTRY) 중
+하나를 ``SCREEN_ARCHETYPE`` 상수로 선언하고, 페이지 크롬을 공용 스캐폴드
 (``views/common/scaffold.py`` 의 ``page_chrome``/``page_chrome_for``) 또는
 ``views/master`` 공통 기반의 **실제 호출**로만 만들도록 강제한다. 이 스위트는
 그 집행 장치를 순수 AST 분석으로 검증한다(문자열 존재 검사 금지).
@@ -482,8 +482,8 @@ for name, expected in EXPECTED.items():
 # ===========================================================================
 print("(c) 스캐폴드 검증 — 잘못된 유형 ValueError / 목록 정합")
 check(
-    "ARCHETYPES == DESIGN.md §0 4유형",
-    scaffold.ARCHETYPES == ("EDIT_GRID", "READ_VIEW", "MATRIX_EDIT", "DASHBOARD"),
+    "ARCHETYPES == DESIGN.md §0 5유형",
+    scaffold.ARCHETYPES == ("EDIT_GRID", "READ_VIEW", "MATRIX_EDIT", "DASHBOARD", "FORM_ENTRY"),
 )
 try:
     scaffold._validate_archetype("NOT_A_TYPE")
@@ -751,6 +751,96 @@ check(
     {"dashboard", "schedule_edit", "schedule_view", "master_users",
      "master_org", "master_work_types"} <= routed_screen_names(_APP_SRC),
 )
+
+
+# ===========================================================================
+# (h) FORM_ENTRY — 5번째 §0 유형(단건 입력·제출 폼). 크롬 계약: 유형 선언 +
+#     page_chrome/page_chrome_for 실호출(render 경로). EDIT_GRID 스택은 불필요.
+# ===========================================================================
+print("(h) FORM_ENTRY — 단건 폼 유형: 유형 선언 + 헤더 크롬 실호출(그리드 스택 불요)")
+
+# 유효 유형 등록 확인(§0 표·scaffold.ARCHETYPES 정합).
+check("FORM_ENTRY 는 유효 유형(scaffold.ARCHETYPES 등록)", "FORM_ENTRY" in scaffold.ARCHETYPES)
+
+# 유형 상수 탐지(AST) — 주석이 아니라 실제 모듈 레벨 상수.
+FORM_DECL = 'SCREEN_ARCHETYPE = "FORM_ENTRY"\ndef render(user):\n    pass\n'
+check("FORM_ENTRY: 모듈 레벨 SCREEN_ARCHETYPE 상수 탐지(AST)", module_archetype(FORM_DECL) == "FORM_ENTRY")
+
+# 양성: 온전한 FORM_ENTRY — render 경로에서 page_chrome_for 실호출 → 크롬 충족.
+GOOD_FORM_ENTRY = (
+    'SCREEN_ARCHETYPE = "FORM_ENTRY"\n'
+    "from views.common import scaffold\n"
+    "def render(user):\n"
+    "    scaffold.page_chrome_for('near_miss_new', SCREEN_ARCHETYPE)\n"
+    "    _form_body()\n"          # 라벨드 필드·첨부(시각 게이트)
+    "    _submit_and_banner()\n"  # 제출 + 저장 결과 배너(시각 게이트)
+    "def _form_body():\n"
+    "    return None\n"
+    "def _submit_and_banner():\n"
+    "    return None\n"
+)
+check("대조군: 온전한 FORM_ENTRY(page_chrome_for 실호출)은 크롬 충족",
+      chrome_own_ok("FORM_ENTRY", GOOD_FORM_ENTRY))
+
+# 양성: FORM_ENTRY 는 EDIT_GRID 그리드 스택이 불필요 — 헤더 크롬만으로 충족.
+FORM_NO_GRID = (
+    'SCREEN_ARCHETYPE = "FORM_ENTRY"\n'
+    "from views.common import scaffold\n"
+    "def render(user):\n"
+    "    scaffold.page_chrome('FORM_ENTRY', title='니어미스 신청')\n"
+)
+check("대조군: FORM_ENTRY 는 그리드/액션 스택 없이 헤더 크롬만으로 충족",
+      chrome_own_ok("FORM_ENTRY", FORM_NO_GRID)
+      and not has_editgrid_stack(render_reachable(FORM_NO_GRID)[0] or set()))
+
+# 양성: 전체 경로(chrome_ok, 비면제 화면)도 통과.
+check("대조군: FORM_ENTRY 전체 크롬 규약(chrome_ok, 비면제)도 충족",
+      chrome_ok("near_miss_new", GOOD_FORM_ENTRY, "FORM_ENTRY", {}))
+
+# 양성: render→helper 전이 도달 크롬 호출도 충족(간접 구성 허용).
+FORM_TRANSITIVE = (
+    'SCREEN_ARCHETYPE = "FORM_ENTRY"\n'
+    "from views.common import scaffold\n"
+    "def render(user):\n"
+    "    _head(user)\n"
+    "def _head(user):\n"
+    "    scaffold.page_chrome_for('near_miss_new', SCREEN_ARCHETYPE)\n"
+)
+check("대조군: FORM_ENTRY render→helper 전이 크롬 호출도 충족",
+      chrome_own_ok("FORM_ENTRY", FORM_TRANSITIVE))
+
+# 음성: 크롬 호출이 아예 없으면(폼만 그림) 불충족.
+FORM_NO_CHROME = (
+    'SCREEN_ARCHETYPE = "FORM_ENTRY"\n'
+    "def render(user):\n"
+    "    st.text_input('사유')\n"      # 헤더 크롬 미호출
+    "    st.button('제출')\n"
+)
+check("음성: FORM_ENTRY 헤더 크롬 미호출은 불충족",
+      not chrome_own_ok("FORM_ENTRY", FORM_NO_CHROME))
+
+# 음성: 크롬 호출이 render 도달 불가한 죽은 헬퍼에만 있으면 불충족(gap5 정합).
+FORM_DEADCODE_CHROME = (
+    'SCREEN_ARCHETYPE = "FORM_ENTRY"\n'
+    "from views.common import scaffold\n"
+    "def render(user):\n"
+    "    return None\n"
+    "def _unused(user):\n"
+    "    scaffold.page_chrome_for('near_miss_new', SCREEN_ARCHETYPE)\n"
+)
+check("음성: FORM_ENTRY 크롬 호출이 render 도달 불가(죽은 코드)면 불충족",
+      not chrome_own_ok("FORM_ENTRY", FORM_DEADCODE_CHROME))
+
+# 음성: master_screen_head 만 부르고 page_chrome/page_chrome_for 미호출은 불충족
+#       (FORM_ENTRY 계약은 공용 스캐폴드 크롬 API 실호출을 요구).
+FORM_RAW_HEAD_ONLY = (
+    'SCREEN_ARCHETYPE = "FORM_ENTRY"\n'
+    "from views.master import master_screen_head\n"
+    "def render(user):\n"
+    "    master_screen_head('니어미스 신청', '단건 제출')\n"
+)
+check("음성: FORM_ENTRY 가 page_chrome 계열 대신 master_screen_head 만 호출하면 불충족",
+      not chrome_own_ok("FORM_ENTRY", FORM_RAW_HEAD_ONLY))
 
 
 print()

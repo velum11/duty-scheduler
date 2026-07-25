@@ -1,6 +1,6 @@
 """화면 유형 규약(DESIGN.md §0)의 공용 스캐폴드.
 
-모든 신규 화면·구조 변경 화면은 4유형 중 하나를 ``SCREEN_ARCHETYPE`` 상수로
+모든 신규 화면·구조 변경 화면은 5유형 중 하나를 ``SCREEN_ARCHETYPE`` 상수로
 선언하고, 페이지 크롬은 크롬 손제작 없이 이 모듈의 :func:`page_chrome` 로만
 생성한다(§0 집행 장치). 이 모듈은 ``views/master`` 공통 기반의 기존 공개 API
 (:func:`~views.master.master_screen_head`, :func:`~views.master.inject_page_styles`
@@ -34,8 +34,20 @@ from modules import db as _db
 from modules import nav as _nav
 from views import master as _master
 
-#: 강제되는 4개 화면 유형 코드(DESIGN.md §0 표와 1:1 대응).
-ARCHETYPES: tuple[str, ...] = ("EDIT_GRID", "READ_VIEW", "MATRIX_EDIT", "DASHBOARD")
+#: 강제되는 5개 화면 유형 코드(DESIGN.md §0 표와 1:1 대응).
+#: ``FORM_ENTRY`` 는 단건 레코드 입력·제출 폼(니어미스 신청 등) — 헤더 크롬 +
+#: 라벨드 필드 폼 본문 + 제출 컨트롤 + 저장 결과 배너(``views/master/lifecycle``
+#: ``PersistResult``/``ledger_banner`` 계약 개념 재사용). EDIT_GRID 와 달리 그리드
+#: 스택이 아니라 헤더 크롬(:func:`page_chrome`/:func:`page_chrome_for`) 실호출까지가
+#: 코드 강제 범위이며, 폼 본문·제출·배너의 시각 품질은 visual-qa + 사용자 sign-off
+#: 게이트다. §6 반응형(1366×768 baseline·좁은 폭 무오버플로)을 따른다.
+ARCHETYPES: tuple[str, ...] = (
+    "EDIT_GRID",
+    "READ_VIEW",
+    "MATRIX_EDIT",
+    "DASHBOARD",
+    "FORM_ENTRY",
+)
 
 
 def _validate_archetype(archetype: str) -> str:
@@ -70,6 +82,11 @@ def page_chrome(
     ``EDIT_GRID`` 화면은 이 헤더뿐 아니라 ``views/master`` 전체 스택
     (``DraftState`` · ``MasterGridSpec`` · ``run_save`` · ``master_action_bar``)을
     사용하는 것이 필수다 — 기준정보 3화면이 표준 원본이다.
+
+    ``FORM_ENTRY`` 화면은 이 헤더 크롬만 계약으로 강제된다 — 나머지 폼 본문
+    (라벨드 필드·첨부) · 제출 컨트롤 · 저장 결과 배너(``views/master/lifecycle``
+    ``PersistResult``/``ledger_banner`` 개념 재사용)는 각 화면이 §0 순서대로 이어서
+    구성하며, 그 시각 품질은 visual-qa + 사용자 sign-off 게이트가 보증한다.
 
     Parameters
     ----------
