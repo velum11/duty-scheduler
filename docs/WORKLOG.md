@@ -1,6 +1,11 @@
 # 최근 작업 인계
 
-이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 제품 요구사항, 디자인 승인, DB 적용 상태의 원본으로 사용하지 않습니다. 기능은 `docs/requirements.md`, 디자인은 `DESIGN.md`, DB는 live schema와 `docs/database.md`를 확인합니다.
+이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
+
+## 2026-07-25 · 부장(전문 에이전트) 역할 강화 — 셀프 검증 의무 + 도메인 지식 내장
+
+- 인터뷰(4차 3문항) 확정 적용(프로젝트 특화판 6종만, 도구 확장 없음): **① 셀프 검증 의무** — ui-feature(focused test+compileall+UI 변경 시 Playwright headless 자가측정: 셀 정렬·잘림 스모크·서버 신선도 확인), data-contract(계약 테스트 해당분), integrator(통합 후 직접 재검증). 독립 QA(visual-qa·contract-qa)·Codex 감사는 대체하지 않음. **② 도메인 지식 내장** — ui-feature 화면 오너십 맵(공통 기반 `views/master/`=3화면 영향 명시)·조직 3시트 확정 설계·1366×768, data-contract 파사드 구조·자연키·004 probe 대상·display_order 게이트, recon 구조 지식, integrator 기본 브랜치·worktree 구버전 스냅샷 주의, visual-qa 공통 기반 변경 시 3화면 전수 측정.
+- 완료판정 체크리스트·에스컬레이션 프로토콜·인앱 브라우저 도구 부여·글로벌 범용판 적용은 미채택(후보로 기록 안 함 — 필요 시 재인터뷰). 직전 push로 `cc9ca70..ff601c5` 4커밋 origin 반영, BACKLOG 미푸시 항목 정리. 제품 요구사항, 디자인 승인, DB 적용 상태의 원본으로 사용하지 않습니다. 기능은 `docs/requirements.md`, 디자인은 `DESIGN.md`, DB는 live schema와 `docs/database.md`를 확인합니다.
 
 새 항목은 맨 위에 1~3개 bullet로 작성하고 오래된 항목은 제거합니다. 상세 과정은 Git diff와 작업 보고서에서 확인합니다.
 

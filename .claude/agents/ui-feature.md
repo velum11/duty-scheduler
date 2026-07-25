@@ -18,6 +18,27 @@ tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell, Skill
 - **`.ag-cell`의 `position`을 절대 재지정하지 않는다** — AG Grid는 셀을 absolute로 배치하며, relative 오버라이드는 이후 컬럼 전체를 행 아래로 밀어낸다(2026-07-25 실증). 상태 스타일은 항상 클래스 기반, 임의 DOM 조작 금지.
 - 수정 후 실행 중 서버가 새 코드를 서빙하는지 확인한다(장수 streamlit 프로세스는 모듈을 캐시한다).
 
+## 화면 오너십 맵
+
+route dispatch는 `app.py`, 메뉴는 `modules/nav.py`, App Shell은 `modules/ui.py`.
+
+| 화면 | 파일 |
+|---|---|
+| 대시보드 | `views/dashboard.py` |
+| 근무표 편성 / 월간 / 내 근무표 | `views/schedule_edit.py` / `schedule_view.py` / `my_schedule.py` |
+| 사용자 / 조직 / 근무형태 관리 | `views/master_users.py` / `master_org.py` / `master_work_types.py` |
+| 기준정보 공통 기반 | `views/master/` — **수정하면 3화면 전부 영향**, 보고에 명시 |
+
+조직 관리는 트리가 아니라 **그룹·부서·조 3시트 + 행 클릭 드릴다운**(승인 확정 설계). 조직 route 추적은 `app.py`·`nav.py`·`ui.py`·`master_org.py`를 함께 본다. baseline viewport 1366×768, sample 모드 관리자 사번 `1001`.
+
+## 셀프 검증 (의무)
+
+구현 후 보고 전에 현 도구(Bash·PowerShell) 범위에서 직접 검증하고 결과를 보고에 포함한다.
+
+1. 변경 범위의 focused test(`scripts/test_master_*.py`·`test_sidebar_ui.py` 등 해당분) + `python -m compileall -q app.py modules views scripts`
+2. UI 표시 계층 변경이면 `.venv` Playwright headless로 기본 자가 측정까지: 로그인(1001) → 해당 화면 진입 → 셀 bounding-box 정렬(셀 y=행 y ±1px)·텍스트 잘림(scrollWidth) 스모크. 서버가 새 코드를 서빙하는지 먼저 확인.
+3. 셀프 검증은 독립 QA(visual-qa·contract-qa)를 **대체하지 않는다** — 공용 기반·계약 변경은 임원이 별도 QA를 라우팅한다.
+
 ## 경계
 
 - migration·실DB 쓰기·commit·push·`git reset/restore/clean/revert` 금지(`AGENTS.md` SoT). 미커밋 변경 보존.
@@ -26,4 +47,4 @@ tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell, Skill
 
 ## 보고
 
-변경 결과 / 수정 파일 / 실행한 검증(관련 focused test·compileall) / 남은 위험 / git status 요약.
+변경 결과 / 수정 파일 / 셀프 검증 결과(테스트·자가 측정 수치) / 남은 위험 / git status 요약.

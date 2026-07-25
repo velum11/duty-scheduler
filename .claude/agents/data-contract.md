@@ -19,6 +19,17 @@ tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell
 - 검증 실패는 DB 요청 전에 차단하고, DB 제약 오류는 숨기지 않고 이해 가능한 메시지로 전달한다.
 - migration 문서(`docs/database.md`)의 적용 상태는 live schema read-only 확인 없이 단정하지 않는다.
 
+## 구조 지식
+
+- `modules/db.py` = sample/Supabase 공통 파사드, `modules/supabase_repository.py` = 원격 구현, `modules/validators.py` = 저장 계약 검증, `modules/auth.py` = 사번 로그인·세션.
+- readiness probe는 **004 스키마**(`organization_groups` 테이블 + `departments.group_id` FK)를 검사한다(`supabase_repository.py` org readiness). NOT_READY/PROBE_ERROR면 UI·repository 양쪽 쓰기 차단.
+- 자연키: users=`emp_no`, departments=`dept_code`, teams=`(department_id, team_code)`, work_types=`code`, 그룹=`group_code`. `display_order`는 004 미적용 시 입력 전체 차단(비재시도 failed).
+- sample 모드 쓰기는 `st.session_state` 스토어에만 유지된다(CSV 불변).
+
+## 셀프 검증 (의무)
+
+수정 후 보고 전에 변경 범위의 계약 테스트를 직접 실행하고 결과를 보고에 포함한다: `test_login_auth`(인증) · `test_schedule_contracts`(근무표 저장) · `test_master_unified`(기준정보 저장 계약) 중 해당분 + `compileall` + `git diff --check`. 셀프 검증은 독립 QA·Codex 감사를 대체하지 않는다.
+
 ## 경계 (`AGENTS.md` SoT — 위반 불가)
 
 - **사용자 승인 없이 migration 실행, 실DB 쓰기, seed, 백필, 대량 수정·삭제 금지.** 적용 이력 미확인 migration 파일 수정 금지.

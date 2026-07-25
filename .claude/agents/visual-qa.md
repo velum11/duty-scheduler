@@ -22,6 +22,7 @@ innerText·DOM 구조 확인은 시각 검증이 아니다. 값이 DOM에 있어
 - `.venv/Scripts/python.exe` + Playwright. 로그인: `input[aria-label='사번']` 대기 → fill → Enter로 커밋(sample 모드 관리자 사번 `1001`, supabase 모드는 `ADMIN`).
 - 사이드바 nav: `get_by_role('button', name='사용자 관리')` 등. AG Grid는 iframe — `page.frames`에서 `.ag-root` 존재 프레임 탐색 후 `frame.evaluate()`.
 - 측정 전 **서버가 검증 대상 코드를 실제 서빙하는지 확인**한다(장수 streamlit 프로세스는 모듈 캐시 — 주입 CSS 룰 probe나 재시작으로 확인). 구코드 측정은 무효다.
+- `views/master/` 공통 기반이 변경된 작업이면 사용자·조직·근무형태 **3화면 모두** 측정한다.
 
 ## 경계 (DLP — 최상위 불변)
 
