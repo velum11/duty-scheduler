@@ -375,7 +375,9 @@ _USER_SHELL_CSS = """
   margin:0 -1.25rem .75rem; padding:.35rem 1.25rem;
 }
 .st-key-user_nav div[data-testid="stHorizontalBlock"] { gap:.4rem !important; }
-.st-key-user_nav div[data-testid="stColumn"] { flex:1 1 0 !important; width:33.333% !important; }
+/* 메뉴 항목 수와 무관하게 동일 폭 분배 (flex-basis 0 → grow 로 균등, nowrap 유지).
+   width 는 auto 로 두어 3개·4개 등 항목 수 변화에도 넘침·겹침 없이 배치된다. */
+.st-key-user_nav div[data-testid="stColumn"] { flex:1 1 0 !important; width:auto !important; min-width:0 !important; }
 .st-key-user_nav div.stButton > button {
   width:100%; min-height:2.25rem; border:1px solid transparent; border-radius:4px;
   justify-content:center; gap:.35rem; background:transparent; color:#667085;

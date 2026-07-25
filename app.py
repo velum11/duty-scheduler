@@ -15,6 +15,7 @@ from views import (
     dashboard, login, my_schedule,
     schedule_edit, schedule_view,
     master_users, master_departments, master_teams, master_org, master_work_types,
+    near_miss_submit, near_miss_evaluate, near_miss_view, near_miss_stats,
 )
 
 # 업무 화면 라우팅 테이블 (page id → 화면 모듈)
@@ -26,6 +27,10 @@ _PAGES = {
     "master_departments": master_departments,
     "master_teams": master_teams,
     "master_work_types": master_work_types,
+    "near_miss_submit": near_miss_submit,
+    "near_miss_evaluate": near_miss_evaluate,
+    "near_miss_view": near_miss_view,
+    "near_miss_stats": near_miss_stats,
 }
 
 

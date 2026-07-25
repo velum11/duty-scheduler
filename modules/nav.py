@@ -32,6 +32,11 @@ USER_MENU = [
         "label": "내 근무표",
         "icon": ":material/person:",
     },
+    {
+        "id": "near_miss_submit",
+        "label": "아차사고",
+        "icon": ":material/report:",
+    },
 ]
 
 MENU_GROUPS = [
@@ -65,6 +70,34 @@ MENU_GROUPS = [
                 "desc": "부서와 조를 선택하여 월별 근무표를 조회합니다.",
             },
             _MY_SCHEDULE,
+        ],
+    },
+    {
+        "id": "near_miss",
+        "label": "아차사고",
+        "icon": ":material/report:",
+        "roles": ("MANAGER", "ADMIN"),
+        "children": [
+            {
+                "id": "near_miss_submit",
+                "label": "신청",
+                "desc": "현장에서 발견한 아차사고를 접수 신청합니다.",
+            },
+            {
+                "id": "near_miss_evaluate",
+                "label": "평가",
+                "desc": "접수된 아차사고를 검토하고 등급을 확정합니다.",
+            },
+            {
+                "id": "near_miss_view",
+                "label": "조회",
+                "desc": "아차사고 보고서를 조건별로 조회합니다.",
+            },
+            {
+                "id": "near_miss_stats",
+                "label": "집계",
+                "desc": "등급·부서·기간·원인별 아차사고 분포를 집계합니다.",
+            },
         ],
     },
     {
