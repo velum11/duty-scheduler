@@ -6,7 +6,7 @@
 
 ## 2026-07-25 · 서브에이전트 전문화 체계 확정 — PLAYBOOK·skill 재작성 + .claude/agents 6종
 
-- 사용자 인터뷰(8문항)로 위임 거버넌스 재설계 확정: **직무 6종 전문 에이전트(`.claude/agents/` = 집행 SoT: recon·ui-feature·data-contract·visual-qa·contract-qa·integrator, 도구·모델 하드 제한) · 1단 위임(재spawn 차단) · 혼합 발동(DIRECT 직접/STANDARD+ 위임) · 티어 유지(Haiku/Sonnet/Opus) · 하이브리드 플레인(일상=내장, 밤샘급=ORCA)**. 글로벌 PLAYBOOK(헤딩 `ORCA Lean Multi-Agent Playbook`, §1.3 거버넌스·§7.2 조건부 Enter 앵커)과 lee-mode skill을 정합 재작성해 skill-PLAYBOOK 불일치(헤딩 검증 실패로 /lee-mode 중단되는 상태) 해소. 구버전은 `.bak-20260725` 백업. Codex 불가 시 폴백(사용자 게이트+감사부채 기록) 신설.
+- 사용자 인터뷰(8문항+2차 3문항)로 위임 거버넌스 재설계 확정: **직무 6종 전문 에이전트(`.claude/agents/` = 집행 SoT: recon·ui-feature·data-contract·visual-qa·contract-qa·integrator, 도구 하드 제한) · 1단 위임(재spawn 차단, ORCA 포함 — 부장 하위계층 폐기) · 혼합 발동(DIRECT 직접/STANDARD+ 위임) · 모델은 임원(Fable)이 매 dispatch 필수 지정(정의 파일 기본값 없음, Fable 할당 자유 허용) · 하이브리드 플레인(일상=내장, 밤샘급=ORCA)**. 글로벌 PLAYBOOK(헤딩 `ORCA Lean Multi-Agent Playbook`, §1.3 거버넌스·§7.2 조건부 Enter 앵커)과 lee-mode skill을 정합 재작성해 skill-PLAYBOOK 불일치(헤딩 검증 실패로 /lee-mode 중단되는 상태) 해소. 구버전은 `.bak-20260725` 백업. Codex 불가 시 폴백(사용자 게이트+감사부채 기록) 신설.
 - 프로젝트 오버레이(§2 부서→에이전트 매핑, 1단 위임 정합)·CLAUDE.md(agents SoT 1줄) 최소 수정. visual-qa 정의에 픽셀 지오메트리 필수화(오늘 CSS 사고 교훈) 반영.
 
 ## 2026-07-25 · 기준정보 그리드 "값 누락" 실체 규명 — CSS 1속성 레이아웃 붕괴 수정
