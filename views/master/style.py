@@ -69,7 +69,7 @@ _PAGE_CSS = """
 }
 /* §5 페이지 제목 + 한 줄 설명 + 모드 배지 */
 .ms-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin:0 0 .1rem; }
-.ms-crumb { font-size:.72rem; color:var(--ms-ink-3); margin:0 0 .12rem; letter-spacing:.01em; }
+.ms-crumb { font-size:.72rem; color:var(--ms-ink-2); margin:0 0 .12rem; letter-spacing:.01em; } /* ink-3→ink-2: 콘텐츠 배경 위 대비 2.9→5.76 (§2, WCAG) */
 .ms-title { font-size:1.25rem; font-weight:700; color:var(--ms-ink); letter-spacing:-.01em; margin:0; line-height:1.6rem; }
 .ms-desc { font-size:.81rem; color:var(--ms-ink-2); margin:.18rem 0 0; line-height:1.35; }
 /* 모드 배지 — 데이터 연결 신호 전용(점 색: 연결 success / 오류 danger / 샘플 중립) */
@@ -188,7 +188,7 @@ _PAGE_CSS = """
 .ms-empty { display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:.4rem; text-align:center; padding:2rem 1rem; color:var(--ms-ink-3); }
 .ms-empty .t { font-size:.82rem; font-weight:600; color:var(--ms-ink-2); }
-.ms-empty .s { font-size:.74rem; color:var(--ms-ink-3); }
+.ms-empty .s { font-size:.74rem; color:var(--ms-ink-2); } /* ink-3→ink-2: 콘텐츠 배경 위 대비 2.9→5.76 (§2, WCAG) */
 /* ≤1100px: 3시트 세로 스택(드릴다운 연동 유지). st.columns 를 감싼 horizontal block 대상. */
 @media (max-width:1100px){
   div[data-testid="stHorizontalBlock"]:has([class*="__sheet"]) { flex-direction:column; }
