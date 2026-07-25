@@ -90,7 +90,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div {{
 .empty-state .es-head {{
   height: 32px; background: #F1F4F8; border-bottom: 1px solid #D3DAE3;
   display: flex; align-items: center; padding: 0 0.85rem;
-  font-size: 0.75rem; font-weight: 600; color: #7A8494; letter-spacing: 0.03em;
+  font-size: 0.75rem; font-weight: 600; color: #5F5C55; letter-spacing: 0.03em;
 }}
 .empty-state .es-body {{
   padding: 2.1rem 1rem; text-align: center; color: #6B7280; font-size: 0.85rem;
@@ -147,7 +147,7 @@ div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {{ border: n
 .duty-legend .duty-badge {{ margin-right: 6px; margin-bottom: 4px; }}
 
 /* 데이터 모드 안내 (하단, 눈에 띄지 않게) */
-.data-mode-note {{ color: #9AA0A6; font-size: 0.78rem; text-align: right; margin-top: 0.6rem; }}
+.data-mode-note {{ color: #5F5C55; font-size: 0.78rem; text-align: right; margin-top: 0.6rem; }}
 </style>
 """
 

@@ -229,8 +229,6 @@ def render(user: dict) -> None:
             unsafe_allow_html=True,
         )
 
-    ui.sample_mode_banner()
-
     # dirty 판정: 원본 스냅샷과 현재 편집 상태(정규화)를 비교
     dirty = _canon(live, st.session_state.get("se_deleted", []), day_cols) \
         != st.session_state.get("se_orig")
