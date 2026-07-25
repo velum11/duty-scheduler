@@ -13,8 +13,9 @@
 | 항목 | 내용 | 유형 |
 |---|---|---|
 | 대시보드 P3 | 비차단 개선 잔여분 | 코드 |
+| 화면 규약 Phase B sign-off | 3화면 크롬 표준화(`14d5963`)·근무형태 배지 대비 보수(`cc5f6e4`) — 사용자 실브라우저 확인 대기(8502) | 게이트 |
 | 고아 빈 폴더 1개 | `.claude/worktrees/agent-a7f86db30e9513843` — 내용 없는 빈 폴더인데 타 프로세스 핸들 잠김으로 삭제 실패(07-25 정리 때 유일 잔존). 재부팅 후 또는 탐색기에서 수동 삭제 | 정리 |
-| worktype-improve-2 확인 | ORCA workspace `C:/Users/velum/orca/workspaces/duty-scheduler/worktype-improve-2`에 미커밋 변경 존재(WORKLOG·test_master_work_types_new·master_work_types) — 과거 근무형태 작업 잔재로 추정, 보존/폐기 판단 필요 | 확인 |
+| ORCA worktree 3개 처분 | recon 판정(07-25): brill·worktype-improve=병합 클린 스냅샷(폐기 권고), worktype-improve-2=잔재 포팅 완료(`cc5f6e4`)로 폐기 가능. 제거 실행은 사용자 승인 대기 | 정리 |
 | 화면 규약 Phase B | 기존 비-master 화면(대시보드·근무표 3종) 크롬을 `views/common/scaffold.py` 경유로 점진 이전 + Codex 가용 시 scaffold 사후 감사(감사 부채) | 코드 |
 
 ## 후보 (미채택 — 필요 시 재검토)
