@@ -154,12 +154,12 @@ _ORG_PAGE_CSS = """
 /* ── (1) 선택 컨텍스트·계층 통합 브레드크럼 — 상단 .ms-ctx 를 스텝 경로로 강조 ── */
 .ms-ctx { padding:.5rem .8rem; font-size:.8rem; box-shadow:0 1px 0 rgba(0,0,0,.02); }
 .ms-ctx > span:first-child { font-weight:700; letter-spacing:.03em; text-transform:uppercase;
-  font-size:.66rem; color:var(--ms-ink-3); }
+  font-size:.66rem; color:var(--ms-ink-2); } /* ink-3→ink-2: 대비 (§2, WCAG) */
 .ms-ctx b { padding:.04rem .45rem; border-radius:5px; background:#E5EAF2; border:1px solid #C6D2E4;
   color:var(--ms-navy); }
 .ms-ctx b.pin { background:var(--ms-navy); color:#FFF; border-color:var(--ms-navy); }
 .ms-ctx .arw { font-size:.92rem; color:var(--ms-line-strong); }
-.ms-ctx .none { font-style:normal; color:var(--ms-ink-3); }
+.ms-ctx .none { font-style:normal; color:var(--ms-ink-2); } /* ink-3→ink-2: 대비 (§2, WCAG) */
 
 /* ── (2) 활성/잠김 상태 표시 — 지금 편집 가능한 시트를 즉시 식별(편집 안전성) ──
    계층 순서(그룹›부서›조)는 상단 .ms-ctx 브레드크럼이 이미 표현하므로 단계 배지·시트

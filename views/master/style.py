@@ -84,7 +84,7 @@ _PAGE_CSS = """
 [class*="__filter"] { background:var(--ms-surface-2); border:1px solid var(--ms-line); border-radius:8px;
   padding:.5rem .65rem; margin:.55rem 0 .1rem; }
 [class*="__filter"] div[data-testid="stHorizontalBlock"] { align-items:flex-end; }
-[class*="__filter"] label { font-size:.72rem !important; color:var(--ms-ink-3) !important; }
+[class*="__filter"] label { font-size:.72rem !important; color:var(--ms-ink-2) !important; } /* ink-3→ink-2: 대비 (§2, WCAG) */
 /* §7 액션바 */
 [class*="__bar"] { margin:.15rem 0 .45rem; }
 [class*="__bar"] div[data-testid="stHorizontalBlock"] { align-items:center; }
@@ -163,7 +163,7 @@ _PAGE_CSS = """
 .ms-ctx b { color:var(--ms-ink); font-weight:700; }
 .ms-ctx .pin { color:var(--ms-navy); font-weight:700; }
 .ms-ctx .arw { color:var(--ms-ink-3); }
-.ms-ctx .none { color:var(--ms-ink-3); font-weight:600; }
+.ms-ctx .none { color:var(--ms-ink-2); font-weight:600; } /* ink-3→ink-2: 대비 (§2, WCAG) */
 /* 시트 카드 — 컨테이너 key(.st-key-*__sheet)에 카드 외형을 입힌다 */
 [class*="__sheet"] { background:var(--ms-surface); border:1px solid var(--ms-line-strong);
   border-radius:10px; padding:.2rem .1rem .1rem; box-shadow:0 1px 0 rgba(0,0,0,.02); }
@@ -176,14 +176,14 @@ _PAGE_CSS = """
 .ms-sheet-head .ctx { margin-left:auto; font-size:.7rem; font-weight:600; color:var(--ms-navy);
   background:#E5EAF2; border:1px solid #C6D2E4; border-radius:6px; padding:.1rem .45rem;
   max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ms-sheet-head .lock { margin-left:auto; font-size:.7rem; font-weight:600; color:var(--ms-ink-3);
+.ms-sheet-head .lock { margin-left:auto; font-size:.7rem; font-weight:600; color:var(--ms-ink-2); /* ink-3→ink-2: 대비 (§2, WCAG) */
   display:inline-flex; align-items:center; gap:.3rem; }
 /* 잠김/빈 상태 — 상위 미선택 시 하위 시트 (§ '그룹을 먼저 선택하세요') */
 .ms-locked { display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:.5rem; text-align:center; padding:2.6rem 1rem; min-height:220px; color:var(--ms-ink-3); }
 .ms-locked .glyph { font-size:1.4rem; line-height:1; color:var(--ms-line-strong); }
 .ms-locked .t { font-size:.82rem; font-weight:700; color:var(--ms-ink-2); }
-.ms-locked .s { font-size:.74rem; color:var(--ms-ink-3); line-height:1.45; }
+.ms-locked .s { font-size:.74rem; color:var(--ms-ink-2); line-height:1.45; } /* ink-3→ink-2: 대비 (§2, WCAG) */
 /* 빈 상태(정상 empty, 오류 아님) — 표 본문 자리 */
 .ms-empty { display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:.4rem; text-align:center; padding:2rem 1rem; color:var(--ms-ink-3); }
