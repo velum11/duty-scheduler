@@ -502,8 +502,8 @@ def upsert_teams_reported(records: list[dict]) -> BatchWriteResult:
 _ORG_READY: bool | None = None
 _ORG_PROBE: str | None = None
 _ORG_NOT_READY_MESSAGE = (
-    "조직 그룹 스키마(migration 004)가 아직 적용되지 않아 저장할 수 없습니다. "
-    "supabase/migrations/004_org_groups.sql 적용 후 다시 시도하세요."
+    "조직 스키마(조직 그룹)가 아직 준비되지 않아 저장할 수 없습니다. "
+    "조직 그룹 스키마(도입: migration 004, supabase/migrations/004_org_groups.sql) 적용 후 다시 시도하세요."
 )
 
 
@@ -567,7 +567,7 @@ def _group_maps() -> tuple[dict[str, int], dict[str, str]]:
 
 
 def get_organization_groups() -> pd.DataFrame:
-    """조직 그룹 목록(ORG_GROUP_COLUMNS). 004 적용 후에만 호출한다."""
+    """조직 그룹 목록(ORG_GROUP_COLUMNS). 조직 스키마 capability(도입: migration 004) 준비 후에만 호출한다."""
     rows = _select_all(
         "organization_groups",
         "group_code,group_name,sort_order,description,is_active",
@@ -600,14 +600,14 @@ def _org_groups_payload(records: list[dict]) -> list[dict]:
 
 
 def upsert_organization_groups(records: list[dict]) -> None:
-    """그룹 upsert. 004 미적용이면 저장을 차단한다. 저장코드(group_code) 수정 불가."""
+    """그룹 upsert. 조직 스키마 capability(도입: migration 004) 미준비면 저장을 차단한다. 저장코드(group_code) 수정 불가."""
     payload = _org_groups_payload(records)
     if payload:
         _upsert("organization_groups", payload, "group_code")
 
 
 def upsert_organization_groups_reported(records: list[dict]) -> BatchWriteResult:
-    """그룹 upsert(부분성공 원장). 004 미적용은 전체 failed 로 표기한다."""
+    """그룹 upsert(부분성공 원장). 조직 스키마 capability(도입: migration 004) 미준비는 전체 failed 로 표기한다."""
     return _reported_write(
         "organization_groups", records, "group_code", ["group_code"], _org_groups_payload
     )
@@ -630,7 +630,7 @@ def delete_organization_group(group_code: str) -> None:
 
 # --- 부서(departments) + group_id FK → group_code ---
 def get_departments_org() -> pd.DataFrame:
-    """부서 목록 + 소속 그룹코드(group_id FK→group_code) + 비고. 004 적용 후 호출.
+    """부서 목록 + 소속 그룹코드(group_id FK→group_code) + 비고. 조직 스키마 capability(도입: migration 004) 준비 후 호출.
 
     자연키 계약: dept_code, dept_name, group_code, description, sort_order, is_active.
     group_id 가 NULL(미배정)인 부서는 group_code 를 빈 문자열로 반환한다.
@@ -687,7 +687,7 @@ def _departments_org_payload(records: list[dict]) -> list[dict]:
 
 
 def upsert_departments_org(records: list[dict]) -> None:
-    """group_id/비고를 포함한 부서 upsert. 004 미적용이면 저장을 차단한다.
+    """group_id/비고를 포함한 부서 upsert. 조직 스키마 capability(도입: migration 004) 미준비면 저장을 차단한다.
 
     003 잔재 컬럼(department_group/group_sort_order)은 payload 에 넣지 않는다 —
     기존 행은 값이 유지되고 신규 행은 컬럼 기본값('' / 0)으로 채워진다(무해).
@@ -698,7 +698,7 @@ def upsert_departments_org(records: list[dict]) -> None:
 
 
 def upsert_departments_org_reported(records: list[dict]) -> BatchWriteResult:
-    """group_id 포함 부서 upsert(부분성공 원장). 004 미적용은 전체 failed 로 표기한다."""
+    """group_id 포함 부서 upsert(부분성공 원장). 조직 스키마 capability(도입: migration 004) 미준비는 전체 failed 로 표기한다."""
     return _reported_write(
         "departments", records, "dept_code", ["dept_code"], _departments_org_payload
     )
@@ -706,7 +706,7 @@ def upsert_departments_org_reported(records: list[dict]) -> BatchWriteResult:
 
 # --- 운영단위(teams) + department_id FK ---
 def get_teams_org() -> pd.DataFrame:
-    """운영단위(조) 목록 + unit_type + 비고. 004 적용 후에만 호출한다."""
+    """운영단위(조) 목록 + unit_type + 비고. 조직 스키마 capability(도입: migration 004) 준비 후에만 호출한다."""
     _, dept_by_id = _department_maps()
     rows = _select_all(
         "teams",
@@ -764,14 +764,14 @@ def _teams_org_payload(records: list[dict]) -> list[dict]:
 
 
 def upsert_teams_org(records: list[dict]) -> None:
-    """unit_type/비고를 포함한 운영단위 upsert. 004 미적용이면 저장을 차단한다."""
+    """unit_type/비고를 포함한 운영단위 upsert. 조직 스키마 capability(도입: migration 004) 미준비면 저장을 차단한다."""
     payload = _teams_org_payload(records)
     if payload:
         _upsert("teams", payload, "department_id,team_code")
 
 
 def upsert_teams_org_reported(records: list[dict]) -> BatchWriteResult:
-    """unit_type 포함 운영단위 upsert(부분성공 원장). 004 미적용은 전체 failed."""
+    """unit_type 포함 운영단위 upsert(부분성공 원장). 조직 스키마 capability(도입: migration 004) 미준비는 전체 failed."""
     return _reported_write(
         "teams", records, "department_id,team_code", ["dept_code", "team_code"], _teams_org_payload
     )
@@ -835,7 +835,7 @@ def _users_payload(records: list[dict]) -> list[dict]:
     ] if not with_order else []
     if blocked_emp_nos:
         raise SupabaseDataError(
-            "migration 004 미적용 상태에서는 사용자 표시순서를 저장할 수 없습니다: "
+            "조직 스키마(조직 그룹) 미준비 상태에서는 사용자 표시순서를 저장할 수 없습니다: "
             + ", ".join(blocked_emp_nos)
         )
 
@@ -873,7 +873,7 @@ def _users_payload(records: list[dict]) -> list[dict]:
 
 
 def upsert_users(records: list[dict]) -> None:
-    """사용자 upsert. 004 미적용 상태의 display_order 입력은 전체 차단한다.
+    """사용자 upsert. 조직 스키마 capability(도입: migration 004) 미준비 상태의 display_order 입력은 전체 차단한다.
 
     표시순서가 모두 NULL이면 기존 사용자 필드만 저장할 수 있지만, 값이 하나라도
     있으면 일부 필드만 성공하는 상태를 만들지 않도록 DB 조회 전에 실패시킨다.
@@ -884,7 +884,7 @@ def upsert_users(records: list[dict]) -> None:
 
 
 def upsert_users_reported(records: list[dict]) -> BatchWriteResult:
-    """사용자 upsert(부분성공 원장). 004 미적용 + 표시순서 입력은 전체 failed(비재시도)."""
+    """사용자 upsert(부분성공 원장). 조직 스키마 capability(도입: migration 004) 미준비 + 표시순서 입력은 전체 failed(비재시도)."""
     return _reported_write("users", records, "emp_no", ["emp_no"], _users_payload)
 
 

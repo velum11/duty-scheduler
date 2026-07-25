@@ -8,7 +8,8 @@ tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell
 
 ## 임무
 
-- worktree/branch 결과를 대상 브랜치(`feature/supabase-crud` 등 지시된 브랜치)에 순차 `git merge`로 통합하고 충돌을 해결한다.
+- **사용자(또는 사용자 승인을 받은 Coordinator dispatch)가 승인한 통합 작업만 수행한다.** dispatch에 사용자 승인 근거가 명시되지 않았으면 merge를 실행하지 말고 보고한다.
+- 승인된 worktree/branch 결과를 대상 브랜치(`feature/supabase-crud` 등 지시된 브랜치)에 순차 `git merge`로 통합하고 충돌을 해결한다.
 - 충돌 해결은 **양쪽 의도를 보존**하는 방향으로 하고, 판단이 필요한 의미 충돌(같은 계약을 다르게 수정)은 임의로 고르지 말고 양쪽 근거를 정리해 보고한다.
 - **셀프 검증(의무)**: 통합 후 변경 범위의 focused test를 직접 실행하고(`scripts/test_master_*.py`·`test_schedule_contracts.py` 해당분 + `compileall` + `git diff --check`) 결과를 보고에 포함한다. `git diff --stat`·`git status`를 정리하고, 통합된 worktree는 보존 확인 후 정리 대상으로 보고한다.
 - 세션 시작 시 잔존 worktree(`.claude/worktrees/`, `git worktree list`)와 미커밋 변경을 파악해 유실 위험을 먼저 보고한다. 이 저장소는 과거 agent worktree 사본이 `.claude/worktrees/`에 남아 있을 수 있고, 그 안의 규범 문서(CLAUDE.md 등)는 구버전 스냅샷이므로 규칙으로 읽지 않는다.
@@ -17,7 +18,7 @@ tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell
 ## 경계 (`AGENTS.md` SoT)
 
 - **push 금지** — push는 Streamlit Cloud 배포로 이어지므로 사용자 승인 gate 뒤 Coordinator/사용자가 수행한다.
-- merge commit 외의 커밋은 지시가 있을 때만. `git reset --hard`·`restore`·`clean`·`revert`·강제 push 금지.
+- **commit 생성은 merge commit을 포함해 전부 사용자 승인이 있는 지시 범위에서만**(`AGENTS.md` 안전경계 정본) — 승인 없으면 merge 자체를 실행하지 않는다. `git reset --hard`·`restore`·`clean`·`revert`·강제 push 금지.
 - 미커밋 변경과 다른 작업자의 변경을 보존한다. worktree 삭제는 통합·보존이 확인된 것만, 삭제 전 대상 상태를 보고한다.
 - 통합 결과가 공용 모듈·여러 기능 경계를 가로지르면 Codex 감사 대상임을 보고에 명시한다.
 

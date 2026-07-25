@@ -461,7 +461,7 @@ def get_org_groups(is_active: bool | None = None) -> pd.DataFrame:
     elif supabase_repository.org_extensions_ready():
         df = supabase_repository.get_organization_groups()
     else:
-        df = _typed_empty_frame(ORG_GROUP_COLUMNS)  # 004 미적용 — 조회 전용 빈 그룹
+        df = _typed_empty_frame(ORG_GROUP_COLUMNS)  # 조직 스키마 capability 미준비(도입: migration 004) — 조회 전용 빈 그룹
     if is_active is not None and not df.empty:
         df = df[df["is_active"].astype(bool) == bool(is_active)]
     return _empty_contract(df[ORG_GROUP_COLUMNS].reset_index(drop=True), ORG_GROUP_COLUMNS)
@@ -481,7 +481,7 @@ def save_org_groups(df: pd.DataFrame) -> None:
 
 
 def save_org_groups_report(df: pd.DataFrame) -> BatchWriteResult:
-    """save_org_groups 의 부분성공 원장 반환 변형. 004 미적용은 전체 failed."""
+    """save_org_groups 의 부분성공 원장 반환 변형. 조직 스키마 capability(도입: migration 004) 미준비는 전체 failed."""
     keep = [c for c in ORG_GROUP_COLUMNS if c in df.columns]
     normalized = df[keep].reset_index(drop=True).copy()
     if is_sample_mode():
@@ -550,7 +550,7 @@ def get_org_departments(
     elif supabase_repository.org_extensions_ready():
         df = supabase_repository.get_departments_org()
     else:
-        # 004 미적용 — 그룹 정보 없이 부서만 표시(조회 전용, 저장은 차단됨)
+        # 조직 스키마 capability 미준비(도입: migration 004) — 그룹 정보 없이 부서만 표시(조회 전용, 저장은 차단됨)
         df = supabase_repository.get_departments().copy()
         df["group_code"] = ""
         df["description"] = ""
@@ -581,7 +581,8 @@ def save_org_departments(df: pd.DataFrame) -> None:
 def save_org_departments_report(df: pd.DataFrame) -> BatchWriteResult:
     """save_org_departments 의 부분성공 원장 반환 변형. 기존 함수는 그대로 둔다.
 
-    004 미적용 supabase 모드에서는 repository 가 전체 failed(비재시도) 원장을 반환한다."""
+    조직 스키마 capability(도입: migration 004) 미준비 supabase 모드에서는 repository 가 전체
+    failed(비재시도) 원장을 반환한다."""
     keep = [c for c in ORG_DEPT_COLUMNS if c in df.columns]
     normalized = df[keep].reset_index(drop=True).copy()
     if is_sample_mode():
@@ -606,7 +607,7 @@ def get_org_teams(dept_code: str | None = None, is_active: bool | None = None) -
     elif supabase_repository.org_extensions_ready():
         df = supabase_repository.get_teams_org()
     else:
-        # 004 미적용 — unit_type/비고 기본값으로 폴백(조회 전용, 저장은 차단됨)
+        # 조직 스키마 capability 미준비(도입: migration 004) — unit_type/비고 기본값으로 폴백(조회 전용, 저장은 차단됨)
         df = org_team_defaults(supabase_repository.get_teams())
         df["description"] = ""
     if dept_code is not None and not df.empty:
@@ -824,8 +825,9 @@ def save_users(df: pd.DataFrame) -> None:
 def save_users_report(df: pd.DataFrame) -> BatchWriteResult:
     """save_users 의 부분성공 원장 반환 변형. 기존 save_users 는 그대로 둔다.
 
-    supabase 모드에서 004 미적용 + 표시순서 입력이 있으면 repository 가 전체
-    failed(비재시도) 원장을 반환한다(부분 저장 금지 계약 유지)."""
+    supabase 모드에서 조직 스키마 capability(도입: migration 004) 미준비 + 표시순서
+    입력이 있으면 repository 가 전체 failed(비재시도) 원장을 반환한다(부분 저장 금지
+    계약 유지)."""
     keep = [c for c in USER_COLUMNS if c in df.columns]
     normalized = df[keep].reset_index(drop=True).copy()
     if is_sample_mode():

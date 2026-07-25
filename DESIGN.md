@@ -19,11 +19,12 @@
 | 매트릭스 편집형 | `MATRIX_EDIT` | 브레드크럼 → 제목 → 조회 조건바 → 액션바 → 직원×일자 편집 그리드 → 저장 상태 | 근무표 편성 |
 | 대시보드형 | `DASHBOARD` | 브레드크럼 → 제목·모드 배지 → 지표 카드 행 → 현황 패널(오늘 근무·분포) | 대시보드 |
 
-집행 장치:
+집행 장치(코드로 강제되는 범위):
 
-- 화면 모듈은 `SCREEN_ARCHETYPE` 상수로 유형을 선언합니다.
-- 신규 화면의 페이지 크롬은 공용 스캐폴드(`views/common/scaffold.py`)로만 생성합니다 — 크롬 손제작 금지. `EDIT_GRID`는 `views/master/` 공통 기반 전체 스택을 사용합니다.
-- 계약 테스트(`scripts/test_screen_scaffold.py`)가 유형 선언과 신규 화면의 스캐폴드 사용을 검사합니다.
+- 화면 모듈은 `SCREEN_ARCHETYPE` 상수로 유형을 선언합니다(AST 수준 검사 — 주석 선언은 무효).
+- 페이지 크롬은 공용 스캐폴드(`views/common/scaffold.py`의 `page_chrome`/`page_chrome_for`) **실제 호출**로 생성하며, `EDIT_GRID`는 `views/master/` 전체 스택(헤더 + `render_master_grid` + 액션바/저장)의 실호출이 필요합니다 — 크롬 손제작 금지. USER 셸 화면(아래 예외)은 크롬 호출 검사가 면제됩니다.
+- 계약 테스트(`scripts/test_screen_scaffold.py`)가 위 항목을 `views/` 재귀 + route 연결 기반 AST 분석으로 검증합니다(미사용 import·문자열 언급 우회 불가).
+- **정직한 보장 수준**: 코드가 강제하는 것은 "유형 선언 + 크롬 API 실호출 + EDIT_GRID 스택"까지입니다. 유형별 크롬의 순서·간격·시각 품질 자체는 코드로 강제되지 않으며, visual-qa 측정과 **사용자 실브라우저 sign-off**가 그 게이트입니다.
 - **유형 밖 레이아웃·새 유형 추가는 사용자 명시 승인 + 이 규약 개정으로만** 가능합니다. 에이전트가 임의로 예외를 만들지 않습니다.
 
 ## 1. 현재 화면 구조
@@ -152,14 +153,14 @@
 - 변경 건수는 **액션바 카운터 한 곳**으로 단일화합니다(`dirty_total = 신규 + 기존 변경`). 푸터는 `총 · 신규 · 기존 변경 · 선택`으로 분해 표기합니다.
 - 표 위 배너는 한 시점에 최대 1개(삭제 확인 바는 별개 슬롯). 우선순위: `삭제 확인 바 > 부분성공 원장 > 오류 배너 > (오류 없을 때) 미저장 배너 > 성공 flash`.
 
-### migration readiness 3-state
+### 조직 스키마 readiness 3-state
 
-스키마 준비 상태는 데이터 모드 배지와 **분리**하며 `READY | NOT_READY | PROBE_ERROR` 상호 배타로 표시합니다(`ReadinessState`).
+조직 스키마 capability(조직 그룹 — 도입 이력: migration 004) 준비 상태는 데이터 모드 배지와 **분리**하며 `READY | NOT_READY | PROBE_ERROR` 상호 배타로 표시합니다(`ReadinessState`). 조직 데이터와 무관한 화면에는 이 readiness를 요구하지 않습니다.
 
 | 상태 | write control | 표시 |
 |---|---|---|
 | READY | 전체 활성 | 모드 배지만 |
-| NOT_READY | 전체 비활성(조회만) | warn 배너 `조직 확장(migration 004) 적용 전 — 조회만 가능` |
+| NOT_READY | 전체 비활성(조회만) | warn 배너 `조직 스키마가 준비되지 않아 조회만 가능합니다` (migration 번호는 진단 상세·DB 문서에만 병기) |
 | PROBE_ERROR | 비활성 + 재확인 | danger 배너 `스키마 상태 확인 실패 — 재확인 필요` |
 
 - 모드 배지 점 색은 데이터 모드 전용입니다: 연결됨 `--success`, 미연결/오류 `--danger`, 샘플 중립. migration/네트워크 경고를 배지 색으로 표현하지 않습니다.

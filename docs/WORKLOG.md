@@ -2,6 +2,12 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-25 · Codex 감사(P1 0/P2 5) 반영 — 안전경계 완결·승인 게이트·AST 집행·capability 일반화
+
+- **P2-1**: AGENTS.md를 완결 단일 정본으로(DLP 하드경계 편입·"참조만" 명문화·`.local_sessions`/QA 데이터 보호 이관·merge commit/worktree 승인 포함). CLAUDE.md·오버레이는 규칙 재서술 제거, "왜"만 잔류. **P2-2**: 글로벌 PLAYBOOK §7.3 "worktree는 조건 불문 사용자 승인, commit 생성 merge도 승인 필수" + skill·integrator 2종 정합(승인 근거 없으면 실행 거부). **P2-3**: visual-qa Write 제거(probe는 heredoc→scratchpad만), contract-qa shell 실행 전용 경계, 12개 정의 Agent/Task 부재 재검사 통과. **P2-4**: 감사부채=BACKLOG 정본 등록·WORKLOG는 당시 이력·사후감사 후 이관 흐름으로 글로벌 §5 교체. **P2-5**(ui-feature Opus): test_screen_scaffold를 AST·route연결·재귀 스캔·실호출·EDIT_GRID 스택 검증으로 재설계(우회 4경로 차단, 음성 검증 내장, 51 checks), scaffold·DESIGN §0 보장 수준 정직화.
+- **capability 일반화**(data-contract): 사용자 노출 5건 "조직 스키마" 안정 표현(migration 번호 제거 — 정본: "조직 스키마가 준비되지 않아 조회만 가능합니다"), 주석 20곳 "(도입: migration 004)" 병기, DESIGN·requirements·data-contract 정의 정합, 조직 무관 화면 readiness 비요구 명문화. P3 반영: "mig 003" placeholder 정리·skill wakeup "필요할 때만" 통일.
+- 검증: 10개 스위트 ALL GREEN(scaffold 51·common·unified 195·org 67·org_new 133·users_new·work_types 84·schedule 136·sidebar 42·login 29) + compileall + diff-check. **커밋·push 없음(지시)** — Codex 재감사 대기(BACKLOG).
+
 ## 2026-07-25 · §98 제품 결정·구현 + ORCA worktree 폐기 + push
 
 - **§98 확정(사용자)**: 퇴직 직원 과거 근무는 기록 있는 월에 한해 조회 표시 + 퇴직 구분(라벨+음영 이중부호화, 색 단독 금지) — requirements §5 반영. 구현(ui-feature): `workspace.py::_build_month_grid` 필터를 "기록 있는 비활성 포함"으로 확장, 성명 `(퇴직)` 라벨 + 메타 셀 음영(ms-row-inactive 동일 토큰), MANAGER fail-closed·스냅샷 우선 계약 불변. `test_schedule_contracts` 신규 12체크 포함 136 all-green.

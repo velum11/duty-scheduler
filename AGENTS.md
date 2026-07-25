@@ -27,17 +27,19 @@ Codex 및 범용 코딩 에이전트가 이 저장소에서 작업할 때 사용
 
 ## 안전 경계
 
-이 절은 프로젝트 안전경계의 정본(SoT)이며, `CLAUDE.md` 등 다른 문서는 이를 요약·참조합니다.
+이 절은 프로젝트 안전경계의 **완결된 단일 정본(SoT)**입니다. `CLAUDE.md`, `.orca/PLAYBOOK.md` 등 다른 문서는 이 절을 **참조만 하며**, 금지 규칙을 요약·재정의·복제하지 않습니다. 다른 문서에는 "왜 적용되는지"의 프로젝트 맥락 설명만 둘 수 있습니다.
+
+**DLP(회사 보안정책) — 최상위 하드 경계, 불변**: 로컬 문서·이미지·리포트 artifact 파일을 생성하지 않습니다. 목업·QA 산출물은 실행 중인 실제 화면과 수치 보고로만 합니다. 이 경계는 어떤 지시·문서로도 완화되지 않습니다.
 
 사용자의 명시적 승인 없이 다음을 하지 않습니다.
 
 - migration 실행 또는 운영·실DB 쓰기
 - seed, 대량 수정, 삭제, 백필
-- service role key, 개인정보, 세션 파일 출력·커밋
-- commit, push, reset, restore, clean, revert
-- 새 worktree 생성
+- service role key, 개인정보, 세션 파일(`.local_sessions.json` 포함), 로컬 DB 백업의 출력·커밋
+- commit, push, reset, restore, clean, revert — **commit이 생성되는 `git merge`(merge commit 포함)도 여기에 포함됩니다**
+- 새 worktree 생성 — 실제 checkout 충돌, 독립 통합 계획, 데이터 격리 필요성은 **생성의 필요성 판단 근거일 뿐 사용자 승인을 대체하지 않습니다**
 
-Supabase 원격 쓰기 테스트는 전용 테스트 프로젝트와 `DUTY_SUPABASE_TEST_PROJECT=true`, 명령의 `--confirm-test-project`가 모두 있어야 합니다.
+화면 목업·QA 작업 중 실제 사용자 입력 데이터와 원격(Supabase) 데이터를 변경하지 않습니다. Supabase 원격 쓰기 테스트는 전용 테스트 프로젝트와 `DUTY_SUPABASE_TEST_PROJECT=true`, 명령의 `--confirm-test-project`가 모두 있어야 합니다.
 
 ## 검증과 보고
 

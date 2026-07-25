@@ -22,8 +22,8 @@ selectbox/드롭다운 없음). 상위→하위로 진행되는 활성 체인은
 
 공통 기반 패키지(``views/master``)의 계약(DraftState/MasterGridSpec/run_save/
 ReadinessState/master_action_bar/ledger_banner/sheet_head/sheet_locked/
-drilldown_context/공통 style)을 그대로 사용하고, migration 004 미적용 시 저장을
-차단(UI + repository 이중 방어)한다.
+drilldown_context/공통 style)을 그대로 사용하고, 조직 스키마 capability(도입: migration 004)
+미준비 시 저장을 차단(UI + repository 이중 방어)한다.
 
 순수·도메인 함수(``build_group_rows``/``build_dept_rows``/``build_team_rows``/
 ``_validate_groups``/``_validate_depts``/``_validate_units``/``_unit_structure_errors``/
@@ -83,8 +83,8 @@ _GRP = DraftState("org_group")  # 그룹(organization_groups)
 _OD = DraftState("org_dept")    # 부서(선택 그룹의 departments)
 _OU = DraftState("org_unit")    # 조(선택 부서의 teams = 운영단위)
 
-# migration 004 미적용/probe 실패 배너 문구(계약: 소스에 1회).
-_NOT_READY_MSG = "조직 스키마(migration 004) 적용 전 — 조회만 가능하며 저장은 차단됩니다."
+# 조직 스키마 capability(도입: migration 004) 미준비/probe 실패 배너 문구(계약: 소스에 1회).
+_NOT_READY_MSG = "조직 스키마가 준비되지 않아 조회만 가능하며 저장은 차단됩니다."
 _PROBE_ERROR_MSG = "조직 스키마 상태 확인 실패 — 재확인이 필요합니다 (조회만 가능하며 저장은 차단됩니다)."
 
 _SYSTEM_CODES = {"ADMIN"}  # 화면 보호 대상(코드수정·미사용·삭제 차단)

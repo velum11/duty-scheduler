@@ -267,7 +267,7 @@ def _build_board(day_rows, users, wt, snap=None, manager_dept=None):
 
     # 그룹 권위는 migration 004(organization_groups) — 앱 전체(master_org/db.py)와 동일.
     # 활성 그룹만 반영하고 그룹명은 organization_groups 에서 정확히 조회한다(P2-4).
-    # 부서가 비활성 그룹에 매핑돼 있거나(soft-delete) 그룹 미해석(004 미적용)이면
+    # 부서가 비활성 그룹에 매핑돼 있거나(soft-delete) 그룹 미해석(조직 스키마 capability 미준비, 도입: migration 004)이면
     # 비활성 그룹을 재출현시키지 않고 부서를 자체 그룹으로 폴백한다.
     active_groups = db.get_org_groups(is_active=True)
     if not active_groups.empty:
@@ -294,7 +294,7 @@ def _build_board(day_rows, users, wt, snap=None, manager_dept=None):
 
         gc, _ = dgm.get(dept, ("", 0))
         if gc not in active_codes:
-            # 비활성 그룹/미매핑/004 미적용 → 부서를 자체 그룹으로 폴백(비활성 재출현 방지)
+            # 비활성 그룹/미매핑/조직 스키마 capability 미준비(도입: migration 004) → 부서를 자체 그룹으로 폴백(비활성 재출현 방지)
             gc = dept or "(미지정)"
         if gc not in boards:
             if gc == "(미지정)":

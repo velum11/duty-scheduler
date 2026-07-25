@@ -99,7 +99,7 @@ _EDIT_UNLESS_PROTECTED = JsCode(
 # 필터 위젯 세션 key (이 화면 전용 — 취소 시 위젯 복원에 사용).
 _F_ACTIVE, _F_DEPT, _F_ROLE, _F_SEARCH = "mu_active", "mu_dept", "mu_role", "mu_search"
 
-# readiness(migration 004 조직 확장) 안내 문구 — 표시순서(display_order) 저장이 이 확장에 의존한다.
+# readiness(조직 스키마 capability, 도입: migration 004) 안내 문구 — 표시순서(display_order) 저장이 이 capability 에 의존한다.
 _NOT_READY_MSG = (
     "표시순서 기능이 아직 준비되지 않아 표시순서를 저장할 수 없습니다 — 조회·편집만 가능합니다."
 )
@@ -193,9 +193,9 @@ def _group_hints(group_of: dict, dept_names: dict, dept_labels: dict) -> dict[st
 
 
 def _readiness() -> ReadinessState:
-    """migration 004 조직 확장 스키마 준비 상태를 3-state(READY/NOT_READY/PROBE_ERROR)로 승격한다.
+    """조직 스키마 capability(도입: migration 004) 준비 상태를 3-state(READY/NOT_READY/PROBE_ERROR)로 승격한다.
 
-    표시순서(display_order) 저장은 이 확장에 의존한다. sample 모드는 항상 READY.
+    표시순서(display_order) 저장은 이 capability 에 의존한다. sample 모드는 항상 READY.
     실제 write 차단은 ``ReadinessState.write_enabled``(READY 에서만 True)가 담당하므로
     오분류(NOT_READY↔PROBE_ERROR)가 저장을 열지 않는다 — 조직 화면과 동일 계약(§25).
     """

@@ -165,8 +165,8 @@ try:
     at_nr = AppTest.from_function(_screen_render, default_timeout=45).run()
     check("NOT_READY 렌더 예외 없음", not at_nr.exception)
     nr_body = " ".join(str(m.value) for m in at_nr.markdown)
-    check("NOT_READY 조회 전용 경고 배너", "migration 004" in nr_body and "조회만 가능" in nr_body)
-    check("NOT_READY 스키마 배지(모드 배지와 분리)", "migration 미적용" in nr_body)
+    check("NOT_READY 조회 전용 경고 배너", "조직 스키마" in nr_body and "조회만 가능" in nr_body)
+    check("NOT_READY 스키마 배지(모드 배지와 분리)", "스키마 미준비" in nr_body)
     check("NOT_READY 세 시트 모든 write 버튼 비활성", _all_disabled(at_nr, _WRITE_KEYS))
     check("NOT_READY 에도 새로고침(조회)은 활성",
           not _all_disabled(at_nr, ("org_group__refresh",)))

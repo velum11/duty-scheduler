@@ -427,7 +427,7 @@ def readiness_badge_html(state: str) -> str:
         return "<span class='ms-ready ready'>스키마 준비됨</span>"
     if state == "PROBE_ERROR":
         return "<span class='ms-ready err'>상태 확인 실패</span>"
-    return "<span class='ms-ready not'>migration 미적용</span>"
+    return "<span class='ms-ready not'>스키마 미준비</span>"
 
 
 # ---------------------------------------------------------------------------

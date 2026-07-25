@@ -15,7 +15,7 @@
 | 사용자 실브라우저 sign-off | 3화면 크롬 표준화(`14d5963`)·근무형태 배지 대비 보수(`cc5f6e4`)·퇴직자 과거근무 표시(§98 구현) — 8502에서 확인 대기 | 게이트 |
 | 고아 빈 폴더 1개 | `.claude/worktrees/agent-a7f86db30e9513843` — 내용 없는 빈 폴더인데 타 프로세스 핸들 잠김으로 삭제 실패(07-25 정리 때 유일 잔존). 재부팅 후 또는 탐색기에서 수동 삭제 | 정리 |
 | worktree 물리 잔재 2개 | ORCA worktree 폐기 완료(git 등록·브랜치 3개 삭제)했으나 `worktype-improve`·`worktype-improve-2` 디렉터리가 프로세스 잠김으로 물리 삭제 실패 — 재부팅 후 또는 잠근 프로세스 종료 후 폴더 수동 삭제(`.claude/worktrees/agent-a7f8...` 빈 폴더와 동일 처리) | 정리 |
-| 화면 규약 Phase B | 기존 비-master 화면(대시보드·근무표 3종) 크롬을 `views/common/scaffold.py` 경유로 점진 이전 + Codex 가용 시 scaffold 사후 감사(감사 부채) | 코드 |
+| P2 반영분 Codex 재감사 | 07-25 Codex 감사 P2 5건 반영(안전경계 완결·worktree/merge 승인·QA read-only·감사부채 흐름·규약 AST 집행+capability 일반화) — 동일 Codex의 재감사 대기(§5 수정·재감사 loop). scaffold 감사부채는 이번 감사가 사후 감사 수행으로 해소 | 게이트 |
 
 ## 후보 (미채택 — 필요 시 재검토)
 

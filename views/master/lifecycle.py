@@ -176,7 +176,7 @@ class ReadinessState:
         return ReadinessState(Readiness.READY)
 
     @staticmethod
-    def not_ready(message: str = "migration 004 적용 전 — 조회만 가능합니다.") -> "ReadinessState":
+    def not_ready(message: str = "조직 스키마가 준비되지 않아 조회만 가능합니다.") -> "ReadinessState":
         return ReadinessState(Readiness.NOT_READY, message)
 
     @staticmethod

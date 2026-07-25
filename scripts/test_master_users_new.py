@@ -430,7 +430,7 @@ def test_readiness_state():
 def test_head_badges_compose():
     from views.master import ReadinessState
     ready_html = mu._head_badges(ReadinessState.ready())
-    not_html = mu._head_badges(ReadinessState.not_ready("mig 003"))
+    not_html = mu._head_badges(ReadinessState.not_ready("조직 스키마 미준비"))
     err_html = mu._head_badges(ReadinessState.probe_error("probe"))
     check("READY 는 스키마 배지 생략(모드 배지만)", "ms-ready" not in ready_html and "ms-mode" in ready_html)
     check("NOT_READY 는 스키마 배지 동반", "ms-ready" in not_html and "ms-mode" in not_html)

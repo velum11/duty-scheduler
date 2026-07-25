@@ -21,18 +21,15 @@
 ## 3. 프로젝트 고유 규칙
 
 - 이 프로젝트는 업무용 ERP다 — 정보 밀도·탐색 속도·편집 안전·화면 간 일관성 우선, hero·장식 카드·불필요 애니메이션 금지. 세부 기준과 완료 게이트는 `DESIGN.md`.
-- **DLP(최상위 불변)**: 로컬 HTML·PNG·리포트 artifact 생성 금지. 목업은 실제 Streamlit 코드의 sample/static 프로토타입 + 목표 viewport 실화면 확인으로만 한다. `.orca/artifacts/`의 정적 prototype은 DLP가 허용하는 환경에서만 사용한다.
-- 목업 단계에서 Supabase 연결·저장·migration 금지. 사용자 승인 전 merge·배포·완료 선언 금지.
-- **push는 Streamlit Cloud 배포로 이어진다 — 별도 사용자 승인이 필수다.**
+- **DLP가 적용되는 이유**: 회사 보안정책 환경이다(규칙 정본은 `AGENTS.md` 안전경계 — 여기서 재서술하지 않음). 그 제약 아래의 목업 실행 방법: 실제 Streamlit 코드의 sample/static 프로토타입 + 목표 viewport 실화면 확인. `.orca/artifacts/`의 정적 prototype은 DLP가 허용하는 환경에서만 사용한다.
+- 목업 단계에서 Supabase 연결·저장·migration을 하지 않는 이유: 승인 전 실데이터 보호(정본은 `AGENTS.md`). 사용자 승인 전 merge·배포·완료 선언 금지.
+- **push에 별도 승인이 필요한 이유**: 이 저장소의 push는 Streamlit Cloud 배포로 이어진다(금지 규칙 정본은 `AGENTS.md`).
 - 실행: `$env:DUTY_DATA_MODE = "sample"; streamlit run app.py`. focused test 목록은 `CLAUDE.md` § 검증이 정본이며, 작은 변경마다 전체 회귀를 돌리지 않는다.
 - 기존 `app-dev-preview` terminal과 ORCA browser tab을 재사용하고, 완료된 terminal·workspace는 `completed`로 정리한다.
 
 ## 4. 안전 경계
 
-`AGENTS.md`가 정본이며 전 항목이 그대로 적용된다. 프로젝트 특이사항만 추가한다.
-
-- `.local_sessions.json`과 로컬 DB 백업을 출력·커밋하지 않는다.
-- 화면 디자인·목업·QA 중 실제 사용자 입력 데이터와 Supabase 데이터를 변경하지 않는다.
+`AGENTS.md` 안전경계가 완결된 정본이며 전 항목이 그대로 적용된다. 이 문서는 금지 규칙을 추가·요약·재정의하지 않는다(§3의 항목들은 규칙이 아니라 "왜 적용되는지"의 프로젝트 맥락이다).
 
 ## 5. 현재 호환 사항
 

@@ -242,7 +242,7 @@ elif mode == "actions":
 elif mode == "bar_readonly":
     # can_write=False → 행 추가·삭제·저장 모두 비활성, 새로고침만 활성(조회 허용)
     actions.master_action_bar(s, sel_count=2, dirty_total=3, can_write=False,
-                              write_disabled_reason="migration 004 적용 전 — 조회만 가능합니다.")
+                              write_disabled_reason="조직 스키마가 준비되지 않아 조회만 가능합니다.")
 
 elif mode == "bar_ready":
     # can_write=True(기본) → dirty·선택 있으면 add/delete/save 활성

@@ -22,8 +22,8 @@ tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell
 ## 구조 지식
 
 - `modules/db.py` = sample/Supabase 공통 파사드, `modules/supabase_repository.py` = 원격 구현, `modules/validators.py` = 저장 계약 검증, `modules/auth.py` = 사번 로그인·세션.
-- readiness probe는 **004 스키마**(`organization_groups` 테이블 + `departments.group_id` FK)를 검사한다(`supabase_repository.py` org readiness). NOT_READY/PROBE_ERROR면 UI·repository 양쪽 쓰기 차단.
-- 자연키: users=`emp_no`, departments=`dept_code`, teams=`(department_id, team_code)`, work_types=`code`, 그룹=`group_code`. `display_order`는 004 미적용 시 입력 전체 차단(비재시도 failed).
+- readiness probe는 **조직 스키마 capability**(`organization_groups` 테이블 + `departments.group_id` FK — 도입 이력: migration 004)를 검사한다(`supabase_repository.py::org_schema_readiness` 계열). NOT_READY/PROBE_ERROR면 조직 데이터를 쓰는 화면의 쓰기를 UI·repository 양쪽에서 차단한다. 조직 무관 화면엔 요구하지 않는다. 사용자 안내는 안정 표현("조직 스키마가 준비되지 않아…"), migration 번호는 진단·DB 문서에만.
+- 자연키: users=`emp_no`, departments=`dept_code`, teams=`(department_id, team_code)`, work_types=`code`, 그룹=`group_code`. `display_order`는 조직 스키마 미준비 시 입력 전체 차단(비재시도 failed).
 - sample 모드 쓰기는 `st.session_state` 스토어에만 유지된다(CSV 불변).
 
 ## 셀프 검증 (의무)
