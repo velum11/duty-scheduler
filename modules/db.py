@@ -20,6 +20,42 @@ DATA_SOURCE_ERRORS = (
     supabase_repository.SupabaseDataError,
 )
 
+# 참조 건수 조회가 '알 수 없음'으로 실패했을 때 결과 dict 에 추가하는 sentinel 키.
+# 삭제 화면 controller 는 ``sum(refs.values()) > 0`` 으로 물리삭제/미사용을 가르므로,
+# 이 sentinel(값 1)이 있으면 합이 양수가 되어 물리 삭제 대신 미사용 처리(fail-closed)로
+# 라우팅된다. 실제 참조 키(users/schedules/…)는 그대로 유지해 기존 표시·테스트를 보존한다.
+REFERENCE_CHECK_FAILED = "_reference_check_failed"
+
+# 참조 건수 경로 전용 '테이블 미생성' 고신뢰 표식.
+# readiness probe 의 ``_MISSING_COLUMN_MARKERS`` 는 generic 문구("does not exist",
+# "could not find")·컬럼 단위 코드(42703/PGRST204)까지 포함해, 네트워크/DNS/프록시
+# 오류 문구("temporary failure: host does not exist" 등)에도 매칭되어 fail-OPEN 을
+# 유발한다. 삭제 안전 경로에서는 그 위험을 없애기 위해, 테이블 단위 undefined 신호
+# (PostgreSQL 42P01 / PostgREST PGRST205)만 신뢰하고 나머지는 전부 일시 실패로 본다.
+_MISSING_TABLE_CODES = ("42p01", "pgrst205")
+
+
+def _is_missing_table_error(exc: Exception) -> bool:
+    """예외가 '테이블 미생성(마이그레이션 미적용)' **고신뢰** 신호인지 판정한다.
+
+    참조 건수 경로는 물리 삭제/미사용을 가르는 삭제 안전 임계 경로다. 따라서 오직
+    테이블 단위 undefined 코드(PostgreSQL ``42P01`` / PostgREST ``PGRST205``) 또는
+    PostgREST 스키마 캐시의 테이블 미발견 문구("Could not find the table '…' in the
+    schema cache")만 참조 0(물리 삭제 허용)으로 인정한다. bare "does not exist" 같은
+    generic 부분문자열은 네트워크 오류에도 등장하므로 신뢰하지 않는다 → 모호하면 일시
+    실패로 간주(fail-closed → 미사용 처리). code/message/details/hint 구조 필드가 있으면
+    함께 검사한다(문구가 중첩 원인에 숨어도 탐지)."""
+    parts = [repr(exc)]
+    for attr in ("code", "message", "details", "hint"):
+        val = getattr(exc, attr, None)
+        if val:
+            parts.append(str(val))
+    text = " ".join(parts).lower()
+    if any(code in text for code in _MISSING_TABLE_CODES):
+        return True
+    # 테이블(table) 단어가 명시된 스키마 캐시 미발견 문구만 인정(컬럼/generic 제외).
+    return "could not find the table" in text and "schema cache" in text
+
 # 저장 부분성공 원장 계약(프레임워크 비의존). 화면 controller 는 이 결과를
 # ``views.master.lifecycle.PersistResult(page_id=..., **result.to_persist_kwargs())``
 # 로 매핑한다. 기존 save_* 는 None 을 반환하는 계약을 유지하고, 부분성공이 필요한
@@ -717,8 +753,11 @@ def org_group_reference_counts(group_code: str) -> dict:
     code = str(group_code).strip()
     try:
         depts = get_org_departments()
-    except Exception:
-        return {"departments": 0}
+    except Exception as exc:
+        # 미적용 스키마(테이블/컬럼 없음)만 참조 0. 그 외 실패는 fail-closed.
+        if _is_missing_table_error(exc):
+            return {"departments": 0}
+        return {"departments": 0, REFERENCE_CHECK_FAILED: 1}
     if depts.empty or "group_code" not in depts:
         return {"departments": 0}
     return {"departments": int((depts["group_code"].astype(str).str.strip() == code).sum())}
@@ -1653,25 +1692,33 @@ def delete_department(dept_code: str) -> None:
 def department_reference_counts(dept_code: str) -> dict:
     """부서를 참조하는 사용자/조/편성 조 건수를 반환한다(활성·비활성 모두 포함).
 
-    아직 생성되지 않은 테이블(예: migration 002 미적용 시 shift_groups)은
-    조회 실패를 참조 0 으로 안전하게 처리한다.
+    아직 생성되지 않은 테이블(예: migration 002 미적용 시 shift_groups)의 조회
+    실패만 참조 0 으로 안전하게 처리한다. 네트워크/소켓 등 일시 실패는 참조 확인
+    실패로 보아 fail-closed sentinel 을 실어 물리 삭제를 막는다(미사용 처리로 라우팅).
     """
     code = str(dept_code).strip()
+    check_failed = False
 
     def _count(loader) -> int:
+        nonlocal check_failed
         try:
             frame = loader()
-        except Exception:
+        except Exception as exc:
+            if not _is_missing_table_error(exc):
+                check_failed = True
             return 0
         if frame.empty or "dept_code" not in frame:
             return 0
         return int((frame["dept_code"].astype(str).str.strip() == code).sum())
 
-    return {
+    result = {
         "users": _count(get_users),
         "teams": _count(get_teams),
         "shift_groups": _count(get_shift_groups),
     }
+    if check_failed:
+        result[REFERENCE_CHECK_FAILED] = 1
+    return result
 
 
 def deactivate_team(dept_code: str, team_code: str) -> None:
@@ -1704,8 +1751,10 @@ def team_reference_counts(dept_code: str, team_code: str) -> dict:
     dc, tc = str(dept_code).strip(), str(team_code).strip()
     try:
         users = get_users()
-    except Exception:
-        return {"users": 0}
+    except Exception as exc:
+        if _is_missing_table_error(exc):
+            return {"users": 0}
+        return {"users": 0, REFERENCE_CHECK_FAILED: 1}
     if users.empty:
         return {"users": 0}
     mask = (
@@ -1750,8 +1799,10 @@ def work_type_reference_counts(code: str) -> dict:
     c = str(code).strip()
     try:
         scheds = get_schedules()
-    except Exception:
-        return {"schedules": 0}
+    except Exception as exc:
+        if _is_missing_table_error(exc):
+            return {"schedules": 0}
+        return {"schedules": 0, REFERENCE_CHECK_FAILED: 1}
     if scheds.empty or "work_type_code" not in scheds:
         return {"schedules": 0}
     return {"schedules": int((scheds["work_type_code"].astype(str).str.strip() == c).sum())}
