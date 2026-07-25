@@ -18,6 +18,7 @@ tools: Glob, Grep, Read, Edit, Write, Bash, PowerShell, Skill
 
 - **`.ag-cell`의 `position`을 절대 재지정하지 않는다** — AG Grid는 셀을 absolute로 배치하며, relative 오버라이드는 이후 컬럼 전체를 행 아래로 밀어낸다(2026-07-25 실증). 상태 스타일은 항상 클래스 기반, 임의 DOM 조작 금지.
 - 수정 후 실행 중 서버가 새 코드를 서빙하는지 확인한다(장수 streamlit 프로세스는 모듈을 캐시한다).
+- 외부 라이브러리(streamlit·streamlit-aggrid 등) 결함·버전 차이가 의심되면 자체 추측으로 우회하지 말고, 근거와 함께 "recon 외부 조사(웹·GitHub 이슈) 필요"를 Coordinator에 보고한다.
 
 ## 화면 오너십 맵
 

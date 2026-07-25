@@ -2,6 +2,10 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-25 · agent-reach 스킬 불채택 — recon에 네이티브 웹조사 부여
+
+- 사용자 설치 agent-reach 스킬을 분석 후 **불채택**(CLI·백엔드 미설치로 미동작, 개발 조사 능력은 내장 WebSearch/WebFetch로 대체 가능, 고유 가치는 소셜·영상 등 개발 범위 밖, r.jina.ai 프록시·서드파티 CLI 등 DLP 감점). 스킬은 휴면 보존(참조 에이전트 없음=토큰 소모 0). 대신 recon 특화판에 WebSearch·WebFetch 부여(read-only 유지 — Bash 미부여), ui-feature는 라이브러리 결함 의심 시 recon 조사 요청을 보고하도록 규정.
+
 ## 2026-07-25 · 화면 유형 규약(§0) 확정 — 디자인 발산 원천 차단 (문서+스캐폴드+테스트 3중 강제)
 
 - 사용자 결정(인터뷰 4문항): 종전 "레이아웃 미강제" 원칙 **폐지** → 모든 신규·구조 변경 화면은 4유형(`EDIT_GRID`/`READ_VIEW`/`MATRIX_EDIT`/`DASHBOARD`) 중 하나를 선언하고 그 크롬만 사용(표준 원본=기준정보 3화면, 유형 밖은 사용자 승인+규약 개정 필수). DESIGN.md §0 신설, CLAUDE.md·requirements.md 미강제 조항 교체, ui-feature 특화판에 하드 규칙.
