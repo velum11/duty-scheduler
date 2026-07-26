@@ -4,31 +4,71 @@
 
 사용자의 최신 디자인 요구가 이 문서보다 우선합니다. 작업 중 승인된 새 패턴이 생기면 공용화가 필요한 범위만 이 문서와 구현에 반영합니다. 구현 기준은 `modules/ui.py`(App Shell)와 `views/master/`(기준정보 공통 기반)입니다.
 
-## 0. 화면 유형 규약 (강제)
+## 0. 화면 구조 표준 (강제) — KP-standard
 
-모든 신규 화면과 구조 변경 화면은 아래 5유형 중 **하나를 선언하고 그 크롬 구성만** 사용합니다. 표준 원본은 사용자 sign-off를 받은 기준정보 화면군(현재 3개) 스타일이며, 공통 토큰(§2)·상태 이중부호화(§4)·상호작용(§5)이 전 유형에 적용됩니다.
+모든 ADMIN/MANAGER 업무 화면은 하나의 **공용 구조 골격과 컴포넌트 어휘**를 공유합니다(레퍼런스: 밀집형 데스크톱 ERP — 2026-07-26 사용자 결정). 목적은 화면마다 본문을 손제작해 생기던 **화면 간 불일치·조잡함**을 제거하는 것입니다. 화면은 필드·패널 **수**만 다를 뿐 **영역 골격은 동일**합니다. 색이 아니라 **구조·밀도·일관성**이 표준의 대상입니다.
 
-**화면 수는 규약 대상이 아닙니다** — 유형별 화면의 추가·분리·통합은 기능 요구에 따라 자유이며, 규약이 강제하는 것은 유형 선언과 해당 유형의 크롬 구성뿐입니다(예: 기준정보 화면이 늘거나 통합되어도 `EDIT_GRID` 선언 + `views/master/` 스택 사용이면 규약 준수).
+### 0.1 화면×역할 매니페스트 (SoT)
 
-**USER 모바일 화면 예외**: `user_app_shell` 기반 화면(내 근무표 등)은 유형 선언은 동일하게 적용하되, 크롬은 위 표가 아니라 §1의 USER 셸 패턴(상단 사용자 정보·반응형 메뉴·달력)을 따릅니다. 위 표의 크롬 구성은 ADMIN/MANAGER App Shell 화면 기준입니다.
+화면 표현은 파일이 아니라 **화면×역할 variant** 단위로 계약합니다 — 같은 파일이 USER 모바일 셸과 ADMIN/MANAGER 데스크톱 셸에서 다르게 렌더될 수 있기 때문입니다(예: `schedule_view`·`near_miss_submit`·`my_schedule`·`dashboard`는 USER와 M/A가 공유). 매니페스트는 route(`app.py`)·메뉴(`modules/nav.py`)에서 도출하며, **매니페스트에 없는 라우팅 화면은 계약 테스트가 실패**시킵니다.
 
-| 유형 | 코드 | 크롬 구성(순서 고정) | 예 |
-|---|---|---|---|
-| 기준정보 편집형 | `EDIT_GRID` | 브레드크럼 → 제목·모드 배지 → 필터바 → 액션바(`[＋행 추가][삭제][저장] … 변경 N·[새로고침]`) → 편집 그리드 → 상태 스트립 | 사용자·조직·근무형태 관리 |
-| 조회형 | `READ_VIEW` | 브레드크럼 → 제목 → 조회 조건바(연월·범위) → 읽기 그리드/달력 → 범례·요약 | 월간 근무표, 내 근무표 |
-| 매트릭스 편집형 | `MATRIX_EDIT` | 브레드크럼 → 제목 → 조회 조건바 → 액션바 → 직원×일자 편집 그리드 → 저장 상태 | 근무표 편성 |
-| 대시보드형 | `DASHBOARD` | 브레드크럼 → 제목·모드 배지 → 지표 카드 행 → 현황 패널(오늘 근무·분포) | 대시보드 |
-| 폼 입력형 | `FORM_ENTRY` | 브레드크럼 → 제목·모드 배지 → 입력 폼 본문(라벨드 필드·첨부) → 제출 버튼 → 저장 결과 배너 | 니어미스(near-miss) 신청 등 단건 제출 폼 |
+| 화면 | 역할 | 셸 | 아키타입 | 그리드 | 반응형 | 페이지 액션 | 범위 액션 |
+|---|---|---|---|---|---|---|---|
+| dashboard | U/M/A | U=user, M/A=app | DASHBOARD | — | U variant만 | 조회·새로고침 | — |
+| schedule_view(월간) | U/M/A | U=user, M/A=app | READ_VIEW | READ | U variant만 | 조회·새로고침·다운로드 | — |
+| schedule_edit(편성) | M/A | app | MATRIX_EDIT | MATRIX | ✕ | 조회·저장·새로고침 | 추가·삭제(그리드) |
+| my_schedule(내 근무) | U/M/A | U=user, M/A=app | READ_VIEW | — | ✔(USER 중심) | 월이동·조회 | — |
+| near_miss_submit(신청) | U/M/A | U=user, M/A=app | FORM_ENTRY | — | ✔(USER) | **상단바 제외** | 제출(form) |
+| near_miss_view(조회) | M/A | app | READ_VIEW | READ | ✕ | 조회·새로고침 | — |
+| near_miss_evaluate(평가) | M/A | app | MASTER_DETAIL | READ+상세 | ✕ | 조회·새로고침 | 등급확정·반려·종결(상세) |
+| near_miss_stats(집계) | M/A | app | DASHBOARD | — | ✕ | 조회·새로고침 | — |
+| master_users | A | app | EDIT_GRID | EDIT | ✕ | 조회·새로고침 | 추가·삭제·저장 |
+| master_org | A | app | EDIT_GRID(3시트) | EDIT×3 | ✕ | 조회·새로고침만 | 시트별 추가·삭제·저장(3범위) |
+| master_work_types | A | app | EDIT_GRID | EDIT | ✕ | 조회·새로고침 | 추가·삭제·저장 |
 
-**`FORM_ENTRY`(폼 입력형)** 는 단건 레코드를 입력·제출하는 화면입니다(니어미스 신청 폼 — 사진 첨부 포함이 첫 사용처이며, 이후 다른 신청 폼이 이어질 수 있습니다). 크롬은 헤더(`page_chrome`/`page_chrome_for`) + 라벨드 필드로 구성된 입력 폼 본문 + 제출 컨트롤 + 저장 결과 배너로 이뤄집니다. 저장 결과 배너는 기준정보 화면의 `views/master/lifecycle`(`PersistResult` → `ledger_banner`) 계약을 **개념적으로 재사용**해 성공/부분성공/실패를 상태 이중부호화(§4)로 표기합니다. `FORM_ENTRY`는 §6 반응형 기준을 따릅니다 — 1366×768 필수 baseline과 좁은 폭에서 가로 오버플로 없이 사용 가능해야 합니다. 코드가 강제하는 것은 EDIT_GRID와 달리 그리드 스택이 아니라 "유형 선언 + `page_chrome`/`page_chrome_for` 실호출"까지이며, 폼 본문·제출·배너의 순서·간격·시각 품질은 아래 정직한 보장 수준대로 visual-qa 측정과 **사용자 실브라우저 sign-off**가 게이트입니다(표준 시각 원본은 Phase B 구현 + sign-off로 확정됩니다).
+*(`master_departments`·`master_teams`는 `master_org`로 위임하는 legacy 화면입니다.)*
 
-집행 장치(코드로 강제되는 범위):
+### 0.2 공용 구조 어휘 (중립 키트 ↔ 도메인 lifecycle 분리)
 
-- 화면 모듈은 `SCREEN_ARCHETYPE` 상수로 유형을 선언합니다(AST 수준 검사 — 주석 선언은 무효).
-- 페이지 크롬은 공용 스캐폴드(`views/common/scaffold.py`의 `page_chrome`/`page_chrome_for`) **실제 호출**로 생성하며, `EDIT_GRID`는 `views/master/` 전체 스택(헤더 + `render_master_grid` + 액션바/저장)의 실호출이 필요합니다 — 크롬 손제작 금지. USER 셸 화면(아래 예외)은 크롬 호출 검사가 면제됩니다.
-- 계약 테스트(`scripts/test_screen_scaffold.py`)가 위 항목을 `views/` 재귀 + route 연결 기반 AST 분석으로 검증합니다(미사용 import·문자열 언급 우회 불가).
-- **정직한 보장 수준**: 코드가 강제하는 것은 "유형 선언 + 크롬 API 실호출 + EDIT_GRID 스택"까지입니다. 유형별 크롬의 순서·간격·시각 품질 자체는 코드로 강제되지 않으며, visual-qa 측정과 **사용자 실브라우저 sign-off**가 그 게이트입니다.
-- **유형 밖 레이아웃·새 유형 추가는 사용자 명시 승인 + 이 규약 개정으로만** 가능합니다. 에이전트가 임의로 예외를 만들지 않습니다.
+구조(레이아웃) 컴포넌트는 편집 lifecycle과 **분리된 중립 키트**(`views/common/erp/` — 신설)로 제공합니다: `ScreenFrame · TopActionBar · ConditionPanel · DataGrid · DetailTabs · StatusRegion`. 도메인 lifecycle(`DraftState·run_save·ReadinessState`)은 `views/master/`가 계속 소유하며 중립 키트를 **소비**합니다. `modules/ui.py`의 body helper(`page_title·card·summary_cards·panel_head·action_bar`)와 `views/workspace.py`의 독자 grid는 이 키트로 **흡수·폐기**하되, App Shell·logout·nav guard(dirty 이탈 방어)는 그대로 둡니다. `views/master`에 전부 흡수하지 않습니다 — 그건 편집 프레임워크지 중립 키트가 아니기 때문입니다.
+
+### 0.3 영역 순서 (모든 화면 공통)
+
+`title → top actions(page) → conditions → primary(grid/body) → details → status`. **선택 영역은 생략 가능하되 존재하는 영역의 순서는 강제**합니다. 각 화면×역할의 필수/선택 영역은 매니페스트가 선언합니다.
+
+### 0.4 상단 액션바 (일관성 앵커)
+
+- **위치·어휘 고정**이 일관성의 앵커입니다. 페이지 액션(`조회·새로고침`)은 상단 동일 위치·동일 어휘.
+- 편집/삭제/저장 등 **범위 액션**은 그 범위를 소유한 섹션 안에 두되 **같은 ActionBar 컴포넌트·같은 어휘**를 씁니다. "모든 화면에 CRUD 4종"을 문자 그대로 강제하지 않습니다.
+- **조직 관리**: 그룹·부서·조 **3독립 저장 범위**를 유지(`docs/requirements.md` 계약) — 페이지 상단바는 `조회·새로고침`만, 추가/삭제/저장은 각 시트 내부.
+- **FORM_ENTRY(신청)**: `st.form` 제약상 상단 CRUD바 제외 — 제출은 form 내부 `form_submit_button`, 🔍 picker는 form 밖/별도 실행 모드.
+- sticky/fixed 상단바는 표준에 넣지 않습니다(Streamlit 네이티브 아님·DOM 셀렉터 의존). "문서 흐름상 title 다음" 고정 위치만 강제.
+
+### 0.5 그리드 (단일 백엔드, capability 분리)
+
+AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `READ / SELECT / EDIT / MATRIX`. READ 그리드에는 action 메타열·paste JS·`allow_unsafe_jscode`를 넣지 않습니다. 한 GridSpec에 옵션 플래그를 누적하지 않습니다(→ 재조잡 방지).
+
+### 0.6 밀도·라벨 (§2 토큰)
+
+- **우측정렬 인라인 라벨**: 짝 컬럼(라벨 열 + widget 열) + widget은 실제 label + `label_visibility="collapsed"`. `col-N`은 중첩 columns가 아니라 한 행 라벨/widget 나열용 row builder로 구현.
+- **행 피치**: 읽기 32–34 / 편집 34(검증 후 축소) / 헤더 34–36 / **USER·터치 컨트롤 44 유지**. 32×32 히트영역 계약(§4)과 정합.
+
+### 0.7 반응형 (역할 variant 단위)
+
+- **USER 셸 variant는 반응형 필수**: 내 근무표·USER 대시보드·월간 근무표(USER)·아차사고 신청(USER).
+- **ADMIN/MANAGER 데스크톱 variant는 1366×768** baseline(반응형 불요). 같은 파일이 두 셸에 걸치면 **variant별로** 다르게 적용합니다.
+
+### 0.8 아키타입
+
+`EDIT_GRID · READ_VIEW · MATRIX_EDIT · DASHBOARD · FORM_ENTRY · MASTER_DETAIL`. `MASTER_DETAIL`은 읽기 목록 + 상세/워크플로 화면(평가)용 신규 유형입니다 — `near_miss_evaluate`의 `EDIT_GRID` 오분류(비활성 CRUD바 렌더)를 정정합니다. 유형 밖 레이아웃·새 유형은 **사용자 명시 승인 + 이 규약 개정**으로만.
+
+### 0.9 집행 (정적 심볼 → 실렌더 region 검증)
+
+- 매니페스트가 각 화면×역할의 필수/선택 영역·순서를 선언합니다.
+- 계약 테스트(`scripts/test_screen_scaffold.py`)는 **AppTest로 ADMIN/MANAGER/USER 각각을 실렌더해 실제 region key·순서**를 검증합니다 — 정적 심볼 존재 검사만으로는 분기 비인식 false-pass(예: `dashboard` USER 조기 반환이 ADMIN 분기의 크롬 호출로 통과)가 생깁니다. AST 검사는 "선언 존재 · 금지된 raw body helper 미사용 · 미등록 화면 없음"으로 제한합니다.
+- 화면 **수**는 규약 대상이 아닙니다 — 추가·분리·통합은 자유이며, 규약이 강제하는 것은 매니페스트 등록 + 영역 골격·순서 + 중립 키트 사용입니다.
+- 사이드바/셸도 표준 범위입니다(2026-07-26 동결 해제). 재설계는 visual-qa 실측 + **사용자 실브라우저 sign-off** 게이트.
+- **정직한 보장 수준**: 코드가 강제하는 것은 "유형 선언 + 영역 순서(실렌더) + 중립 키트 사용 + 금지 helper 미사용"까지입니다. 간격·시각 품질 자체는 visual-qa 측정과 **사용자 실브라우저 sign-off**가 최종 게이트입니다.
 
 ## 1. 현재 화면 구조
 
@@ -89,7 +129,9 @@
 | `--danger` / `--danger-bg` | `#9A3B2E` / `#FBEEEB` | 삭제·오류·저장 실패 |
 
 - **표면 3단**: L0 캔버스 → L1 표면(외곽선 `--line-strong`, radius 8px, 그림자 최소) → L2 subtle. 깊이는 색으로만 표현합니다.
-- **타이포그래피**: 시스템 sans(`Malgun Gothic`/`Apple SD Gothic Neo` 등). 페이지 제목 20/700, 설명 13, 표 헤더 12.5/600, 셀 13, 배지 11/600, 버튼 13/600. 숫자·시간·건수 열은 `tabular-nums`. 데이터 행 40px, 헤더 44px.
+- **타이포그래피**: 시스템 sans(`Malgun Gothic`/`Apple SD Gothic Neo` 등). 페이지 제목 20/700, 설명 13, 표 헤더 12.5/600, 셀 13, 배지 11/600, 버튼 13/600. 숫자·시간·건수 열은 `tabular-nums`.
+- **밀도(데스크톱 ADMIN/MANAGER)**: 읽기 그리드 행 32–34px, 편집 그리드 행 34px(체크박스·오류 마커·focus ring이 들어가는지 검증 후에만 32px로 축소), 헤더 34–36px. **USER·터치 컨트롤은 최소 44px**를 유지합니다. 값은 `views/master/grid.py` 등 그리드 상수를 단일 소스로 합니다.
+- **라벨 배치(데스크톱)**: 조건패널·상세폼은 **우측정렬 인라인 라벨**을 씁니다 — 짝 컬럼(라벨 열 + widget 열)에 widget은 비어 있지 않은 실제 label + `label_visibility="collapsed"`. 시각 라벨(`st.markdown`)과 widget label은 DOM상 직접 연결되지 않으므로 스크린리더 검증이 필요하며, `st.columns` 중첩은 1회를 넘기지 않습니다(§0.6).
 - **대비**: 본문 ≥ 4.5:1, 배지/보조 ≥ 3:1. 상태 배경 위 글자는 대응 진한색을 사용합니다.
 - **읽는 텍스트에 `--ink-3`(#908C83) 금지**: ink-3는 비활성 컨트롤·placeholder·장식(보더·아이콘 틴트)에만 씁니다. 콘텐츠/서피스 배경 위에서 읽는 본문·보조 텍스트는 `--ink` 또는 `--ink-2`를 씁니다(밝은 배경에서 ink-3 ≈ 2.9:1로 WCAG 미달 — breadcrumb·빈상태 힌트에서 재발). ink-2는 같은 배경에서 5.76:1로 통과합니다.
 
@@ -137,7 +179,7 @@
 - 좌 클러스터 `[＋ 행 추가] [삭제] [저장]`, 우 클러스터 `변경 N · [새로고침]`. 버튼 높이 34px 단일값.
 - 저장(`--navy` 채움)은 **미저장 변경이 있을 때만 활성**하고 변경 건수 badge를 노출합니다. 삭제(outline)는 **선택 0이면 비활성**입니다.
 - 아이콘은 **단색 라인 아이콘**(inline SVG)만 사용합니다. 컬러 이모지(💾/🗑/🗀 등) 금지. 아이콘 전용 컨트롤에는 tooltip·라벨을 둡니다.
-- 모든 인터랙션 타깃은 **히트영역 ≥ 32×32px**입니다. 신규 행 제거(`−`) 버튼은 시각 20px를 유지하되 투명 패딩으로 32px를 확보합니다.
+- 모든 인터랙션 타깃은 **히트영역 ≥ 32×32px**입니다. 신규 행 제거(`−`) 버튼은 시각 20px를 유지하되 투명 패딩으로 32px를 확보합니다. **밀도 축소(§0.6)와 충돌 주의**: 편집 그리드는 34px에서 먼저 검증하고, 32px 행에서 `−` 버튼 히트영역·focus outline이 인접 행으로 새지 않는지 visual-qa로 확인한 뒤에만 축소합니다. 두 계약(32×32 히트영역, 조밀 행 피치)을 함께 만족하지 못하면 행 피치를 34–36px로 유지합니다.
 
 ### 표 상태 — 색 + 형태/라벨 이중 부호화
 
