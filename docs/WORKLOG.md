@@ -2,6 +2,22 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-26 · KP-standard 구조 통합 — 중립 키트 + 콘텐츠 8화면 이관 (사이드바 진행 중)
+
+- 사용자 지적("화면마다 조잡·불일치")을 **라이브 KPtech ERP(dews-ui) 실조사** + recon/visual-qa/Codex로 진단: 본문 4계보·그리드 3엔진·§0 골격 미강제가 근본원인. DESIGN.md §0을 **화면 구조 표준(KP-standard)** 으로 재작성(화면×역할 매니페스트·중립 키트·영역 순서·실렌더 검증 목표). Codex+Sonnet+Fable 계획 교차검증(GO-WITH-CHANGES).
+- **중립 구조 키트 `views/common/erp/` 신설**(도메인 lifecycle과 분리): `screen_frame·top_action_bar·condition_panel`(col-N 우측 인라인 라벨)·`read_grid`(AgGrid READ 어댑터 + 색 dedup + 행 오버레이 `row_rules` + 겹침 가드)·`status_region·form_submit·master_detail_frame/detail_actions/detail_empty`·`Field`(widget_key 정확 세션키·placeholder). `MASTER_DETAIL` 6번째 아키타입 등록.
+- **콘텐츠 8화면 전부 이관·커밋·푸시**(`d11c3d3`~`fea4606`): near_miss_view(파일럿·sign-off)·schedule_view(31일 색매트릭스+퇴직 오버레이)·near_miss_submit(FORM_ENTRY)·near_miss_evaluate(EDIT_GRID→MASTER_DETAIL 재분류)·near_miss_stats·dashboard(ADMIN/MANAGER 경로)·schedule_edit(크롬만·편집 machinery 보존)·master 사용자/근무형태/조직(우측 인라인 라벨).
+- 검증(위험 비례): 화면별 내 diff 리뷰 + 계약 테스트 그린 + **고위험(스코프 누수·TOCTOU·쓰기)엔 Codex 능동 감사** + visual-qa 실렌더. **Fable 내부감사가 DESIGN.md §0 드리프트 3건 실제 적발**(§0.2/0.8/0.9 정직성 정정). lee-mode PLAYBOOK/skill에 "품질 최우선·검증 위험비례·Codex 적극·중복만 강등" 반영(메모리 [[push-back-on-excess]]).
+- 팀: Coordinator Opus→**Fable 승격**(사용자 지정). 실행 부장 Sonnet(inventory/구현/QA), 리뷰 Codex(외부)·Fable 내부감사·Sonnet 하위모델. **one-hop 위임 유지**.
+- **사이드바: 미확정(진행 중).** 다크 프로토타입(direction C: 검색+트리+즐겨찾기)이 대비 붕괴·계층 혼란으로 실패 → 사용자 지시로 **라이트 재설계 중**(테마-ready: 다크/시스템은 나중에 토큰만 오버라이드). 실브라우저 sign-off 대기.
+
+### ⚠️ 사이드바 디자인 확정(sign-off) 후에만 반영할 MD — **지금 미적용** (2026-07-26 사용자 지시: 확정 디자인을 규약화해 유지하려는 것이므로 미리 적용 금지. 아래는 알아보기 위한 메모)
+
+- **DESIGN.md §1 (현재 화면 구조 · ADMIN/MANAGER)**: 사이드바 설명을 확정본으로 — 라이트 테마 + 검색·접이식 트리 그룹·즐겨찾기 구조 반영.
+- **DESIGN.md §2 (공용 토큰 · App Shell)**: 사이드바 토큰을 다크(bg `#1B1B1D`·글자 `#C9C7C0`·골드 `#C9A26B`)에서 **확정 라이트 테마 토큰**으로 교체 + **테마-ready 구조 명문화**(색은 `--sb-*` 토큰으로만; 다크/시스템 테마는 그 토큰 블록만 오버라이드).
+- **memory `sidebar-design-protected`**: 확정 라이트 디자인으로 갱신(동결 해제 후 채택안 기록).
+- 반영 시점: **사이드바 실브라우저 sign-off 직후**. 그 전엔 절대 미적용. (BACKLOG "결정 대기"에도 동일 추적.)
+
 ## 2026-07-25 · Phase 1 성능 — supabase 읽기 캐싱 + 로딩 스피너·잔상 클리어
 
 - 증상(사용자): supabase 모드 전환 후 로컬 느림 + 화면 전환 시 이전 화면 잔상. recon 진단: supabase 읽기에 캐시 전무 → 매 rerun 네트워크 재조회(조직관리 첫 로드 8~10 왕복), nav가 `st.empty` 미사용이라 새 화면 느린 로드 동안 이전 DOM 잔류.
