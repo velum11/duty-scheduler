@@ -77,14 +77,13 @@ _COL_CONFIG = {
 
 
 def render(user: dict) -> None:
-    # nav.py 에 아직 라우팅되지 않은 화면(B2 routing 이후 예정)이므로 page_chrome_for
-    # (modules/nav.py 의 그룹/라벨을 조회)가 아니라 page_chrome 에 제목/설명/브레드크럼을
-    # 직접 넘긴다 — nav.py 미등록 page_id 로 인한 KeyError(group_of)를 피한다. B2 routing
-    # 후 nav.py 라벨과의 정합은 통합 담당(§0 크롬 계약은 page_chrome 실호출로 이미 충족).
+    # near_miss_view 는 nav.py 에 등록돼 있다(그룹 '아차사고' › '조회'). 제목/설명은 nav.py
+    # 라벨과 정합되게 명시한다(desc 는 nav.py 와 동일 문구). page_chrome_for 로 nav 라벨을
+    # 단일 출처에서 끌어오는 통일은 후속(통합 담당) — 현재는 screen_frame 명시 문자열로 충분.
     erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="아차사고 조회",
-        desc="아차사고 보고서 목록을 조회합니다.",
+        desc="아차사고 보고서를 조건별로 조회합니다.",
         breadcrumb="아차사고 › 조회",
         badges=scaffold.mode_badge(),
     )

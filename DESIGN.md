@@ -30,7 +30,7 @@
 
 ### 0.2 공용 구조 어휘 (중립 키트 ↔ 도메인 lifecycle 분리)
 
-구조(레이아웃) 컴포넌트는 편집 lifecycle과 **분리된 중립 키트**(`views/common/erp/` — 신설)로 제공합니다: `ScreenFrame · TopActionBar · ConditionPanel · DataGrid · DetailTabs · StatusRegion`. 도메인 lifecycle(`DraftState·run_save·ReadinessState`)은 `views/master/`가 계속 소유하며 중립 키트를 **소비**합니다. `modules/ui.py`의 body helper(`page_title·card·summary_cards·panel_head·action_bar`)와 `views/workspace.py`의 독자 grid는 이 키트로 **흡수·폐기**하되, App Shell·logout·nav guard(dirty 이탈 방어)는 그대로 둡니다. `views/master`에 전부 흡수하지 않습니다 — 그건 편집 프레임워크지 중립 키트가 아니기 때문입니다.
+구조(레이아웃) 컴포넌트는 편집 lifecycle과 **분리된 중립 키트**(`views/common/erp/` — 신설)로 제공합니다. **목표 어휘**: `ScreenFrame · TopActionBar · ConditionPanel · DataGrid(READ/SELECT/EDIT/MATRIX) · DetailTabs · StatusRegion`. **현재 출하된 것은 READ subset뿐**입니다 — `screen_frame · top_action_bar · condition_panel · read_grid · status_region`(`views/common/erp/__init__.py` 실제 export). `DataGrid`의 SELECT/EDIT/MATRIX 어댑터와 `DetailTabs`(상세 탭)는 각 화면 이관 시점에 추가되는 미출하 목표입니다. 도메인 lifecycle(`DraftState·run_save·ReadinessState`)은 `views/master/`가 계속 소유하며 중립 키트를 **소비**합니다. `modules/ui.py`의 body helper(`page_title·card·summary_cards·panel_head·action_bar`)와 `views/workspace.py`의 독자 grid는 이 키트로 **흡수·폐기**하되, App Shell·logout·nav guard(dirty 이탈 방어)는 그대로 둡니다. `views/master`에 전부 흡수하지 않습니다 — 그건 편집 프레임워크지 중립 키트가 아니기 때문입니다.
 
 ### 0.3 영역 순서 (모든 화면 공통)
 
@@ -60,12 +60,12 @@ AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `RE
 
 ### 0.8 아키타입
 
-`EDIT_GRID · READ_VIEW · MATRIX_EDIT · DASHBOARD · FORM_ENTRY · MASTER_DETAIL`. `MASTER_DETAIL`은 읽기 목록 + 상세/워크플로 화면(평가)용 신규 유형입니다 — `near_miss_evaluate`의 `EDIT_GRID` 오분류(비활성 CRUD바 렌더)를 정정합니다. 유형 밖 레이아웃·새 유형은 **사용자 명시 승인 + 이 규약 개정**으로만.
+현재 코드(`views/common/scaffold.py::ARCHETYPES`)가 강제하는 유형은 **5종**입니다: `EDIT_GRID · READ_VIEW · MATRIX_EDIT · DASHBOARD · FORM_ENTRY`. `MASTER_DETAIL`(읽기 목록 + 상세/워크플로 — `near_miss_evaluate`의 `EDIT_GRID` 오분류 정정 대상)은 **계획 유형**이며, 아직 `ARCHETYPES`·계약 테스트·중립 키트의 상세 탭(DetailTabs) 어느 것에도 없습니다. **`near_miss_evaluate` 이관 시점에** `ARCHETYPES`+테스트 등록과 DetailTabs 신설을 함께 하며 도입합니다 — 그전까지 `MASTER_DETAIL`을 선언하면 `page_chrome`가 거부합니다. 유형 밖 레이아웃·새 유형은 **사용자 명시 승인 + 이 규약 개정**으로만.
 
 ### 0.9 집행 (정적 심볼 → 실렌더 region 검증)
 
 - 매니페스트가 각 화면×역할의 필수/선택 영역·순서를 선언합니다.
-- 계약 테스트(`scripts/test_screen_scaffold.py`)는 **AppTest로 ADMIN/MANAGER/USER 각각을 실렌더해 실제 region key·순서**를 검증합니다 — 정적 심볼 존재 검사만으로는 분기 비인식 false-pass(예: `dashboard` USER 조기 반환이 ADMIN 분기의 크롬 호출로 통과)가 생깁니다. AST 검사는 "선언 존재 · 금지된 raw body helper 미사용 · 미등록 화면 없음"으로 제한합니다.
+- **현재** 계약 테스트(`scripts/test_screen_scaffold.py`)는 **AST 정적 분석**입니다 — 유형 선언 존재 + 크롬 `Call`의 render 도달성 + 화면 발견/등록. 이는 분기 비인식이라 false-pass(예: `dashboard` USER 조기 반환이 ADMIN 분기의 크롬 호출로 통과)를 완전히 잡지 못합니다. **목표(강건화 예정)**: AppTest로 ADMIN/MANAGER/USER 각각을 실렌더해 실제 region key·순서를 검증하고, AST 검사는 "선언 존재 · 금지된 raw body helper 미사용 · 미등록 화면 없음"으로 한정. (이 목표는 아직 구현 전이며, 그전까지 영역 순서·밀도의 최종 게이트는 visual-qa 실측 + 사용자 sign-off입니다.)
 - 화면 **수**는 규약 대상이 아닙니다 — 추가·분리·통합은 자유이며, 규약이 강제하는 것은 매니페스트 등록 + 영역 골격·순서 + 중립 키트 사용입니다.
 - 사이드바/셸도 표준 범위입니다(2026-07-26 동결 해제). 재설계는 visual-qa 실측 + **사용자 실브라우저 sign-off** 게이트.
 - **정직한 보장 수준**: 코드가 강제하는 것은 "유형 선언 + 영역 순서(실렌더) + 중립 키트 사용 + 금지 helper 미사용"까지입니다. 간격·시각 품질 자체는 visual-qa 측정과 **사용자 실브라우저 sign-off**가 최종 게이트입니다.

@@ -51,12 +51,6 @@ _KIT_CSS = f"""
 """
 
 
-def _inject_css() -> None:
-    if not st.session_state.get("_erp_kit_css"):
-        st.markdown(_KIT_CSS, unsafe_allow_html=True)
-        st.session_state["_erp_kit_css"] = True
-
-
 def read_grid_height(nrows: int) -> int:
     natural = _READ_HEADER_PX + max(int(nrows), 1) * _READ_ROW_PX + _READ_CHROME_PX
     return max(_READ_MIN_PX, min(natural, _READ_MAX_PX))
@@ -67,13 +61,13 @@ def screen_frame(archetype: str, *, title: str, desc: str, breadcrumb: str,
                  badges: str | None = None) -> None:
     """화면 헤더(브레드크럼·제목·모드배지) — scaffold.page_chrome 위임(영역 순서의 title 슬롯).
 
-    매 렌더마다 세션 플래그를 초기화해 키트 CSS를 이 run 에서 다시 주입한다."""
-    st.session_state["_erp_kit_css"] = False
+    키트 CSS(우측 라벨·메트릭)를 이 진입점에서 매 렌더 주입한다 — 모든 화면이 screen_frame
+    을 먼저 호출하므로 이후 condition_panel/status_region 의 클래스가 항상 스타일을 받는다."""
     scaffold.page_chrome(
         archetype, title=title, desc=desc, breadcrumb=breadcrumb,
         badges=badges if badges is not None else scaffold.mode_badge(),
     )
-    _inject_css()
+    st.markdown(_KIT_CSS, unsafe_allow_html=True)
 
 
 # ============================================================ top_action_bar
@@ -159,49 +153,106 @@ _READ_BASE_CSS = {
 def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
               color_rules: dict[str, dict[str, str]] | None = None,
               col_config: dict[str, dict] | None = None,
+              row_rules: list[dict] | None = None,
+              hidden_fields: list[str] | None = None,
               height: int | None = None) -> None:
     """AgGrid READ 어댑터(§0.5) — 편집 자산 없음. 색은 cellClassRules 문자열식.
 
-    ``color_rules``: ``{컬럼명: {값: hex색}}`` — 값 일치 시 배경(13% alpha)+ink+600.
-    텍스트는 항상 유지(색은 보조 신호). 편집·paste·action열·allow_unsafe_jscode 없음.
+    ``color_rules``: ``{컬럼명: {값: hex색}}`` — 셀 값 일치 시 배경(13% alpha)+ink+600.
+      텍스트는 항상 유지(색은 보조 신호). 같은 색은 클래스 하나로 dedup 되어, 31일 매트릭스처럼
+      전 컬럼이 동일 매핑을 공유해도 custom_css/규칙이 폭증하지 않는다.
     ``col_config``: ``{컬럼명: {width|flex|minWidth|maxWidth|cellClass ...}}`` — 폭·정렬 주입.
-    미지정 컬럼은 ``flex=1, minWidth=90`` 으로 컨테이너 폭을 채운다(AgGrid 200px 기본값이
-    다열에서 가로 오버플로를 만드는 문제 방지 — master 그리드가 폭을 지정하는 것과 동일 취지).
+      미지정 컬럼은 ``flex=1, minWidth=90`` 으로 컨테이너 폭을 채운다(AgGrid 200px 기본값이
+      다열에서 가로 오버플로를 만드는 문제 방지).
+    ``row_rules``: ``[{"when": <행-참조 문자열식>, "columns": [적용 컬럼], "bg": hex, "ink": hex}]``
+      — 셀 값이 아니라 **행 데이터**(``data['필드']``)에 따라 지정 컬럼군에만 배경을 입힌다
+      (예: 퇴직행 오버레이를 meta 컬럼에만). 색 컬럼과 오버레이 컬럼을 분리해 두 규칙이 같은
+      셀에 겹치지 않게 하는 것이 호출부 책임이다(상호배타를 우선순위가 아니라 구조로 보장).
+    ``hidden_fields``: 표시하지 않지만 데이터로 실려(``data['필드']`` 참조 가능) 행-규칙에 쓰는 컬럼.
+    ``row_rules``/``hidden_fields`` 모두 문자열식만 쓰므로 ``allow_unsafe_jscode`` 는 False 유지.
+    편집·paste·action열 없음.
     """
     cols = list(columns) if columns else list(df.columns)
+    hidden = [h for h in (hidden_fields or []) if h not in cols]
     frame = df.copy()
     for c in cols:
         if c not in frame.columns:
             frame[c] = ""
         frame[c] = frame[c].fillna("").astype(str)
+    for h in hidden:
+        if h not in frame.columns:
+            frame[h] = None  # 행-규칙이 참조하는 플래그(불리언 등)는 원형 그대로 싣는다.
 
     rules = color_rules or {}
     sizing = col_config or {}
     custom = dict(_READ_BASE_CSS)
+
+    # 색 클래스는 색상 단위로 dedup(전 컬럼 공유). 컬럼별 규칙식은 각 colDef 에서 값을 OR 로 묶는다.
+    _color_cls: dict[str, str] = {}
+
+    def _cls_for_color(color: str) -> str:
+        cls = _color_cls.get(color)
+        if cls is None:
+            cls = f"erp-c{len(_color_cls)}"
+            _color_cls[color] = cls
+            custom[f".{cls}"] = {
+                "background-color": f"{color}22", "color": TOKENS["ink"], "font-weight": "600",
+            }
+        return cls
+
+    # 행-조건부 오버레이 클래스(컬럼군 한정).
+    row_defs: list[tuple[str, str, set]] = []
+    for ri, rr in enumerate(row_rules or []):
+        cls = f"erp-rr-{ri}"
+        css: dict = {}
+        if rr.get("bg"):
+            css["background-color"] = rr["bg"]
+        if rr.get("ink"):
+            css["color"] = rr["ink"]
+        custom[f".{cls}"] = css
+        row_defs.append((cls, rr["when"], set(rr.get("columns") or [])))
+
+    # 상호배타 강제: 같은 컬럼이 color_rules(셀 값 색)와 row_rules(행 오버레이)에 동시에 지정되면
+    # 한 셀에 두 배경 클래스가 겹쳐 결과가 삽입 순서에 좌우된다(정의되지 않은 시각). 호출부 책임을
+    # 문구가 아니라 구조로 강제해 schedule_view 같은 day/meta 분리 실수를 빌드 시점에 차단한다.
+    _color_cols = set(rules)
+    for _cls, _when, _rcols in row_defs:
+        _dup = _color_cols & _rcols
+        if _dup:
+            raise ValueError(
+                "read_grid: 컬럼이 color_rules 와 row_rules 에 동시에 지정됨(상호배타 위반): "
+                f"{sorted(_dup)}"
+            )
+
     coldefs: list[dict] = []
-    for ci, c in enumerate(cols):
+    for c in cols:
         cd = {"field": c, "headerName": c, "editable": False, "sortable": False,
               "filter": False, "resizable": True}
         cfg = sizing.get(c)
         if cfg:
             cd.update(cfg)
-        elif "width" not in cd:
+        else:
             cd.setdefault("flex", 1)
             cd.setdefault("minWidth", 90)
+        ccr: dict = {}
         crule = rules.get(c)
         if crule:
-            ccr: dict = {}
-            for vi, (val, color) in enumerate(crule.items()):
-                cls = f"erp-cc-{ci}-{vi}"
-                # ag-grid cellClassRules 문자열식: x = 셀 값. JsCode 아님 → unsafe 불필요.
-                ccr[cls] = f"x == {json.dumps(str(val))}"
-                custom[f".{cls}"] = {
-                    "background-color": f"{color}22",
-                    "color": TOKENS["ink"],
-                    "font-weight": "600",
-                }
+            by_color: dict[str, list] = {}
+            for val, color in crule.items():
+                by_color.setdefault(color, []).append(val)
+            for color, vals in by_color.items():
+                # ag-grid cellClassRules 문자열식: x = 셀 값(JsCode 아님 → unsafe 불필요).
+                ccr[_cls_for_color(color)] = " || ".join(
+                    f"x == {json.dumps(str(v))}" for v in vals
+                )
+        for cls, when, rcols in row_defs:
+            if c in rcols:
+                ccr[cls] = when
+        if ccr:
             cd["cellClassRules"] = ccr
         coldefs.append(cd)
+    for h in hidden:
+        coldefs.append({"field": h, "hide": True, "suppressColumnsToolPanel": True})
 
     options = {
         "columnDefs": coldefs,
@@ -213,7 +264,7 @@ def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
     }
     h = height if height is not None else read_grid_height(len(frame))
     AgGrid(
-        frame[cols], gridOptions=options, key=key, height=h,
+        frame[cols + hidden], gridOptions=options, key=key, height=h,
         data_return_mode=DataReturnMode.AS_INPUT,
         allow_unsafe_jscode=False, theme="streamlit",
         custom_css=custom, show_toolbar=False, show_search=False,
@@ -228,7 +279,6 @@ def status_region(summary: list[tuple[str, str]]) -> None:
     """
     if not summary:
         return
-    _inject_css()
     cols = st.columns(len(summary))
     for col, (label, value) in zip(cols, summary):
         with col:
