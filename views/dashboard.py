@@ -15,6 +15,7 @@ import streamlit as st
 
 from modules import db, ui
 from views import workspace
+from views.common import erp
 from views.common import scaffold
 
 # 버킷 표시 순서와 대표 색상(카테고리 accent — 색만이 아닌 라벨 병기로 이중 부호화).
@@ -76,7 +77,13 @@ def render(user: dict) -> None:
         _render_user(user)
         return
 
-    scaffold.page_chrome_for("dashboard", SCREEN_ARCHETYPE, role=role)
+    erp.screen_frame(
+        SCREEN_ARCHETYPE,
+        title="대시보드",
+        desc="오늘 근무 현황과 근무표 등록 현황을 확인합니다.",
+        breadcrumb="홈 › 대시보드",
+        badges=scaffold.mode_badge(),
+    )
     the_date = _date_nav_bar()
     _inject_board_style()
 
@@ -89,6 +96,10 @@ def render(user: dict) -> None:
             head="당일 근무 현황",
         )
         return
+
+    # 영역 순서(§0.3): title → top actions → status(KPI) → primary(그룹 보드).
+    # 새로고침은 별도 wiring 없이 rerun 만으로 아래 근무 조회가 재실행된다.
+    erp.top_action_bar("dashboard", [("새로고침", "default")])
 
     # 조직 조회(get_org_groups/dept_group_map/team_name 등)도 오류 처리 범위에 포함한다
     # — 최초 근무 조회만 감싸면 보드 구성 중 데이터소스 오류가 화면 전체 예외가 된다.
@@ -110,7 +121,7 @@ def render(user: dict) -> None:
         st.error("근무 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    ui.summary_cards([
+    erp.status_region([
         ("당일 근무", f"{totals['주간'] + totals['야간']}명"),
         ("주간", f"{totals['주간']}명"),
         ("야간", f"{totals['야간']}명"),
