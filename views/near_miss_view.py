@@ -1,8 +1,11 @@
 """아차사고(near-miss) 조회 — 보고서 목록(조회 전용).
 
-DESIGN.md §0 READ_VIEW 크롬: 브레드크럼 → 제목 → 조회 조건바(발생일 기간·부서·등급·
-상태·원인) → 읽기 그리드 → 범례·요약. 저장/평가 액션은 이 화면의 책임이 아니다
+DESIGN.md §0 READ_VIEW / KP-standard: title → top actions(조회·새로고침) → 조건 패널
+(col-N 우측 인라인 라벨) → 읽기 그리드 → 요약. 저장/평가 액션은 이 화면의 책임이 아니다
 (별도 평가 화면 소관) — 여기는 순수 조회다.
+
+구조는 공용 중립 키트(``views/common/erp``)를 쓰고, 데이터/권한 로직(_scope_for
+fail-closed·readiness 3-state·facade 전용)은 그대로 유지한다.
 
 파사드 계약: ``modules/db.py`` 의 ``get_near_miss_reports(filters)`` 만 호출하고
 repository 를 직접 부르지 않는다(자연키 계약, NEAR_MISS_COLUMNS).
@@ -19,6 +22,7 @@ import streamlit as st
 
 from modules import auth, db, ui
 from views import workspace
+from views.common import erp
 from views.common import scaffold
 from views.master import TOKENS
 from views.master.lifecycle import Readiness, ReadinessState
@@ -53,13 +57,31 @@ _GRADE_COLOR = {
     "C": TOKENS["info"], "D": TOKENS["ink-3"],
 }
 
+_DISPLAY_COLUMNS = [
+    "보고번호", "작업명", "신고자", "소속", "발생일",
+    "제안등급", "확정등급", "상태", "원인",
+]
+
+# 컬럼 폭(1366×768에서 9열이 가로 오버플로 없이 들어가도록 — 작업명·소속은 flex 로 잔여 폭 흡수).
+_COL_CONFIG = {
+    "보고번호": {"width": 108},
+    "작업명": {"flex": 2, "minWidth": 160},
+    "신고자": {"width": 92},
+    "소속": {"flex": 1, "minWidth": 96},
+    "발생일": {"width": 104},
+    "제안등급": {"width": 84},
+    "확정등급": {"width": 84},
+    "상태": {"width": 88},
+    "원인": {"width": 92},
+}
+
 
 def render(user: dict) -> None:
     # nav.py 에 아직 라우팅되지 않은 화면(B2 routing 이후 예정)이므로 page_chrome_for
     # (modules/nav.py 의 그룹/라벨을 조회)가 아니라 page_chrome 에 제목/설명/브레드크럼을
     # 직접 넘긴다 — nav.py 미등록 page_id 로 인한 KeyError(group_of)를 피한다. B2 routing
     # 후 nav.py 라벨과의 정합은 통합 담당(§0 크롬 계약은 page_chrome 실호출로 이미 충족).
-    scaffold.page_chrome(
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="아차사고 조회",
         desc="아차사고 보고서 목록을 조회합니다.",
@@ -76,6 +98,8 @@ def render(user: dict) -> None:
         )
         return
 
+    # readiness 배너만 표시하고 차단하지 않는다(READ_VIEW — facade 가 미적용 시 빈 프레임으로
+    # 안전하게 저하되므로 조회 자체는 막지 않는다).
     _readiness().banner()
 
     try:
@@ -94,7 +118,11 @@ def render(user: dict) -> None:
         )
         return
 
-    q, clicked = _filter_bar(scope, manager_dept, dept_names)
+    # 영역 순서(§0.3): title → top actions(조회·새로고침) → conditions → primary → status.
+    acts = erp.top_action_bar(_PAGE_ID, [("조회", "primary"), ("새로고침", "default")])
+    clicked = bool(acts.get("조회") or acts.get("새로고침"))
+    q = _collect_conditions(scope, manager_dept, dept_names)
+
     saved = workspace.run_query(_PAGE_ID, clicked, q)
     if saved is None:
         ui.empty_state("조회 조건을 지정하고 [조회]를 눌러 아차사고 보고서를 확인하세요.", head="아차사고 조회")
@@ -102,6 +130,7 @@ def render(user: dict) -> None:
 
     # MANAGER 부서 범위는 저장된 조회조건(이전 세션 값일 수 있음)에도 항상 재적용한다
     # (workspace.schedule_screen 과 동일한 fail-closed 관행 — 위젯 잠금만 믿지 않는다).
+    # 이 override 는 누수 방지의 핵심 통제이므로 매 렌더·facade 호출 직전에 무조건 실행한다.
     if scope == "scoped":
         saved = {**saved, "dept": manager_dept}
 
@@ -130,17 +159,30 @@ def render(user: dict) -> None:
     except Exception:
         st.error("사용자·부서 정보를 불러오지 못해 목록을 표시할 수 없습니다. 잠시 후 다시 확인하세요.")
         return
-    ui.panel_head("아차사고 보고서 목록", f"조회 결과 {len(display)}건")
-    styled = display.style.map(_style_grade, subset=["제안등급", "확정등급"])
-    styled = styled.map(_style_status, subset=["상태"])
-    st.dataframe(
-        styled, width="stretch", hide_index=True,
-        height=workspace.list_height(len(display)),
-    )
-    st.write("")
 
+    # primary — 읽기 그리드(색은 보조 신호, 한글 라벨 텍스트는 항상 유지).
+    st.markdown(
+        f"<div style='font-weight:600;color:{TOKENS['ink']};margin:2px 0 6px;'>"
+        f"아차사고 보고서 목록 "
+        f"<span style='color:{TOKENS['ink-2']};font-weight:400;'>· 조회 결과 {len(display)}건</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    status_rules = {label: _STATUS_COLOR[code] for code, label in _STATUS_LABEL.items()}
+    erp.read_grid(
+        display, columns=_DISPLAY_COLUMNS, key=f"{_PAGE_ID}_grid",
+        col_config=_COL_CONFIG,
+        color_rules={
+            "제안등급": _GRADE_COLOR,
+            "확정등급": _GRADE_COLOR,
+            "상태": status_rules,
+        },
+    )
+
+    # status — 요약(현재 필터된 결과 기준, raw status 코드로 집계).
+    st.write("")
     counts = df["status"].astype(str)
-    ui.summary_cards([
+    erp.status_region([
         ("조회 건수", f"{len(df)}건"),
         ("평가 대기", f"{counts.isin(['SUBMITTED', 'IN_REVIEW']).sum()}건"),
         ("평가완료", f"{(counts == 'EVALUATED').sum()}건"),
@@ -173,67 +215,56 @@ def _scope_for(user: dict) -> tuple[str, str | None, dict]:
     return "all", None, dept_names
 
 
-# ---------- 조회 조건바 ----------
-def _filter_bar(scope: str, manager_dept: str | None, dept_names: dict) -> tuple[dict, bool]:
-    with ui.card():
-        r1 = st.columns([1.0, 1.15, 1.15, 1.5, 1.0], vertical_alignment="bottom")
-        with r1[0]:
-            period_on = st.checkbox("기간 지정", value=False, key=f"{_PAGE_ID}_period_on")
-        with r1[1]:
-            date_from = st.date_input(
-                "발생일(시작)", value=date.today() - timedelta(days=90),
-                key=f"{_PAGE_ID}_from", disabled=not period_on,
-            )
-        with r1[2]:
-            date_to = st.date_input(
-                "발생일(종료)", value=date.today(),
-                key=f"{_PAGE_ID}_to", disabled=not period_on,
-            )
-        with r1[3]:
-            if scope == "scoped":
-                dept = st.selectbox(
-                    "부서", [manager_dept],
-                    format_func=lambda c: dept_names.get(c, c),
-                    key=f"{_PAGE_ID}_dept", disabled=True,
-                )
-            else:
-                dept_opts = [workspace.ALL] + sorted(dept_names)
-                dept = st.selectbox(
-                    "부서", dept_opts,
-                    format_func=lambda c: dept_names.get(c, c),
-                    key=f"{_PAGE_ID}_dept",
-                )
-        with r1[4]:
-            clicked = st.button("조회", key=f"{_PAGE_ID}_go", type="primary", width="stretch")
+# ---------- 조회 조건(col-N 우측 인라인 라벨) ----------
+def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) -> dict:
+    """조건 패널을 렌더하고 facade 조회조건 dict 를 만든다.
 
-        r2 = st.columns([1.0, 1.0, 1.0, 3.0])
-        with r2[0]:
-            grade = st.selectbox(
-                "확정등급", [workspace.ALL] + list(db.NEAR_MISS_GRADES), key=f"{_PAGE_ID}_grade",
-            )
-        with r2[1]:
-            status = st.selectbox(
-                "상태", [workspace.ALL] + list(db.NEAR_MISS_STATUSES),
-                format_func=lambda v: _STATUS_LABEL.get(v, v) if v != workspace.ALL else v,
-                key=f"{_PAGE_ID}_status",
-            )
-        with r2[2]:
-            cause = st.selectbox(
-                "원인", [workspace.ALL] + list(db.NEAR_MISS_CAUSE_CODES),
-                format_func=lambda v: _CAUSE_LABEL.get(v, v) if v != workspace.ALL else v,
-                key=f"{_PAGE_ID}_cause",
-            )
+    필드 key 는 기존 위젯 key suffix 와 동일하게 유지해 세션 상태를 보존한다
+    (period_on/from/to/dept/grade/status/cause). 기간 미지정 시 날짜 필드는 비활성.
+    """
+    period_on = bool(st.session_state.get(f"{_PAGE_ID}_period_on", False))
 
-    params = {
-        "dept": dept,
-        "grade": grade,
-        "status": status,
-        "cause": cause,
-        "period_on": period_on,
-        "date_from": date_from.isoformat() if period_on else "",
-        "date_to": date_to.isoformat() if period_on else "",
+    if scope == "scoped":
+        dept_field = erp.Field(
+            key="dept", label="부서", kind="select",
+            options=[manager_dept], disabled=True,
+            format_func=lambda c: dept_names.get(c, c),
+        )
+    else:
+        dept_field = erp.Field(
+            key="dept", label="부서", kind="select",
+            options=[workspace.ALL] + sorted(dept_names),
+            format_func=lambda c: dept_names.get(c, c),
+        )
+
+    fields = [
+        erp.Field(key="period_on", label="기간 지정", kind="checkbox", value=False),
+        erp.Field(key="from", label="발생일(시작)", kind="date",
+                  value=date.today() - timedelta(days=90), disabled=not period_on),
+        erp.Field(key="to", label="발생일(종료)", kind="date",
+                  value=date.today(), disabled=not period_on),
+        dept_field,
+        erp.Field(key="grade", label="확정등급", kind="select",
+                  options=[workspace.ALL] + list(db.NEAR_MISS_GRADES)),
+        erp.Field(key="status", label="상태", kind="select",
+                  options=[workspace.ALL] + list(db.NEAR_MISS_STATUSES),
+                  format_func=lambda v: _STATUS_LABEL.get(v, v) if v != workspace.ALL else v),
+        erp.Field(key="cause", label="원인", kind="select",
+                  options=[workspace.ALL] + list(db.NEAR_MISS_CAUSE_CODES),
+                  format_func=lambda v: _CAUSE_LABEL.get(v, v) if v != workspace.ALL else v),
+    ]
+    v = erp.condition_panel(_PAGE_ID, fields, cols=3)
+
+    on = bool(v["period_on"])
+    return {
+        "dept": v["dept"],
+        "grade": v["grade"],
+        "status": v["status"],
+        "cause": v["cause"],
+        "period_on": on,
+        "date_from": v["from"].isoformat() if on else "",
+        "date_to": v["to"].isoformat() if on else "",
     }
-    return params, clicked
 
 
 def _has_filters(q: dict) -> bool:
@@ -317,19 +348,3 @@ def _to_display(df: pd.DataFrame) -> pd.DataFrame:
             "원인": _CAUSE_LABEL.get(_clean(r.get("cause_code")), _clean(r.get("cause_code")) or "-"),
         })
     return pd.DataFrame(rows)
-
-
-def _style_grade(value: str) -> str:
-    color = _GRADE_COLOR.get(str(value).strip())
-    if not color:
-        return ""
-    return f"background-color:{color}22; color:{TOKENS['ink']}; font-weight:600;"
-
-
-def _style_status(value: str) -> str:
-    # 표시값은 한글 라벨이므로 라벨→색 역맵으로 조회한다(코드 자체는 바꾸지 않음).
-    label_to_color = {label: _STATUS_COLOR[code] for code, label in _STATUS_LABEL.items()}
-    color = label_to_color.get(str(value).strip())
-    if not color:
-        return ""
-    return f"background-color:{color}22; color:{TOKENS['ink']}; font-weight:600;"

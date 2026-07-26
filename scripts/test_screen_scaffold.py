@@ -198,12 +198,17 @@ def render_reachable(src: str) -> tuple[set[str] | None, set[str]]:
     return reach_names, reach_deleg
 
 
+# 크롬 진입점: 직접 호출(page_chrome/page_chrome_for) 또는 공용 중립 키트의
+# ``screen_frame``(KP-standard §0.2 — 내부에서 page_chrome 을 실호출하는 헤더 진입점).
+_CHROME_ENTRIES = {"page_chrome", "page_chrome_for", "screen_frame"}
+
+
 def _has_head(names: set[str]) -> bool:
-    return bool(names & {"master_screen_head", "page_chrome", "page_chrome_for"})
+    return bool(names & ({"master_screen_head"} | _CHROME_ENTRIES))
 
 
 def _has_page_chrome(names: set[str]) -> bool:
-    return bool(names & {"page_chrome", "page_chrome_for"})
+    return bool(names & _CHROME_ENTRIES)
 
 
 def has_editgrid_stack(names: set[str]) -> bool:
