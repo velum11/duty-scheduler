@@ -41,6 +41,7 @@ import streamlit as st
 from st_aggrid import JsCode
 
 from modules import db
+from views.common import erp
 from views.master import (
     ADD,
     DELETE,
@@ -65,7 +66,6 @@ from views.master import (
     live_rows,
     master_action_bar,
     master_grid_height,
-    master_screen_head,
     mode_badge_html,
     render_master_grid,
     run_save,
@@ -224,11 +224,12 @@ _DRILL_CLICK = JsCode(
 
 
 def render(user: dict) -> None:
-    master_screen_head(
-        "조직 관리",
-        "그룹 → 부서 → 조(운영단위)를 가로 3단 시트로 관리합니다. 상위를 선택하면 하위가 열립니다.",
+    erp.screen_frame(
+        SCREEN_ARCHETYPE,
+        title="조직 관리",
+        desc="그룹 → 부서 → 조(운영단위)를 가로 3단 시트로 관리합니다. 상위를 선택하면 하위가 열립니다.",
         breadcrumb="기준정보 › 조직 관리",
-        mode_badge=_head_badges(),
+        badges=_head_badges(),
     )
     st.markdown(_ORG_PAGE_CSS, unsafe_allow_html=True)
 
@@ -244,13 +245,17 @@ def render(user: dict) -> None:
     refresh_dept = _OD.take_action(REFRESH)
     refresh_unit = _OU.take_action(REFRESH)
 
-    with st.container(key="org__filter"):
-        f1, f2, _sp = st.columns([1.4, 3.0, 5.6], vertical_alignment="bottom")
-        active = f1.selectbox("사용 여부", _STATUS, key="og_active", label_visibility="collapsed")
-        search = f2.text_input(
-            "검색", key="og_search", placeholder="코드·명칭 검색", label_visibility="collapsed",
-        )
-    filt = {"active": active, "search": search.strip()}
+    cond = erp.condition_panel(
+        "org",
+        [
+            erp.Field(key="active", label="사용 여부", kind="select", options=_STATUS,
+                     widget_key="og_active"),
+            erp.Field(key="search", label="검색", kind="text",
+                     widget_key="og_search", placeholder="코드·명칭 검색"),
+        ],
+        cols=2,
+    )
+    filt = {"active": cond["active"], "search": str(cond["search"]).strip()}
 
     # 드릴다운 선택 상태 — 상단 selectbox 없이 표 안의 행 클릭으로만 정한다. 선택은 안정
     # 코드키(group_code/dept_code)로 session_state 에 보관하고, 저장된 행이 사라지면 해제한다.
