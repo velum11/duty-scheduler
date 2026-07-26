@@ -65,7 +65,12 @@ def test_render_smoke() -> None:
     from views import master_work_types
     src = inspect.getsource(master_work_types)
     check("공통 기반 views.master 사용", "from views import master" in src or "views.master" in src)
-    check("공통 헤더(master_screen_head) 사용", "master_screen_head" in src)
+    # 헤더 크롬은 공통 기반을 직접(master_screen_head) 또는 중립 키트(erp.screen_frame —
+    # 내부적으로 scaffold.page_chrome → master.master_screen_head 를 호출)를 통해 쓴다.
+    # KP-standard 구조 이전(§0.2) 후에도 최종 렌더 계층은 동일 함수다(test_screen_scaffold.py
+    # 가 render-path AST 로 이를 별도 검증).
+    check("공통 헤더(master_screen_head/erp.screen_frame) 사용",
+          "master_screen_head" in src or "screen_frame" in src)
     check("공통 액션바(master_action_bar) 사용", "master_action_bar" in src)
     check("공통 그리드(render_master_grid) 사용", "render_master_grid" in src)
     check("동적 그리드 높이(master_grid_height) 사용", "master_grid_height" in src)

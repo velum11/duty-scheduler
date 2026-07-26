@@ -119,7 +119,13 @@ def form_submit(label: str, *, disabled: bool = False, help: str | None = None) 
 # ============================================================ condition_panel
 @dataclass
 class Field:
-    """조건 패널의 한 필드. select/date/checkbox/text."""
+    """조건 패널의 한 필드. select/date/checkbox/text.
+
+    ``key``: 반환 dict(``condition_panel`` 결과)의 논리 키.
+    ``widget_key``: 지정 시 st 세션 위젯 키를 **정확히 그 값**으로 쓴다(기본은
+    ``f"{page_id}_{key}"``). 기존 화면이 load-bearing 세션 키(예: revert 로직·테스트가
+    이름으로 직접 참조하는 ``og_active``/``se_y`` 등)를 유지해야 할 때 사용한다.
+    """
     key: str
     label: str
     kind: str = "select"
@@ -128,10 +134,12 @@ class Field:
     disabled: bool = False
     format_func: Callable | None = None
     help: str | None = None
+    widget_key: str | None = None
+    placeholder: str | None = None
 
 
 def _render_widget(page_id: str, f: Field):
-    wkey = f"{page_id}_{f.key}"
+    wkey = f.widget_key if f.widget_key else f"{page_id}_{f.key}"
     if f.kind == "checkbox":
         return st.checkbox(f.label, value=bool(f.value), key=wkey,
                            label_visibility="collapsed", disabled=f.disabled, help=f.help)
@@ -140,10 +148,12 @@ def _render_widget(page_id: str, f: Field):
                              label_visibility="collapsed", disabled=f.disabled, help=f.help)
     if f.kind == "text":
         return st.text_input(f.label, value=f.value or "", key=wkey,
-                             label_visibility="collapsed", disabled=f.disabled, help=f.help)
+                             label_visibility="collapsed", disabled=f.disabled,
+                             help=f.help, placeholder=f.placeholder)
     return st.selectbox(f.label, f.options, key=wkey,
                         format_func=f.format_func or (lambda x: x),
-                        label_visibility="collapsed", disabled=f.disabled, help=f.help)
+                        label_visibility="collapsed", disabled=f.disabled,
+                        help=f.help, placeholder=f.placeholder)
 
 
 def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3) -> dict:

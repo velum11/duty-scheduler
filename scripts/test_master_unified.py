@@ -74,15 +74,20 @@ _SRC = {label: inspect.getsource(mod) for label, mod in _SCREENS.items()}
 # 1) 세 화면이 모두 신규 공통 기반(views/master)으로 재구현됨 (정적)
 # ===========================================================================
 print("공통 기반 재구현 — 세 화면이 views/master 골격을 실제로 사용")
-# 공통 기반이 제공하는 핵심 심볼(제목/액션/그리드/저장/건수/dirty)을 실제로 참조하는가.
+# 공통 기반이 제공하는 핵심 심볼(액션/그리드/저장/건수/dirty)을 실제로 참조하는가.
+# 헤더는 별도 검사(아래) — master_screen_head 직접 호출 또는 중립 키트 erp.screen_frame
+# (내부적으로 scaffold.page_chrome → master.master_screen_head 를 호출, KP-standard §0.2
+# 구조 이전) 중 하나면 동등하게 공통 기반을 쓰는 것으로 인정한다.
 _COMMON_SYMBOLS = (
-    "master_screen_head", "master_action_bar", "render_master_grid",
+    "master_action_bar", "render_master_grid",
     "master_grid_height", "MasterGridSpec", "run_save", "PersistResult",
     "dirty_total", "count_strip",
 )
 for label, src in _SRC.items():
     check(f"{label}: 공통 기반 패키지 import", "from views.master import" in src
           or "from views import master" in src)
+    check(f"{label}: 공통 헤더 크롬 사용 [master_screen_head/erp.screen_frame]",
+          "master_screen_head" in src or "screen_frame" in src)
     for sym in _COMMON_SYMBOLS:
         check(f"{label}: 공통 심볼 사용 [{sym}]", sym in src)
 

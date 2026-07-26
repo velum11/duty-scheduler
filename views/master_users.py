@@ -36,6 +36,7 @@ import streamlit as st
 from st_aggrid import JsCode
 
 from modules import db
+from views.common import erp
 from views.master import (
     ADD,
     DELETE,
@@ -61,7 +62,6 @@ from views.master import (
     master_action_bar,
     master_grid_height,
     master_row_class_rules,
-    master_screen_head,
     mode_badge_html,
     render_master_grid,
     run_save,
@@ -763,11 +763,12 @@ def render(user: dict) -> None:
     teams_json = json.dumps(_dept_team_options(teams, dept_labels), ensure_ascii=False)
 
     readiness = _readiness()
-    master_screen_head(
-        "사용자 관리",
-        "사번·소속·권한을 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
+    erp.screen_frame(
+        SCREEN_ARCHETYPE,
+        title="사용자 관리",
+        desc="사번·소속·권한을 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
         breadcrumb="기준정보 › 사용자 관리",
-        mode_badge=_head_badges(readiness),
+        badges=_head_badges(readiness),
     )
     # readiness 배너(NOT_READY/PROBE_ERROR 만) + 확인 실패 시 재프로브 — 조직 화면과 동일 UX(§25).
     readiness.banner()
@@ -778,24 +779,35 @@ def render(user: dict) -> None:
 
     refresh = state.take_action(REFRESH)
 
-    with st.container(key=f"{PAGE_ID}__filter"):
-        f1, f2, f3, f4 = st.columns([1.2, 1.6, 1.4, 3.0], vertical_alignment="bottom")
-        active = f1.selectbox("재직 여부", _STATUS, key=_F_ACTIVE, label_visibility="collapsed")
-        dept = f2.selectbox(
-            "부서", [_ALL] + list(dept_names),
-            format_func=lambda c: "전체 부서" if c == _ALL else dept_names.get(c, c),
-            key=_F_DEPT, label_visibility="collapsed",
-        )
-        role = f3.selectbox(
-            "권한", [_ALL] + list(_ROLE_TO_LABEL),
-            format_func=lambda c: "전체 권한" if c == _ALL else _ROLE_TO_LABEL.get(c, c),
-            key=_F_ROLE, label_visibility="collapsed",
-        )
-        search = f4.text_input(
-            "검색", key=_F_SEARCH, placeholder="사번·성명 검색", label_visibility="collapsed",
-        )
-
-    params = {"active": active, "dept": dept, "role": role, "search": str(search).strip()}
+    # ---- 조건 패널(우측 인라인 라벨, KP-standard) — 위젯 key 는 기존 필터 세션 key
+    #      상수(_F_ACTIVE/_F_DEPT/_F_ROLE/_F_SEARCH)를 widget_key 로 그대로 지정해
+    #      restore_filters 되돌리기 경로를 변경 없이 유지한다(구조만 이전). ----
+    cond = erp.condition_panel(
+        PAGE_ID,
+        [
+            erp.Field(key="active", label="재직 여부", kind="select", options=_STATUS,
+                     widget_key=_F_ACTIVE),
+            erp.Field(
+                key="dept", label="부서", kind="select",
+                options=[_ALL] + list(dept_names),
+                format_func=lambda c: "전체 부서" if c == _ALL else dept_names.get(c, c),
+                widget_key=_F_DEPT,
+            ),
+            erp.Field(
+                key="role", label="권한", kind="select",
+                options=[_ALL] + list(_ROLE_TO_LABEL),
+                format_func=lambda c: "전체 권한" if c == _ALL else _ROLE_TO_LABEL.get(c, c),
+                widget_key=_F_ROLE,
+            ),
+            erp.Field(key="search", label="검색", kind="text",
+                     widget_key=_F_SEARCH, placeholder="사번·성명 검색"),
+        ],
+        cols=2,
+    )
+    params = {
+        "active": cond["active"], "dept": cond["dept"], "role": cond["role"],
+        "search": str(cond["search"]).strip(),
+    }
     ready = readiness.write_enabled  # READY 에서만 True — org_schema_ready() bool 게이트와 동치
 
     # dirty 인식 재적재 — 미저장 초안이 있으면 필터/새로고침 시 무경고 소실 대신 확인을 요구한다.

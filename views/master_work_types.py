@@ -31,6 +31,7 @@ from st_aggrid import JsCode
 
 from modules import db
 from views import master
+from views.common import erp
 from views.master import (
     ADD,
     CORE_META,
@@ -335,21 +336,29 @@ def render(user: dict) -> None:
 
     sample = db.is_sample_mode()
     mode_badge = style.mode_badge_html(connected=not sample, sample=sample)
-    master.master_screen_head(
-        "근무형태 관리",
-        "근무형태(코드·명칭·약칭·색상)를 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
+    erp.screen_frame(
+        SCREEN_ARCHETYPE,
+        title="근무형태 관리",
+        desc="근무형태(코드·명칭·약칭·색상)를 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
         breadcrumb="기준정보 › 근무형태 관리",
-        mode_badge=mode_badge,
+        badges=mode_badge,
     )
     st.markdown(_EXTRA_CSS, unsafe_allow_html=True)  # 미리보기·오류 목록 보조 스타일(항상 주입)
 
-    # ---- 필터 ----
-    with st.container(key=f"{PAGE_ID}__filter"):
-        f1, f2, _sp = st.columns([1.4, 3.0, 5.6], vertical_alignment="bottom")
-        active = f1.selectbox("사용 여부", _STATUS, key=state.key("f_active"), label_visibility="collapsed")
-        search = f2.text_input("검색", key=state.key("f_search"),
-                               placeholder="코드·명칭·약칭 검색", label_visibility="collapsed")
-    params = {"active": active, "search": search.strip()}
+    # ---- 조건 패널(우측 인라인 라벨, KP-standard) — 위젯 key 는 기존 DraftState 스코프
+    #      키(state.key("f_active")/"f_search")를 widget_key 로 그대로 지정해 세션 상태를
+    #      보존한다(구조만 이전, 조회/재적재 로직 불변). ----
+    cond = erp.condition_panel(
+        PAGE_ID,
+        [
+            erp.Field(key="active", label="사용 여부", kind="select", options=_STATUS,
+                     widget_key=state.key("f_active")),
+            erp.Field(key="search", label="검색", kind="text",
+                     widget_key=state.key("f_search"), placeholder="코드·명칭·약칭 검색"),
+        ],
+        cols=2,
+    )
+    params = {"active": cond["active"], "search": str(cond["search"]).strip()}
 
     # ---- 재적재 결정(dirty 무경고 소실 금지, §17) ----
     decision = state.resolve_reload(params, refresh=False, dirty=state.is_dirty())
