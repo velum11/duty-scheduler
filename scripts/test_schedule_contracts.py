@@ -716,25 +716,37 @@ def test_schedule_view_manager_scope_enforced() -> None:
     from streamlit.testing.v1 import AppTest
     from views import workspace
 
-    def run(user, stale_q):
-        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
-        at.session_state["user"] = user
-        at.session_state["nav_page"] = "schedule_view"
-        at.session_state[db._ASSIGNMENTS_STORE] = db._typed_empty_frame(
-            db.SCHEDULE_ASSIGNMENT_COLUMNS
-        )  # 스냅샷 없음 → 현재 소속 표시
-        at.session_state["q_schedule_view"] = stale_q
-        return at.run()
+    # KP-standard(views/common/erp) 이관 이후 그리드는 AgGrid 로 렌더되어
+    # AppTest.dataframe(pandas Styler/st.dataframe 전용 계약)에 값이 실리지 않는다.
+    # 렌더 계층(어떤 위젯으로 그렸는지)이 아니라 스코프 계약(fail-closed 재적용이 실제
+    # 계산에 반영됐는지)을 고정하기 위해, HARD BOUNDARY 로 보존된
+    # ``workspace._build_month_grid``(편집하지 않음)를 spy 로 감싸 그 함수가 받은 q 와
+    # 실제로 계산해 낸 grid(원본 로직 그대로 위임 호출)를 함께 캡처한다. 이렇게 하면
+    # "MANAGER 는 타 부서를 볼 수 없다"는 의도를 렌더러 교체와 무관하게, 실제 필터링된
+    # 데이터로 검증할 수 있다(약화 아님 — 오히려 원본 테스트와 동일한 데이터 단언).
+    captured: dict = {}
+    orig_build = workspace._build_month_grid
 
-    def grid_of(at):
-        for d in at.dataframe:
-            try:
-                cols = list(d.value.columns)
-            except Exception:
-                continue
-            if "사번" in cols and "부서" in cols:
-                return d.value
-        return None
+    def _spy(q, display_of=None):
+        result = orig_build(q, display_of)
+        captured["q"] = dict(q)
+        captured["grid"] = result[0]
+        return result
+
+    def run(user, stale_q):
+        captured.clear()
+        workspace._build_month_grid = _spy
+        try:
+            at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+            at.session_state["user"] = user
+            at.session_state["nav_page"] = "schedule_view"
+            at.session_state[db._ASSIGNMENTS_STORE] = db._typed_empty_frame(
+                db.SCHEDULE_ASSIGNMENT_COLUMNS
+            )  # 스냅샷 없음 → 현재 소속 표시
+            at.session_state["q_schedule_view"] = stale_q
+            return at.run()
+        finally:
+            workspace._build_month_grid = orig_build
 
     def md_of(at):
         return " ".join(m.value for m in at.markdown)
@@ -746,16 +758,21 @@ def test_schedule_view_manager_scope_enforced() -> None:
     # (d) 유효 dept MANAGER(1002/PET1) → scoped(잔존 ALL 을 본인 부서로 축소)
     at = run({"role": "MANAGER", "dept_code": "PET1", "emp_no": "1002", "name": "이책임"}, stale)
     check("유효 MANAGER 잔존조회: 예외 없음", not at.exception)
-    grid = grid_of(at)
-    check("유효 MANAGER 잔존조회: 그리드 렌더", grid is not None)
-    if grid is not None:
+    check("유효 MANAGER 잔존조회: _build_month_grid 호출(그리드 계산됨)", "grid" in captured)
+    if "grid" in captured:
+        check("잔존 ALL → PET1 축소: _build_month_grid 가 받은 q['dept']=='PET1'",
+              captured["q"].get("dept") == "PET1")
+        check("잔존 ALL → PET1 축소: q['team'] 초기화((전체))",
+              captured["q"].get("team") == ALL)
+        grid = captured["grid"]
         emps = set(grid["사번"].astype(str))
         depts_shown = set(grid["부서"].astype(str))
         check("잔존 ALL → PET1 축소: 타 부서 직원(1005/PET2) 제외", "1005" not in emps)
         check("잔존 ALL 축소: 본인 부서 직원(1003) 포함", "1003" in emps)
         check("표시 부서 PET1 단일(권한범위 강제)", depts_shown == {db.dept_name("PET1")})
 
-    # 차단 케이스: dept 가 유효하지 않으면 전체조회로 새지 않고 blocked(그리드 미렌더).
+    # 차단 케이스: dept 가 유효하지 않으면 전체조회로 새지 않고 blocked(_build_month_grid
+    # 자체가 호출되지 않아야 한다 — fail-closed 는 계산 이전에 막는다).
     for label, bad_dept in [
         ("빈 dept", ""),
         ("미존재 dept 코드", "NOPE"),
@@ -763,14 +780,19 @@ def test_schedule_view_manager_scope_enforced() -> None:
     ]:
         at_b = run({"role": "MANAGER", "dept_code": bad_dept, "emp_no": "9002", "name": "부서이상"}, stale)
         check(f"MANAGER {label}: 예외 없음", not at_b.exception)
-        check(f"MANAGER {label}: 그리드 미렌더(전체조회 아님)", grid_of(at_b) is None)
+        check(f"MANAGER {label}: _build_month_grid 미호출(전체조회로 새지 않음)",
+              "grid" not in captured)
         check(f"MANAGER {label}: 차단 안내 표시", "소속 부서가 유효하지 않아" in md_of(at_b))
 
     # (e) ADMIN 은 잔존 ALL 로 전체(PET1+PET2) 조회 유지(부서 미확정이어도 무영향)
     at2 = run({"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"}, stale)
-    grid2 = grid_of(at2)
-    check("ADMIN: 잔존 ALL 전체 유지(다중 부서 표시)",
-          grid2 is not None and len(set(grid2["부서"].astype(str))) >= 2)
+    check("ADMIN: _build_month_grid 호출(전체 조회)", "grid" in captured)
+    if "grid" in captured:
+        check("ADMIN: 잔존 ALL 유지(_build_month_grid 가 받은 q['dept']=='(전체)')",
+              captured["q"].get("dept") == ALL)
+        grid2 = captured["grid"]
+        check("ADMIN: 잔존 ALL 전체 유지(다중 부서 표시)",
+              len(set(grid2["부서"].astype(str))) >= 2)
 
 
 def main() -> int:

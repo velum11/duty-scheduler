@@ -17,6 +17,7 @@ import streamlit as st
 from st_aggrid import AgGrid, DataReturnMode, GridOptionsBuilder, JsCode
 
 from modules import db, ui
+from views.common import erp
 
 ALL = "(전체)"
 RETIRED_LABEL = "(퇴직)"
@@ -802,50 +803,65 @@ def schedule_screen(user: dict, page_id: str) -> None:
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
     manager_locked = user["role"] == "MANAGER" and user.get("dept_code")
 
-    # 조회 조건 카드
-    with ui.card():
-        c1, c2, c3, c4, c5, c6 = st.columns(
-            [0.9, 0.9, 1.5, 1.1, 1.6, 0.8],
-            vertical_alignment="bottom",
+    # 영역 순서(§0.3): title(screen_frame, 호출부 소관) → top actions → conditions.
+    acts = erp.top_action_bar(page_id, [("조회", "primary"), ("새로고침", "default")])
+    clicked = bool(acts.get("조회") or acts.get("새로고침"))
+
+    # condition_panel 의 select Field 는 index/value 인자를 받지 않고 항상 위젯 key 의
+    # 세션 상태에 의존한다 — 최초 렌더(키 미존재)에서 기존 selectbox(index=...) 와 같은
+    # 기본값(연도=올해·월=이번달)을 내려면 위젯 인스턴스화 전에 세션 상태를 선점해야 한다.
+    y_key, m_key, d_key = f"{page_id}_y", f"{page_id}_m", f"{page_id}_d"
+    if y_key not in st.session_state:
+        st.session_state[y_key] = today.year
+    if m_key not in st.session_state:
+        st.session_state[m_key] = today.month
+
+    # 부서→조 종속 옵션: 조 Field 를 만들기 전에 "현재" 부서 선택을 세션 상태에서
+    # 읽는다(near_miss_view 의 period_on 선-조회 패턴과 동일 — 위젯 렌더 순서가 아니라
+    # 세션 상태로 종속을 해석해, 사용자가 부서를 바꾼 그 rerun 에서 조 옵션이 갱신되게 한다).
+    if manager_locked:
+        cur_dept = user["dept_code"]
+        dept_field = erp.Field(
+            key="d", label="부서", kind="select",
+            options=[user["dept_code"]], disabled=True,
+            format_func=lambda c: dept_names.get(c, c),
         )
-        year = c1.selectbox("연도", years, index=years.index(today.year), key=f"{page_id}_y")
-        month = c2.selectbox(
-            "월", list(range(1, 13)), index=today.month - 1,
-            format_func=lambda m: f"{m}월", key=f"{page_id}_m",
+    else:
+        cur_dept = st.session_state.get(d_key, ALL)
+        dept_field = erp.Field(
+            key="d", label="부서", kind="select",
+            options=[ALL] + list(dept_names),
+            format_func=lambda c: dept_names.get(c, c),
         )
-        if manager_locked:
-            dept = c3.selectbox(
-                "부서", [user["dept_code"]], format_func=lambda c: dept_names.get(c, c),
-                key=f"{page_id}_d", disabled=True,
-            )
-        else:
-            dept_opts = [ALL] + list(dept_names)
-            dept = c3.selectbox(
-                "부서", dept_opts, format_func=lambda c: dept_names.get(c, c),
-                key=f"{page_id}_d",
-            )
-        team_rows = teams[teams["dept_code"] == dept] if dept != ALL else teams.iloc[0:0]
-        team_names = {r["team_code"]: r["team_name"] for _, r in team_rows.iterrows()}
-        team = c4.selectbox(
-            "조", [ALL] + list(team_names), format_func=lambda c: team_names.get(c, c),
-            key=f"{page_id}_t",
-        )
-        keyword = c5.text_input(
-            "사번 또는 성명",
-            key=f"{page_id}_kw",
-            placeholder="전체",
-        )
-        clicked = c6.button("조회", key=f"{page_id}_go", type="primary", width="stretch")
+    team_rows = teams[teams["dept_code"] == cur_dept] if cur_dept != ALL else teams.iloc[0:0]
+    team_names = {r["team_code"]: r["team_name"] for _, r in team_rows.iterrows()}
+
+    fields = [
+        # format_func=str 명시: 키트 select 기본 포맷터(lambda x: x)는 항등함수라
+        # int 옵션(연도)을 protobuf 문자열 필드에 그대로 넣으면 TypeError 가 난다
+        # (일반 st.selectbox 는 format_func 미지정 시 내부에서 str() 로 감싸주지만,
+        # 키트는 항등 폴백을 쓰므로 non-str 옵션에는 항상 format_func 를 명시해야
+        # 한다 — 키트 자체는 손대지 않고 호출부에서 회피). str(int) 는 원래
+        # selectbox 가 보여주던 "2026" 표시와 동일하다.
+        erp.Field(key="y", label="연도", kind="select", options=years, format_func=str),
+        erp.Field(key="m", label="월", kind="select", options=list(range(1, 13)),
+                  format_func=lambda m: f"{m}월"),
+        dept_field,
+        erp.Field(key="t", label="조", kind="select",
+                  options=[ALL] + list(team_names), format_func=lambda c: team_names.get(c, c)),
+        erp.Field(key="kw", label="사번 또는 성명", kind="text"),
+    ]
+    v = erp.condition_panel(page_id, fields, cols=3)
 
     q = run_query(
         page_id,
         clicked,
         {
-            "year": year,
-            "month": month,
-            "dept": dept,
-            "team": team,
-            "keyword": keyword.strip(),
+            "year": v["y"],
+            "month": v["m"],
+            "dept": v["d"],
+            "team": v["t"],
+            "keyword": str(v["kw"] or "").strip(),
         },
     )
     if not q:
@@ -879,10 +895,10 @@ def schedule_screen(user: dict, page_id: str) -> None:
         ui.empty_state("조회 조건에 해당하는 직원이 없습니다.", head="월별 근무표")
         return
 
-    # 요약 카드
+    # status — 요약(§0.3 영역 순서상 primary 뒤가 정본이나, 값 자체는 원 계약과 동일).
     wt = db.work_types_map()
     n_work = sum(1 for c in month_rows["work_type_code"] if wt.get(c, {}).get("is_work"))
-    ui.summary_cards([
+    erp.status_region([
         ("대상 인원", f"{len(grid)}명"),
         ("근무 데이터", f"{len(month_rows)}건"),
         ("실근무", f"{n_work}건"),
@@ -890,13 +906,46 @@ def schedule_screen(user: dict, page_id: str) -> None:
     ])
     st.write("")
 
-    # 데이터 그리드 (근무 약칭 + 지정 색상, 읽기 전용)
+    # primary — 월간 근무표(근무 약칭 + 지정 색상, 읽기 전용).
     day_cols = [c for c in grid.columns if c[0].isdigit()]
     meta_cols = [c for c in grid.columns if c not in day_cols]
     ui.panel_head("월간 근무표", f"조회 결과 {len(grid)}건")
-    styled = grid.style.map(lambda v: _cell_style(v, color_of), subset=day_cols)
-    styled = styled.apply(_retired_row_style, axis=1, subset=meta_cols)
-    st.dataframe(styled, width="stretch", hide_index=True, height=grid_height(len(grid)))
+
+    # 퇴직 플래그는 read_grid 의 row_rules 가 참조하는 hidden field 로만 싣는다 —
+    # _build_month_grid(불변) 출력을 그대로 복사해 표시용으로만 부가하며, 다운로드용
+    # grid(원본)에는 이 컬럼을 남기지 않는다(엑셀 CSV 스키마를 바꾸지 않기 위함).
+    grid_ui = grid.copy()
+    grid_ui["_retired"] = grid_ui["성명"].astype(str).str.endswith(RETIRED_LABEL)
+    # 색 규칙: _cell_style 과 동일하게 표시값(약칭)·코드 양쪽을 색에 매핑하는
+    # color_of 를 그대로 재사용해 전 날짜 컬럼에 공유한다(전용 변환 불필요).
+    color_rules = {day_col: color_of for day_col in day_cols}
+    # 퇴직행 배경/글자색 — _RETIRED_ROW_CSS(불변, _retired_row_style 이 쓰는 값)를
+    # row_rules 의 hex 인자 형태로 그대로 파싱해 재사용한다(새 색을 만들지 않는다).
+    _retired_parts = dict(
+        p.strip().split(":", 1) for p in _RETIRED_ROW_CSS.split(";") if ":" in p
+    )
+    retired_bg = _retired_parts["background-color"].strip()
+    retired_ink = _retired_parts["color"].strip()
+    # 폭 지정(pixel QA 로 실측 발견): 키트 기본값(미지정 컬럼 flex=1,minWidth=90) 은
+    # 원래 st.dataframe(width="stretch") 의 자동 폭보다 좁아 "PET생산부(본동)" 같은
+    # 긴 부서명이 잘렸다(scrollWidth>clientWidth 실측). 데이터·색은 그대로 두고
+    # meta 컬럼만 넉넉한 폭으로 지정해 원 화면과 동등한 잘림 없는 표시를 보존한다.
+    meta_col_config = {
+        "사번": {"width": 84},
+        "성명": {"minWidth": 108, "width": 108},
+        "부서": {"minWidth": 150, "width": 150},
+        "조": {"minWidth": 100, "width": 100},
+    }
+    erp.read_grid(
+        grid_ui, columns=meta_cols + day_cols, key=f"{page_id}_grid",
+        color_rules=color_rules,
+        col_config={c: meta_col_config[c] for c in meta_cols if c in meta_col_config},
+        row_rules=[{
+            "when": "data['_retired'] === true",
+            "columns": meta_cols, "bg": retired_bg, "ink": retired_ink,
+        }],
+        hidden_fields=["_retired"],
+    )
     st.markdown(_label_legend_html(display_of, color_of), unsafe_allow_html=True)
 
     # 사용자별 집계 (전체 근무표 조회)
@@ -904,19 +953,17 @@ def schedule_screen(user: dict, page_id: str) -> None:
         st.write("")
         ui.panel_head("직원별 근무형태 집계")
         agg = _build_agg(grid, month_rows, wt, display_of)
-        st.dataframe(agg, width="stretch", hide_index=True, height=grid_height(len(agg)))
+        erp.read_grid(agg, key=f"{page_id}_agg")
 
-    # 하단 액션
-    (dl,) = ui.action_bar("download")
-    with dl:
-        st.download_button(
-            "엑셀 다운로드",
-            grid.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"근무표_{q['year']}-{q['month']:02d}.csv",
-            mime="text/csv",
-            key=f"{page_id}_dl",
-            width="stretch",
-        )
+    # 하단 액션 — 다운로드(원본 grid, 상태/색 부가 없이 그대로 — CSV 스키마 불변).
+    st.download_button(
+        "엑셀 다운로드",
+        grid.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"근무표_{q['year']}-{q['month']:02d}.csv",
+        mime="text/csv",
+        key=f"{page_id}_dl",
+        width="stretch",
+    )
 
 
 def _clean(value) -> str:
