@@ -18,6 +18,7 @@ from html import escape
 import streamlit as st
 
 from modules import auth, db, ui
+from views.common import erp
 from views.common import scaffold
 from views.master import TOKENS
 from views.master.lifecycle import Readiness, ReadinessState
@@ -44,10 +45,10 @@ _NEUTRAL = TOKENS["navy"]
 
 
 def render(user: dict) -> None:
-    # nav.py 에 아직 라우팅되지 않은 화면(B2 routing 이후 예정)이므로 page_chrome_for 대신
-    # page_chrome 에 제목/설명/브레드크럼을 직접 넘긴다 — near_miss_view.render 와 동일
-    # 사유(nav.py 미등록 page_id 로 인한 group_of KeyError 회피).
-    scaffold.page_chrome(
+    # near_miss_stats 는 nav.py 에 등록돼 있다(그룹 '아차사고' › '집계'). 제목/설명은
+    # page_chrome_for 대신 screen_frame 에 직접 넘긴다 — near_miss_view.render 와 동일하게
+    # nav 라벨과의 단일 출처 통일은 후속(통합 담당) 과제로 남겨둔다.
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="아차사고 집계",
         desc="아차사고 등급·부서·기간·원인·상태별 분포를 확인합니다.",
@@ -81,6 +82,11 @@ def render(user: dict) -> None:
         )
         return
     filters = {"dept_code": manager_dept} if scope == "scoped" else {}
+
+    # 영역 순서(§0.3): title → top actions → 지표카드(status) → 분포 패널(primary).
+    # 조회조건이 없는 화면이므로 새로고침 버튼은 별도 wiring 없이 rerun 만으로 아래 5건
+    # 통계 호출을 재실행한다.
+    erp.top_action_bar(_PAGE_ID, [("새로고침", "default")])
 
     try:
         status_counts = db.near_miss_stats(by="status", filters=filters)
@@ -153,7 +159,7 @@ def _kpi_cards(status_counts: dict, total: int) -> None:
     pending = status_counts.get("SUBMITTED", 0) + status_counts.get("IN_REVIEW", 0)
     evaluated = status_counts.get("EVALUATED", 0)
     closed_or_rejected = status_counts.get("CLOSED", 0) + status_counts.get("REJECTED", 0)
-    ui.summary_cards([
+    erp.status_region([
         ("총 건수", f"{total}건"),
         ("평가 대기", f"{pending}건"),
         ("평가완료", f"{evaluated}건"),
