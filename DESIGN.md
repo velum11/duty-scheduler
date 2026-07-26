@@ -16,7 +16,7 @@
 |---|---|---|---|---|---|---|---|
 | dashboard | U/M/A | U=user, M/A=app | DASHBOARD | — | U variant만 | 조회·새로고침 | — |
 | schedule_view(월간) | U/M/A | U=user, M/A=app | READ_VIEW | READ | U variant만 | 조회·새로고침·다운로드 | — |
-| schedule_edit(편성) | M/A | app | MATRIX_EDIT | MATRIX | ✕ | 조회·저장·새로고침 | 추가·삭제(그리드) |
+| schedule_edit(편성) | M/A | app | MATRIX_EDIT | MATRIX | ✕ | 조회·새로고침 | 추가·삭제·저장(그리드) |
 | my_schedule(내 근무) | U/M/A | U=user, M/A=app | READ_VIEW | — | ✔(USER 중심) | 월이동·조회 | — |
 | near_miss_submit(신청) | U/M/A | U=user, M/A=app | FORM_ENTRY | — | ✔(USER) | **상단바 제외** | 제출(form) |
 | near_miss_view(조회) | M/A | app | READ_VIEW | READ | ✕ | 조회·새로고침 | — |

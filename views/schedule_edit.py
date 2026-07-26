@@ -32,6 +32,7 @@ import streamlit as st
 from st_aggrid import JsCode
 
 from modules import db, ui
+from views.common import erp
 from views.common import scaffold
 from views.workspace import (
     grid_bool,
@@ -49,7 +50,16 @@ _EMP_EDITABLE = JsCode("function(p){ return p.data && p.data._row_state !== 'exi
 
 # ---------- 진입점 ----------
 def render(user: dict) -> None:
-    scaffold.page_chrome_for("schedule_edit", SCREEN_ARCHETYPE, role=user.get("role"))
+    # 크롬만 키트로 통일(screen_frame). 필터·편집 버튼·MATRIX 그리드·저장/dirty/이탈가드는
+    # 클릭소실 회피(on_click 플래그)·저장 파이프라인·revert 키(se_*) 계약상 이번엔 건드리지
+    # 않는다 — 필터 condition_panel 이관·top_action_bar·MATRIX 어댑터 추출은 BACKLOG.
+    erp.screen_frame(
+        SCREEN_ARCHETYPE,
+        title="근무표 편성",
+        desc="부서와 조를 선택하여 월별 근무표를 관리합니다.",
+        breadcrumb="근무표 › 근무표 편성",
+        badges=scaffold.mode_badge(),
+    )
 
     depts = db.get_departments()
     teams = db.get_teams()
