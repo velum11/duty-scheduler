@@ -34,7 +34,9 @@ from modules import db as _db
 from modules import nav as _nav
 from views import master as _master
 
-#: 강제되는 5개 화면 유형 코드(DESIGN.md §0 표와 1:1 대응).
+#: 강제되는 6개 화면 유형 코드(DESIGN.md §0 표와 1:1 대응).
+#: ``MASTER_DETAIL`` 은 읽기 목록 + 상세/워크플로 화면(아차사고 평가) — 상단 액션바는
+#: 조회·새로고침(page)만이고 평가·반려·종결 등 쓰기는 상세 영역(scope action)에 둔다.
 #: ``FORM_ENTRY`` 는 단건 레코드 입력·제출 폼(니어미스 신청 등) — 헤더 크롬 +
 #: 라벨드 필드 폼 본문 + 제출 컨트롤 + 저장 결과 배너(``views/master/lifecycle``
 #: ``PersistResult``/``ledger_banner`` 계약 개념 재사용). EDIT_GRID 와 달리 그리드
@@ -47,6 +49,7 @@ ARCHETYPES: tuple[str, ...] = (
     "MATRIX_EDIT",
     "DASHBOARD",
     "FORM_ENTRY",
+    "MASTER_DETAIL",
 )
 
 

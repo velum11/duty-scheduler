@@ -15,7 +15,10 @@ ReadinessState)은 ``views/master`` 가 계속 소유하며 이 키트는 **구�
 from views.common.erp.kit import (
     Field,
     condition_panel,
+    detail_actions,
+    detail_empty,
     form_submit,
+    master_detail_frame,
     read_grid,
     screen_frame,
     status_region,
@@ -30,4 +33,7 @@ __all__ = [
     "condition_panel",
     "read_grid",
     "status_region",
+    "master_detail_frame",
+    "detail_empty",
+    "detail_actions",
 ]

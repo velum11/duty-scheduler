@@ -487,8 +487,10 @@ for name, expected in EXPECTED.items():
 # ===========================================================================
 print("(c) 스캐폴드 검증 — 잘못된 유형 ValueError / 목록 정합")
 check(
-    "ARCHETYPES == DESIGN.md §0 5유형",
-    scaffold.ARCHETYPES == ("EDIT_GRID", "READ_VIEW", "MATRIX_EDIT", "DASHBOARD", "FORM_ENTRY"),
+    "ARCHETYPES == DESIGN.md §0 6유형",
+    scaffold.ARCHETYPES == (
+        "EDIT_GRID", "READ_VIEW", "MATRIX_EDIT", "DASHBOARD", "FORM_ENTRY", "MASTER_DETAIL",
+    ),
 )
 try:
     scaffold._validate_archetype("NOT_A_TYPE")

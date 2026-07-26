@@ -47,6 +47,16 @@ _KIT_CSS = f"""
 }}
 .erp-metric-v {{ font-size: 20px; font-weight: 700; color: {TOKENS['ink']}; font-variant-numeric: tabular-nums; }}
 .erp-metric-l {{ font-size: 12px; color: {TOKENS['ink-2']}; margin-top: 2px; }}
+.erp-detail-empty {{
+  border: 1px dashed {TOKENS['line-strong']}; border-radius: 8px;
+  background: {TOKENS['surface-2']}; padding: 20px 16px; text-align: center;
+}}
+.erp-detail-empty-t {{ font-size: 14px; font-weight: 600; color: {TOKENS['ink-2']}; }}
+.erp-detail-empty-b {{ font-size: 12.5px; color: {TOKENS['ink-2']}; margin-top: 4px; line-height: 1.5; }}
+/* help(툴팁) 래퍼가 씌워진 버튼도 앱 기본 버튼 크기를 따르게 — modules/ui.py 의 직계자식
+   선택자(.stButton > button)가 툴팁 DOM 체인을 못 잡아 생기는 높이 불일치 보정(detail_actions
+   처럼 help 유무가 섞인 버튼을 한 행에 둘 때 가시화). 크기만 맞추는 저위험 규칙. */
+.stTooltipHoverTarget > button {{ min-height: 2.15rem; font-size: 0.83rem; }}
 </style>
 """
 
@@ -301,3 +311,49 @@ def status_region(summary: list[tuple[str, str]]) -> None:
                 f"<div class='erp-metric-l'>{label}</div></div>",
                 unsafe_allow_html=True,
             )
+
+
+# ============================================================ master-detail (MASTER_DETAIL)
+def master_detail_frame(*, list_ratio: float = 1.5, detail_ratio: float = 1.0,
+                        gap: str = "medium"):
+    """MASTER_DETAIL 의 primary(목록)+details(상세) 영역 split(§0.3). ``(list_col, detail_col)`` 반환.
+
+    순수 레이아웃 — 그리드·데이터·선택 상태를 소유하지 않는다(선택 id·조회·readiness·
+    쓰기 lifecycle 은 화면 소관, EDIT_GRID 에서 DraftState/run_save 가 화면 소관인 것과 동일 분리).
+    """
+    return tuple(st.columns([list_ratio, detail_ratio], gap=gap, vertical_alignment="top"))
+
+
+def detail_empty(title: str, body: str) -> None:
+    """상세 영역 '선택 없음 / 선택 만료' 안내 — 모든 MASTER_DETAIL 화면이 같은 문구·시각을 쓰도록."""
+    st.markdown(
+        f"<div class='erp-detail-empty'><div class='erp-detail-empty-t'>{title}</div>"
+        f"<div class='erp-detail-empty-b'>{body}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def detail_actions(page_id: str, actions: list[tuple]) -> dict:
+    """상세 영역의 scope 쓰기 액션 행(§0.4: scope 액션은 소유 영역에 두되 공통 컴포넌트로).
+
+    ``actions``: ``[(label, kind, disabled, help)]`` — kind ∈ {"primary","default"}; disabled/help 생략 가능.
+    반환 ``{label: clicked}``. **순수 UI** — facade 호출·``current_user`` 전달·오류/stale 처리는
+    전적으로 호출부 소관이다(이 함수는 ``db.*``·``auth.*`` 를 호출하지 않는다 — 신원 전송 계약을
+    모호하게 만들지 않기 위함). FORM_ENTRY 의 form_submit 과 달리 폼이 아닌 일반 rerun 버튼이다.
+    """
+    if not actions:
+        return {}
+    cols = st.columns(len(actions))
+    clicks: dict = {}
+    for i, act in enumerate(actions):
+        label = act[0]
+        kind = act[1] if len(act) > 1 else "default"
+        disabled = act[2] if len(act) > 2 else False
+        help_ = act[3] if len(act) > 3 else None
+        with cols[i]:
+            clicks[label] = st.button(
+                label, key=f"{page_id}_da_{i}",
+                type="primary" if kind == "primary" else "secondary",
+                disabled=disabled, help=help_, use_container_width=True,
+            )
+    return clicks

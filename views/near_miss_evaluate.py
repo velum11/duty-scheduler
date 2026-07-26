@@ -1,13 +1,14 @@
 """아차사고 평가 화면 — 대기 큐(그리드) + 케이스 상세 드릴다운.
 
-DESIGN.md §0 화면 유형: ``EDIT_GRID``. 이 화면은 행을 인라인 편집하지 않지만(전 컬럼
-``editable=False``), 큐를 표(``views/master`` 공통 그리드)로 보여주고 행 클릭으로 상세를
-여는 마스터-디테일 구성이 ``master_org.py`` 의 3시트 드릴다운(가장 가까운 기존 패턴)과
-같은 크롬 스택을 요구하므로 ``EDIT_GRID`` 로 선언한다. 액션바(행 추가·삭제·저장)는 이
-화면에서 항상 ``can_write=False``(조회 전용 큐 — org 의 "상위 미선택 잠금 시트"와 동일
-관용구)이며, 유일하게 동작하는 버튼은 새로고침이다. 실제 쓰기(평가확정/반려/종결)는
-액션바가 아니라 상세 패널의 전용 버튼이 담당한다(파사드 직접 호출, 그리드 저장 lifecycle
-미사용 — 이 화면은 다건 편집·저장이 아니라 단건 상태전이라 ``run_save`` 대상이 아니다).
+DESIGN.md §0 화면 유형: ``MASTER_DETAIL``. 이 화면은 다건 인라인 편집·저장 그리드가
+아니라, 조회 전용 목록(큐)과 그 옆 상세/워크플로 패널로 구성된 읽기 목록 + 상세 화면이다
+(§0.8/§0.1 유형 매뉴페스트: MASTER_DETAIL = 읽기 목록 + 상세/워크플로). 상단 액션바는
+page-scope 조회 액션(새로고침)만 두고, 유일한 쓰기(평가확정/반려/종결)는 상세 패널의
+scope 액션(``erp.detail_actions``)이 담당한다 — 파사드 직접 호출, 그리드 저장 lifecycle
+미사용(이 화면은 다건 편집·저장이 아니라 단건 상태전이라 ``run_save`` 대상이 아니다).
+목록 그리드 자체는 ``views/master`` 의 ``render_master_grid``/``MasterGridSpec``(행 클릭
+선택 JsCode 포함)을 그대로 쓴다 — 중립 키트에는 아직 선택 가능한 read_grid 가 없어
+그 추출은 후속(BACKLOG)으로 미루고, 목록 렌더 로직 자체는 이전 그대로 유지한다.
 
 권한 게이트: ``auth.can_evaluate_near_miss(user)`` — ADMIN/MANAGER 또는 안전담당자만
 평가할 수 있다(``modules/auth.py``). 게이트를 통과하지 못하면 조회 전용 안내만 보여주고
@@ -36,9 +37,8 @@ stale 처리: 두 파사드 모두 사전평가 상태(SUBMITTED/IN_REVIEW)를 �
 금지) — 새 예외 텍스트를 만들지 않는다. 배너는 2단계(제목 + 원문 사유) 패턴이며 raw
 traceback 은 절대 노출하지 않는다(``_run_action``).
 """
-# DESIGN.md §0 화면 유형 규약 — 조회 그리드 + 상세 드릴다운(가장 가까운 기존 패턴은
-# master_org 의 행 클릭 드릴다운형 EDIT_GRID).
-SCREEN_ARCHETYPE = "EDIT_GRID"
+# DESIGN.md §0 화면 유형 규약 — 읽기 목록(큐) + 상세/워크플로 패널.
+SCREEN_ARCHETYPE = "MASTER_DETAIL"
 
 from html import escape
 
@@ -47,24 +47,22 @@ import streamlit as st
 from st_aggrid import JsCode
 
 from modules import auth, db
+from views.common import erp, scaffold
 from views.master import (
-    REFRESH,
     DraftState,
     MasterGridSpec,
     Readiness,
     ReadinessState,
     count_strip,
     empty_state,
-    master_action_bar,
     master_grid_height,
-    master_screen_head,
-    mode_badge_html,
     render_master_grid,
     sheet_head,
     show_flash,
 )
 
 _STATE = DraftState("nm_eval")
+_PAGE_ID = _STATE.page_id  # erp.top_action_bar/detail_actions 위젯 key 스코프(동일 page_id).
 
 # 이 화면이 다루는 "평가 대기" 상태 — 파사드 NEAR_MISS_STATUSES 의 부분집합.
 # db.evaluate_near_miss 의 _NEAR_MISS_PRE_EVAL_STATES 와 같은 집합(소스 오브 트루스는
@@ -123,11 +121,12 @@ _ROW_CLICK = JsCode(
 
 
 def render(user: dict) -> None:
-    master_screen_head(
-        "아차사고 평가",
-        "제출된 아차사고 보고를 검토해 등급을 확정하거나 반려합니다.",
+    erp.screen_frame(
+        SCREEN_ARCHETYPE,
+        title="아차사고 평가",
+        desc="제출된 아차사고 보고를 검토해 등급을 확정하거나 반려합니다.",
         breadcrumb="안전 › 아차사고 평가",
-        mode_badge=mode_badge_html(connected=True, sample=db.is_sample_mode()),
+        badges=scaffold.mode_badge(),
     )
     if not auth.can_evaluate_near_miss(user):
         empty_state(
@@ -156,7 +155,11 @@ def _render_body(user: dict) -> None:
             db.near_miss_schema_probe(force=True)
             st.rerun()
 
-    _STATE.take_action(REFRESH)  # 버튼 클릭 자체가 이미 rerun 을 유발 — flag 는 소비만 한다.
+    # page-scope 조회 액션(§0.3 top actions) — 유일한 버튼은 새로고침. st.button 클릭
+    # 자체가 이미 rerun 을 유발하고, 아래 _load_pending_reports() 는 매 렌더 무조건
+    # 재조회하므로(구 master_action_bar REFRESH flag 소비와 동일 결과 — 그 flag 도 별도
+    # 분기 없이 소비만 했다) 클릭 반환값을 추가로 배선할 필요가 없다.
+    erp.top_action_bar(_PAGE_ID, [("새로고침", "default")])
 
     try:
         reports = _load_pending_reports()
@@ -167,10 +170,10 @@ def _render_body(user: dict) -> None:
         st.error("평가 대기 목록을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    col_queue, col_detail = st.columns([1.5, 1], gap="medium")
-    with col_queue:
+    list_col, detail_col = erp.master_detail_frame(list_ratio=1.5, detail_ratio=1.0)
+    with list_col:
         grid_df = _render_queue(reports, readiness)
-    with col_detail:
+    with detail_col:
         _render_detail(user, readiness)
 
     picked = _picked_report_id(grid_df)
@@ -264,12 +267,10 @@ def _render_queue(reports: pd.DataFrame, readiness: ReadinessState) -> pd.DataFr
     grid_df = render_master_grid(spec, _queue_display(rows, selected_id), key=_STATE.grid_key())
 
     # 이 큐는 조회 전용이다 — 행 추가/삭제/저장은 이 화면의 책임이 아니다(평가/반려/종결은
-    # 상세 패널 전용 버튼이 파사드를 직접 호출한다). master_org 의 "상위 미선택 잠금 시트"와
-    # 같은 관용구(can_write=False)로 액션바를 항상 비활성 표시하고, 새로고침만 살려둔다.
-    master_action_bar(
-        _STATE, sel_count=0, dirty_total=0, can_write=False,
-        write_disabled_reason="이 목록은 조회 전용입니다. 케이스를 클릭해 상세에서 평가하세요.",
-    )
+    # 상세 패널 전용 버튼이 파사드를 직접 호출한다). page-scope 액션바(erp.top_action_bar)의
+    # 새로고침만이 유일한 이 화면 액션이며, 그리드 자체 action열/편집도 없다(전 컬럼
+    # editable=False) — 이 카운트 스트립은 "케이스를 클릭해 상세에서 평가"하라는 안내 없이도
+    # 목록 규모만 보이면 충분하다.
     count_strip(len(rows), 0, 0, 0)
     return grid_df
 
@@ -278,7 +279,7 @@ def _render_queue(reports: pd.DataFrame, readiness: ReadinessState) -> pd.DataFr
 def _render_detail(user: dict, readiness: ReadinessState) -> None:
     selected_id = st.session_state.get(_SEL_KEY)
     if not selected_id:
-        empty_state("케이스를 선택하세요", "왼쪽 큐에서 행을 클릭하면 상세 내용이 여기에 표시됩니다.")
+        erp.detail_empty("케이스를 선택하세요", "왼쪽 큐에서 행을 클릭하면 상세 내용이 여기에 표시됩니다.")
         return
 
     try:
@@ -293,7 +294,7 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     if report is None or status not in _PENDING_STATUSES:
         # 다른 평가자가 먼저 처리했거나(EVALUATED/REJECTED/CLOSED) 삭제됨 — stale 선택 해제.
         st.session_state.pop(_SEL_KEY, None)
-        empty_state(
+        erp.detail_empty(
             "이 케이스는 더 이상 대기 중이 아닙니다",
             "다른 사용자가 먼저 처리했을 수 있습니다. 목록을 새로고침한 뒤 다시 선택하세요.",
         )
@@ -341,31 +342,42 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         "반려 사유(반려 시 필수)", key=f"nm_reason_{selected_id}", height=56, disabled=not can_write,
     )
 
-    b1, b2, b3 = st.columns(3)
+    # 상세 패널 scope 액션(§0.4) — 실제 쓰기는 이 세 버튼만 담당한다(page 액션바에는
+    # 없음). disabled/help 판정은 여기서 그대로 계산해 넘기고, erp.detail_actions 는
+    # 순수 UI(버튼 렌더 + 클릭 반환)만 담당한다 — facade 호출·current_user 전달·
+    # 오류/stale 처리는 이 화면(아래 클릭 분기 + ``_run_action``)이 그대로 소유한다.
     eval_disabled = not can_write
-    if b1.button("평가확정", type="primary", width="stretch", disabled=eval_disabled,
-                 key=f"nm_eval_btn_{selected_id}",
-                 help=None if can_write else readiness.message):
-        _run_action(user, "평가확정", lambda: db.evaluate_near_miss(
-            selected_id, grade, current_user=auth.get_current_user(),
-        ))
+    eval_help = None if can_write else readiness.message
 
     reject_disabled = (not can_write) or not str(reason or "").strip()
     reject_help = readiness.message if not can_write else (
         None if str(reason or "").strip() else "반려 사유를 입력하세요."
     )
-    if b2.button("반려", width="stretch", disabled=reject_disabled,
-                 key=f"nm_reject_btn_{selected_id}", help=reject_help):
-        _run_action(user, "반려", lambda: db.update_near_miss_status(
-            selected_id, "REJECTED", rejection_reason=reason, current_user=auth.get_current_user(),
-        ))
 
+    # 이 큐는 SUBMITTED/IN_REVIEW 만 담아 CLOSED 로의 유일한 허용 전이(EVALUATED→CLOSED)
+    # 대상이 여기 없다 — 종결은 이 화면에서 사실상 항상 비활성이다(기존 동작 그대로 보존,
+    # 큐 범위를 넓히는 건 별도 제품 결정 — BACKLOG 추적).
     close_allowed = db.near_miss_transition_allowed(status, "CLOSED")
+    close_disabled = (not can_write) or not close_allowed
     close_help = readiness.message if not can_write else (
         None if close_allowed else "평가 확정 후에만 종결할 수 있습니다."
     )
-    if b3.button("종결", width="stretch", disabled=(not can_write) or not close_allowed,
-                 key=f"nm_close_btn_{selected_id}", help=close_help):
+
+    clicks = erp.detail_actions(_PAGE_ID, [
+        ("평가확정", "primary", eval_disabled, eval_help),
+        ("반려", "default", reject_disabled, reject_help),
+        ("종결", "default", close_disabled, close_help),
+    ])
+
+    if clicks.get("평가확정"):
+        _run_action(user, "평가확정", lambda: db.evaluate_near_miss(
+            selected_id, grade, current_user=auth.get_current_user(),
+        ))
+    if clicks.get("반려"):
+        _run_action(user, "반려", lambda: db.update_near_miss_status(
+            selected_id, "REJECTED", rejection_reason=reason, current_user=auth.get_current_user(),
+        ))
+    if clicks.get("종결"):
         _run_action(user, "종결", lambda: db.update_near_miss_status(
             selected_id, "CLOSED", current_user=auth.get_current_user(),
         ))
