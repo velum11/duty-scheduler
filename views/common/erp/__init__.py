@@ -5,6 +5,7 @@ ReadinessState)은 ``views/master`` 가 계속 소유하며 이 키트는 **구�
 
     screen_frame     화면 헤더(브레드크럼·제목·모드배지) — scaffold 위임 + 영역 순서 진입점
     top_action_bar   페이지 액션(조회·새로고침 등) 상단 고정 위치·어휘
+    form_submit      FORM_ENTRY 제출 앵커(st.form_submit_button 래퍼, 상단바 대체)
     condition_panel  col-N 우측 인라인 라벨 조건(필터) 패널
     read_grid        AgGrid READ 어댑터(편집 자산 없음 — action열·paste·editable·unsafe_jscode 제거)
     status_region    요약 카드 + readiness 배너
@@ -14,6 +15,7 @@ ReadinessState)은 ``views/master`` 가 계속 소유하며 이 키트는 **구�
 from views.common.erp.kit import (
     Field,
     condition_panel,
+    form_submit,
     read_grid,
     screen_frame,
     status_region,
@@ -24,6 +26,7 @@ __all__ = [
     "Field",
     "screen_frame",
     "top_action_bar",
+    "form_submit",
     "condition_panel",
     "read_grid",
     "status_region",

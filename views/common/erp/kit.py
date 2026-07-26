@@ -92,6 +92,20 @@ def top_action_bar(page_id: str, actions: list[tuple[str, str]]) -> dict:
     return clicks
 
 
+# ============================================================ form_submit
+def form_submit(label: str, *, disabled: bool = False, help: str | None = None) -> bool:
+    """FORM_ENTRY 제출 앵커 — ``st.form_submit_button`` 래퍼(위치·타입·어휘 고정, §0.4).
+
+    FORM_ENTRY 는 상단 액션바(top_action_bar) 대신 이 버튼이 유일한 제출 지점이다.
+    **반드시 호출부의 ``st.form(...)`` 컨텍스트 안에서 호출**한다 — 이 함수는 폼을 열지
+    않는다(중첩 폼은 Streamlit 금지, 폼 개설은 화면 소관). 도메인 검증·저장은 호출부가
+    소유하며 여기서는 클릭 bool 만 돌려준다(readiness 등으로 계산한 ``disabled`` 전달).
+    """
+    return st.form_submit_button(
+        label, type="primary", disabled=disabled, help=help, use_container_width=False,
+    )
+
+
 # ============================================================ condition_panel
 @dataclass
 class Field:

@@ -23,6 +23,7 @@ from html import escape
 import streamlit as st
 
 from modules import auth, db
+from views.common import erp
 from views.common import scaffold
 from views.master import PersistResult, banner, ledger_banner
 
@@ -122,7 +123,7 @@ def render(user: dict) -> None:
     # ── 헤더 크롬(§0 FORM_ENTRY): 브레드크럼 → 제목·모드 배지 ─────────────────
     # nav 라우팅이 아직 연결되지 않아(B2) page_chrome_for 대신 명시 문자열로 헤더를
     # 만든다. 라우팅 연결 후에는 page_chrome_for(_PAGE_ID, ...) 로 통일 가능하다.
-    scaffold.page_chrome(
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="아차사고 신청",
         desc="현장에서 발견한 아차사고(near-miss)를 제안서로 접수합니다. 접수 후 상태는 제출됨(SUBMITTED)입니다.",
@@ -186,8 +187,7 @@ def render(user: dict) -> None:
             uploaded = st.file_uploader("사진 선택(PC)", type=["png", "jpg", "jpeg"],
                                         accept_multiple_files=True)
 
-        submitted = st.form_submit_button("제안서 제출", type="primary",
-                                          disabled=not can_submit, use_container_width=False)
+        submitted = erp.form_submit("제안서 제출", disabled=not can_submit)
 
     # ── 제출 처리 + 저장 결과 배너(§0 순서: 폼 → 제출 → 결과 배너) ────────────
     if not submitted:
