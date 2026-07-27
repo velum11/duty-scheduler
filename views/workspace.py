@@ -26,7 +26,7 @@ RETIRED_LABEL = "(퇴직)"
 _RETIRED_ROW_CSS = "background-color:#F1EEE7; color:#5F5C55"
 
 
-def work_type_display() -> tuple[dict, dict]:
+def work_type_display(wt_df: pd.DataFrame | None = None) -> tuple[dict, dict]:
     """근무형태 표시 계약 — (display_of, color_of).
 
     - display_of: 내부 코드 -> 화면 표시값(약칭). 약칭이 비었거나 같은 약칭이 여러
@@ -34,8 +34,12 @@ def work_type_display() -> tuple[dict, dict]:
     - color_of: 표시값과 코드 양쪽을 색상(#RRGGBB)에 매핑 — 셀이 약칭으로 바뀌어도
       같은 코드는 같은 색을 유지한다(색은 코드에 귀속).
     조회 화면(월간·개인)이 셀을 약칭·색상으로 일관 표시하도록 공통으로 쓴다.
+
+    wt_df: 이미 조회한 근무형태 프레임을 재사용하려는 호출자가 넘긴다(렌더 1회
+    내 db.get_work_types() 중복 조회를 피하기 위함). 넘기지 않으면 직접 조회한다
+    (기존 호출자 호환).
     """
-    wt = db.get_work_types()
+    wt = wt_df if wt_df is not None else db.get_work_types()
     active = wt[wt["is_active"]] if not wt.empty else wt
     label_codes: dict[str, set] = {}
     for _, r in active.iterrows():
@@ -55,6 +59,23 @@ def work_type_display() -> tuple[dict, dict]:
                 color_of[code] = color
                 color_of[disp] = color
     return display_of, color_of
+
+
+def _work_types_map_from_df(wt_df: pd.DataFrame) -> dict:
+    """db.work_types_map() 과 동일한 계약(근무코드 -> {name, category, color, is_work})을
+    이미 조회해 둔 프레임에서 재구성한다 — db.work_types_map() 파사드 시그니처는 그대로
+    두고(다른 화면의 호출부는 영향 없음), 같은 렌더 안에서 db.get_work_types() 를
+    두 번째로 다시 조회하지 않기 위한 뷰 쪽 helper 다.
+    """
+    out = {}
+    for _, r in wt_df.iterrows():
+        out[r["code"]] = {
+            "name": r["name"],
+            "category": r.get("category", ""),
+            "color": r["color"] or "#9AA0A6",
+            "is_work": bool(r["is_work"]),
+        }
+    return out
 
 
 def editor_has_changes(key: str) -> bool:
@@ -610,18 +631,28 @@ def selectable_master_grid(
         grid_options.update(extra_grid_options)
 
     ordered = ["_action"] + order + _META_COLUMNS
-    response = AgGrid(
-        frame[ordered],
-        gridOptions=grid_options,
-        key=key,
-        height=height,
-        update_on=[("cellValueChanged", 200)],
-        data_return_mode=DataReturnMode.AS_INPUT,
-        allow_unsafe_jscode=True,
-        theme="streamlit",
-        custom_css=_MASTER_GRID_CSS,
-        show_toolbar=False,
-        show_search=False,
+
+    def _mount():
+        return AgGrid(
+            frame[ordered],
+            gridOptions=grid_options,
+            key=key,
+            height=height,
+            update_on=[("cellValueChanged", 200)],
+            data_return_mode=DataReturnMode.AS_INPUT,
+            allow_unsafe_jscode=True,
+            theme="streamlit",
+            custom_css=_MASTER_GRID_CSS,
+            show_toolbar=False,
+            show_search=False,
+        )
+
+    # 편집 그리드는 key(f"{page}_grid_{nonce}") 가 조회·구조변경(remount) 때만 바뀐다.
+    # fingerprint=key 로 두면 스켈레톤은 그 remount run 에서만 뜨고(이미 재마운트되는 시점),
+    # 일반 편집 rerun(같은 key)에는 뜨지 않아 iframe in-place 유지 → 미저장 셀 입력 보존.
+    response = erp.grid_shell(
+        key, nrows=len(frame), ncols=len(order) + 1,
+        fingerprint=key, render=_mount, height=height,
     )
     result = response.data
     if not isinstance(result, pd.DataFrame):
@@ -807,6 +838,16 @@ def schedule_screen(user: dict, page_id: str) -> None:
     acts = erp.top_action_bar(page_id, [("조회", "primary"), ("새로고침", "default")])
     clicked = bool(acts.get("조회") or acts.get("새로고침"))
 
+    # 화면 레벨 스켈레톤 표출 트리거 — 데이터 정체성(조회조건 q) 기준으로 전환을 판정한다.
+    # q 가 바뀌는 로드(부서·월·조·검색어 변경 = 실제로 다른 데이터)에서만 스켈레톤을 칠하고,
+    # 같은 조건 재조회·검색어 입력 등 q 불변 rerun 에는 칠하지 않는다(fingerprint 재사용 =
+    # warm/미변경 무점멸). 새로고침은 조건이 같아도 강제 재조회이므로 별도 세대값을 올려
+    # 표출 대상에 포함한다(콜드 새로고침 커버). q 는 아래 run_query 결과에서 확정된다.
+    _rg_key = f"{page_id}_refreshgen"
+    if acts.get("새로고침"):
+        st.session_state[_rg_key] = st.session_state.get(_rg_key, 0) + 1
+    refresh_gen = st.session_state.get(_rg_key, 0)
+
     # condition_panel 의 select Field 는 index/value 인자를 받지 않고 항상 위젯 key 의
     # 세션 상태에 의존한다 — 최초 렌더(키 미존재)에서 기존 selectbox(index=...) 와 같은
     # 기본값(연도=올해·월=이번달)을 내려면 위젯 인스턴스화 전에 세션 상태를 선점해야 한다.
@@ -889,80 +930,112 @@ def schedule_screen(user: dict, page_id: str) -> None:
         if str(q.get("dept") or "") != manager_dept:
             q = {**q, "dept": manager_dept, "team": ALL}  # 부서 밖 조 조건은 초기화
 
-    display_of, color_of = work_type_display()
-    grid, month_rows = _build_month_grid(q, display_of)
-    if grid.empty:
-        ui.empty_state("조회 조건에 해당하는 직원이 없습니다.", head="월별 근무표")
-        return
+    # 근무형태 프레임은 이 렌더에서 display_of/color_of 와 wt(맵) 양쪽이 필요하지만,
+    # 같은 내용을 두 번 조회·순회하지 않도록 한 번만 가져와 재사용한다(값은 기존과 동일).
+    # ── 화면 레벨 스켈레톤 표출 ──────────────────────────────────────────────
+    # 콜드 잔상(Supabase 냉캐시 네트워크 로드 ~500–800ms) 구간을 스켈레톤으로 대체한다.
+    # 핵심: 그리드에 실릴 콜드 데이터 fetch(db.get_work_types + _build_month_grid — 내부에서
+    # get_users/get_month_schedules/get_month_assignments 등 네트워크 호출)를 grid_shell 의
+    # prepare 로 넘긴다. 그러면 「스켈레톤 칠하기 → 느린 fetch(prepare) → 그리드로 교체」순서가
+    # 되어, fetch 가 도는 그 구간에만 스켈레톤이 뜨고 낡은 그리드 형상을 덮는다.
+    # fetch 이후의 클라이언트 AgGrid iframe 마운트(~700ms)는 가릴 수 없다(container 델타가
+    # 나간 뒤 마운트가 진행됨) — 커버 대상은 서버측 데이터 로드 구간뿐(부분 개선).
+    # fingerprint=load_gen: 조회·새로고침 클릭에서만 전환→스켈레톤. warm/미변경 순수 rerun 은
+    # load_gen 불변이라 스켈레톤이 뜨지 않는다(무점멸). warm 로드는 fetch 가 빨라 자연 합쳐진다.
+    def _cold_load():
+        wt_df = db.get_work_types()
+        display_of, color_of = work_type_display(wt_df)
+        grid, month_rows = _build_month_grid(q, display_of)
+        return wt_df, display_of, color_of, grid, month_rows
 
-    # status — 요약(§0.3 영역 순서상 primary 뒤가 정본이나, 값 자체는 원 계약과 동일).
-    wt = db.work_types_map()
-    n_work = sum(1 for c in month_rows["work_type_code"] if wt.get(c, {}).get("is_work"))
-    erp.status_region([
-        ("대상 인원", f"{len(grid)}명"),
-        ("근무 데이터", f"{len(month_rows)}건"),
-        ("실근무", f"{n_work}건"),
-        ("휴무·휴가", f"{len(month_rows) - n_work}건"),
-    ])
-    st.write("")
+    def _render_body(loaded):
+        wt_df, display_of, color_of, grid, month_rows = loaded
+        if grid.empty:
+            ui.empty_state("조회 조건에 해당하는 직원이 없습니다.", head="월별 근무표")
+            return
 
-    # primary — 월간 근무표(근무 약칭 + 지정 색상, 읽기 전용).
-    day_cols = [c for c in grid.columns if c[0].isdigit()]
-    meta_cols = [c for c in grid.columns if c not in day_cols]
-    ui.panel_head("월간 근무표", f"조회 결과 {len(grid)}건")
-
-    # 퇴직 플래그는 read_grid 의 row_rules 가 참조하는 hidden field 로만 싣는다 —
-    # _build_month_grid(불변) 출력을 그대로 복사해 표시용으로만 부가하며, 다운로드용
-    # grid(원본)에는 이 컬럼을 남기지 않는다(엑셀 CSV 스키마를 바꾸지 않기 위함).
-    grid_ui = grid.copy()
-    grid_ui["_retired"] = grid_ui["성명"].astype(str).str.endswith(RETIRED_LABEL)
-    # 색 규칙: _cell_style 과 동일하게 표시값(약칭)·코드 양쪽을 색에 매핑하는
-    # color_of 를 그대로 재사용해 전 날짜 컬럼에 공유한다(전용 변환 불필요).
-    color_rules = {day_col: color_of for day_col in day_cols}
-    # 퇴직행 배경/글자색 — _RETIRED_ROW_CSS(불변, _retired_row_style 이 쓰는 값)를
-    # row_rules 의 hex 인자 형태로 그대로 파싱해 재사용한다(새 색을 만들지 않는다).
-    _retired_parts = dict(
-        p.strip().split(":", 1) for p in _RETIRED_ROW_CSS.split(";") if ":" in p
-    )
-    retired_bg = _retired_parts["background-color"].strip()
-    retired_ink = _retired_parts["color"].strip()
-    # 폭 지정(pixel QA 로 실측 발견): 키트 기본값(미지정 컬럼 flex=1,minWidth=90) 은
-    # 원래 st.dataframe(width="stretch") 의 자동 폭보다 좁아 "PET생산부(본동)" 같은
-    # 긴 부서명이 잘렸다(scrollWidth>clientWidth 실측). 데이터·색은 그대로 두고
-    # meta 컬럼만 넉넉한 폭으로 지정해 원 화면과 동등한 잘림 없는 표시를 보존한다.
-    meta_col_config = {
-        "사번": {"width": 84},
-        "성명": {"minWidth": 108, "width": 108},
-        "부서": {"minWidth": 150, "width": 150},
-        "조": {"minWidth": 100, "width": 100},
-    }
-    erp.read_grid(
-        grid_ui, columns=meta_cols + day_cols, key=f"{page_id}_grid",
-        color_rules=color_rules,
-        col_config={c: meta_col_config[c] for c in meta_cols if c in meta_col_config},
-        row_rules=[{
-            "when": "data['_retired'] === true",
-            "columns": meta_cols, "bg": retired_bg, "ink": retired_ink,
-        }],
-        hidden_fields=["_retired"],
-    )
-    st.markdown(_label_legend_html(display_of, color_of), unsafe_allow_html=True)
-
-    # 사용자별 집계 (전체 근무표 조회)
-    if page_id == "schedule_view" and not month_rows.empty:
+        # status — 요약(§0.3 영역 순서상 primary 뒤가 정본이나, 값 자체는 원 계약과 동일).
+        wt = _work_types_map_from_df(wt_df)
+        n_work = sum(1 for c in month_rows["work_type_code"] if wt.get(c, {}).get("is_work"))
+        erp.status_region([
+            ("대상 인원", f"{len(grid)}명"),
+            ("근무 데이터", f"{len(month_rows)}건"),
+            ("실근무", f"{n_work}건"),
+            ("휴무·휴가", f"{len(month_rows) - n_work}건"),
+        ])
         st.write("")
-        ui.panel_head("직원별 근무형태 집계")
-        agg = _build_agg(grid, month_rows, wt, display_of)
-        erp.read_grid(agg, key=f"{page_id}_agg")
 
-    # 하단 액션 — 다운로드(원본 grid, 상태/색 부가 없이 그대로 — CSV 스키마 불변).
-    st.download_button(
-        "엑셀 다운로드",
-        grid.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"근무표_{q['year']}-{q['month']:02d}.csv",
-        mime="text/csv",
-        key=f"{page_id}_dl",
-        width="stretch",
+        # primary — 월간 근무표(근무 약칭 + 지정 색상, 읽기 전용).
+        day_cols = [c for c in grid.columns if c[0].isdigit()]
+        meta_cols = [c for c in grid.columns if c not in day_cols]
+        ui.panel_head("월간 근무표", f"조회 결과 {len(grid)}건")
+
+        # 퇴직 플래그는 read_grid 의 row_rules 가 참조하는 hidden field 로만 싣는다 —
+        # _build_month_grid(불변) 출력을 그대로 복사해 표시용으로만 부가하며, 다운로드용
+        # grid(원본)에는 이 컬럼을 남기지 않는다(엑셀 CSV 스키마를 바꾸지 않기 위함).
+        grid_ui = grid.copy()
+        grid_ui["_retired"] = grid_ui["성명"].astype(str).str.endswith(RETIRED_LABEL)
+        # 색 규칙: _cell_style 과 동일하게 표시값(약칭)·코드 양쪽을 색에 매핑하는
+        # color_of 를 그대로 재사용해 전 날짜 컬럼에 공유한다(전용 변환 불필요).
+        color_rules = {day_col: color_of for day_col in day_cols}
+        # 퇴직행 배경/글자색 — _RETIRED_ROW_CSS(불변, _retired_row_style 이 쓰는 값)를
+        # row_rules 의 hex 인자 형태로 그대로 파싱해 재사용한다(새 색을 만들지 않는다).
+        _retired_parts = dict(
+            p.strip().split(":", 1) for p in _RETIRED_ROW_CSS.split(";") if ":" in p
+        )
+        retired_bg = _retired_parts["background-color"].strip()
+        retired_ink = _retired_parts["color"].strip()
+        # 폭 지정(pixel QA 로 실측 발견): 키트 기본값(미지정 컬럼 flex=1,minWidth=90) 은
+        # 원래 st.dataframe(width="stretch") 의 자동 폭보다 좁아 "PET생산부(본동)" 같은
+        # 긴 부서명이 잘렸다(scrollWidth>clientWidth 실측). 데이터·색은 그대로 두고
+        # meta 컬럼만 넉넉한 폭으로 지정해 원 화면과 동등한 잘림 없는 표시를 보존한다.
+        meta_col_config = {
+            "사번": {"width": 84},
+            "성명": {"minWidth": 108, "width": 108},
+            "부서": {"minWidth": 150, "width": 150},
+            "조": {"minWidth": 100, "width": 100},
+        }
+        # skeleton=False: 콜드 로드 표출은 상위 grid_shell(prepare) 가 담당하므로 read_grid
+        # 내부 shell 은 끈다(이중 shell 방지). AgGrid 계약·key 는 그대로.
+        erp.read_grid(
+            grid_ui, columns=meta_cols + day_cols, key=f"{page_id}_grid",
+            color_rules=color_rules,
+            col_config={c: meta_col_config[c] for c in meta_cols if c in meta_col_config},
+            row_rules=[{
+                "when": "data['_retired'] === true",
+                "columns": meta_cols, "bg": retired_bg, "ink": retired_ink,
+            }],
+            hidden_fields=["_retired"],
+            skeleton=False,
+        )
+        st.markdown(_label_legend_html(display_of, color_of), unsafe_allow_html=True)
+
+        # 사용자별 집계 (전체 근무표 조회)
+        if page_id == "schedule_view" and not month_rows.empty:
+            st.write("")
+            ui.panel_head("직원별 근무형태 집계")
+            agg = _build_agg(grid, month_rows, wt, display_of)
+            erp.read_grid(agg, key=f"{page_id}_agg", skeleton=False)
+
+        # 하단 액션 — 다운로드(원본 grid, 상태/색 부가 없이 그대로 — CSV 스키마 불변).
+        st.download_button(
+            "엑셀 다운로드",
+            grid.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"근무표_{q['year']}-{q['month']:02d}.csv",
+            mime="text/csv",
+            key=f"{page_id}_dl",
+            width="stretch",
+        )
+
+    _ndays = calendar.monthrange(int(q["year"]), int(q["month"]))[1]
+    # fingerprint = 조회조건 q + 새로고침 세대값. q 가 같으면(같은 데이터) 재전환하지 않아
+    # warm/미변경 rerun 에 스켈레톤이 뜨지 않고(무점멸), q 변경/새로고침에만 콜드 표출된다.
+    _fp = (tuple(sorted((str(k), str(v)) for k, v in q.items())), refresh_gen)
+    erp.grid_shell(
+        f"{page_id}_screen",
+        nrows=7, ncols=min(_ndays + 4, 8),
+        fingerprint=_fp, height=360,
+        prepare=_cold_load, render=_render_body,
     )
 
 
@@ -1074,6 +1147,20 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     ndays = calendar.monthrange(q["year"], q["month"])[1]
     days = [date(q["year"], q["month"], d) for d in range(1, ndays + 1)]
 
+    # 부서/조 이름은 프레임 전체를 매 행마다 필터링하지 않고, 렌더 1회에 한해
+    # 코드->이름 dict 를 미리 만들어 재사용한다(db.dept_name/team_name 과 동일한
+    # "첫 매치 우선·미매치 시 코드 그대로" 폴백을 그대로 재현한다).
+    dept_name_by_code: dict = {}
+    for _, d in db.get_departments().iterrows():
+        code = d["dept_code"]
+        if code not in dept_name_by_code:
+            dept_name_by_code[code] = d["dept_name"]
+    team_name_by_key: dict = {}
+    for _, t in db.get_teams().iterrows():
+        key = (t["dept_code"], t["team_code"])
+        if key not in team_name_by_key:
+            team_name_by_key[key] = t["team_name"]
+
     rows = []
     for _, u in users.iterrows():
         dept_code, team_code = u["_eff_dept"], u["_eff_team"]
@@ -1083,8 +1170,12 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
         row = {
             "사번": u["emp_no"],
             "성명": name,
-            "부서": db.dept_name(dept_code),
-            "조": db.team_name(dept_code, team_code),
+            "부서": dept_name_by_code.get(dept_code, dept_code),
+            "조": (
+                team_name_by_key.get((dept_code, team_code), team_code)
+                if team_code
+                else ""
+            ),
         }
         for d in days:
             code = lookup.get((u["emp_no"], d.isoformat()), "")

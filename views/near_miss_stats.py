@@ -17,7 +17,7 @@ from html import escape
 
 import streamlit as st
 
-from modules import auth, db, ui
+from modules import db, ui
 from views.common import erp
 from views.common import scaffold
 from views.master import TOKENS
@@ -50,38 +50,17 @@ def render(user: dict) -> None:
     # nav 라벨과의 단일 출처 통일은 후속(통합 담당) 과제로 남겨둔다.
     erp.screen_frame(
         SCREEN_ARCHETYPE,
-        title="아차사고 집계",
-        desc="아차사고 등급·부서·기간·원인·상태별 분포를 확인합니다.",
-        breadcrumb="아차사고 › 집계",
+        title="아차사고 분석",
+        desc="아차사고 등급·부서·기간·원인·상태별 분포를 분석합니다.",
+        breadcrumb="아차사고 › 아차사고 분석",
         badges=scaffold.mode_badge(),
     )
     _inject_panel_style()
 
-    if not auth.can_evaluate_near_miss(user):
-        ui.empty_state(
-            "아차사고 집계 권한이 없습니다. 안전담당자 또는 관리자만 조회할 수 있습니다.",
-            head="접근 제한",
-        )
-        return
-
+    # 접근 범위(제품 결정 — Coordinator): 아차사고 분석은 전 사용자에게 열려 있고 회사
+    # 전체 범위다. 과거 평가자 전용 게이트·MANAGER 부서 스코프는 제거했다(filters 비움).
     _readiness().banner()
-
-    try:
-        scope, manager_dept = _scope_for(user)
-    except db.DATA_SOURCE_ERRORS as exc:
-        st.error(f"조직 정보를 불러오지 못했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
-        return
-    except Exception:
-        st.error("조직 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
-        return
-    if scope == "blocked":
-        ui.empty_state(
-            "소속 부서가 지정되지 않아 아차사고 집계를 표시할 수 없습니다. "
-            "관리자에게 부서 지정을 요청하세요.",
-            head="아차사고 집계",
-        )
-        return
-    filters = {"dept_code": manager_dept} if scope == "scoped" else {}
+    filters: dict = {}
 
     # 영역 순서(§0.3): title → top actions → 지표카드(status) → 분포 패널(primary).
     # 조회조건이 없는 화면이므로 새로고침 버튼은 별도 wiring 없이 rerun 만으로 아래 5건
@@ -122,20 +101,6 @@ def render(user: dict) -> None:
         _cause_panel(cause_counts, total)
 
     _period_panels(period_counts, total)
-
-
-# ---------- 접근 범위(fail-closed) — near_miss_view._scope_for 와 동일 관행 ----------
-def _scope_for(user: dict) -> tuple[str, str | None]:
-    """집계 범위: ADMIN/안전담당자=전체, MANAGER=본인 부서, 그 외(부서 미확정 MANAGER)=차단."""
-    role = str(user.get("role") or "").strip().upper()
-    if role == "MANAGER":
-        dept = str(user.get("dept_code") or "").strip() or None
-        depts = db.get_departments()
-        codes = set(depts["dept_code"].astype(str)) if not depts.empty else set()
-        if dept and dept in codes:
-            return "scoped", dept
-        return "blocked", None
-    return "all", None
 
 
 # ---------- readiness (migration 006 3-state) ----------

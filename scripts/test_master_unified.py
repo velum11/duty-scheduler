@@ -89,7 +89,14 @@ for label, src in _SRC.items():
     check(f"{label}: 공통 헤더 크롬 사용 [master_screen_head/erp.screen_frame]",
           "master_screen_head" in src or "screen_frame" in src)
     for sym in _COMMON_SYMBOLS:
-        check(f"{label}: 공통 심볼 사용 [{sym}]", sym in src)
+        # 공통 액션 렌더는 인페이지 액션바(master_action_bar) 또는 라이브 밴드 툴바
+        # (page_action_specs — 사용자 관리 파일럿, 밴드로 액션 승격) 중 하나면 인정한다.
+        # 둘 다 views/master 공통 기반의 동일한 활성/건수/사유 규칙을 쓴다(의도 보존).
+        if sym == "master_action_bar":
+            check(f"{label}: 공통 액션 렌더 사용 [master_action_bar/밴드 page_action_specs]",
+                  "master_action_bar" in src or "page_action_specs" in src)
+        else:
+            check(f"{label}: 공통 심볼 사용 [{sym}]", sym in src)
 
 # 구 workspace grid 헬퍼·모듈 의존 제거 (마이그레이션 완료 — 되돌아가지 않았는가)
 print("구 workspace grid 의존 제거")

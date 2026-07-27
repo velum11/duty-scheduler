@@ -68,16 +68,22 @@ def read_grid_height(nrows: int) -> int:
 
 # ============================================================ screen_frame
 def screen_frame(archetype: str, *, title: str, desc: str, breadcrumb: str,
-                 badges: str | None = None) -> None:
+                 badges: str | None = None, toolbar: bool = False):
     """화면 헤더(브레드크럼·제목·모드배지) — scaffold.page_chrome 위임(영역 순서의 title 슬롯).
 
     키트 CSS(우측 라벨·메트릭)를 이 진입점에서 매 렌더 주입한다 — 모든 화면이 screen_frame
-    을 먼저 호출하므로 이후 condition_panel/status_region 의 클래스가 항상 스타일을 받는다."""
-    scaffold.page_chrome(
+    을 먼저 호출하므로 이후 condition_panel/status_region 의 클래스가 항상 스타일을 받는다.
+
+    ``toolbar=True`` 면 헤더 밴드에 실제 액션 버튼 슬롯을 만들고 그 핸들
+    (:class:`~views.master.BandToolbar`)을 반환한다(사용자 관리 파일럿 — EDIT_GRID 의
+    추가·삭제·저장·새로고침을 밴드로 승격). 기본 ``False`` 면 종전처럼 ``None`` 반환."""
+    band = scaffold.page_chrome(
         archetype, title=title, desc=desc, breadcrumb=breadcrumb,
         badges=badges if badges is not None else scaffold.mode_badge(),
+        toolbar=toolbar,
     )
     st.markdown(_KIT_CSS, unsafe_allow_html=True)
+    return band if toolbar else None
 
 
 # ============================================================ top_action_bar
@@ -177,6 +183,105 @@ def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3) -> dict
     return values
 
 
+# ============================================================ grid skeleton (표현 요소, §0 아키타입 아님)
+# 무거운 그리드가 rerun/전환될 때 이전 실행의 낡은 그리드 형상이 남아 보이는 문제를
+# 중립 회색 셔머 스켈레톤으로 가린다(사용자: "전환 중 형상이 남아 보기 불편").
+# 라이트 전용 — 토큰은 master.style.TOKENS 재사용, 다크는 --skel-* var 오버라이드로
+# 나중에(라이트 우선 결정). 스켈레톤은 primary 영역의 표현 요소일 뿐 새 아키타입이 아니다.
+_SKEL_MIN_ROWS, _SKEL_MAX_ROWS = 3, 7
+_SKEL_MIN_COLS, _SKEL_MAX_COLS = 3, 8
+_SKEL_COL_W = (46, 62, 40, 70, 52, 64, 44, 58)  # 셀 내부 막대 폭(%) — 다열 그리드 밀도 근사
+_SKEL_UNSET = object()
+
+# 스켈레톤 CSS. var 기본값은 TOKENS(라이트) 를 그대로 주입하고(팔레트 새로 만들지 않음),
+# 구조/키프레임은 순수 문자열(중괄호 리터럴 그대로)로 둔다. 다크는 var 만 오버라이드하면 됨.
+_SKEL_CSS = (
+    "<style>"
+    ".erp-skel{"
+    f"--skel-surface:{TOKENS['surface']};--skel-surface2:{TOKENS['surface-2']};"
+    f"--skel-line:{TOKENS['line-strong']};--skel-hair:{TOKENS['line']};"
+    f"--skel-base:{TOKENS['line-strong']};--skel-base2:{TOKENS['ink-3']};"
+    f"--skel-hi:{TOKENS['surface-2']};"
+    "border:1px solid var(--skel-line);border-radius:2px;background:var(--skel-surface);overflow:hidden}"
+    ".erp-skel-hd{display:flex;height:36px;background:var(--skel-surface2);"
+    "border-bottom:1px solid var(--skel-line)}"
+    ".erp-skel-rw{display:flex;height:34px;border-bottom:1px solid var(--skel-hair)}"
+    ".erp-skel-rw:last-child{border-bottom:0}"
+    ".erp-skel-cell{flex:1 1 0;display:flex;align-items:center;padding:0 12px;"
+    "min-width:0;border-right:1px solid var(--skel-hair)}"
+    ".erp-skel-cell:last-child{border-right:0}"
+    ".erp-skel-cell.k{flex:0 0 54px;justify-content:center;padding:0}"
+    ".erp-skel-b{height:10px;border-radius:2px;background:var(--skel-base);"
+    "position:relative;overflow:hidden;max-width:100%}"
+    ".erp-skel-hd .erp-skel-b{height:11px;background:var(--skel-base2);opacity:.55}"
+    ".erp-skel-b::after{content:'';position:absolute;inset:0;"
+    "background:linear-gradient(90deg,transparent,var(--skel-hi),transparent);"
+    "transform:translateX(-100%);animation:erp-skel-sweep 1.25s ease-in-out infinite}"
+    "@keyframes erp-skel-sweep{100%{transform:translateX(100%)}}"
+    "@media (prefers-reduced-motion:reduce){.erp-skel-b::after{animation:none}}"
+    # 다크 테마 훅(라이트 우선 — 지금은 튜닝하지 않음). 향후 --skel-* 만 오버라이드.
+    ":root[data-theme='dark'] .erp-skel{/* dark --skel-* TBD */}"
+    "@media (prefers-color-scheme:dark){/* .erp-skel dark override TBD — ship light */}"
+    "</style>"
+)
+
+
+def _skel_cells(ncols: int) -> str:
+    # 첫 셀은 좁은 액션/인덱스열 모사(체크박스 크기 사각), 이후는 셀 내부 막대.
+    cells = ["<span class='erp-skel-cell k'><i class='erp-skel-b' style='width:16px'></i></span>"]
+    for i in range(1, ncols):
+        w = _SKEL_COL_W[i % len(_SKEL_COL_W)]
+        cells.append(f"<span class='erp-skel-cell'><i class='erp-skel-b' style='width:{w}%'></i></span>")
+    return "".join(cells)
+
+
+def grid_skeleton_html(nrows: int, ncols: int, *, height: int | None = None) -> str:
+    """헤더 밴드 + N개 자리행(READ 행높이 34px 근사) + 열 블록의 회색 셔머 스켈레톤 HTML.
+
+    행/열 수는 실제 그리드가 아무리 커도 작은 상한(행 3~7·열 3~8)으로 잘라 과다 도색을
+    막는다. ``height`` 를 주면 컨테이너 min-height 로 맞춰 그리드로 교체될 때 레이아웃
+    점프를 줄인다. 자체 완결형(<style> 동봉) — 그리드로 교체되면 style 도 함께 사라진다.
+    """
+    r = max(_SKEL_MIN_ROWS, min(int(nrows or 0), _SKEL_MAX_ROWS))
+    c = max(_SKEL_MIN_COLS, min(int(ncols or 0), _SKEL_MAX_COLS))
+    head = f"<div class='erp-skel-hd'>{_skel_cells(c)}</div>"
+    body = "".join(f"<div class='erp-skel-rw'>{_skel_cells(c)}</div>" for _ in range(r))
+    mh = f" style='min-height:{int(height)}px'" if height else ""
+    return f"{_SKEL_CSS}<div class='erp-skel' role='presentation' aria-hidden='true'{mh}>{head}{body}</div>"
+
+
+def grid_shell(key: str, *, nrows: int, ncols: int, fingerprint, render,
+               prepare=None, height: int | None = None):
+    """무거운 그리드를 st.empty 자리표시자 안에서 렌더하되, **전환 시에만** 스켈레톤을 먼저
+    칠해 낡은 형상을 가린다(app.py 의 nav pivot st.empty+spinner 선례와 같은 발상).
+
+    전환 판정: (이 key 최초 등장) 또는 (fingerprint 변화). 전환일 때만 markdown(스켈레톤)을
+    empty 에 칠하고, **그다음** ``prepare`` (느린 데이터 준비)를 실행한 뒤 container 로 교체한다.
+    스켈레톤이 실제로 화면에 뜨는 유일한 구간은 이 「칠하기 → 느린 prepare → container 교체」
+    사이의 서버측 지연이다(라이브 실측: 지연 0 이면 델타가 합쳐져 스켈레톤이 안 뜨고, 유의미한
+    지연이 있어야 뜬다). 따라서 **낡은 형상을 실제로 가리려면 느린 준비를 ``prepare`` 로 넘겨야
+    한다** — 준비가 이미 끝난 뒤 grid_shell 을 호출하면(현재 read_grid/selectable_master_grid 의
+    호출부 준비) 스켈레톤 칠하기와 container 교체 사이에 지연이 없어 스켈레톤이 뜨지 않는다.
+
+    ``prepare`` 미지정 시엔 안전 래퍼로만 동작한다: 비전환 run 은 ``st.empty().container()``
+    안에서 그대로 렌더하므로(app.py 전체 본문이 이미 쓰는 안전 패턴) 그리드 iframe 이 in-place
+    갱신되어 미저장 편집이 보존된다 — 편집 그리드(schedule_edit)는 이 비전환 경로로만 도므로 셀
+    입력이 리셋되지 않는다. ``render`` 는 AgGrid 를 호출해 반환을 돌려주는 콜러블이며, ``prepare``
+    를 준 경우 그 반환값을 인자로 받는다(``render(prepared)``). key·JsCode·selection·col config
+    등 그리드 계약은 전적으로 render 안에서 유지된다.
+    """
+    ph = st.empty()
+    sk = f"_grid_skel::{key}"
+    prev = st.session_state.get(sk, _SKEL_UNSET)
+    transition = prev is _SKEL_UNSET or prev != fingerprint
+    st.session_state[sk] = fingerprint
+    if transition:
+        ph.markdown(grid_skeleton_html(nrows, ncols, height=height), unsafe_allow_html=True)
+    prepared = prepare() if prepare is not None else None  # 느린 준비 — 이 사이에만 스켈레톤이 보인다
+    with ph.container():
+        return render(prepared) if prepare is not None else render()
+
+
 # ============================================================ read_grid
 _READ_BASE_CSS = {
     ".ag-header-cell": {"font-weight": "600", "font-size": "12.5px"},
@@ -189,7 +294,8 @@ def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
               col_config: dict[str, dict] | None = None,
               row_rules: list[dict] | None = None,
               hidden_fields: list[str] | None = None,
-              height: int | None = None) -> None:
+              height: int | None = None,
+              skeleton: bool = True) -> None:
     """AgGrid READ 어댑터(§0.5) — 편집 자산 없음. 색은 cellClassRules 문자열식.
 
     ``color_rules``: ``{컬럼명: {값: hex색}}`` — 셀 값 일치 시 배경(13% alpha)+ink+600.
@@ -297,12 +403,29 @@ def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
         "overlayNoRowsTemplate": _NO_ROWS,
     }
     h = height if height is not None else read_grid_height(len(frame))
-    AgGrid(
-        frame[cols + hidden], gridOptions=options, key=key, height=h,
-        data_return_mode=DataReturnMode.AS_INPUT,
-        allow_unsafe_jscode=False, theme="streamlit",
-        custom_css=custom, show_toolbar=False, show_search=False,
-    )
+    view = frame[cols + hidden]
+
+    def _mount():
+        AgGrid(
+            view, gridOptions=options, key=key, height=h,
+            data_return_mode=DataReturnMode.AS_INPUT,
+            allow_unsafe_jscode=False, theme="streamlit",
+            custom_css=custom, show_toolbar=False, show_search=False,
+        )
+
+    if not skeleton:
+        # 화면(호출부)이 상위 grid_shell(prepare=콜드로드) 로 이미 감싼 경우 — 이중 shell 을
+        # 피하려고 여기서는 스켈레톤/전환판정을 하지 않고 AgGrid 만 in-place 로 렌더한다.
+        _mount()
+        return
+    # 전환(조회/필터 변경으로 표시 데이터가 바뀜) 판정용 지문 — 읽기 그리드는 key 가 고정이라
+    # 데이터 해시로 전환을 감지한다. 다만 느린 준비가 read_grid 상류에 있으면 이 shell 은 지연이
+    # 없어 스켈레톤이 합쳐져 안 뜬다(화면 레벨 grid_shell(prepare=...) 가 실제 표출 담당).
+    try:
+        fp = int(pd.util.hash_pandas_object(view, index=False).sum())
+    except Exception:
+        fp = (len(view), tuple(cols))
+    grid_shell(key, nrows=len(view), ncols=len(cols), fingerprint=fp, render=_mount, height=h)
 
 
 # ============================================================ status_region

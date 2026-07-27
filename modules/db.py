@@ -1616,17 +1616,15 @@ def _sample_report_no(store: pd.DataFrame, incident_date: str) -> str:
     return f"{ym}-{max_seq + 1:04d}"
 
 
-def _sample_near_miss_record(payload: dict, store: pd.DataFrame) -> dict:
-    """create 입력(자연키)을 검증해 sample 스토어 레코드로 만든다.
+def _near_miss_editable_fields(payload: dict) -> dict:
+    """수정 가능한 본문 필드(자연키)를 검증·정규화한다(신원/상태 제외).
 
-    reporter_emp_no·dept_code·시각은 서버측 값이다(화면이 세션에서 채워 넘긴다).
-    """
+    sample create(`_sample_near_miss_record`)와 수정(`update_near_miss_report`)이
+    **같은** 필드 검증을 공유하도록 추출한 헬퍼다 — 한쪽만 느슨해지는 검증 분기를
+    막는다. reporter/부서/상태/평가/시각은 포함하지 않는다(서버측 확정 대상)."""
     work_name = str(payload.get("work_name") or "").strip()
     if not work_name:
         raise ValueError("작업명은 비어 있을 수 없습니다.")
-    reporter = str(payload.get("reporter_emp_no") or "").strip()
-    if not reporter or find_user_by_emp_no(reporter) is None:
-        raise ValueError(f"아차사고 보고자 사번을 찾을 수 없습니다: {reporter}")
     cause = str(payload.get("cause_code") or "").strip().upper()
     if cause not in NEAR_MISS_CAUSE_CODES:
         raise ValueError(f"원인 코드가 유효하지 않습니다: {cause}")
@@ -1639,27 +1637,42 @@ def _sample_near_miss_record(payload: dict, store: pd.DataFrame) -> dict:
     photo = payload.get("photo_paths") or []
     if not isinstance(photo, (list, tuple)):
         raise ValueError("photo_paths 는 배열이어야 합니다.")
-    ids = pd.to_numeric(store["id"], errors="coerce").dropna() if not store.empty else pd.Series([], dtype=float)
-    new_id = int(ids.max()) + 1 if not ids.empty else 1
-    now = datetime.now(timezone.utc).isoformat()
     return {
-        "id": new_id,
-        "report_no": _sample_report_no(store, incident_date),
-        "status": "SUBMITTED",
         "work_name": work_name,
         "work_content": str(payload.get("work_content") or ""),
         "incident_content": str(payload.get("incident_content") or ""),
         "countermeasure": str(payload.get("countermeasure") or ""),
         "site_description": str(payload.get("site_description") or ""),
         "proposed_grade": proposed,
-        "confirmed_grade": None,
         "cause_code": cause,
         "cause_detail": str(payload.get("cause_detail") or ""),
         "incident_date": incident_date,
+        "photo_paths": [str(p) for p in photo],
+    }
+
+
+def _sample_near_miss_record(payload: dict, store: pd.DataFrame) -> dict:
+    """create 입력(자연키)을 검증해 sample 스토어 레코드로 만든다.
+
+    reporter_emp_no·dept_code·시각은 서버측 값이다(화면이 세션에서 채워 넘긴다).
+    본문 필드 검증은 수정 경로와 공유하는 `_near_miss_editable_fields` 로 위임한다.
+    """
+    body = _near_miss_editable_fields(payload)
+    reporter = str(payload.get("reporter_emp_no") or "").strip()
+    if not reporter or find_user_by_emp_no(reporter) is None:
+        raise ValueError(f"아차사고 보고자 사번을 찾을 수 없습니다: {reporter}")
+    ids = pd.to_numeric(store["id"], errors="coerce").dropna() if not store.empty else pd.Series([], dtype=float)
+    new_id = int(ids.max()) + 1 if not ids.empty else 1
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "id": new_id,
+        "report_no": _sample_report_no(store, body["incident_date"]),
+        "status": "SUBMITTED",
+        **body,
+        "confirmed_grade": None,
         "reporter_emp_no": reporter,
         "evaluator_emp_no": "",
         "dept_code": str(payload.get("dept_code") or ""),
-        "photo_paths": [str(p) for p in photo],
         "rejection_reason": None,
         "evaluated_at": None,
         "is_active": True,
@@ -1669,13 +1682,18 @@ def _sample_near_miss_record(payload: dict, store: pd.DataFrame) -> dict:
 
 
 def _sample_update_near_miss(
-    report_id, *, expected_status=None, clear_eval: bool = False, **changes
+    report_id, *, expected_status=None, owner_emp_no=None, clear_eval: bool = False,
+    allow_null=(), **changes
 ) -> bool:
     """sample 스토어의 단일 보고서 필드를 변경한다(존재하는 컬럼만).
 
     ``expected_status`` 가 주어지면 현재 상태가 일치할 때만 적용한다(supabase 조건부
-    UPDATE 와 동일한 원자 전이 계약을 sample 에서도 모사). 적용하면 True, 대상 없음·
-    상태 불일치(이미 전이됨)면 False 를 반환해 파사드가 stale 오류를 낼 수 있게 한다."""
+    UPDATE 와 동일한 원자 전이 계약을 sample 에서도 모사). ``owner_emp_no`` 가 주어지면
+    보고자(reporter_emp_no)가 **정확히 일치**(trim only, casefold 아님)할 때만 적용한다
+    — supabase 의 ``where reporter_user_id=?`` 조건과 대응하는 소유자 게이트다.
+    적용하면 True, 대상 없음·상태 불일치(이미 전이됨)·소유자 불일치면 False 를 반환해
+    파사드가 stale 오류를 낼 수 있게 한다. ``allow_null`` 에 든 컬럼은 값이 None 이어도
+    갱신한다(제안등급 해제 등) — 기본은 None 을 건너뛰어 전이 시 다른 필드 클로버를 막는다."""
     store = _near_miss_store().copy()
     mask = store["id"].astype(str) == str(report_id)
     if not mask.any():
@@ -1684,13 +1702,25 @@ def _sample_update_near_miss(
         current = store.loc[mask, "status"].astype(str).str.strip()
         if not (current == str(expected_status).strip()).all():
             return False
+    if owner_emp_no is not None:
+        # 정확 일치(trim only, casefold 아님) — 대소문자만 다른 사번(ABC vs abc)은
+        # supabase(reporter_user_id 구분)처럼 별개 소유자다. casefold 하면 sample 에서만
+        # abc 가 ABC 보고서를 수정하게 되어 계약(requirements.md:39)과 어긋난다.
+        owners = store.loc[mask, "reporter_emp_no"].astype(str).str.strip()
+        if not (owners == str(owner_emp_no).strip()).all():
+            return False
+    allow_null = set(allow_null)
     if clear_eval:
         store.loc[mask, "confirmed_grade"] = None
         store.loc[mask, "evaluator_emp_no"] = ""
         store.loc[mask, "evaluated_at"] = None
+    indices = store.index[mask]
     for column, value in changes.items():
-        if column in store.columns and value is not None:
-            store.loc[mask, column] = value
+        if column in store.columns and (value is not None or column in allow_null):
+            # .at 로 인덱스별 단일 셀에 대입한다 — list(photo_paths) 를 loc 로 대입하면
+            # pandas 가 원소별 정렬을 시도해 리스트가 풀리거나 길이 불일치로 실패한다.
+            for i in indices:
+                store.at[i, column] = value
     store.loc[mask, "updated_at"] = datetime.now(timezone.utc).isoformat()
     st.session_state[_NEAR_MISS_STORE] = store.reset_index(drop=True)
     return True
@@ -1761,6 +1791,64 @@ def create_near_miss_report(payload: dict, *, current_user) -> dict:
         return record
     try:
         return supabase_repository.create_near_miss_report(safe)
+    finally:
+        _invalidate_near_miss()
+
+
+_NEAR_MISS_EDITABLE_STATUS = "SUBMITTED"
+_NEAR_MISS_NOT_OWNER_MESSAGE = "본인이 보고한 아차사고만 수정할 수 있습니다."
+_NEAR_MISS_NOT_EDITABLE_MESSAGE = (
+    "제출(SUBMITTED) 상태의 아차사고만 수정할 수 있습니다. "
+    "검토·평가·반려·종결된 보고서는 수정할 수 없습니다."
+)
+
+
+def update_near_miss_report(report_id, payload: dict, *, current_user) -> dict | None:
+    """보고자 본인이 SUBMITTED 상태의 아차사고 본문을 수정한다.
+
+    수정 행위자 신원은 payload/위젯이 아니라 인증된 ``current_user``(세션 사용자,
+    auth.get_current_user() 반환값)에서 **서버측으로 확정**한다(사번만 신뢰). 소유자
+    게이트(보고자 본인)와 생명주기 게이트(status==SUBMITTED)를 DB 요청 전에 확인해
+    사람이 읽을 수 있는 오류를 주고, 실제 저장은 소유자·상태를 함께 조건으로 거는
+    원자적 조건부 UPDATE 로 수행해 TOCTOU/lost update 를 서버측에서 재차 막는다.
+
+    server-owned 필드(id/report_no/status/reporter_*/evaluator_*/부서/확정등급/
+    평가시각/반려사유/is_active/감사시각)는 payload 에서 제거되어 **절대** 저장되지
+    않는다 — 본문 컬럼만 수정한다. 상태/생명주기는 이 경로로 바꾸지 않으며 제출취소는
+    범위 밖이다. 검증은 create 와 공유하는 `_near_miss_editable_fields` /
+    repository `_near_miss_editable_payload` 를 사용한다(검증 단일화, fail-closed).
+    updated_by 는 세션 행위자 사번으로 확정한다."""
+    actor = _near_miss_actor(current_user, action="아차사고 수정")
+    current = get_near_miss_report(report_id)
+    if current is None:
+        raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
+    # 소유자 게이트: 보고자 본인만. **정확 일치(trim only, casefold 아님)** — 대소문자만
+    # 다른 사번(ABC vs abc)은 계약상 별개 활성 계정이며(requirements.md:39, SQL unique 는
+    # 대소문자 구분), supabase 는 reporter_user_id 로 서로 다르게 귀속된다. 여기서 casefold
+    # 하면 sample 에서만 abc 가 ABC 의 보고서를 수정할 수 있어 supabase 와 어긋난다.
+    # 보고서의 reporter_emp_no 와 actor.emp_no 는 같은 사람의 권위 원본값이므로 정확
+    # 일치로 정당한 소유자를 배제하지 않는다(로그인 시 casefold 계정 선택과는 무관).
+    owner = str(current.get("reporter_emp_no") or "").strip()
+    if owner != actor["emp_no"]:
+        raise ValueError(_NEAR_MISS_NOT_OWNER_MESSAGE)
+    # 생명주기 게이트: SUBMITTED 에서만 수정 가능(docs/database.md 상태전이 계약).
+    if str(current.get("status") or "").strip() != _NEAR_MISS_EDITABLE_STATUS:
+        raise ValueError(_NEAR_MISS_NOT_EDITABLE_MESSAGE)
+    # server-owned 필드를 제거한다 — 상태/신원/평가/부서/감사는 payload 로 못 쓴다.
+    safe = {k: v for k, v in dict(payload or {}).items() if k not in _NEAR_MISS_SERVER_FIELDS}
+    if is_sample_mode():
+        fields = _near_miss_editable_fields(safe)  # create 와 같은 검증
+        ok = _sample_update_near_miss(
+            report_id, expected_status=_NEAR_MISS_EDITABLE_STATUS,
+            owner_emp_no=actor["emp_no"], allow_null={"proposed_grade"}, **fields,
+        )
+        if not ok:
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        return get_near_miss_report(report_id)
+    try:
+        return supabase_repository.update_near_miss_report(
+            report_id, safe, reporter_emp_no=actor["emp_no"], updated_by=actor["emp_no"],
+        )
     finally:
         _invalidate_near_miss()
 

@@ -228,6 +228,233 @@ def test_reevaluate_already_evaluated_rejected() -> None:
 
 
 # =========================================================================
+# 보고자 자기수정(update_near_miss_report) — 소유자+SUBMITTED 게이트, 서버필드 보호
+# =========================================================================
+def _valid_edit(**over) -> dict:
+    payload = {
+        "work_name": "수정된 작업",
+        "work_content": "수정된 작업 내용",
+        "incident_content": "수정된 사고 내용",
+        "countermeasure": "수정된 대책",
+        "site_description": "현장 설명",
+        "cause_code": "FALL",
+        "cause_detail": "상세",
+        "incident_date": "2026-07-15",
+        "proposed_grade": "B",
+        "photo_paths": ["a.jpg", "b.jpg"],
+    }
+    payload.update(over)
+    return payload
+
+
+def _fresh_submitted(reporter: dict) -> dict:
+    st.session_state.pop(db._NEAR_MISS_STORE, None)
+    return db.create_near_miss_report(_base_payload(), current_user=reporter)
+
+
+def test_update_owner_submitted_allows_edit() -> None:
+    print("update_near_miss_report 소유자+SUBMITTED 수정 허용 + 서버필드 무시")
+    reporter = _sample_emp(0)
+    rec = _fresh_submitted(reporter)
+    rid = rec["id"]
+    orig_report_no = rec["report_no"]
+
+    # 본문 편집 + server-owned 위조 필드 동시 주입.
+    updated = db.update_near_miss_report(rid, _valid_edit(
+        status="EVALUATED", report_no="WRONG", reporter_emp_no="9999",
+        reporter_user_id=999, confirmed_grade="S", evaluator_emp_no="9999",
+        dept_code="ZZZ", is_active=False, id=999999, rejection_reason="위조",
+        evaluated_at="2000-01-01T00:00:00Z",
+    ), current_user=reporter)
+
+    check("작업명 수정 반영", updated["work_name"] == "수정된 작업")
+    check("사고 내용 수정 반영", updated["incident_content"] == "수정된 사고 내용")
+    check("원인 코드 수정 반영", updated["cause_code"] == "FALL")
+    check("제안 등급 수정 반영", updated["proposed_grade"] == "B")
+    check("사고일 수정 반영", updated["incident_date"] == "2026-07-15")
+    check("사진 배열 수정 반영(list 보존)", updated["photo_paths"] == ["a.jpg", "b.jpg"])
+    # server-owned 필드는 위조 시도에도 불변.
+    check("상태는 SUBMITTED 유지(위조 무시)", updated["status"] == "SUBMITTED")
+    check("report_no 불변", updated["report_no"] == orig_report_no)
+    check("보고자 불변", updated["reporter_emp_no"] == reporter["emp_no"])
+    check("확정 등급 미설정 유지", updated["confirmed_grade"] in (None, ""))
+    check("평가자 미설정 유지", str(updated["evaluator_emp_no"]) == "")
+    check("id 불변", str(updated["id"]) == str(rid))
+    check("is_active True 유지", bool(updated["is_active"]) is True)
+
+    # 제안 등급을 비워(해제) 저장하면 None 으로 반영된다(allow_null).
+    cleared = db.update_near_miss_report(rid, _valid_edit(proposed_grade=None), current_user=reporter)
+    check("제안 등급 해제(None) 반영", cleared["proposed_grade"] in (None, ""))
+
+
+def test_update_non_owner_blocked() -> None:
+    print("update_near_miss_report 비소유자 차단")
+    reporter = _sample_emp(0)
+    other = _sample_emp(1)
+    check("전제: 두 사용자 사번 다름", reporter["emp_no"] != other["emp_no"])
+    rec = _fresh_submitted(reporter)
+    rid = rec["id"]
+
+    exc = raises(lambda: db.update_near_miss_report(rid, _valid_edit(), current_user=other), ValueError)
+    check("비소유자 수정은 ValueError", exc is not None)
+    check("비소유자 안내 메시지", exc is not None and "본인이 보고한" in str(exc))
+    check("비소유자 시도로 본문 불변", db.get_near_miss_report(rid)["work_name"] == "설비 점검")
+
+
+def test_update_non_submitted_blocked() -> None:
+    print("update_near_miss_report 비-SUBMITTED 상태 차단(IN_REVIEW/EVALUATED/REJECTED/CLOSED)")
+    reporter = _sample_emp(0)
+    evaluator = _sample_emp(1)
+
+    # IN_REVIEW 에서 수정 불가.
+    rec = _fresh_submitted(reporter)
+    rid = rec["id"]
+    db.update_near_miss_status(rid, "IN_REVIEW", current_user=evaluator)
+    exc = raises(lambda: db.update_near_miss_report(rid, _valid_edit(), current_user=reporter), ValueError)
+    check("IN_REVIEW 수정 차단", exc is not None and "SUBMITTED" in str(exc))
+    check("IN_REVIEW 시도로 본문 불변", db.get_near_miss_report(rid)["work_name"] == "설비 점검")
+
+    # EVALUATED 에서 수정 불가.
+    db.evaluate_near_miss(rid, "B", current_user=evaluator)
+    exc2 = raises(lambda: db.update_near_miss_report(rid, _valid_edit(), current_user=reporter), ValueError)
+    check("EVALUATED 수정 차단", exc2 is not None and "SUBMITTED" in str(exc2))
+
+    # CLOSED 에서 수정 불가.
+    db.update_near_miss_status(rid, "CLOSED", current_user=evaluator)
+    exc3 = raises(lambda: db.update_near_miss_report(rid, _valid_edit(), current_user=reporter), ValueError)
+    check("CLOSED 수정 차단", exc3 is not None and "SUBMITTED" in str(exc3))
+
+    # REJECTED 에서 수정 불가(별도 보고서).
+    rec2 = _fresh_submitted(reporter)
+    rid2 = rec2["id"]
+    db.update_near_miss_status(rid2, "REJECTED", rejection_reason="사유", current_user=evaluator)
+    exc4 = raises(lambda: db.update_near_miss_report(rid2, _valid_edit(), current_user=reporter), ValueError)
+    check("REJECTED 수정 차단", exc4 is not None and "SUBMITTED" in str(exc4))
+
+
+def test_update_invalid_values_rejected() -> None:
+    print("update_near_miss_report 필드 검증(create 와 동일 검증) — 잘못된 값 거부")
+    reporter = _sample_emp(0)
+    rec = _fresh_submitted(reporter)
+    rid = rec["id"]
+
+    def bad(**over):
+        return raises(lambda: db.update_near_miss_report(rid, _valid_edit(**over), current_user=reporter), ValueError)
+
+    check("빈 작업명 거부", bad(work_name="   ") is not None)
+    check("잘못된 원인 코드 거부", bad(cause_code="NOPE") is not None)
+    check("잘못된 제안 등급 거부", bad(proposed_grade="Z") is not None)
+    check("잘못된 사고일 형식 거부", bad(incident_date="2026/07/15") is not None)
+    check("photo_paths 비배열 거부", bad(photo_paths="notalist") is not None)
+    # 검증 실패 후에도 원본은 그대로(DB 요청 전 차단).
+    check("검증 실패는 본문 미변경", db.get_near_miss_report(rid)["work_name"] == "설비 점검")
+
+
+def test_update_stale_zero_row_raises() -> None:
+    print("update_near_miss_report stale(0행/소유자·상태 불일치) 처리")
+    reporter = _sample_emp(0)
+    rec = _fresh_submitted(reporter)
+    rid = rec["id"]
+
+    # sample primitive: 소유자 불일치 → False(=조건부 0행 대응).
+    ok = db._sample_update_near_miss(
+        rid, expected_status="SUBMITTED", owner_emp_no="다른사번", work_name="x")
+    check("소유자 불일치 primitive False", ok is False)
+    # sample primitive: 상태 불일치 → False.
+    stale = db._sample_update_near_miss(
+        rid, expected_status="IN_REVIEW", owner_emp_no=reporter["emp_no"], work_name="x")
+    check("상태 불일치 primitive False", stale is False)
+    check("primitive 실패로 본문 불변", db.get_near_miss_report(rid)["work_name"] == "설비 점검")
+
+    # 파사드: primitive 가 False 면 stale 오류로 올린다(게이트 통과 후 원자 UPDATE 실패).
+    orig = db._sample_update_near_miss
+    db._sample_update_near_miss = lambda *a, **k: False
+    try:
+        exc = raises(lambda: db.update_near_miss_report(rid, _valid_edit(), current_user=reporter), ValueError)
+    finally:
+        db._sample_update_near_miss = orig
+    check("파사드 stale 오류", exc is not None and "이미 변경" in str(exc))
+
+    # 존재하지 않는 보고서 → ValueError(찾을 수 없음).
+    exc2 = raises(lambda: db.update_near_miss_report(999999, _valid_edit(), current_user=reporter), ValueError)
+    check("없는 보고서 수정 차단", exc2 is not None and "찾을 수 없습니다" in str(exc2))
+
+
+def test_update_owner_case_sensitive_distinct() -> None:
+    print("update_near_miss_report 소유자 대소문자 구분(ABC vs abc 는 별개 소유자, supabase 정합)")
+    st.session_state.pop(db._NEAR_MISS_STORE, None)
+    orig_find = db.find_user_by_emp_no
+
+    def finder(emp):
+        # 대소문자만 다른 두 활성 계정(정확 대소문자 보존) — 로그인 exact-preference 모사.
+        e = str(emp).strip()
+        if e in ("ABC", "abc"):
+            return {"emp_no": e, "dept_code": "D1", "role": "USER", "is_active": True}
+        return orig_find(emp)
+
+    db.find_user_by_emp_no = finder
+    try:
+        upper = {"emp_no": "ABC", "dept_code": "D1", "role": "USER"}
+        lower = {"emp_no": "abc", "dept_code": "D1", "role": "USER"}
+        rec = db.create_near_miss_report(_base_payload(), current_user=upper)
+        rid = rec["id"]
+        check("보고자 대문자 ABC 로 확정", rec["reporter_emp_no"] == "ABC")
+
+        # (a) 대소문자만 다른 abc 는 별개 소유자 → 수정 차단(supabase 0행 stale 과 동일 효과).
+        exc = raises(lambda: db.update_near_miss_report(rid, _valid_edit(), current_user=lower), ValueError)
+        check("abc 는 ABC 보고서 수정 불가(대소문자 구분)", exc is not None and "본인이 보고한" in str(exc))
+        check("차단 후 본문 불변", db.get_near_miss_report(rid)["work_name"] == "설비 점검")
+
+        # 진짜 소유자 ABC 는 정상 수정.
+        updated = db.update_near_miss_report(rid, _valid_edit(), current_user=upper)
+        check("ABC 본인은 수정 가능", updated["work_name"] == "수정된 작업")
+
+        # (b) 내 아차사고 reporter 필터는 정확 일치 — abc 목록에 ABC 보고서 없음.
+        mine_lower = db.get_near_miss_reports({"reporter_emp_no": "abc"})
+        check("abc 의 내 목록은 비어있음(ABC 보고서 미포함)", mine_lower.empty)
+        mine_upper = db.get_near_miss_reports({"reporter_emp_no": "ABC"})
+        check("ABC 의 내 목록에는 ABC 보고서 있음",
+              not mine_upper.empty and (mine_upper["reporter_emp_no"] == "ABC").all())
+
+        # (c) 원자 primitive 소유자 게이트도 정확 일치.
+        check("primitive: abc 소유자 불일치 False",
+              db._sample_update_near_miss(rid, expected_status="SUBMITTED", owner_emp_no="abc", work_name="x") is False)
+        check("primitive: ABC 소유자 일치 True",
+              db._sample_update_near_miss(rid, expected_status="SUBMITTED", owner_emp_no="ABC", work_name="x") is True)
+    finally:
+        db.find_user_by_emp_no = orig_find
+        st.session_state.pop(db._NEAR_MISS_STORE, None)
+
+
+def test_repo_update_atomic_conditional() -> None:
+    print("supabase update_near_miss_report 원자 조건부 UPDATE(소유자+상태+id)")
+    edit = {
+        "work_name": "x", "cause_code": "JAM", "incident_date": "2026-07-01",
+        "proposed_grade": "C", "photo_paths": [],
+    }
+
+    # (a) 0행 갱신 → stale 오류(비소유자/비SUBMITTED/삭제 서버측 강제).
+    bus = _new_bus([[]])
+    exc = _with_repo_mocks(bus, lambda: raises(
+        lambda: sr.update_near_miss_report(7, edit, reporter_emp_no="1001"),
+        sr.SupabaseDataError))
+    check("조건부 0행이면 stale 오류", exc is not None and "이미 변경" in str(exc))
+    check("id 조건 포함", ("id", 7) in bus["eq"])
+    check("reporter_user_id 조건 포함(소유자 서버강제)", ("reporter_user_id", 1) in bus["eq"])
+    check("status=SUBMITTED 조건 포함(컷오프 서버강제)", ("status", "SUBMITTED") in bus["eq"])
+    check("update 에 status 없음(상태 미변경)", "status" not in (bus["update"] or {}))
+    check("update 에 server-owned 필드 없음",
+          not (set(bus["update"] or {}) & (db._NEAR_MISS_SERVER_FIELDS - {"updated_by"})))
+
+    # (b) 1행 갱신 → 정상 반환 + updated_by 서버 귀속.
+    bus2 = _new_bus([[{"id": 7, "status": "SUBMITTED", "work_name": "x"}]])
+    out = _with_repo_mocks(bus2, lambda: sr.update_near_miss_report(
+        7, edit, reporter_emp_no="1001", updated_by="1001"))
+    check("1행 갱신 시 정상 반환", out and out.get("id") == 7)
+    check("updated_by 기록", (bus2["update"] or {}).get("updated_by") == "1001")
+
+
+# =========================================================================
 # P1-3 — 원자 전이(조건부 UPDATE) 로 stale 갱신 거부
 # =========================================================================
 def test_sample_atomic_transition_primitive() -> None:
@@ -574,6 +801,13 @@ def main() -> int:
         test_forged_current_user_dept_ignored,
         test_facade_strips_client_audit_fields,
         test_reevaluate_already_evaluated_rejected,
+        test_update_owner_submitted_allows_edit,
+        test_update_non_owner_blocked,
+        test_update_non_submitted_blocked,
+        test_update_invalid_values_rejected,
+        test_update_stale_zero_row_raises,
+        test_update_owner_case_sensitive_distinct,
+        test_repo_update_atomic_conditional,
         test_sample_atomic_transition_primitive,
         test_repo_atomic_conditional_update,
         test_create_no_blind_retry_on_transient,

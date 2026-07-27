@@ -35,7 +35,7 @@ import pandas as pd
 import streamlit as st
 from st_aggrid import JsCode
 
-from modules import db
+from modules import db, nav
 from views.common import erp
 from views.master import (
     ADD,
@@ -44,6 +44,7 @@ from views.master import (
     RELOAD,
     SAVE,
     DraftState,
+    icon_toolbar_specs,
     MasterGridSpec,
     PersistResult,
     Readiness,
@@ -59,10 +60,10 @@ from views.master import (
     grid_bool,
     ledger_banner,
     live_rows,
-    master_action_bar,
     master_grid_height,
     master_row_class_rules,
     mode_badge_html,
+    page_action_specs,
     render_master_grid,
     run_save,
     take_actions,
@@ -763,12 +764,16 @@ def render(user: dict) -> None:
     teams_json = json.dumps(_dept_team_options(teams, dept_labels), ensure_ascii=False)
 
     readiness = _readiness()
-    erp.screen_frame(
+    # toolbar="icons": 헤더 파랑 밴드에 KPtech 아이콘 전용 툴바(정보·globe·추가·조회·삭제·
+    # 인쇄·저장·즐겨찾기) 슬롯을 만들고 핸들을 받는다. 아이콘은 그리드 뒤 건수 계산 후
+    # band.render_icons 로 채운다(dirty/선택 정확). 파일럿(사용자 관리·근무표 편성) 전용.
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="사용자 관리",
         desc="사번·소속·권한을 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
         breadcrumb="기준정보 › 사용자 관리",
         badges=_head_badges(readiness),
+        toolbar="icons",
     )
     # readiness 배너(NOT_READY/PROBE_ERROR 만) + 확인 실패 시 재프로브 — 조직 화면과 동일 UX(§25).
     readiness.banner()
@@ -823,7 +828,6 @@ def render(user: dict) -> None:
         rows = state.get_rows()
     _render_summary_chips(rows, params, dept_names)
 
-    bar_slot = st.container()      # 액션바(건수 계산 후 채움)
     banner_slot = st.container()   # 배너(삭제 확인/폐기 확인/원장/오류/flash 중 1)
 
     # ---- 그리드 표시 프레임(권위 rows + 상태 view-model) ----
@@ -863,15 +867,33 @@ def render(user: dict) -> None:
 
     state.set_dirty(total_dirty > 0)
 
-    # ---- 액션바(placeholder 채움) ----
+    # ---- 아이콘 툴바 채움(상단 파랑 밴드 슬롯에 지연 채움) ----
+    # 활성/비활성·툴팁 사유는 인페이지 규칙(page_action_specs)을 그대로 계산해 쓰고, 클릭은
+    # 인페이지와 동일한 state.action_requester(role) on_click 플래그 + {page_id}__{role} 키로
+    # 남긴다(저장/삭제/추가/새로고침 경로·2단계 삭제 확인 무변경 — 렌더만 아이콘으로 이전).
     can_save = ready or not has_order
-    with bar_slot, st.container(key=f"{PAGE_ID}__bar"):
-        master_action_bar(
-            state, sel_count=sel_count, dirty_total=total_dirty, can_save=can_save,
+    if band is not None:
+        specs = page_action_specs(
+            sel_count=sel_count, dirty_total=total_dirty, can_save=can_save,
             save_disabled_reason=(
                 None if can_save else "표시순서 기능이 준비되면 저장할 수 있습니다 — 시스템 관리자에게 문의하세요"
             ),
         )
+        by_role = {s["role"]: s for s in specs}
+
+        def _icon_action(role: str, name: str) -> dict:
+            # 아이콘 전용 tooltip: 활성=기능명(발견성) / 비활성=사유(page_action_specs).
+            s = by_role[role]
+            return {"key": f"{PAGE_ID}__{role}", "on_click": state.action_requester(role),
+                    "disabled": s["disabled"], "help": (s["help"] or name) if s["disabled"] else name}
+
+        band.render_icons(icon_toolbar_specs(
+            PAGE_ID, info_content=nav.page_desc("master_users"),
+            add=_icon_action(ADD, "행 추가"),
+            refresh=_icon_action(REFRESH, "조회/새로고침"),
+            delete=_icon_action(DELETE, "삭제"),
+            save=_icon_action(SAVE, "저장"),
+        ))
 
     # ---- 배너(우선순위: 삭제 확인 > 폐기 확인 > 결과 원장 > 오류 > flash) ----
     with banner_slot:

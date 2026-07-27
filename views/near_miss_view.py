@@ -16,11 +16,12 @@ from __future__ import annotations
 SCREEN_ARCHETYPE = "READ_VIEW"
 
 from datetime import date, timedelta
+from html import escape
 
 import pandas as pd
 import streamlit as st
 
-from modules import auth, db, ui
+from modules import db, ui
 from views import workspace
 from views.common import erp
 from views.common import scaffold
@@ -88,50 +89,31 @@ def render(user: dict) -> None:
         badges=scaffold.mode_badge(),
     )
 
-    # 접근 통제: 평가자(안전담당자) 또는 ADMIN/MANAGER 만 조회한다(auth.can_evaluate_near_miss
-    # 가 이미 이 세 경우를 판정한다 — 화면은 판정을 다시 만들지 않는다).
-    if not auth.can_evaluate_near_miss(user):
-        ui.empty_state(
-            "아차사고 조회 권한이 없습니다. 안전담당자 또는 관리자만 조회할 수 있습니다.",
-            head="접근 제한",
-        )
-        return
-
-    # readiness 배너만 표시하고 차단하지 않는다(READ_VIEW — facade 가 미적용 시 빈 프레임으로
-    # 안전하게 저하되므로 조회 자체는 막지 않는다).
+    # 접근 범위(제품 결정 — Coordinator): 아차사고 조회는 전 사용자에게 열려 있고
+    # 회사 전체 범위이며, 신고자 이름·상세 내용을 숨기지 않는다. 과거 평가자 전용 게이트
+    # (auth.can_evaluate_near_miss)와 MANAGER 부서 스코프(_scope_for)는 이 경로에서
+    # 제거했다. _scope_for 정의 자체는 회귀 계약(scripts/test_near_miss_view.py)이
+    # 고정하고 있어 남겨두되(과거 스코프 동작 보존), render 는 더 이상 호출하지 않는다.
     _readiness().banner()
 
     try:
-        scope, manager_dept, dept_names = _scope_for(user)
+        dept_names = _all_dept_names()
     except db.DATA_SOURCE_ERRORS as exc:
         st.error(f"조직 정보를 불러오지 못했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
         return
     except Exception:
         st.error("조직 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
-    if scope == "blocked":
-        ui.empty_state(
-            "소속 부서가 지정되지 않아 아차사고 현황을 표시할 수 없습니다. "
-            "관리자에게 부서 지정을 요청하세요.",
-            head="아차사고 조회",
-        )
-        return
 
     # 영역 순서(§0.3): title → top actions(조회·새로고침) → conditions → primary → status.
     acts = erp.top_action_bar(_PAGE_ID, [("조회", "primary"), ("새로고침", "default")])
     clicked = bool(acts.get("조회") or acts.get("새로고침"))
-    q = _collect_conditions(scope, manager_dept, dept_names)
+    q = _collect_conditions("all", None, dept_names)
 
     saved = workspace.run_query(_PAGE_ID, clicked, q)
     if saved is None:
         ui.empty_state("조회 조건을 지정하고 [조회]를 눌러 아차사고 보고서를 확인하세요.", head="아차사고 조회")
         return
-
-    # MANAGER 부서 범위는 저장된 조회조건(이전 세션 값일 수 있음)에도 항상 재적용한다
-    # (workspace.schedule_screen 과 동일한 fail-closed 관행 — 위젯 잠금만 믿지 않는다).
-    # 이 override 는 누수 방지의 핵심 통제이므로 매 렌더·facade 호출 직전에 무조건 실행한다.
-    if scope == "scoped":
-        saved = {**saved, "dept": manager_dept}
 
     try:
         df = db.get_near_miss_reports(_facade_filters(saved))
@@ -188,8 +170,79 @@ def render(user: dict) -> None:
         ("종결·반려", f"{counts.isin(['CLOSED', 'REJECTED']).sum()}건"),
     ])
 
+    # details — 행(보고서) 선택 상세. 신고자 이름·상세 내용을 숨기지 않는다.
+    _render_result_detail(df)
 
-# ---------- 접근 범위(fail-closed) ----------
+
+def _render_result_detail(df: pd.DataFrame) -> None:
+    """조회 결과에서 보고서를 선택해 상세(신고자 이름 + 전체 내용)를 조회 전용으로 표시."""
+    frame = df.sort_values("incident_date", ascending=False, kind="stable")
+    ids = [str(r.get("id")) for _, r in frame.iterrows()]
+    if not ids:
+        return
+    labels = {
+        str(r.get("id")): f"{_clean(r.get('report_no')) or '(번호 미상)'} · {_clean(r.get('work_name')) or '-'}"
+        for _, r in frame.iterrows()
+    }
+    st.write("")
+    st.markdown(
+        f"<div style='font-weight:600;color:{TOKENS['ink']};margin:2px 0 6px;'>상세 보기</div>",
+        unsafe_allow_html=True,
+    )
+    sel = st.selectbox("상세 볼 보고서", ids, key=f"{_PAGE_ID}_detail_pick",
+                       format_func=lambda i: labels.get(i, i))
+    match = frame[frame["id"].astype(str) == str(sel)]
+    if match.empty:
+        return
+    report = match.iloc[0].to_dict()
+
+    users = db.get_users()
+    name_of = {str(r["emp_no"]): str(r["name"]) for _, r in users.iterrows()} if not users.empty else {}
+    depts = db.get_departments()
+    dept_of = {str(r["dept_code"]): str(r["dept_name"]) for _, r in depts.iterrows()} if not depts.empty else {}
+
+    emp = _clean(report.get("reporter_emp_no"))
+    dept = _clean(report.get("dept_code"))
+    status = _clean(report.get("status"))
+    cause = _clean(report.get("cause_code"))
+    with ui.card():
+        st.markdown(
+            f"### {escape(_clean(report.get('report_no')) or '(번호 미상)')} · "
+            f"{escape(_STATUS_LABEL.get(status, status))}"
+        )
+        st.caption(
+            f"신고자 {escape(name_of.get(emp, emp) or '-')} · "
+            f"소속 {escape(dept_of.get(dept, dept) or '-')} · "
+            f"발생일 {escape(_clean(report.get('incident_date')) or '-')}"
+        )
+        st.caption(
+            f"제안등급 {escape(_clean(report.get('proposed_grade')) or '없음')} · "
+            f"확정등급 {escape(_clean(report.get('confirmed_grade')) or '미정')} · "
+            f"원인 {escape(_CAUSE_LABEL.get(cause, cause) or '-')}"
+        )
+        st.markdown(f"**작업명** {escape(_clean(report.get('work_name')) or '-')}")
+        st.text_area("작업내용", value=_clean(report.get("work_content")),
+                     height=68, disabled=True, key=f"{_PAGE_ID}_d_wc_{sel}")
+        st.text_area("사고내용", value=_clean(report.get("incident_content")),
+                     height=88, disabled=True, key=f"{_PAGE_ID}_d_ic_{sel}")
+        st.text_area("예방대책", value=_clean(report.get("countermeasure")),
+                     height=68, disabled=True, key=f"{_PAGE_ID}_d_cm_{sel}")
+        st.text_area("작업현장 상황설명", value=_clean(report.get("site_description")),
+                     height=68, disabled=True, key=f"{_PAGE_ID}_d_sd_{sel}")
+        if status == "REJECTED" and _clean(report.get("rejection_reason")):
+            st.caption(f"반려 사유: {_clean(report.get('rejection_reason'))}")
+
+
+def _all_dept_names() -> dict:
+    """부서코드→부서명 전체 맵(회사 전체 범위 조건 드롭다운·표시용)."""
+    depts = db.get_departments()
+    if depts.empty:
+        return {}
+    return {str(r["dept_code"]): str(r["dept_name"]) for _, r in depts.iterrows()}
+
+
+# ---------- 접근 범위(fail-closed) — 회귀 계약(test_near_miss_view)이 고정. 현재 render 는
+# 회사 전체 공개로 전환되어 이 함수를 호출하지 않는다(정의만 보존). ----------
 def _scope_for(user: dict) -> tuple[str, str | None, dict]:
     """조회 범위를 결정한다(dashboard._scope_for 와 같은 fail-closed 관행).
 

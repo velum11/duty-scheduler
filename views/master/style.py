@@ -64,14 +64,32 @@ _PAGE_CSS = """
   --ms-canvas:#EBE7DF; --ms-surface:#FFFFFF; --ms-surface-2:#F7F5F0; --ms-surface-3:#F1EEE7;
   --ms-line:#E4E0D8; --ms-line-strong:#D4CEC3; --ms-ink:#24262B; --ms-ink-2:#5F5C55; --ms-ink-3:#908C83;
   --ms-navy:#1E3A6E; --ms-navy-hover:#17305C; --ms-gold:#B4813F; --ms-gold-soft:#EFE9DC;
+  --ms-band:#0F6FCB; --ms-band-hover:#0C5CB8; /* KPtech 타이틀 밴드(파랑) — 흰 제목 대비 5.05:1 */
   --ms-info:#295D91; --ms-info-bg:#EAF1F8; --ms-success:#2F6B4F; --ms-success-bg:#E9F2EC;
   --ms-warn:#8A6A1C; --ms-warn-bg:#FBF2D8; --ms-danger:#9A3B2E; --ms-danger-bg:#FBEEEB;
 }
-/* §5 페이지 제목 + 한 줄 설명 + 모드 배지 */
-.ms-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin:0 0 .1rem; }
-.ms-crumb { font-size:.72rem; color:var(--ms-ink-2); margin:0 0 .12rem; letter-spacing:.01em; } /* ink-3→ink-2: 콘텐츠 배경 위 대비 2.9→5.76 (§2, WCAG) */
-.ms-title { font-size:1.25rem; font-weight:700; color:var(--ms-ink); letter-spacing:-.01em; margin:0; line-height:1.6rem; }
-.ms-desc { font-size:.81rem; color:var(--ms-ink-2); margin:.18rem 0 0; line-height:1.35; }
+/* §5 페이지 헤더 — KPtech 풀폭 블루 타이틀 밴드(제목 흰색) 클론.
+   위에서 아래로: 브레드크럼(크림 위 진회색) → 파랑 밴드[리딩 아이콘+제목 / 모드배지+툴바]
+   → 설명(크림 위 진회색). 모든 텍스트 ≥4.5:1: 흰 제목 18px/밴드 #0F6FCB=5.05:1,
+   브레드크럼·설명 ink-2/크림=5.76:1. ms-head/ms-title/ms-mode 클래스는 계약상 유지. */
+.ms-head { display:flex; flex-direction:column; gap:.28rem; margin:0 0 .35rem; }
+.ms-crumb { font-size:.72rem; color:var(--ms-ink-2); margin:0; letter-spacing:.01em; } /* ink-2: 크림 위 5.76 (§2) */
+.ms-band { display:flex; align-items:center; justify-content:space-between; gap:1rem;
+  background:var(--ms-band); border-radius:4px; padding:0 .6rem 0 .85rem; min-height:46px; }
+.ms-band-main { display:flex; align-items:center; gap:.6rem; min-width:0; }
+.ms-band-ico { display:inline-flex; align-items:center; color:#FFFFFF; flex:0 0 auto; }
+.ms-band-ico svg { display:block; }
+.ms-title { font-size:18px; font-weight:700; color:#FFFFFF; letter-spacing:-.01em; margin:0;
+  line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } /* 흰색/밴드 5.05:1 */
+.ms-desc { font-size:.81rem; color:var(--ms-ink-2); margin:0; line-height:1.35; }
+/* 밴드 우측 툴바(프로토타입: 시각 전용, 흰 라인 아이콘 — 정보/인쇄/저장/즐겨찾기/새로고침) */
+.ms-band-tools { display:flex; align-items:center; gap:.1rem; flex:0 0 auto; }
+.ms-band-tools .ms-mode { margin-right:.4rem; }
+.ms-tool { display:inline-flex; align-items:center; justify-content:center;
+  width:30px; height:30px; border-radius:4px; color:#FFFFFF; cursor:default;
+  transition:background-color 120ms ease; }
+.ms-tool svg { width:17px; height:17px; display:block; }
+.ms-tool:hover { background:rgba(255,255,255,.16); }
 /* 모드 배지 — 데이터 연결 신호 전용(점 색: 연결 success / 오류 danger / 샘플 중립) */
 .ms-mode { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .6rem; border-radius:999px;
   background:var(--ms-surface-2); border:1px solid var(--ms-line-strong); font-size:.74rem; font-weight:600;
@@ -95,15 +113,18 @@ _PAGE_CSS = """
    래퍼를 끼워 넣어 직계자식이 끊겨도 사이즈/radius/weight 를 유지한다. 액션바 stButton 은
    버튼을 하나만 담으므로 후손 매칭이 안전하다. `__del`_ok/_cancel(2단계 확인 바)·
    `__discard`(폐기 바)는 별도 컴포넌트이므로 `:not([class*="__del_"])` 로 제외해 건드리지 않는다. */
+/* 지오메트리는 밴드 툴(.st-key-ms_band_live) 과 동일 규격으로 맞춘다(콤팩트 툴 계열
+   통일 — 조직 관리 인페이지 액션바가 남은 유일한 실사용처, 2026-07-26). 색상 규칙은
+   아래 §8 원 규칙(주요/보조/위험)을 그대로 유지하며 크기·모양만 조정한다. */
 [class*="__save"] div.stButton button,
 [class*="__del"]:not([class*="__del_"]) div.stButton button,
 [class*="__add"] div.stButton button,
-[class*="__refresh"] div.stButton button { min-height:2.2rem; height:2.2rem; padding:0 .72rem; border-radius:6px;
-  font-size:.82rem; font-weight:600; white-space:nowrap; gap:.35rem; }
+[class*="__refresh"] div.stButton button { min-height:1.8rem; height:1.8rem; padding:0 .58rem; border-radius:4px;
+  font-size:.78rem; font-weight:600; white-space:nowrap; gap:.26rem; line-height:1; }
 [class*="__save"] div.stButton button [data-testid="stIconMaterial"],
 [class*="__del"]:not([class*="__del_"]) div.stButton button [data-testid="stIconMaterial"],
 [class*="__add"] div.stButton button [data-testid="stIconMaterial"],
-[class*="__refresh"] div.stButton button [data-testid="stIconMaterial"] { font-size:16px; }
+[class*="__refresh"] div.stButton button [data-testid="stIconMaterial"] { font-size:15px; }
 /* §8 주요(저장) — 앱 네이비, 검정 금지 */
 [class*="__save"] button[kind="primary"] { background:var(--ms-navy) !important; border:1px solid var(--ms-navy) !important; color:#FFF !important; }
 [class*="__save"] button[kind="primary"]:hover:not(:disabled) { background:var(--ms-navy-hover) !important; border-color:var(--ms-navy-hover) !important; }
@@ -119,6 +140,104 @@ _PAGE_CSS = """
 [class*="__del"] button:disabled { color:var(--ms-ink-3) !important; border-color:#E7E3DB !important; background:var(--ms-surface) !important; }
 /* 포커스 링(키보드) */
 [class*="__bar"] button:focus-visible { outline:2px solid var(--ms-navy) !important; outline-offset:1px; }
+/* ── 라이브 액션 밴드(사용자 관리 파일럿, master_screen_head(toolbar=True)) ──
+   파랑 타이틀 밴드 안에 실제 액션 버튼(＋추가·삭제·저장·새로고침)을 놓는다.
+   밴드는 st.container(key='ms_band_live') → 컬럼([제목|배지+장식|추가|삭제|저장|새로고침]).
+   버튼 위젯 key 는 인페이지 액션바와 동일한 {page}__add/__del/__save/__refresh 규칙이라
+   전역 §8 색 규칙이 함께 매칭되지만, 아래 `.st-key-ms_band_live` 접두 규칙이 더 높은/
+   같은 특이도 + 뒤 소스순서로 이 밴드 안에서만 이긴다. 다른 화면의 인페이지 액션바
+   (조직·근무형태)는 이 클래스가 없어 영향받지 않는다. 이 블록은 §8 규칙 뒤에 둔다. */
+/* 중복 그룹 라벨 제거 — 본문 상단 .crumb(=그룹명, modules/ui.py _breadcrumb_header)이
+   파랑 밴드 breadcrumb 첫 세그먼트("그룹 › 페이지")와 중복된다(사용자 승인 2026-07-26).
+   사이드바 구조·토큰은 건드리지 않고 표현만 정리한다: (1) .crumb 텍스트를 숨기고,
+   (2) 열기 버튼이 없는(=사이드바 표시 중) app_header 헤더는 빈 52px 공백이 남지 않게
+   접는다. 사이드바 숨김 시엔 app_header 가 '사이드바 열기' 버튼(stButton)을 담으므로
+   접지 않아 버튼은 그대로 노출된다(sb_show 계약 보존). */
+.st-key-app_header .crumb { display:none !important; }
+.st-key-app_header:not(:has(div.stButton)) { display:none !important; min-height:0 !important; }
+/* 파랑 타이틀 밴드 — 본문 스크롤 시 상단 고정(메뉴바 동작). 스크롤 부모(section.stMain)
+   기준 sticky. 밴드 배경은 solid(var(--ms-band))라 아래로 지나가는 그리드가 비쳐 보이지
+   않으며, z-index 로 AgGrid iframe 위에 둔다. 밴드만 고정하고 위의 breadcrumb 는 흘러
+   올라가 사라진다(제목+콤팩트 툴바가 메뉴바처럼 상시 노출). */
+/* Streamlit 1.59 는 각 요소를 자기 높이만한 stLayoutWrapper 로 감싼다 — sticky 요소는
+   자신의 컨테이닝 블록(=이 46px 래퍼) 밖으로 이동할 수 없어 그대로 스크롤돼 버린다.
+   밴드를 감싼 래퍼만 display:contents 로 접어, 밴드의 컨테이닝 블록을 그 위의 '긴' 세로
+   블록으로 올려 sticky 가 실제로 붙게 한다(밴드 래퍼 한정 — 다른 요소 무영향). */
+div[data-testid="stLayoutWrapper"]:has(> .st-key-ms_band_live),
+div[data-testid="stLayoutWrapper"]:has(> .st-key-ms_iconband) { display:contents; }
+.st-key-ms_band_live, .st-key-ms_iconband { background:var(--ms-band); border-radius:4px;
+  padding:.24rem .5rem .24rem .85rem; min-height:46px;
+  position:sticky; top:0; z-index:30; }
+.st-key-ms_band_live div[data-testid="stHorizontalBlock"] { align-items:center; }
+/* ── KPtech 아이콘 전용 툴바(파일럿: 사용자 관리·근무표 편성, master_screen_head("icons")) ──
+   좌: 제목+모드배지 / 우: 8개 정사각(32×32) 흰 아이콘. 라벨 없음·tooltip 로 기능명 노출.
+   컨테이너 key 를 pill 밴드와 분리(ms_iconband/ms_iconbar)해 pill CSS 와 간섭하지 않는다. */
+.st-key-ms_iconband div[data-testid="stHorizontalBlock"] { align-items:center; }
+.st-key-ms_iconband .ms-band-main { min-width:0; }
+.st-key-ms_iconband .ms-band-main .ms-mode { margin-left:.55rem; }
+/* 아이콘 영역 컬럼은 콘텐츠 폭으로 고정하고 제목 컬럼이 대신 줄어들게 한다
+   (min-width:0 + ms-title ellipsis). 좁은 폭(1024)에서 아이콘이 비율 컬럼에 눌려 겹치던
+   문제(음수 gap)를 없앤다 — 아이콘은 항상 30px 슬롯(.ms-tool 과 동일), 제목은 말줄임. */
+div[data-testid="stColumn"]:has(> div .st-key-ms_iconbar) { flex:0 0 auto !important; width:auto !important; }
+div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
+.st-key-ms_iconbar div[data-testid="stColumn"] {
+  flex:0 0 30px !important; width:30px !important; min-width:30px !important; }
+.st-key-ms_iconbar div[data-testid="stHorizontalBlock"] { gap:.1rem; }  /* .ms-band-tools gap 와 동일 */
+.st-key-ms_iconbar div.stButton { display:flex; justify-content:center; }
+/* 기능 아이콘 버튼을 **기존 장식 클러스터(.ms-tool)와 동일**하게 맞춘다: 30×30 · radius4 ·
+   무테두리 · 흰색 · hover rgba(255,255,255,.16) · transition 120ms(= .ms-tool 값 복제).
+   Material 아이콘은 outlined(FILL 0, wght 400)·17px 로 장식 SVG 라인 아이콘과 같은 계열·
+   굵기·크기로 맞춘다(.ms-tool svg 17×17 과 동일). 별도 룩을 만들지 않는다. */
+.st-key-ms_iconbar div.stButton button {
+  width:30px !important; min-width:30px !important; height:30px !important; min-height:30px !important;
+  padding:0 !important; border-radius:4px !important;
+  background:transparent !important; border:none !important; box-shadow:none !important;
+  color:#FFFFFF !important; transition:background-color 120ms ease !important; }
+.st-key-ms_iconbar div.stButton button [data-testid="stIconMaterial"] {
+  font-size:17px !important; color:#FFFFFF !important;
+  font-variation-settings:'FILL' 0, 'wght' 400 !important; }
+.st-key-ms_iconbar div.stButton button:hover:not(:disabled) {
+  background:rgba(255,255,255,.16) !important; border:none !important; }
+/* shaded(disabled): globe·인쇄·즐겨찾기(Phase2)·N/A 기능 — 아이콘을 흐리게(디스에이블 룩) */
+.st-key-ms_iconbar div.stButton button:disabled { background:transparent !important; }
+.st-key-ms_iconbar div.stButton button:disabled [data-testid="stIconMaterial"] {
+  color:rgba(255,255,255,.4) !important; }
+.st-key-ms_iconbar div.stButton button:focus-visible { outline:2px solid #FFFFFF !important; outline-offset:1px; }
+/* 밴드 위 브레드크럼(.ms-crumb) 전역 제거 — 파랑 밴드가 최상단 콘텐츠가 되도록(사용자
+   요청 2026-07-27). 위치 정보는 밴드 제목 + 사이드바 활성 상태로 충분. crumb 전용 ms-head
+   (툴바 밴드: 밴드는 별도 컨테이너)는 통째로 접어 빈 공간을 없애고, 정적 밴드(toolbar=False,
+   ms-head 안에 .ms-band 포함)는 crumb 만 숨겨 밴드·설명은 유지한다. */
+.ms-crumb { display:none !important; }
+.ms-head:not(:has(.ms-band)) { display:none !important; margin:0 !important; }
+.st-key-ms_band_live .ms-band-main { min-width:0; }
+.st-key-ms_band_live .ms-band-tools { justify-content:flex-end; }
+/* 콤팩트 액션 툴(밴드 표준) — 아이콘+짧은 라벨의 낮은 툴 버튼. 라벨 폭에 맞춰
+   (width="content") 오밀조밀 클러스터하고, 각 액션 컬럼 안에서 우측 정렬해 큰 여백
+   없이 붙인다. '큰 버튼' 인상을 없애는 게 핵심 — 높이·패딩·라운드를 줄인다.
+   후손 셀렉터(div.stButton button)로 disabled+help 툴팁 래퍼가 껴도 유지한다. */
+.st-key-ms_band_live div.stButton { display:flex; justify-content:flex-end; }
+/* 지오메트리는 !important 로 강제한다 — 전역 §8 액션 규칙(특히 삭제
+   `[class*="__del"]:not([class*="__del_"])` 는 :not 로 특이도가 더 높다)이 이 밴드 안에서도
+   매칭돼 높이/라운드를 덮어써, 삭제만 큰 버튼으로 튀는 것을 막는다(밴드 스코프 한정). */
+.st-key-ms_band_live div.stButton button { min-height:1.8rem !important; height:1.8rem !important;
+  min-width:0 !important; padding:0 .58rem !important; border-radius:4px !important;
+  font-size:.78rem !important; font-weight:600 !important; white-space:nowrap; gap:.26rem; line-height:1;
+  background:rgba(255,255,255,.12) !important; border:1px solid rgba(255,255,255,.5) !important;
+  color:#FFFFFF !important; }
+.st-key-ms_band_live div.stButton button [data-testid="stIconMaterial"] { font-size:15px !important; }
+.st-key-ms_band_live div.stButton button:hover:not(:disabled) {
+  background:rgba(255,255,255,.24) !important; border-color:#FFFFFF !important; }
+/* 저장(primary): 활성 시 흰 배경·네이비 글자로 강조(밴드 위 최고 대비) */
+.st-key-ms_band_live [class*="__save"] button[kind="primary"] {
+  background:#FFFFFF !important; border-color:#FFFFFF !important; color:var(--ms-navy) !important; }
+.st-key-ms_band_live [class*="__save"] button[kind="primary"]:hover:not(:disabled) {
+  background:#EEF3FA !important; border-color:#EEF3FA !important; }
+/* 비활성(저장·삭제 등): 밴드 위에서 흐리게 — 클릭 불가 어포던스 */
+.st-key-ms_band_live div.stButton button:disabled {
+  background:rgba(255,255,255,.10) !important; border-color:rgba(255,255,255,.30) !important;
+  color:rgba(255,255,255,.55) !important; }
+/* 포커스 링(키보드) — 밴드 대비 흰 링 */
+.st-key-ms_band_live button:focus-visible { outline:2px solid #FFFFFF !important; outline-offset:1px; }
 /* 조직 좌/우 패널 제목 */
 .ms-panel { font-size:.94rem; font-weight:700; color:var(--ms-ink); margin:.2rem 0 .1rem; }
 .ms-panel small { font-weight:500; color:var(--ms-ink-2); }

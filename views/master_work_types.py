@@ -336,12 +336,15 @@ def render(user: dict) -> None:
 
     sample = db.is_sample_mode()
     mode_badge = style.mode_badge_html(connected=not sample, sample=sample)
-    erp.screen_frame(
+    # toolbar=True: 헤더 파랑 밴드에 실제 액션 버튼(추가·삭제·저장·새로고침) 슬롯을 만들고
+    # 핸들을 받는다. 버튼은 그리드 뒤 건수 계산 후 band.render 로 채운다(사용자 관리와 동일).
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="근무형태 관리",
         desc="근무형태(코드·명칭·약칭·색상)를 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
         breadcrumb="기준정보 › 근무형태 관리",
         badges=mode_badge,
+        toolbar=True,
     )
     st.markdown(_EXTRA_CSS, unsafe_allow_html=True)  # 미리보기·오류 목록 보조 스타일(항상 주입)
 
@@ -369,7 +372,6 @@ def render(user: dict) -> None:
     # ---- 표 위 슬롯(§7): 액션바 → 배너 → 표 순서 확정. 건수는 그리드 후 계산하므로
     #      슬롯을 먼저 확보하고 나중에 채운다(사용자·조직 화면과 동일 배치). ----
     summary_slot = st.container()  # 요약 칩(필터결과 사용/미사용 분포) — 표 위 최상단
-    bar_slot = st.container()     # 액션바(필터 아래·표 위)
     banner_slot = st.container()  # 배너(삭제 확인/폐기 확인/원장/오류/flash 중 1개)
 
     # ---- 그리드 ----
@@ -395,9 +397,13 @@ def render(user: dict) -> None:
     state.set_dirty(dtotal > 0)
     st.session_state[state.key(_LAST_COUNTS)] = (new_count, changed_count, sel_count)
 
-    # ---- 액션바(표 위 슬롯) ----
-    with bar_slot, st.container(key=f"{PAGE_ID}__bar"):
-        master.master_action_bar(state, sel_count=sel_count, dirty_total=dtotal, can_save=True)
+    # ---- 액션 밴드 채움(상단 파랑 밴드 슬롯에 실제 버튼 지연 채움) ----
+    # 활성/비활성·변경 배지·툴팁 사유는 인페이지 액션바(master_action_bar)와 동일 규칙
+    # (page_action_specs). 클릭은 band.render 가 state.action_requester(role) on_click
+    # 플래그로 남겨 아래 take_actions 가 소비한다(저장/삭제/추가/새로고침 경로 무변경).
+    if band is not None:
+        band.render(state, master.page_action_specs(
+            sel_count=sel_count, dirty_total=dtotal, can_save=True))
 
     # ---- 배너(표 위 슬롯, 단일 우선순위: 삭제확인 > 폐기확인 > 저장원장/오류 > flash) ----
     with banner_slot:

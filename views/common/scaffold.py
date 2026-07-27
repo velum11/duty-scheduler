@@ -74,7 +74,8 @@ def page_chrome(
     desc: str = "",
     breadcrumb: str | None = None,
     badges: str = "",
-) -> str:
+    toolbar: bool = False,
+):
     """선언한 ``archetype`` 의 표준 페이지 크롬을 렌더하고 그 코드를 반환한다.
 
     공용 CSS 주입 + 브레드크럼 + 제목/설명 + 배지 슬롯까지의 표준 헤더를
@@ -105,19 +106,26 @@ def page_chrome(
         제목 우측 배지 슬롯에 넣을 신뢰된 HTML(예: ``mode_badge_html(...)`` 결과).
         데이터 모드 신호 전용이며 readiness/health 를 섞지 않는다(§5).
 
+    toolbar:
+        ``True`` 면 헤더 밴드에 실제 액션 버튼 슬롯을 만들고(사용자 관리 파일럿)
+        ``master_screen_head`` 가 반환한 :class:`~views.master.BandToolbar` 핸들을
+        그대로 돌려준다 — 화면이 그리드 뒤 건수 계산 후 버튼을 채운다. 기본 ``False``
+        면 종전처럼 장식 툴바만 그리고 ``archetype`` 문자열을 반환한다(기존 화면 무변경).
+
     Returns
     -------
-    str
-        검증을 통과한 ``archetype`` 코드.
+    str | BandToolbar
+        기본은 검증을 통과한 ``archetype`` 코드. ``toolbar=True`` 면 밴드 액션 핸들.
     """
     _validate_archetype(archetype)
-    _master.master_screen_head(
+    band = _master.master_screen_head(
         title,
         desc,
         breadcrumb=breadcrumb,
         mode_badge=badges or None,
+        toolbar=toolbar,
     )
-    return archetype
+    return band if toolbar else archetype
 
 
 def mode_badge() -> str:

@@ -1636,19 +1636,13 @@ def get_near_miss_report(report_id) -> dict | None:
     return natural[0] if natural else None
 
 
-def _near_miss_write_payload(payload: dict) -> dict:
-    """create 용 payload(자연키 입력)를 ID/FK 저장 레코드로 검증·변환한다.
+def _near_miss_editable_payload(payload: dict) -> dict:
+    """수정 가능한 본문 필드(자연키 입력)를 검증·정규화한다(신원/상태 제외).
 
-    reporter_emp_no·부서·시각은 서버측 값이다(화면이 세션에서 채워 넘긴다 —
-    클라이언트 임의값 신뢰 금지). 여기서는 관계 무결성만 재확인한다."""
-    if not near_miss_extensions_ready():
-        raise SupabaseDataError(_NM_NOT_READY_MESSAGE)
-    user_by_emp, _ = _user_maps()
-    dept_by_code, _ = _department_maps()
-
-    reporter_emp = _clean_text(payload.get("reporter_emp_no"))
-    if reporter_emp not in user_by_emp:
-        raise SupabaseDataError(f"아차사고 보고자 사번을 찾을 수 없습니다: {reporter_emp}")
+    create(`_near_miss_write_payload`)와 수정(`update_near_miss_report`)이 **같은**
+    필드 검증을 공유하도록 추출한 헬퍼다 — 두 경로의 검증이 어긋나 한쪽만 느슨해지는
+    것을 막는다(fail-closed). 반환 dict 는 본문 저장 컬럼만 담으며 reporter/부서/상태/
+    평가/감사 필드는 절대 포함하지 않는다(서버측 확정 대상)."""
     work_name = _clean_text(payload.get("work_name"))
     if not work_name:
         raise SupabaseDataError("작업명은 비어 있을 수 없습니다.")
@@ -1665,12 +1659,6 @@ def _near_miss_write_payload(payload: dict) -> dict:
         date.fromisoformat(incident_date)
     except ValueError as exc:
         raise SupabaseDataError(f"사고 발생일 형식이 유효하지 않습니다: {incident_date}") from exc
-    dept_code = _clean_text(payload.get("dept_code"), nullable=True)
-    department_id = None
-    if dept_code:
-        if dept_code not in dept_by_code:
-            raise SupabaseDataError(f"아차사고 부서코드를 찾을 수 없습니다: {dept_code}")
-        department_id = dept_by_code[dept_code]
     photo_paths = payload.get("photo_paths") or []
     if not isinstance(photo_paths, (list, tuple)):
         raise SupabaseDataError("photo_paths 는 배열이어야 합니다.")
@@ -1684,9 +1672,35 @@ def _near_miss_write_payload(payload: dict) -> dict:
         "cause_code": cause_code,
         "cause_detail": _clean_text(payload.get("cause_detail")),
         "incident_date": incident_date,
+        "photo_paths": [str(p) for p in photo_paths],
+    }
+
+
+def _near_miss_write_payload(payload: dict) -> dict:
+    """create 용 payload(자연키 입력)를 ID/FK 저장 레코드로 검증·변환한다.
+
+    reporter_emp_no·부서·시각은 서버측 값이다(화면이 세션에서 채워 넘긴다 —
+    클라이언트 임의값 신뢰 금지). 여기서는 관계 무결성만 재확인한다. 본문 필드 검증은
+    수정 경로와 공유하는 `_near_miss_editable_payload` 로 위임한다(검증 단일화)."""
+    if not near_miss_extensions_ready():
+        raise SupabaseDataError(_NM_NOT_READY_MESSAGE)
+    user_by_emp, _ = _user_maps()
+    dept_by_code, _ = _department_maps()
+
+    reporter_emp = _clean_text(payload.get("reporter_emp_no"))
+    if reporter_emp not in user_by_emp:
+        raise SupabaseDataError(f"아차사고 보고자 사번을 찾을 수 없습니다: {reporter_emp}")
+    body = _near_miss_editable_payload(payload)
+    dept_code = _clean_text(payload.get("dept_code"), nullable=True)
+    department_id = None
+    if dept_code:
+        if dept_code not in dept_by_code:
+            raise SupabaseDataError(f"아차사고 부서코드를 찾을 수 없습니다: {dept_code}")
+        department_id = dept_by_code[dept_code]
+    return {
+        **body,
         "reporter_user_id": user_by_emp[reporter_emp],
         "department_id": department_id,
-        "photo_paths": [str(p) for p in photo_paths],
         "status": "SUBMITTED",
         "is_active": True,
         "created_by": _clean_text(payload.get("created_by"), nullable=True),
@@ -1752,6 +1766,40 @@ def create_near_miss_report(payload: dict) -> dict:
         "아차사고 보고서 번호가 반복 충돌하여 채번에 실패했습니다. "
         "목록을 재조회한 뒤 다시 시도하세요."
     )
+
+
+def update_near_miss_report(
+    report_id, payload: dict, *, reporter_emp_no: str, updated_by=None,
+) -> dict | None:
+    """보고자 본인이 SUBMITTED 상태의 본문을 수정한다(원자적 조건부 UPDATE).
+
+    ``where id=? and reporter_user_id=? and status='SUBMITTED'`` 로 갱신하므로
+    **소유자·수정가능 상태(컷오프)·lost update** 를 서버측에서 함께 강제한다. 0행이면
+    소유자가 아니거나 이미 상태가 바뀌었거나(검토 착수/평가/반려/종결) 보고서가 사라진
+    것이므로 덮어쓰지 않고 stale 오류를 낸다(TOCTOU 방지). 본문 컬럼만 쓰며 상태/신원/
+    평가 필드는 절대 갱신하지 않는다. 검증은 create 와 공유하는
+    `_near_miss_editable_payload` 를 사용한다(검증 단일화)."""
+    if not near_miss_extensions_ready():
+        raise SupabaseDataError(_NM_NOT_READY_MESSAGE)
+    user_by_emp, _ = _user_maps()
+    reporter = _clean_text(reporter_emp_no)
+    if reporter not in user_by_emp:
+        raise SupabaseDataError(f"아차사고 보고자 사번을 찾을 수 없습니다: {reporter}")
+    updates = _near_miss_editable_payload(payload)
+    if updated_by is not None:
+        updates["updated_by"] = _clean_text(updated_by, nullable=True)
+    query = (
+        client().table(NEAR_MISS_TABLE).update(updates)
+        .eq("id", report_id)
+        .eq("reporter_user_id", user_by_emp[reporter])
+        .eq("status", "SUBMITTED")
+    )
+    response = _execute(query, "수정", NEAR_MISS_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
+        # 조건부 0행 = 비소유자/비SUBMITTED/삭제됨 — 덮어쓰지 않고 재조회를 요구한다.
+        raise SupabaseDataError(_NM_STALE_MESSAGE)
+    return _near_miss_natural([saved])[0]
 
 
 def update_near_miss_status(

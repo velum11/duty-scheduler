@@ -22,12 +22,31 @@ from html import escape
 
 import streamlit as st
 
-from modules import auth, db
+from modules import auth, db, ui
 from views.common import erp
 from views.common import scaffold
 from views.master import PersistResult, banner, ledger_banner
 
 _PAGE_ID = "near_miss_submit"
+
+# 제출 후 상태(접수 결과 + 다음 작업 선택)를 담는 세션 키. 값이 있으면 폼 대신
+# 결과·선택 패널을 그린다(제출 직후 rerun 에도 선택지가 유지되도록).
+_DONE_KEY = "nm_submit_done"
+
+# 폼 위젯 세션 키(명시 key). clear_on_submit=False 라 값이 남으므로, '새 아차사고
+# 등록' 시 이 키들을 명시적으로 비워 폼을 초기화한다.
+_FORM_WIDGET_KEYS = [
+    "nm_f_work_name", "nm_f_incident_date", "nm_f_proposed_grade", "nm_f_cause_code",
+    "nm_f_cause_detail", "nm_f_work_content", "nm_f_incident_content",
+    "nm_f_countermeasure", "nm_f_site_description", "nm_f_camera", "nm_f_upload",
+]
+
+
+def _reset_form_state() -> None:
+    """폼 위젯 세션 상태를 비운다(다음 렌더에서 기본값으로 초기화). 결과 패널에서만
+    호출한다 — 폼 위젯이 화면에 없을 때 pop 해야 안전하다."""
+    for key in _FORM_WIDGET_KEYS:
+        st.session_state.pop(key, None)
 
 # 표시용 라벨(display-only). 실제로 저장·검증되는 것은 통제 코드(NEAR_MISS_CAUSE_CODES/
 # NEAR_MISS_GRADES)이며, 아래 라벨은 선택 위젯의 사람이 읽는 표기일 뿐이다. 코드에 없는
@@ -125,12 +144,18 @@ def render(user: dict) -> None:
     # 만든다. 라우팅 연결 후에는 page_chrome_for(_PAGE_ID, ...) 로 통일 가능하다.
     erp.screen_frame(
         SCREEN_ARCHETYPE,
-        title="아차사고 신청",
-        desc="현장에서 발견한 아차사고(near-miss)를 제안서로 접수합니다. 접수 후 상태는 제출됨(SUBMITTED)입니다.",
-        breadcrumb="안전관리 › 아차사고 신청",
+        title="아차사고 등록",
+        desc="현장에서 발견한 아차사고(near-miss)를 접수 등록합니다. 접수 후 상태는 제출됨(SUBMITTED)입니다.",
+        breadcrumb="아차사고 › 아차사고 등록",
         badges=scaffold.mode_badge(),
     )
     st.markdown(_FORM_CSS, unsafe_allow_html=True)
+
+    # 제출 완료 후에는 폼 대신 결과·다음 작업 선택 패널을 그린다(§0 순서: 결과 배너).
+    done = st.session_state.get(_DONE_KEY)
+    if done:
+        _render_post_submit(done)
+        return
 
     can_submit = _readiness_gate()
 
@@ -142,36 +167,36 @@ def render(user: dict) -> None:
         st.markdown("<div class='nm-sec'>작업·발생 개요</div>", unsafe_allow_html=True)
         c1, c2 = st.columns([2, 1])
         with c1:
-            work_name = st.text_input("작업명", max_chars=120,
+            work_name = st.text_input("작업명", max_chars=120, key="nm_f_work_name",
                                       placeholder="예: 3라인 컨베이어 벨트 점검")
         with c2:
             incident_date = st.date_input("발생일", value=date.today(),
-                                          format="YYYY-MM-DD")
+                                          format="YYYY-MM-DD", key="nm_f_incident_date")
         c3, c4 = st.columns(2)
         with c3:
             grade_opts = [""] + list(db.NEAR_MISS_GRADES)
             proposed_grade = st.selectbox(
-                "제안 등급", grade_opts, index=0,
+                "제안 등급", grade_opts, index=0, key="nm_f_proposed_grade",
                 format_func=lambda g: "— 선택 안 함 —" if g == "" else g,
                 help="신고자가 제안하는 위험 등급(S~D). 확정 등급은 평가 단계에서 부여됩니다.",
             )
         with c4:
             cause_opts = [""] + list(db.NEAR_MISS_CAUSE_CODES)
             cause_code = st.selectbox(
-                "발생원인", cause_opts, index=0,
+                "발생원인", cause_opts, index=0, key="nm_f_cause_code",
                 format_func=lambda c: "— 선택 —" if c == "" else f"{_CAUSE_LABELS.get(c, c)} ({c})",
             )
-        cause_detail = st.text_input("발생원인 상세", max_chars=200,
+        cause_detail = st.text_input("발생원인 상세", max_chars=200, key="nm_f_cause_detail",
                                      placeholder="원인을 구체적으로 적어 주세요(선택)")
 
         st.markdown("<div class='nm-sec'>세부 내용</div>", unsafe_allow_html=True)
-        work_content = st.text_area("작업내용", height=90,
+        work_content = st.text_area("작업내용", height=90, key="nm_f_work_content",
                                     placeholder="어떤 작업을 하고 있었는지")
-        incident_content = st.text_area("사고내용", height=110,
+        incident_content = st.text_area("사고내용", height=110, key="nm_f_incident_content",
                                         placeholder="무슨 일이 있었는지(아차사고 상황)")
-        countermeasure = st.text_area("예방대책", height=90,
+        countermeasure = st.text_area("예방대책", height=90, key="nm_f_countermeasure",
                                       placeholder="재발을 막기 위한 제안 대책")
-        site_description = st.text_area("작업현장 상황설명", height=90,
+        site_description = st.text_area("작업현장 상황설명", height=90, key="nm_f_site_description",
                                         placeholder="현장 상황·주변 환경(선택)")
 
         st.markdown("<div class='nm-sec'>사진 첨부</div>", unsafe_allow_html=True)
@@ -182,10 +207,10 @@ def render(user: dict) -> None:
         )
         pc1, pc2 = st.columns(2)
         with pc1:
-            camera_shot = st.camera_input("현장 촬영(모바일)")
+            camera_shot = st.camera_input("현장 촬영(모바일)", key="nm_f_camera")
         with pc2:
             uploaded = st.file_uploader("사진 선택(PC)", type=["png", "jpg", "jpeg"],
-                                        accept_multiple_files=True)
+                                        accept_multiple_files=True, key="nm_f_upload")
 
         submitted = erp.form_submit("제안서 제출", disabled=not can_submit)
 
@@ -256,7 +281,32 @@ def _persist_and_report(payload: dict, photo_count: int) -> None:
         return
 
     report_no = _clean((record or {}).get("report_no")) or "(채번 확인 필요)"
+    # 결과·다음 작업 선택을 폼 밖 패널로 넘긴다(제출 직후 rerun 에도 선택지 유지). 폼
+    # 위젯 세션 상태는 _render_post_submit 의 선택 버튼에서 명시적으로 비운다.
+    st.session_state[_DONE_KEY] = {"report_no": report_no, "photo_count": int(photo_count)}
+    st.rerun()
+
+
+def _render_post_submit(done: dict) -> None:
+    """제출 완료 결과 배너 + 다음 작업 선택([내 아차사고에서 확인]·[새 아차사고 등록])."""
+    report_no = _clean(done.get("report_no")) or "(채번 확인 필요)"
+    photo_count = int(done.get("photo_count") or 0)
     ledger_banner(PersistResult.success(_PAGE_ID, [report_no]))
     extra = f" · 첨부 {photo_count}장은 저장되지 않았습니다(사진 기능 승인 대기)" if photo_count else ""
     banner("success",
-           f"아차사고 제안서를 접수했습니다. 접수번호 {report_no} · 상태 제출됨(SUBMITTED){extra}")
+           f"아차사고를 접수했습니다. 접수번호 {report_no} · 상태 제출됨(SUBMITTED){extra}")
+
+    st.markdown("<div class='nm-note'>다음 작업을 선택하세요.</div>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("내 아차사고에서 확인", type="primary", width="stretch",
+                     key="nm_done_go_my", icon=":material/inbox:"):
+            _reset_form_state()
+            st.session_state.pop(_DONE_KEY, None)
+            ui.request_nav({"type": "page", "target": "near_miss_my"})
+    with c2:
+        if st.button("새 아차사고 등록", width="stretch",
+                     key="nm_done_new", icon=":material/add:"):
+            _reset_form_state()
+            st.session_state.pop(_DONE_KEY, None)
+            st.rerun()

@@ -123,9 +123,9 @@ _ROW_CLICK = JsCode(
 def render(user: dict) -> None:
     erp.screen_frame(
         SCREEN_ARCHETYPE,
-        title="아차사고 평가",
-        desc="제출된 아차사고 보고를 검토해 등급을 확정하거나 반려합니다.",
-        breadcrumb="안전 › 아차사고 평가",
+        title="평가 관리",
+        desc="등록된 아차사고를 검토해 등급을 확정하거나 반려합니다.",
+        breadcrumb="아차사고 › 평가 관리",
         badges=scaffold.mode_badge(),
     )
     if not auth.can_evaluate_near_miss(user):

@@ -71,24 +71,30 @@ def test_render_smoke() -> None:
     # 가 render-path AST 로 이를 별도 검증).
     check("공통 헤더(master_screen_head/erp.screen_frame) 사용",
           "master_screen_head" in src or "screen_frame" in src)
-    check("공통 액션바(master_action_bar) 사용", "master_action_bar" in src)
+    # 액션은 상단 타이틀 밴드(toolbar=True + page_action_specs)로 승격됐다 — 인페이지
+    # master_action_bar 대신 공통 활성/건수/사유 규칙(page_action_specs)을 밴드에 채운다.
+    check("공통 액션 규칙(master_action_bar/밴드 page_action_specs) 사용",
+          "master_action_bar" in src or "page_action_specs" in src)
     check("공통 그리드(render_master_grid) 사용", "render_master_grid" in src)
     check("동적 그리드 높이(master_grid_height) 사용", "master_grid_height" in src)
 
 
-# ===== 1-1) 액션바 위치 = 표 위 (design-contract §7, 검수 defect Visual) =====
+# ===== 1-1) 액션 위치 = 상단 타이틀 밴드 (사용자 관리와 통일된 콤팩트 툴바) =====
 def test_action_bar_above_grid() -> None:
-    print("액션바 위치(표 위) — 필터바 아래·그리드 위")
+    print("액션 위치(상단 밴드) — screen_frame(toolbar=True) → 그리드 뒤 건수 계산 후 밴드 채움")
     import inspect
     from views import master_work_types as m
     src = inspect.getsource(m.render)
-    # 액션바 슬롯(bar_slot)을 그리드 렌더보다 먼저 확보하고 나중에 채운다.
-    i_slot = src.find("bar_slot = st.container()")
+    # 밴드 핸들을 헤더에서 받고(toolbar=True), 그리드 렌더 뒤 건수 계산 후 채운다.
+    i_frame = src.find("erp.screen_frame(")
+    i_toolbar = src.find("toolbar=True")
     i_grid = src.find("render_master_grid(spec")
-    i_fill = src.find("with bar_slot")
-    check("액션바 슬롯을 그리드보다 먼저 확보", 0 <= i_slot < i_grid)
-    check("액션바를 슬롯(표 위)에 채움", i_fill >= 0 and "master_action_bar" in src[i_fill:i_fill + 200])
-    check("배너 슬롯도 그리드보다 먼저 확보", 0 <= src.find("banner_slot = st.container()") < i_grid)
+    i_fill = src.find("band.render(")
+    check("헤더에서 밴드 핸들 확보(toolbar=True)", 0 <= i_frame and 0 <= i_toolbar)
+    check("밴드를 그리드 건수 계산 뒤에 채움", i_fill > i_grid)
+    check("밴드에 공통 액션 스펙(page_action_specs) 채움",
+          i_fill >= 0 and "page_action_specs" in src[i_fill - 200:i_fill + 200])
+    check("배너 슬롯은 그리드보다 먼저 확보", 0 <= src.find("banner_slot = st.container()") < i_grid)
 
 
 # ===== 1-2) B2: 부분성공 원장 — save_work_types_report → PersistResult =====

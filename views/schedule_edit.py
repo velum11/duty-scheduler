@@ -31,9 +31,10 @@ import pandas as pd
 import streamlit as st
 from st_aggrid import JsCode
 
-from modules import db, ui
+from modules import db, nav, ui
 from views.common import erp
 from views.common import scaffold
+from views.master import icon_toolbar_specs  # KPtech 아이콘 툴바 스펙 빌더(공통 계약)
 from views.workspace import (
     grid_bool,
     selectable_master_grid,
@@ -50,15 +51,23 @@ _EMP_EDITABLE = JsCode("function(p){ return p.data && p.data._row_state !== 'exi
 
 # ---------- 진입점 ----------
 def render(user: dict) -> None:
-    # 크롬만 키트로 통일(screen_frame). 필터·편집 버튼·MATRIX 그리드·저장/dirty/이탈가드는
-    # 클릭소실 회피(on_click 플래그)·저장 파이프라인·revert 키(se_*) 계약상 이번엔 건드리지
-    # 않는다 — 필터 condition_panel 이관·top_action_bar·MATRIX 어댑터 추출은 BACKLOG.
-    erp.screen_frame(
+    # 크롬은 키트로 통일(screen_frame). 필터 select 만 condition_panel 로 이관했고
+    # (widget_key=se_y/se_m/se_d/se_t 로 revert 키 계약 유지), 새로고침은 클릭소실
+    # 회피(on_click 플래그) 그대로 패널 밖 별도 버튼이다. 편집 버튼·MATRIX 그리드·
+    # 저장/dirty/이탈가드는 계약상 이번엔 건드리지 않는다 — top_action_bar·MATRIX
+    # 어댑터 추출은 BACKLOG.
+    # toolbar="icons": 헤더 파랑 밴드에 KPtech 아이콘 전용 툴바(정보·globe·추가·조회·삭제·
+    # 인쇄·저장·즐겨찾기) 슬롯을 만들고 핸들을 받는다. 아이콘은 그리드 뒤 건수 계산 후
+    # band.render_icons 로 채운다 — 사용자 관리와 동일 표준(파일럿). 클릭은 이 화면 고유
+    # on_click 플래그(se_*_req)로 남겨(그리드 전송과 경합해도 유실 없음) 기존 소비 경로가
+    # 그대로 처리한다.
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="근무표 편성",
         desc="부서와 조를 선택하여 월별 근무표를 관리합니다.",
         breadcrumb="근무표 › 근무표 편성",
         badges=scaffold.mode_badge(),
+        toolbar="icons",
     )
 
     depts = db.get_departments()
@@ -94,36 +103,49 @@ def render(user: dict) -> None:
     st.session_state.setdefault("se_y", today.year)
     st.session_state.setdefault("se_m", today.month)
 
-    # 조회 조건 카드 (기존 디자인 유지)
-    with ui.card():
-        c1, c2, c3, c4, c5 = st.columns([1, 1, 1.6, 1.2, 0.9], vertical_alignment="bottom")
-        year = c1.selectbox("연도", years, key="se_y")
-        month = c2.selectbox(
-            "월", list(range(1, 13)),
-            format_func=lambda m: f"{m}월", key="se_m",
+    # 조회 조건(우측 인라인 라벨, KP-standard) — 위젯 key 는 기존 se_y/se_m/se_d/se_t 를
+    # widget_key 로 그대로 지정해 revert 로직(위 67-90행)·테스트가 이름으로 참조하는
+    # 세션 키를 변경 없이 유지한다(구조만 이전, views.workspace.schedule_screen 과 동일 패턴).
+    if manager_locked:
+        cur_dept = user["dept_code"]
+        dept_field = erp.Field(
+            key="d", label="부서", kind="select",
+            options=[user["dept_code"]], format_func=lambda c: dept_names.get(c, c),
+            disabled=True, widget_key="se_d",
         )
-        if manager_locked:
-            dept = c3.selectbox(
-                "부서", [user["dept_code"]], format_func=lambda c: dept_names.get(c, c),
-                key="se_d", disabled=True,
-            )
-        else:
-            dept = c3.selectbox(
-                "부서", list(dept_names), format_func=lambda c: dept_names.get(c, c),
-                key="se_d",
-            )
-        team_rows = teams[(teams["dept_code"] == dept) & teams["is_active"]].sort_values("sort_order")
-        team_names = {r["team_code"]: r["team_name"] for _, r in team_rows.iterrows()}
-        team = c4.selectbox(
-            "조", list(team_names), format_func=lambda c: team_names.get(c, c), key="se_t",
+    else:
+        # 부서→조 종속 옵션: 조 Field 를 만들기 전에 "현재" 부서 선택을 세션 상태에서
+        # 읽는다(위젯 렌더 순서가 아니라 세션 상태로 종속을 해석해, 사용자가 부서를 바꾼
+        # 그 rerun 에서 조 옵션이 갱신되게 한다 — workspace.schedule_screen 과 동일).
+        cur_dept = st.session_state.get("se_d") or next(iter(dept_names))
+        dept_field = erp.Field(
+            key="d", label="부서", kind="select",
+            options=list(dept_names), format_func=lambda c: dept_names.get(c, c),
+            widget_key="se_d",
         )
-        # 반환값 방식은 그리드 컴포넌트 전송과 경합해 클릭이 소실될 수 있어
-        # on_click 플래그로 받는다 (저장/행 추가/행 삭제와 동일 패턴).
-        c5.button(
-            "새로고침", key="se_go", type="primary", width="stretch",
-            on_click=lambda: st.session_state.update(se_go_req=True),
-        )
-        clicked = st.session_state.pop("se_go_req", False)
+    team_rows = teams[(teams["dept_code"] == cur_dept) & teams["is_active"]].sort_values("sort_order")
+    team_names = {r["team_code"]: r["team_name"] for _, r in team_rows.iterrows()}
+
+    fields = [
+        # format_func=str 명시: 키트 select 기본 포맷터(항등함수)는 int 옵션(연도)을
+        # 그대로 protobuf 문자열 필드에 넣어 TypeError 를 낸다(workspace.schedule_screen 과
+        # 동일 회피 — 키트 자체는 손대지 않는다). str(int) 는 기존 selectbox 표시와 동일.
+        erp.Field(key="y", label="연도", kind="select", options=years, format_func=str,
+                  widget_key="se_y"),
+        erp.Field(key="m", label="월", kind="select", options=list(range(1, 13)),
+                  format_func=lambda m: f"{m}월", widget_key="se_m"),
+        dept_field,
+        erp.Field(key="t", label="조", kind="select", options=list(team_names),
+                  format_func=lambda c: team_names.get(c, c), widget_key="se_t"),
+    ]
+    v = erp.condition_panel("se", fields, cols=4)
+    year, month, dept, team = v["y"], v["m"], v["d"], v["t"]
+
+    # 새로고침도 그리드 전송과 경합하는 on_click 플래그(se_go_req — 저장/행추가/행삭제와
+    # 동일 패턴)로 받되, 버튼은 상단 타이틀 밴드로 승격했다. 여기서는 직전 rerun 에서
+    # on_click 이 세팅한 플래그만 소비한다(밴드 채움은 그리드 뒤). on_click 플래그는 rerun
+    # 을 넘겨 유지되므로 버튼 렌더 위치와 무관하게 클릭이 유실되지 않는다.
+    clicked = st.session_state.pop("se_go_req", False)
 
     show_flash("schedule_edit")
 
@@ -155,18 +177,9 @@ def render(user: dict) -> None:
     day_cols = [c for c, _ in st.session_state["se_days"]]
     row_cols = _META + _FIXED + day_cols
 
-    # 표 작업 영역: 메타 정보 한 줄 + [행 추가] [행 삭제] (통계 카드 없음)
-    bar_l, bar_add, bar_del = st.columns([7, 1.5, 1.5], vertical_alignment="center")
-    with bar_add:
-        st.button(
-            "행 추가", key="se_add", icon=":material/add:", width="stretch",
-            on_click=lambda: st.session_state.update(se_add_req=True),
-        )
-    with bar_del:
-        st.button(
-            "행 삭제", key="se_del", icon=":material/delete:", width="stretch",
-            on_click=lambda: st.session_state.update(se_del_req=True),
-        )
+    # 표 작업 영역: 메타 정보 한 줄(통계 카드 없음). [행 추가]·[행 삭제] 버튼은 상단 타이틀
+    # 밴드로 승격했으므로, 여기서는 메타 슬롯만 확보하고 건수 계산 뒤 채운다.
+    meta_slot = st.container()
 
     col_config = {
         "사번": {"pinned": "left", "width": 112, "minWidth": 96,
@@ -233,9 +246,9 @@ def render(user: dict) -> None:
     )
     if n_del:
         meta += f" · 삭제 예정 <b style='color:#9A3B2E'>{n_del}</b>명"
-    with bar_l:
+    with meta_slot:
         st.markdown(
-            f"<div style='color:#8A8880; font-size:0.78rem; line-height:2rem;'>{meta}</div>",
+            f"<div style='color:#8A8880; font-size:0.78rem; line-height:1.6rem;'>{meta}</div>",
             unsafe_allow_html=True,
         )
 
@@ -264,22 +277,40 @@ def render(user: dict) -> None:
     if pending:
         _leave_dialog(pending, q)
 
-    # 저장 영역
-    note_col, save_col = st.columns([8.4, 1.6], vertical_alignment="center")
-    with note_col:
-        if dirty:
-            st.markdown(
-                "<div style='text-align:right; color:#9A3B2E; font-size:0.78rem;'>"
-                "저장되지 않은 변경사항이 있습니다</div>",
-                unsafe_allow_html=True,
-            )
-    with save_col:
-        st.button(
-            "저장", key="se_save", type="primary", width="stretch",
-            on_click=lambda: st.session_state.update(se_save_req=True),
+    # 저장 버튼은 상단 타이틀 밴드로 승격했다 — 미저장 안내만 표 아래에 남긴다.
+    if dirty:
+        st.markdown(
+            "<div style='text-align:right; color:#9A3B2E; font-size:0.78rem;'>"
+            "저장되지 않은 변경사항이 있습니다</div>",
+            unsafe_allow_html=True,
         )
 
-    # 버튼 플래그 처리 (최신 live 기준)
+    # 상단 밴드 채움 — KPtech 아이콘 전용 툴바(사용자 관리와 동일 표준). 추가·조회·삭제·저장
+    # 아이콘만 이 화면에 적용(정보=화면 설명 popover, globe·인쇄·즐겨찾기는 shaded).
+    # 활성/비활성·툴팁은 master 규칙을 그대로 미러링한다:
+    #   · 삭제 = 선택 0이면 비활성(사유 tooltip),  · 저장 = 변경 없으면 비활성.
+    # 저장의 '변경' 신호는 위 dirty(=_canon(live, se_deleted, day_cols) != se_orig)로,
+    # 셀 편집·행 추가·행 삭제 예약을 **모두** 포함한다(대기 중 삭제/추가가 저장에서 막히지
+    # 않음 — 데이터 유실 방지). 추가·조회(새로고침)는 항상 활성.
+    # 클릭은 반드시 이 화면 고유 on_click 플래그(se_add_req/se_del_req/se_save_req/
+    # se_go_req)로 남겨(그리드 전송과 경합해도 유실 없음) 아래 소비 블록이 처리한다 —
+    # 플래그·버튼 key·저장/삭제 흐름은 byte-동일, 렌더(pill→아이콘)만 변경.
+    if band is not None:
+        band.render_icons(icon_toolbar_specs(
+            "se", info_content=nav.page_desc("schedule_edit"),
+            add={"key": "se_add", "help": "행 추가",
+                 "on_click": lambda: st.session_state.update(se_add_req=True)},
+            refresh={"key": "se_go", "help": "조회/새로고침",
+                     "on_click": lambda: st.session_state.update(se_go_req=True)},
+            delete={"key": "se_del", "disabled": n_sel == 0,
+                    "help": "삭제할 행을 먼저 선택" if n_sel == 0 else "삭제",
+                    "on_click": lambda: st.session_state.update(se_del_req=True)},
+            save={"key": "se_save", "disabled": not dirty,
+                  "help": "저장할 변경이 없습니다" if not dirty else "저장",
+                  "on_click": lambda: st.session_state.update(se_save_req=True)},
+        ))
+
+    # 버튼 플래그 처리 (최신 live 기준) — 밴드/인페이지 어느 위치에서 클릭됐든 동일 소비.
     if st.session_state.pop("se_save_req", False):
         _save(live, q, day_cols)
     if st.session_state.pop("se_del_req", False):

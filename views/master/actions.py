@@ -100,6 +100,62 @@ def master_action_bar(
              disabled=busy, on_click=state.action_requester(REFRESH))
 
 
+def page_action_specs(
+    *,
+    sel_count: int,
+    dirty_total: int = 0,
+    can_save: bool = True,
+    can_write: bool = True,
+    busy: bool = False,
+    save_disabled_reason: str | None = None,
+    write_disabled_reason: str | None = None,
+) -> list[dict]:
+    """액션 버튼(추가·삭제·저장·새로고침)의 활성/사유/라벨을 순수 계산해 스펙 목록으로 반환.
+
+    :func:`master_action_bar` 와 **동일한 규칙**(§8·§20)을 그대로 옮긴 것으로, 라이브
+    타이틀 밴드(:class:`~views.master.BandToolbar`)가 인페이지 액션바와 동일한 활성/
+    비활성·건수 배지·툴팁 사유를 갖도록 한다. 클릭 플래그(on_click)는 밴드 렌더러가
+    ``state.action_requester(role)`` 로 붙이므로 여기서는 표현 스펙만 만든다(순수 함수).
+
+    반환: ``[{role,label,icon,kind,disabled,help}]`` 순서 = ADD, DELETE, SAVE, REFRESH.
+    """
+    write_reason = write_disabled_reason or _WRITE_DISABLED_DEFAULT
+    write_ok = can_write and not busy
+    save_enabled = bool(dirty_total) and can_save and write_ok
+
+    add_help = write_reason if not can_write else ("처리 중입니다" if busy else None)
+    if not can_write:
+        del_help = write_reason
+    elif busy:
+        del_help = "처리 중입니다"
+    elif int(sel_count) == 0:
+        del_help = "삭제할 행을 먼저 선택"
+    else:
+        del_help = None
+    save_help = None
+    if not save_enabled:
+        if not can_write:
+            save_help = write_reason
+        elif busy:
+            save_help = "저장 처리 중입니다"
+        elif not can_save:
+            save_help = save_disabled_reason or "지금은 저장할 수 없습니다"
+        elif not dirty_total:
+            save_help = "저장할 변경이 없습니다"
+    save_label = f"저장 · {dirty_total}" if dirty_total else "저장"
+
+    return [
+        {"role": ADD, "label": "추가", "icon": ":material/add:", "kind": "secondary",
+         "disabled": not write_ok, "help": add_help},
+        {"role": DELETE, "label": "삭제", "icon": ":material/delete:", "kind": "secondary",
+         "disabled": (int(sel_count) == 0) or not write_ok, "help": del_help},
+        {"role": SAVE, "label": save_label, "icon": ":material/save:", "kind": "primary",
+         "disabled": not save_enabled, "help": save_help},
+        {"role": REFRESH, "label": "새로고침", "icon": ":material/refresh:", "kind": "secondary",
+         "disabled": busy, "help": None},
+    ]
+
+
 def take_actions(state: DraftState) -> dict[str, bool]:
     """표준 4액션 flag 를 한 번에 소비해 dict 로 반환한다(controller 편의)."""
     return {

@@ -137,19 +137,19 @@ _EDIT_UNLESS_PROTECTED = JsCode(
 _ORG_PAGE_CSS = """
 <style>
 /* 시트 액션바 버튼 — 좁은 3열 시트에서도 4버튼(행추가·삭제·저장·새로고침) 라벨이
-   전부 보이도록 압축 레이아웃으로 맞춘다. 세로 줄바꿈은 계속 금지(눌림 방지)하되,
-   라벨을 잘라내지 않는다(overflow:visible·clip 금지 — DESIGN.md §8 텍스트/버튼 잘림 금지).
-   폭 확보는 (1) 낭비되던 우측 스페이서를 줄인 org 전용 액션바 비율(_ORG_BAR_RATIOS)과
-   (2) 아래 패딩·간격·아이콘 축소를 함께 쓴다. 다른 화면(사용자·근무형태)은 이 스코프
-   (.st-key-org_*__sheet)를 쓰지 않으므로 영향받지 않는다. */
-.st-key-org_group__sheet div.stButton > button,
-.st-key-org_dept__sheet div.stButton > button,
-.st-key-org_unit__sheet div.stButton > button {
-  white-space:nowrap; min-width:0; overflow:visible; text-overflow:clip;
-  padding-left:.34rem; padding-right:.34rem; gap:.2rem; }
-.st-key-org_group__sheet div.stButton > button [data-testid="stIconMaterial"],
-.st-key-org_dept__sheet div.stButton > button [data-testid="stIconMaterial"],
-.st-key-org_unit__sheet div.stButton > button [data-testid="stIconMaterial"] { font-size:15px; }
+   전부 보이도록 줄바꿈 없이 맞춘다(overflow:visible·clip 금지 — DESIGN.md §8 텍스트/버튼
+   잘림 금지). 크기(패딩·높이·폰트)는 공통 밴드 툴 규격(style.py §8, 2026-07-26 통일)을
+   그대로 따르므로 여기서 별도 패딩/간격/아이콘 축소를 두지 않는다 — 과거 압축값
+   (padding .34rem)은 direct-child(`>`) 선택자라 disabled+help 시 Streamlit 이 끼워 넣는
+   stTooltipHoverTarget 래퍼에 끊겨 삭제/저장 버튼에는 적용되지 않고 행추가/새로고침에만
+   적용돼(선택 0건·미변경 상태에서만) 4버튼 폭이 들쭉날쭉해지는 결함이 있었다(2026-07-26
+   근본원인 확인). 후손 셀렉터(공백)로 바꿔 래퍼가 껴도 동일 규칙이 4버튼 모두에 안정
+   적용된다. 폭 확보는 org 전용 액션바 비율(_ORG_BAR_RATIOS)만으로 충분하다. 다른 화면
+   (사용자·근무형태)은 이 스코프(.st-key-org_*__sheet)를 쓰지 않으므로 영향받지 않는다. */
+.st-key-org_group__sheet div.stButton button,
+.st-key-org_dept__sheet div.stButton button,
+.st-key-org_unit__sheet div.stButton button {
+  white-space:nowrap; min-width:0; overflow:visible; text-overflow:clip; }
 
 /* ── (1) 선택 컨텍스트·계층 통합 브레드크럼 — 상단 .ms-ctx 를 스텝 경로로 강조 ── */
 .ms-ctx { padding:.5rem .8rem; font-size:.8rem; box-shadow:0 1px 0 rgba(0,0,0,.02); }

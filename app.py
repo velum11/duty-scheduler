@@ -15,7 +15,8 @@ from views import (
     dashboard, login, my_schedule,
     schedule_edit, schedule_view,
     master_users, master_departments, master_teams, master_org, master_work_types,
-    near_miss_submit, near_miss_evaluate, near_miss_view, near_miss_stats,
+    near_miss_submit, near_miss_my, near_miss_evaluate, near_miss_improvement,
+    near_miss_view, near_miss_stats,
 )
 
 # 업무 화면 라우팅 테이블 (page id → 화면 모듈)
@@ -28,10 +29,24 @@ _PAGES = {
     "master_teams": master_teams,
     "master_work_types": master_work_types,
     "near_miss_submit": near_miss_submit,
+    "near_miss_my": near_miss_my,
     "near_miss_evaluate": near_miss_evaluate,
+    "near_miss_improvement": near_miss_improvement,
     "near_miss_view": near_miss_view,
     "near_miss_stats": near_miss_stats,
 }
+
+
+def _caps_for(user: dict) -> set:
+    """메뉴/route guard 가 공유하는 능력 집합을 세션 사용자에서 계산한다.
+
+    nav 는 DEPENDENCY-FREE 이므로(auth import 없음) 능력 판정은 여기(호출부)에서 하고
+    nav 필터에 caps 로 넘긴다. 현재는 아차사고 평가 능력 하나뿐이다.
+    """
+    caps = set()
+    if auth.can_evaluate_near_miss(user):
+        caps.add(nav.CAP_EVALUATE_NEAR_MISS)
+    return caps
 
 
 def dispatch(page: str, user: dict) -> None:
@@ -43,8 +58,9 @@ def dispatch(page: str, user: dict) -> None:
     않고) 교체된다. 로딩 중에는 공통 스피너를 보여준다.
     """
     role = str(user.get("role", "")).strip().upper()
-    if not (nav.allowed(page, role) or (page == "master_org" and role == "ADMIN")):
-        page = nav.default_page(role)
+    caps = _caps_for(user)
+    if not (nav.allowed(page, role, caps) or (page == "master_org" and role == "ADMIN")):
+        page = nav.default_page(role, caps)
         st.session_state.nav_page = page
 
     body = st.empty()
