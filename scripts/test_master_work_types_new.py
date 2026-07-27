@@ -79,21 +79,24 @@ def test_render_smoke() -> None:
     check("동적 그리드 높이(master_grid_height) 사용", "master_grid_height" in src)
 
 
-# ===== 1-1) 액션 위치 = 상단 타이틀 밴드 (사용자 관리와 통일된 콤팩트 툴바) =====
+# ===== 1-1) 액션 위치 = 상단 타이틀 밴드 (사용자 관리와 통일된 KPtech 아이콘 툴바) =====
 def test_action_bar_above_grid() -> None:
-    print("액션 위치(상단 밴드) — screen_frame(toolbar=True) → 그리드 뒤 건수 계산 후 밴드 채움")
+    print("액션 위치(상단 밴드) — screen_frame(toolbar=\"icons\") → 그리드 뒤 건수 계산 후 아이콘 밴드 채움")
     import inspect
     from views import master_work_types as m
     src = inspect.getsource(m.render)
-    # 밴드 핸들을 헤더에서 받고(toolbar=True), 그리드 렌더 뒤 건수 계산 후 채운다.
+    # 밴드 핸들을 헤더에서 받고(toolbar="icons"), 그리드 렌더 뒤 건수 계산 후 아이콘으로 채운다.
     i_frame = src.find("erp.screen_frame(")
-    i_toolbar = src.find("toolbar=True")
+    i_toolbar = src.find('toolbar="icons"')
     i_grid = src.find("render_master_grid(spec")
-    i_fill = src.find("band.render(")
-    check("헤더에서 밴드 핸들 확보(toolbar=True)", 0 <= i_frame and 0 <= i_toolbar)
+    i_fill = src.find("band.render_icons(")
+    check("헤더에서 밴드 핸들 확보(toolbar=\"icons\")", 0 <= i_frame and 0 <= i_toolbar)
     check("밴드를 그리드 건수 계산 뒤에 채움", i_fill > i_grid)
-    check("밴드에 공통 액션 스펙(page_action_specs) 채움",
-          i_fill >= 0 and "page_action_specs" in src[i_fill - 200:i_fill + 200])
+    check("밴드에 아이콘 툴바 스펙(icon_toolbar_specs) 채움",
+          i_fill >= 0 and "icon_toolbar_specs" in src[i_fill - 300:i_fill + 100])
+    i_specs = src.find("page_action_specs")
+    check("아이콘 활성/사유는 공통 액션 규칙(page_action_specs) 재사용",
+          0 <= i_specs < i_fill)
     check("배너 슬롯은 그리드보다 먼저 확보", 0 <= src.find("banner_slot = st.container()") < i_grid)
 
 

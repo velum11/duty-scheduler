@@ -275,20 +275,24 @@ div[data-testid="stLayoutWrapper"]:has(> .st-key-ms_iconband) { display:contents
    컨테이너 key 를 pill 밴드와 분리(ms_iconband/ms_iconbar)해 pill CSS 와 간섭하지 않는다. */
 .st-key-ms_iconband div[data-testid="stHorizontalBlock"] { align-items:center; }
 .st-key-ms_iconband .ms-band-main { min-width:0; }
-.st-key-ms_iconband .ms-band-main .ms-mode { margin-left:.55rem; }
-/* 아이콘 영역 컬럼은 콘텐츠 폭으로 고정하고 제목 컬럼이 대신 줄어들게 한다
+/* 모드 배지는 밴드 우측(아이콘 툴바 바로 왼쪽)에 둔다 — pill/static 변종과 동일한 우측
+   통일(2026-07-27 사용자 결정). 자체 컬럼에서 우측 정렬해 아이콘 클러스터에 붙인다
+   (pill 의 .ms-band-tools .ms-mode margin-right 와 동일한 리듬). */
+.st-key-ms_iconband .ms-band-badge { display:flex; justify-content:flex-end; margin-right:.4rem; }
+/* 아이콘 영역·배지 컬럼은 콘텐츠 폭으로 고정하고 제목 컬럼이 대신 줄어들게 한다
    (min-width:0 + ms-title ellipsis). 좁은 폭(1024)에서 아이콘이 비율 컬럼에 눌려 겹치던
    문제(음수 gap)를 없앤다 — 아이콘은 항상 30px 슬롯(.ms-tool 과 동일), 제목은 말줄임. */
 div[data-testid="stColumn"]:has(> div .st-key-ms_iconbar) { flex:0 0 auto !important; width:auto !important; }
+div[data-testid="stColumn"]:has(> div .ms-band-badge) { flex:0 0 auto !important; width:auto !important; }
 div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 .st-key-ms_iconbar div[data-testid="stColumn"] {
   flex:0 0 30px !important; width:30px !important; min-width:30px !important; }
-/* 기능 툴바 아이콘 간격을 장식 클러스터(.ms-band-tools)와 동일한 tight-pack 리듬으로
-   맞춘다. st.columns 의 기본 컬럼 gap(emotion 클래스, 라이브 측정 8.4px)은 !important 로
-   주입돼 특이도만으로는 이기지 못하므로, 여기서도 !important 로 .1rem(=.ms-band-tools gap)
-   을 강제한다. 8개 슬롯을 넓게 벌리지 않고 우측에 오밀조밀 붙인다(레이아웃/간격만 변경 —
-   슬롯 수·글리프·클릭 계약 무변경). */
-.st-key-ms_iconbar div[data-testid="stHorizontalBlock"] { gap:.1rem !important; }  /* .ms-band-tools gap 와 동일 */
+/* 기능 툴바 아이콘 간격 — 각 아이콘 버튼이 서로 붙지 않고 개별적으로 분리돼 보이도록
+   벌린다(참고 이미지 방향, 2026-07-27 사용자 승인). st.columns 의 기본 컬럼 gap(emotion
+   클래스, 라이브 측정 8.4px)은 !important 로 주입돼 특이도만으로는 이기지 못하므로 여기서도
+   !important 로 강제한다. 과거 tight-pack(.1rem, 거의 붙음)을 .4rem(≈6.4px)로 넓혀 버튼이
+   개별로 읽히게 한다(레이아웃/간격만 변경 — 슬롯 수·글리프·클릭 계약 무변경). */
+.st-key-ms_iconbar div[data-testid="stHorizontalBlock"] { gap:.4rem !important; }
 .st-key-ms_iconbar div.stButton { display:flex; justify-content:center; }
 /* 기능 아이콘 버튼을 **기존 장식 클러스터(.ms-tool)와 동일**하게 맞춘다: 30×30 · radius4 ·
    무테두리 · 흰색 · hover rgba(255,255,255,.16) · transition 120ms(= .ms-tool 값 복제).
@@ -296,7 +300,7 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
    굵기·크기로 맞춘다(.ms-tool svg 17×17 과 동일). 별도 룩을 만들지 않는다. */
 .st-key-ms_iconbar div.stButton button {
   width:30px !important; min-width:30px !important; height:30px !important; min-height:30px !important;
-  padding:0 !important; border-radius:4px !important;
+  padding:0 !important; border-radius:7px !important;  /* 모서리를 살짝 더 둥근 사각형으로(참고 이미지, 2026-07-27) */
   background:transparent !important; border:none !important; box-shadow:none !important;
   color:#FFFFFF !important; transition:background-color 120ms ease !important; }
 .st-key-ms_iconbar div.stButton button [data-testid="stIconMaterial"] {

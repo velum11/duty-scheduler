@@ -2,6 +2,37 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-27 · [재시작 대기] 상단바 통일 + 아차사고 계약수정 병렬 진행 중
+
+**중단 이유**: 이 세션 전체(Coordinator+서브에이전트)가 실제로는 의도한 Fable/Opus가 아니라 **Sonnet으로 실행 중**이었음을 사용자가 화면 라벨로 확인(원인 불명 — 프로젝트 `.claude/agents/*.md`의 `model: opus` frontmatter가 하네스에서 적용되지 않음). 사용자가 Claude Code 재시작으로 해결 예정(설정 화면 확인 결과 Fable 5는 Max 플랜에 이미 포함돼 있어 usage credit 불필요, 단순 재시작이 안내된 해결책). **작업은 끊지 않고 로그만 남기고 재시작.**
+
+**git 상태(이 로그 시점)**: 20개 파일 변경, 281 insertions(+)/262 deletions(-), 전부 워킹트리에만 존재(미커밋). 변경 파일: `.claude/agents/*.md`(6개, 이전 라운드), `.orca/PLAYBOOK.md`·`CLAUDE.md`·`DESIGN.md`·`docs/requirements.md`(이전 라운드 문서 정합), `modules/db.py`·`scripts/test_near_miss_data.py`·`views/near_miss_evaluate.py`(아래 A), `views/master/__init__.py`·`views/master/style.py`·`views/master_org.py`·`views/master_work_types.py`·`views/near_miss_improvement.py`·`views/near_miss_submit.py`·`scripts/test_master_work_types_new.py`(아래 B).
+
+### A. 아차사고 데이터 계약 (data-contract Owner) — **완료, 테스트 그린, 미커밋**
+사용자 승인 3건:
+1. 평가관리(near_miss_evaluate) 화면의 항상 비활성이던 "종결" 버튼 제거 — `modules/db.py`는 손대지 않고(EVALUATED→CLOSED 전이 능력은 향후 개선조치 구현 시 재설계 대상으로 보존) UI만 정리. `EVALUATED`="평가완료" 표시 유지.
+2. `modules/db.py::update_near_miss_status`에서 동일상태 재전이(REJECTED→REJECTED, CLOSED→CLOSED 등) 차단 — 1873행 부근 `cur_status != target and` 단축조건 제거. 호출부 전수 추적으로 기존 정상 전이 비영향 확인.
+3. `updated_by` 등 audit 값 전수 점검 — 누락 없음 확인, 코드 변경 없음(신규 컬럼·migration 없음).
+검증: `scripts/test_near_miss_data.py` 168 checks(신규 케이스 포함) + `scripts/test_near_miss_view.py` 59 checks 전부 통과, compileall/git diff --check 클린. 데이터 변경 없음(sample 모드 세션 스토어만 사용).
+**감사부채**: 이 변경은 인가/상태전이 가드라 원래 Codex 감사 대상(HIGH_RISK)이나, 세션 재시작 시간압박으로 **Codex 감사 미실행**. 재개 시 최우선 처리하거나 `docs/BACKLOG.md`에 정식 등록할 것.
+
+### B. 상단바 아이콘 밴드 일관성 (ui-feature Owner) — **완료(이 로그 작성 직후 알림 수신), 테스트·visual-qa 그린, 미커밋 → 커밋 완료 예정**
+사용자 승인 5건(요약): ①버튼 모양=모서리 살짝 둥근 사각형(사용자가 지목한 "Image #4" 참고 스타일) ②간격=기존 1.4px보다 뚜렷하게 확대 ③아이콘 세트는 전 화면 통일 유지, 화면별로 기능 없는 아이콘은 음영 처리(화면별 커스터마이즈는 차기 과제) ④근무형태관리(텍스트 pill)·조직관리/아차사고등록/개선조치(static 장식)를 전부 icons 포맷으로 전환, **대시보드는 전환 작업 대상에서 제외**(이미 icons 포맷이라 공유 CSS 변경만 자동 상속) ⑤모드배지("● 샘플 데이터")를 전 화면 **우측**으로 통일.
+- 코디네이터가 사전에 leftover streamlit 인스턴스(8501/8502/8503/8513/8533/8599/8600/8603 + 조사용 스크래치패드 8799)를 전부 정리함. 다른 워크트리 소유 8630은 보존.
+- 이 로그 작성 시점 기준 새 streamlit 인스턴스가 **포트 8611**(PID 32404)로 떠 있는 것 확인됨 — Owner가 자체 검증용으로 띄운 것으로 추정.
+- **재시작 시 이 백그라운드 Agent 실행이 이어지는지 끊기는지 불명확** — 재개 시 최우선으로 확인할 것.
+
+### 재개 시 순서
+1. `git status --short` / `git diff --stat`로 위 상태와 동일한지 대조(달라졌으면 B가 재시작 전에 더 진행됐다는 뜻).
+2. 8611(또는 새로 뜬 포트) 생존 여부·B의 self-verify/visual-qa 완료 여부 확인. 안 끝났으면 같은 ui-feature Owner 컨텍스트로 이어받거나(가능하면) 새 턴에 위 5개 결정을 그대로 재전달해 마무리.
+3. A·B 변경 파일 겹침 없음 재확인(설계상 없음 — A는 `modules/db.py`/`near_miss_evaluate.py`/테스트, B는 `master/*`·`near_miss_submit.py`·`near_miss_improvement.py`).
+4. **사용자 명시 요청**: 평가(near_miss_evaluate)·등록(near_miss_submit)·개선조치(near_miss_improvement) 3화면을 실브라우저에서 회귀 검증.
+5. A의 Codex 감사부채 처리(실행하거나 BACKLOG 등록).
+6. 문제 없으면 commit → (사용자 기승인된) push.
+7. 재시작한 세션이 실제로 Fable(Coordinator)/Opus(서브에이전트)로 뜨는지 화면 라벨로 먼저 확인한 뒤 위 순서를 이어갈 것 — MD 문구만으로 모델이 바뀌지 않는다는 점을 다시 확인.
+
+관련: `docs/BACKLOG.md`(감사부채 등록 대상), 메모리 `near-miss-topbar-wip-paused`(이전 라운드, 이번 항목으로 대체)·`subagent-role-system`·`localhost-preview-real-data`.
+
 ## 2026-07-26 · KP-standard 구조 통합 — 중립 키트 + 콘텐츠 8화면 이관 (사이드바 진행 중)
 
 - 사용자 지적("화면마다 조잡·불일치")을 **라이브 KPtech ERP(dews-ui) 실조사** + recon/visual-qa/Codex로 진단: 본문 4계보·그리드 3엔진·§0 골격 미강제가 근본원인. DESIGN.md §0을 **화면 구조 표준(KP-standard)** 으로 재작성(화면×역할 매니페스트·중립 키트·영역 순서·실렌더 검증 목표). Codex+Sonnet+Fable 계획 교차검증(GO-WITH-CHANGES).

@@ -336,15 +336,18 @@ def render(user: dict) -> None:
 
     sample = db.is_sample_mode()
     mode_badge = style.mode_badge_html(connected=not sample, sample=sample)
-    # toolbar=True: 헤더 파랑 밴드에 실제 액션 버튼(추가·삭제·저장·새로고침) 슬롯을 만들고
-    # 핸들을 받는다. 버튼은 그리드 뒤 건수 계산 후 band.render 로 채운다(사용자 관리와 동일).
+    # toolbar="icons": 헤더 파랑 밴드에 KPtech 아이콘 전용 툴바(정보·globe·추가·조회·삭제·
+    # 인쇄·저장·즐겨찾기) 슬롯을 만들고 핸들을 받는다. 아이콘은 그리드 뒤 건수 계산 후
+    # band.render_icons 로 채운다(dirty/선택 정확 — 사용자 관리와 동일 표준). pill 텍스트
+    # 라벨 툴바에서 아이콘 포맷으로 통일(2026-07-27).
+    _WT_DESC = "근무형태(코드·명칭·약칭·색상)를 표에서 직접 편집하고 [저장]으로 일괄 반영합니다."
     band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="근무형태 관리",
-        desc="근무형태(코드·명칭·약칭·색상)를 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
+        desc=_WT_DESC,
         breadcrumb="기준정보 › 근무형태 관리",
         badges=mode_badge,
-        toolbar=True,
+        toolbar="icons",
     )
     st.markdown(_EXTRA_CSS, unsafe_allow_html=True)  # 미리보기·오류 목록 보조 스타일(항상 주입)
 
@@ -397,13 +400,28 @@ def render(user: dict) -> None:
     state.set_dirty(dtotal > 0)
     st.session_state[state.key(_LAST_COUNTS)] = (new_count, changed_count, sel_count)
 
-    # ---- 액션 밴드 채움(상단 파랑 밴드 슬롯에 실제 버튼 지연 채움) ----
+    # ---- 아이콘 툴바 채움(상단 파랑 밴드 슬롯에 지연 채움) ----
     # 활성/비활성·변경 배지·툴팁 사유는 인페이지 액션바(master_action_bar)와 동일 규칙
-    # (page_action_specs). 클릭은 band.render 가 state.action_requester(role) on_click
-    # 플래그로 남겨 아래 take_actions 가 소비한다(저장/삭제/추가/새로고침 경로 무변경).
+    # (page_action_specs). 클릭은 인페이지와 동일한 state.action_requester(role) on_click
+    # 플래그 + {page_id}__{role} 키로 남겨 아래 take_actions 가 소비한다(저장/삭제/추가/
+    # 새로고침 경로 무변경 — 렌더만 아이콘으로 이전). 이 화면이 실제로 쓰는 4개 기능
+    # (추가/삭제/저장/새로고침)만 활성이고, 미사용(globe/인쇄/즐겨찾기)은 shaded 로 남는다.
     if band is not None:
-        band.render(state, master.page_action_specs(
-            sel_count=sel_count, dirty_total=dtotal, can_save=True))
+        specs = master.page_action_specs(sel_count=sel_count, dirty_total=dtotal, can_save=True)
+        by_role = {s["role"]: s for s in specs}
+
+        def _icon_action(role: str, name: str) -> dict:
+            s = by_role[role]
+            return {"key": f"{PAGE_ID}__{role}", "on_click": state.action_requester(role),
+                    "disabled": s["disabled"], "help": (s["help"] or name) if s["disabled"] else name}
+
+        band.render_icons(master.icon_toolbar_specs(
+            PAGE_ID, info_content=_WT_DESC,
+            add=_icon_action(ADD, "행 추가"),
+            refresh=_icon_action(REFRESH, "조회/새로고침"),
+            delete=_icon_action(DELETE, "삭제"),
+            save=_icon_action(SAVE, "저장"),
+        ))
 
     # ---- 배너(표 위 슬롯, 단일 우선순위: 삭제확인 > 폐기확인 > 저장원장/오류 > flash) ----
     with banner_slot:

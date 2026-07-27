@@ -3,7 +3,7 @@
 DESIGN.md §0 화면 유형: ``MASTER_DETAIL``. 이 화면은 다건 인라인 편집·저장 그리드가
 아니라, 조회 전용 목록(큐)과 그 옆 상세/워크플로 패널로 구성된 읽기 목록 + 상세 화면이다
 (§0.8/§0.1 유형 매뉴페스트: MASTER_DETAIL = 읽기 목록 + 상세/워크플로). 상단 액션바는
-page-scope 조회 액션(새로고침)만 두고, 유일한 쓰기(평가확정/반려/종결)는 상세 패널의
+page-scope 조회 액션(새로고침)만 두고, 유일한 쓰기(평가확정/반려)는 상세 패널의
 scope 액션(``erp.detail_actions``)이 담당한다 — 파사드 직접 호출, 그리드 저장 lifecycle
 미사용(이 화면은 다건 편집·저장이 아니라 단건 상태전이라 ``run_save`` 대상이 아니다).
 목록 그리드 자체는 ``views/master`` 의 ``render_master_grid``/``MasterGridSpec``(행 클릭
@@ -22,12 +22,11 @@ scope 액션(``erp.detail_actions``)이 담당한다 — 파사드 직접 호출
     최신 상태 확인).
   - ``db.evaluate_near_miss(report_id, grade, current_user=...)`` — 평가확정
     (SUBMITTED/IN_REVIEW 에서만 허용, 서버측에서 평가자·시각을 확정한다).
-  - ``db.update_near_miss_status(report_id, "REJECTED"/"CLOSED", rejection_reason=,
-    current_user=...)`` — 반려/종결 상태전이(전이표 밖이면 ValueError).
-  - ``db.near_miss_transition_allowed(current, target)`` — 종결 버튼 활성 여부 판정.
+  - ``db.update_near_miss_status(report_id, "REJECTED", rejection_reason=,
+    current_user=...)`` — 반려 상태전이(전이표 밖이면 ValueError).
   - ``db.near_miss_schema_probe()`` — migration 006 준비 상태(3-state) 배너.
 
-신원 위조 방지: 세 쓰기 호출 모두 ``current_user=auth.get_current_user()`` 를 그대로
+신원 위조 방지: 두 쓰기 호출 모두 ``current_user=auth.get_current_user()`` 를 그대로
 넘긴다(위젯 입력이 아니라 세션 사용자) — 파사드가 사번을 다시 DB 에서 확인해 평가자를
 서버측으로 확정한다(``modules/db.py::_near_miss_actor``).
 
@@ -132,8 +131,8 @@ def render(user: dict) -> None:
     )
     # 상단 파랑 밴드 아이콘 툴바(공통 표준). 이 화면의 page-scope 조회 액션은 새로고침
     # 뿐이다 — search 아이콘 클릭이 유발하는 rerun 만으로 _load_pending_reports() 가 매
-    # 렌더 무조건 재조회한다(구 pill 과 동일 — on_click 없이 클릭=rerun). 평가확정·반려·
-    # 종결(쓰기)은 상세 패널 scope 액션 소관이라 밴드 추가·삭제·저장은 N/A(shaded).
+    # 렌더 무조건 재조회한다(구 pill 과 동일 — on_click 없이 클릭=rerun). 평가확정·반려
+    # (쓰기)는 상세 패널 scope 액션 소관이라 밴드 추가·삭제·저장은 N/A(shaded).
     if band is not None:
         band.render_icons(icon_toolbar_specs(
             _PAGE_ID, info_content=nav.page_desc("near_miss_evaluate"),
@@ -281,7 +280,7 @@ def _render_queue(reports: pd.DataFrame, readiness: ReadinessState) -> pd.DataFr
     )
     grid_df = render_master_grid(spec, _queue_display(rows, selected_id), key=_STATE.grid_key())
 
-    # 이 큐는 조회 전용이다 — 행 추가/삭제/저장은 이 화면의 책임이 아니다(평가/반려/종결은
+    # 이 큐는 조회 전용이다 — 행 추가/삭제/저장은 이 화면의 책임이 아니다(평가/반려는
     # 상세 패널 전용 버튼이 파사드를 직접 호출한다). page-scope 액션바(erp.top_action_bar)의
     # 새로고침만이 유일한 이 화면 액션이며, 그리드 자체 action열/편집도 없다(전 컬럼
     # editable=False) — 이 카운트 스트립은 "케이스를 클릭해 상세에서 평가"하라는 안내 없이도
@@ -357,7 +356,7 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         "반려 사유(반려 시 필수)", key=f"nm_reason_{selected_id}", height=56, disabled=not can_write,
     )
 
-    # 상세 패널 scope 액션(§0.4) — 실제 쓰기는 이 세 버튼만 담당한다(page 액션바에는
+    # 상세 패널 scope 액션(§0.4) — 실제 쓰기는 이 두 버튼만 담당한다(page 액션바에는
     # 없음). disabled/help 판정은 여기서 그대로 계산해 넘기고, erp.detail_actions 는
     # 순수 UI(버튼 렌더 + 클릭 반환)만 담당한다 — facade 호출·current_user 전달·
     # 오류/stale 처리는 이 화면(아래 클릭 분기 + ``_run_action``)이 그대로 소유한다.
@@ -369,19 +368,13 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         None if str(reason or "").strip() else "반려 사유를 입력하세요."
     )
 
-    # 이 큐는 SUBMITTED/IN_REVIEW 만 담아 CLOSED 로의 유일한 허용 전이(EVALUATED→CLOSED)
-    # 대상이 여기 없다 — 종결은 이 화면에서 사실상 항상 비활성이다(기존 동작 그대로 보존,
-    # 큐 범위를 넓히는 건 별도 제품 결정 — BACKLOG 추적).
-    close_allowed = db.near_miss_transition_allowed(status, "CLOSED")
-    close_disabled = (not can_write) or not close_allowed
-    close_help = readiness.message if not can_write else (
-        None if close_allowed else "평가 확정 후에만 종결할 수 있습니다."
-    )
-
+    # 종결(EVALUATED→CLOSED)은 이 평가 대기 화면의 책임이 아니다 — 큐가 SUBMITTED/IN_REVIEW
+    # 만 담아 여기서는 항상 비활성일 수밖에 없었다. 종결 UI 는 향후 개선조치 관리 화면에서
+    # 재설계하며(별도 제품 결정 — BACKLOG 추적), db.py 의 EVALUATED→CLOSED 전이 능력
+    # 자체는 데이터 계약으로 그대로 유지한다(이 화면에서 버튼만 제거).
     clicks = erp.detail_actions(_PAGE_ID, [
         ("평가확정", "primary", eval_disabled, eval_help),
         ("반려", "default", reject_disabled, reject_help),
-        ("종결", "default", close_disabled, close_help),
     ])
 
     if clicks.get("평가확정"):
@@ -392,10 +385,6 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         _run_action(user, "반려", lambda: db.update_near_miss_status(
             selected_id, "REJECTED", rejection_reason=reason, current_user=auth.get_current_user(),
         ))
-    if clicks.get("종결"):
-        _run_action(user, "종결", lambda: db.update_near_miss_status(
-            selected_id, "CLOSED", current_user=auth.get_current_user(),
-        ))
 
 
 def _flash_kind_for(exc: Exception) -> str:
@@ -404,7 +393,7 @@ def _flash_kind_for(exc: Exception) -> str:
 
 
 def _run_action(user: dict, label: str, call) -> None:
-    """평가/반려/종결 공통 실행 — 예외를 여기서 흡수해 raw traceback 을 노출하지 않는다
+    """평가/반려 공통 실행 — 예외를 여기서 흡수해 raw traceback 을 노출하지 않는다
     (2단계 배너: 제목 + 파사드 원문 사유, stale 메시지는 가공 없이 그대로 노출)."""
     try:
         call()

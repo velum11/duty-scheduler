@@ -25,7 +25,7 @@ import streamlit as st
 from modules import auth, db, ui
 from views.common import erp
 from views.common import scaffold
-from views.master import PersistResult, banner, ledger_banner
+from views.master import PersistResult, banner, icon_toolbar_specs, ledger_banner
 
 _PAGE_ID = "near_miss_submit"
 
@@ -142,13 +142,28 @@ def render(user: dict) -> None:
     # ── 헤더 크롬(§0 FORM_ENTRY): 브레드크럼 → 제목·모드 배지 ─────────────────
     # nav 라우팅이 아직 연결되지 않아(B2) page_chrome_for 대신 명시 문자열로 헤더를
     # 만든다. 라우팅 연결 후에는 page_chrome_for(_PAGE_ID, ...) 로 통일 가능하다.
-    erp.screen_frame(
+    _SUBMIT_DESC = "현장에서 발견한 아차사고(near-miss)를 접수 등록합니다. 접수 후 상태는 제출됨(SUBMITTED)입니다."
+    # toolbar="icons": 상단 파랑 밴드를 타 화면과 동일한 KPtech 아이콘 툴바 포맷으로 통일한다
+    # (2026-07-27, 구 정적 장식 5아이콘 대체). FORM_ENTRY 라 제출(=저장)은 폼 안의 [제안서
+    # 제출] 버튼(erp.form_submit)이 유일한 제출 지점이며(§0.4), 밴드 밖에서는 폼을 제출할 수
+    # 없으므로 밴드의 4개 액션 아이콘은 전부 shaded, 정보 아이콘만 활성으로 둔다.
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="아차사고 등록",
-        desc="현장에서 발견한 아차사고(near-miss)를 접수 등록합니다. 접수 후 상태는 제출됨(SUBMITTED)입니다.",
+        desc=_SUBMIT_DESC,
         breadcrumb="아차사고 › 아차사고 등록",
         badges=scaffold.mode_badge(),
+        toolbar="icons",
     )
+    if band is not None:
+        _na = "저장(제출)은 아래 [제안서 제출] 버튼으로 합니다"
+        band.render_icons(icon_toolbar_specs(
+            _PAGE_ID, info_content=_SUBMIT_DESC,
+            add={"key": f"{_PAGE_ID}__add_na", "disabled": True, "help": "이 화면에서는 사용하지 않습니다"},
+            refresh={"key": f"{_PAGE_ID}__refresh_na", "disabled": True, "help": "이 화면에서는 사용하지 않습니다"},
+            delete={"key": f"{_PAGE_ID}__del_na", "disabled": True, "help": "이 화면에서는 사용하지 않습니다"},
+            save={"key": f"{_PAGE_ID}__save_na", "disabled": True, "help": _na},
+        ))
     st.markdown(_FORM_CSS, unsafe_allow_html=True)
 
     # 제출 완료 후에는 폼 대신 결과·다음 작업 선택 패널을 그린다(§0 순서: 결과 배너).

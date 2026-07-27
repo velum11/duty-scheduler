@@ -329,14 +329,17 @@ def master_screen_head(
     if toolbar == "icons":
         band = st.container(key="ms_iconband")
         with band:
-            left, right = st.columns([2.5, 1.0], vertical_alignment="center")
+            # [제목(가변) | 모드배지(우측 통일) | 아이콘 툴바]. 배지를 좌측 제목 옆이 아니라
+            # 우측 아이콘 클러스터 왼쪽에 두어 pill/static 변종과 위치를 통일한다(2026-07-27).
+            left, mid, right = st.columns([2.5, 1.0, 1.0], vertical_alignment="center")
             left.markdown(
                 f"<div class='ms-band-main'><span class='ms-band-ico'>{_ICO_LEAD}</span>"
-                f"<span class='ms-title'>{escape(title)}</span>"
-                + (f"<span class='ms-band-badge'>{badge}</span>" if badge else "")
-                + "</div>",
+                f"<span class='ms-title'>{escape(title)}</span></div>",
                 unsafe_allow_html=True,
             )
+            if badge:
+                mid.markdown(f"<div class='ms-band-badge'>{badge}</div>",
+                             unsafe_allow_html=True)
             with right:
                 with st.container(key="ms_iconbar"):
                     icols = st.columns([1] * 8, vertical_alignment="center")

@@ -62,6 +62,7 @@ from views.master import (
     drilldown_context,
     empty_state,
     grid_bool,
+    icon_toolbar_specs,
     ledger_banner,
     live_rows,
     master_action_bar,
@@ -224,13 +225,29 @@ _DRILL_CLICK = JsCode(
 
 
 def render(user: dict) -> None:
-    erp.screen_frame(
+    _ORG_DESC = "그룹 → 부서 → 조(운영단위)를 가로 3단 시트로 관리합니다. 상위를 선택하면 하위가 열립니다."
+    # toolbar="icons": 상단 파랑 밴드를 타 화면과 동일한 KPtech 아이콘 툴바 포맷으로 통일한다
+    # (2026-07-27, 구 정적 장식 5아이콘 대체). 다만 이 화면의 추가·삭제·저장·새로고침은 3개
+    # 시트(그룹·부서·조)가 **각자의 인페이지 액션바**로 소유하므로(단일 소유자가 없어 상단
+    # 밴드로 승격할 대상이 아님), 밴드의 4개 액션 아이콘은 전부 shaded 로 두고 정보 아이콘만
+    # 활성으로 둔다 — 포맷만 통일하고 실제 액션 표면(시트별 액션바)은 보존한다.
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="조직 관리",
-        desc="그룹 → 부서 → 조(운영단위)를 가로 3단 시트로 관리합니다. 상위를 선택하면 하위가 열립니다.",
+        desc=_ORG_DESC,
         breadcrumb="기준정보 › 조직 관리",
         badges=_head_badges(),
+        toolbar="icons",
     )
+    if band is not None:
+        _na = "추가·삭제·저장·새로고침은 각 시트(그룹·부서·조)의 액션바에서 처리합니다"
+        band.render_icons(icon_toolbar_specs(
+            "org", info_content=_ORG_DESC,
+            add={"key": "org__add_na", "disabled": True, "help": _na},
+            refresh={"key": "org__refresh_na", "disabled": True, "help": _na},
+            delete={"key": "org__del_na", "disabled": True, "help": _na},
+            save={"key": "org__save_na", "disabled": True, "help": _na},
+        ))
     st.markdown(_ORG_PAGE_CSS, unsafe_allow_html=True)
 
     readiness = _readiness()

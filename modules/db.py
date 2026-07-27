@@ -1871,7 +1871,11 @@ def update_near_miss_status(
     if current is None:
         raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
     cur_status = str(current.get("status") or "").strip()
-    if cur_status != target and not near_miss_transition_allowed(cur_status, target):
+    # 허용표(NEAR_MISS_TRANSITIONS)는 어떤 상태도 자기 자신을 포함하지 않는다. 동일상태
+    # 재호출(REJECTED→REJECTED 로 반려사유 덮어쓰기, CLOSED→CLOSED 무효 재실행 등)은
+    # 정상 사용자 플로우가 아니라 경합(동시클릭/TOCTOU) 시나리오이므로 여기서 일괄
+    # 차단한다 — cur==target 을 예외 취급하지 않고 그대로 허용표 검사를 받게 한다.
+    if not near_miss_transition_allowed(cur_status, target):
         raise ValueError(f"허용되지 않은 상태 전이입니다: {cur_status} → {target}")
     if target == "REJECTED" and not str(rejection_reason or "").strip():
         raise ValueError("반려하려면 반려 사유가 필요합니다.")

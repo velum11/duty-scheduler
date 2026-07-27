@@ -29,18 +29,33 @@ import streamlit as st
 
 from modules import db  # noqa: F401 — 모드 배지 등 공용 경로와의 일관성(향후 조회 연결 지점).
 from views.common import erp, scaffold
-from views.master import TOKENS, banner
+from views.master import TOKENS, banner, icon_toolbar_specs
+
+_IMPROVEMENT_DESC = "아차사고 개선조치를 관리합니다."
 
 
 def render(user: dict) -> None:
     # 접근 경계는 nav route guard(ADMIN)가 이미 집행한다 — 화면 본문에 role 게이트를 두지 않는다.
-    erp.screen_frame(
+    # toolbar="icons": 상단 파랑 밴드를 타 화면과 동일한 KPtech 아이콘 툴바 포맷으로 통일한다
+    # (2026-07-27, 구 정적 장식 5아이콘 대체). 저장 기능이 준비되지 않은 안내 셸이라 밴드의
+    # 4개 액션 아이콘은 전부 shaded, 정보 아이콘만 활성으로 둔다.
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="개선조치 관리",
-        desc="아차사고 개선조치를 관리합니다.",
+        desc=_IMPROVEMENT_DESC,
         breadcrumb="아차사고 › 개선조치 관리",
         badges=scaffold.mode_badge(),
+        toolbar="icons",
     )
+    if band is not None:
+        _na = "개선조치 저장 기능은 아직 준비되지 않았습니다"
+        band.render_icons(icon_toolbar_specs(
+            "near_miss_improvement", info_content=_IMPROVEMENT_DESC,
+            add={"key": "nm_impr__add_na", "disabled": True, "help": _na},
+            refresh={"key": "nm_impr__refresh_na", "disabled": True, "help": _na},
+            delete={"key": "nm_impr__del_na", "disabled": True, "help": _na},
+            save={"key": "nm_impr__save_na", "disabled": True, "help": _na},
+        ))
 
     banner("info",
            "개선조치 저장 기능은 현재 구조상 준비되지 않았습니다. "

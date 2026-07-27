@@ -227,6 +227,48 @@ def test_reevaluate_already_evaluated_rejected() -> None:
     check("CLOSED 재평가도 거부", exc2 is not None and "이미 변경" in str(exc2))
 
 
+def test_same_state_retransition_blocked() -> None:
+    print("update_near_miss_status 동일상태 재전이 차단(종말상태 반복전이 방지)")
+    st.session_state.pop(db._NEAR_MISS_STORE, None)
+    reporter = _sample_emp(0)
+    evaluator = _sample_emp(1)
+
+    # 허용표에는 어떤 상태도 자기 자신으로의 전이가 없다(계약 고정).
+    for state, targets in db.NEAR_MISS_TRANSITIONS.items():
+        check(f"{state} 는 자기 자신으로의 전이 없음", state not in targets)
+
+    # REJECTED → REJECTED 재호출 차단(반려사유 덮어쓰기 방지).
+    rec = db.create_near_miss_report(_base_payload(), current_user=reporter)
+    rid = rec["id"]
+    db.update_near_miss_status(rid, "REJECTED", rejection_reason="최초 사유", current_user=evaluator)
+    check("반려 상태 진입", db.get_near_miss_report(rid)["status"] == "REJECTED")
+    exc = raises(lambda: db.update_near_miss_status(
+        rid, "REJECTED", rejection_reason="덮어쓰기 시도", current_user=evaluator), ValueError)
+    check("REJECTED→REJECTED 재호출 거부", exc is not None and "허용되지 않은 상태 전이" in str(exc))
+    check("반려 사유 덮어써지지 않음(최초 유지)",
+          db.get_near_miss_report(rid)["rejection_reason"] == "최초 사유")
+
+    # CLOSED → CLOSED 재호출 차단(무효 재실행 방지).
+    rec2 = db.create_near_miss_report(_base_payload(), current_user=reporter)
+    rid2 = rec2["id"]
+    db.evaluate_near_miss(rid2, "A", current_user=evaluator)
+    db.update_near_miss_status(rid2, "CLOSED", current_user=evaluator)
+    check("종결 상태 진입", db.get_near_miss_report(rid2)["status"] == "CLOSED")
+    exc2 = raises(lambda: db.update_near_miss_status(
+        rid2, "CLOSED", current_user=evaluator), ValueError)
+    check("CLOSED→CLOSED 재호출 거부", exc2 is not None and "허용되지 않은 상태 전이" in str(exc2))
+
+    # 정상 전이(cur != target, 허용표 포함)는 이 변경에 영향받지 않는다.
+    rec3 = db.create_near_miss_report(_base_payload(), current_user=reporter)
+    rid3 = rec3["id"]
+    db.update_near_miss_status(rid3, "IN_REVIEW", current_user=evaluator)
+    check("SUBMITTED→IN_REVIEW 정상 전이 유지", db.get_near_miss_report(rid3)["status"] == "IN_REVIEW")
+    db.update_near_miss_status(rid3, "REJECTED", rejection_reason="사유", current_user=evaluator)
+    check("IN_REVIEW→REJECTED 정상 전이 유지", db.get_near_miss_report(rid3)["status"] == "REJECTED")
+    db.update_near_miss_status(rid3, "SUBMITTED", current_user=evaluator)
+    check("REJECTED→SUBMITTED 재개 전이 유지", db.get_near_miss_report(rid3)["status"] == "SUBMITTED")
+
+
 # =========================================================================
 # 보고자 자기수정(update_near_miss_report) — 소유자+SUBMITTED 게이트, 서버필드 보호
 # =========================================================================
@@ -801,6 +843,7 @@ def main() -> int:
         test_forged_current_user_dept_ignored,
         test_facade_strips_client_audit_fields,
         test_reevaluate_already_evaluated_rejected,
+        test_same_state_retransition_blocked,
         test_update_owner_submitted_allows_edit,
         test_update_non_owner_blocked,
         test_update_non_submitted_blocked,
