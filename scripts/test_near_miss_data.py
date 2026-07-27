@@ -180,7 +180,7 @@ def test_facade_strips_client_audit_fields() -> None:
     orig_create = db.supabase_repository.create_near_miss_report
     # supabase 경로(파사드가 repo 를 호출)를 타되, 권위 사용자 조회·repo create 는 mock.
     db.is_sample_mode = lambda: False
-    db.find_user_by_emp_no = lambda emp: auth_record if str(emp).strip() == reporter["emp_no"] else None
+    db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == reporter["emp_no"] else None
     db.supabase_repository.create_near_miss_report = lambda safe: (captured.update(safe) or {"ok": True})
     try:
         db.create_near_miss_report(
@@ -318,14 +318,24 @@ def test_status_change_capability_gate() -> None:
     manager = _actor_of_role("MANAGER")
     user = _actor_of_role("USER")
     reporter = _actor_of_role("USER")
-    # 비평가자 USER 는 SUBMITTED→(EVALUATED/REJECTED/IN_REVIEW) 전이 불가.
-    for target, kwargs in (("EVALUATED", {}), ("REJECTED", {"rejection_reason": "x"}), ("IN_REVIEW", {})):
+    # 비평가자 USER 는 SUBMITTED→(REJECTED/IN_REVIEW) 전이 불가(권한 게이트).
+    # EVALUATED 는 update_near_miss_status 진입부에서 role 과 무관하게 차단되므로(P2-2)
+    # 아래 능력 게이트 루프와 분리해 별도로 확인한다.
+    for target, kwargs in (("REJECTED", {"rejection_reason": "x"}), ("IN_REVIEW", {})):
         rec = _fresh_submitted(reporter)
         rid = rec["id"]
         exc = raises(lambda: db.update_near_miss_status(
             rid, target, current_user={"emp_no": user["emp_no"]}, **kwargs), ValueError)
         check(f"USER SUBMITTED→{target} 차단", exc is not None and "권한" in str(exc))
         check(f"USER {target} 시도 후 상태 불변", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
+    # EVALUATED 직접전이는 evaluate_near_miss 전용 — 능력 있는 actor 로도 이 경로 차단(P2-2).
+    rec_ev = _fresh_submitted(reporter)
+    exc_ev = raises(lambda: db.update_near_miss_status(
+        rec_ev["id"], "EVALUATED", current_user={"emp_no": manager["emp_no"]}), ValueError)
+    check("EVALUATED 직접전이는 update_near_miss_status 로 차단",
+          exc_ev is not None and "evaluate_near_miss" in str(exc_ev))
+    check("EVALUATED 차단 후 상태 불변(SUBMITTED)",
+          db.get_near_miss_report(rec_ev["id"])["status"] == "SUBMITTED")
     # 위조 role=ADMIN 은 무시된다(권위 레코드가 USER 라 차단).
     rec = _fresh_submitted(reporter)
     exc = raises(lambda: db.update_near_miss_status(
@@ -435,6 +445,180 @@ def test_inactive_user_action_blocked() -> None:
         check("_near_miss_actor 비활성 직접 차단", excA is not None and "비활성" in str(excA))
     finally:
         db._safety_officer_flag = orig
+
+
+# =========================================================================
+# P1-a Codex 재감사 반영(P2-2/P2-1/P3-1/P3-2)
+#   P2-2 EVALUATED 직접전이 차단(evaluate_near_miss 전용 강제)
+#   P2-1 인가 판정용 actor 조회는 캐시 우회(권한 회수/비활성화 즉시 반영)
+#   P3-1 감사 귀속=인증 actor 사번(위조 updated_by 무시) facade→repo
+#   P3-2 ADMIN·안전담당자 전체 전이표 양성 + 실 읽기경로 + 인가·stale 결합
+#
+# 계약 주석(라이브 불가 분기): supabase 006(users.is_safety_officer·near_miss_reports)
+# 적용/미적용 분기는 원격 write·라이브 스키마가 필요해 이 sample+mock 스위트에서 직접
+# 재현하지 않는다. 미적용 시 near_miss_extensions_ready()=False 로 쓰기가 보수적으로
+# 차단되는 계약은 test_readiness_three_state/test_probe_error_not_sticky 가, is_safety_officer
+# 실 컬럼 읽기 계약은 test_safety_officer_capability_real_read_path 가 mock 으로 근사한다.
+# =========================================================================
+def test_evaluated_direct_transition_blocked() -> None:
+    print("update_near_miss_status 로는 EVALUATED 직접전이 불가 — evaluate 전용 (P2-2)")
+    manager = _actor_of_role("MANAGER")
+    reporter = _actor_of_role("USER")
+
+    # 능력 있는 MANAGER 로도 update_near_miss_status(…, "EVALUATED") 는 진입부에서 차단.
+    rid = _fresh_submitted(reporter)["id"]
+    exc = raises(lambda: db.update_near_miss_status(
+        rid, "EVALUATED", current_user={"emp_no": manager["emp_no"]}), ValueError)
+    check("EVALUATED 직접전이 거부", exc is not None and "evaluate_near_miss" in str(exc))
+    check("차단 후 상태 불변(SUBMITTED)", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
+    check("차단 후 확정등급 미설정", str(db.get_near_miss_report(rid).get("confirmed_grade") or "") == "")
+
+    # 진입부 차단이라 무인증 호출도 EVALUATED 는 동일 사유로 거부(인증 이전 게이트).
+    exc2 = raises(lambda: db.update_near_miss_status(
+        rid, "EVALUATED", current_user=None), ValueError)
+    check("무인증 EVALUATED 직접전이도 거부", exc2 is not None and "evaluate_near_miss" in str(exc2))
+
+    # 정상 평가확정 경로(evaluate_near_miss)는 이 차단에 막히지 않고 EVALUATED 로 확정.
+    updated = db.evaluate_near_miss(rid, "B", current_user={"emp_no": manager["emp_no"]})
+    check("evaluate_near_miss 는 EVALUATED 확정 정상", updated["status"] == "EVALUATED")
+    check("평가확정 시 확정등급·평가자·시각 채워짐",
+          updated["confirmed_grade"] == "B" and updated["evaluator_emp_no"] == manager["emp_no"]
+          and bool(str(updated["evaluated_at"] or "")))
+
+
+def test_status_change_audit_attribution() -> None:
+    print("update_near_miss_status 감사 귀속=인증 actor 사번, 위조 updated_by 무시 (P3-1)")
+    manager = _actor_of_role("MANAGER")
+    reporter = _actor_of_role("USER")
+    auth_record = db.find_user_by_emp_no(manager["emp_no"])  # 권위 레코드(MANAGER, 능력 보유)
+    captured: dict = {}
+
+    def _capture_update(*a, **k):
+        captured.update(k)
+        captured["_args"] = a
+        return {"id": 7, "status": "IN_REVIEW"}
+
+    orig_sample = db.is_sample_mode
+    orig_find = db.find_user_by_emp_no
+    orig_get = db.get_near_miss_report
+    orig_repo = db.supabase_repository.update_near_miss_status
+    # supabase 경로(파사드→repo)를 타되 권위 조회·현재 상태·repo update 만 mock.
+    db.is_sample_mode = lambda: False
+    db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
+    db.get_near_miss_report = lambda _id: {"id": 7, "status": "SUBMITTED", "reporter_emp_no": reporter["emp_no"]}
+    db.supabase_repository.update_near_miss_status = _capture_update
+    try:
+        db.update_near_miss_status(
+            7, "IN_REVIEW",
+            current_user={"emp_no": manager["emp_no"], "role": "USER"},  # 위조 role 무시
+            updated_by="9999",  # 위조 감사값 — repo 로 전달되면 안 됨
+        )
+    finally:
+        db.is_sample_mode = orig_sample
+        db.find_user_by_emp_no = orig_find
+        db.get_near_miss_report = orig_get
+        db.supabase_repository.update_near_miss_status = orig_repo
+
+    check("repo 로 전달된 updated_by = 인증 actor 사번", captured.get("updated_by") == manager["emp_no"])
+    check("위조 updated_by=9999 는 repo 로 전달되지 않음", captured.get("updated_by") != "9999")
+    check("전이 자체는 IN_REVIEW(정상 경로) 유지", captured.get("_args", (None, None))[1] == "IN_REVIEW")
+
+
+def test_safety_officer_capability_real_read_path() -> None:
+    print("안전담당자 능력이 실제 users.is_safety_officer(006) 읽기로 판정됨 (P3-2 실경로)")
+    # db._safety_officer_flag 자체를 갈아끼우지 않고, supabase 리포지토리의 실제 컬럼
+    # 조회 경로(sr._select_all)만 mock 해 006 컬럼 값이 능력으로 이어지는지 검증한다.
+    orig_sample = db.is_sample_mode
+    orig_select = sr._select_all
+    db.is_sample_mode = lambda: False
+
+    def _fake_select(table, columns="*", query_builder=None):
+        if table == "users" and "is_safety_officer" in columns:
+            return [{"emp_no": "7777", "is_safety_officer": True}]
+        return []
+
+    sr._select_all = _fake_select
+    try:
+        check("실 컬럼 읽기 → 안전담당자 True", db._safety_officer_flag("7777") is True)
+        check("USER + is_safety_officer → 평가 능력 인정",
+              auth.can_evaluate_near_miss({"emp_no": "7777", "role": "USER", "is_safety_officer": True}) is True)
+        sr._select_all = lambda table, columns="*", query_builder=None: (
+            [{"emp_no": "7777", "is_safety_officer": False}] if table == "users" else [])
+        check("실 컬럼 false → 안전담당자 아님", db._safety_officer_flag("7777") is False)
+    finally:
+        db.is_sample_mode = orig_sample
+        sr._select_all = orig_select
+
+
+def _walk_transition_table(actor_cu: dict, reporter: dict) -> None:
+    """능력 있는 actor 로 전이표의 모든 간선을 양성 통과시킨다(EVALUATED 는 evaluate 경유)."""
+    # SUBMITTED → IN_REVIEW → SUBMITTED(반송)
+    rid = _fresh_submitted(reporter)["id"]
+    db.update_near_miss_status(rid, "IN_REVIEW", current_user=actor_cu)
+    check("SUBMITTED→IN_REVIEW", db.get_near_miss_report(rid)["status"] == "IN_REVIEW")
+    db.update_near_miss_status(rid, "SUBMITTED", current_user=actor_cu)
+    check("IN_REVIEW→SUBMITTED(반송)", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
+    # SUBMITTED → REJECTED → SUBMITTED(재개)
+    db.update_near_miss_status(rid, "REJECTED", rejection_reason="사유", current_user=actor_cu)
+    check("SUBMITTED→REJECTED", db.get_near_miss_report(rid)["status"] == "REJECTED")
+    db.update_near_miss_status(rid, "SUBMITTED", current_user=actor_cu)
+    check("REJECTED→SUBMITTED(재개)", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
+    # IN_REVIEW → REJECTED
+    rid2 = _fresh_submitted(reporter)["id"]
+    db.update_near_miss_status(rid2, "IN_REVIEW", current_user=actor_cu)
+    db.update_near_miss_status(rid2, "REJECTED", rejection_reason="사유", current_user=actor_cu)
+    check("IN_REVIEW→REJECTED", db.get_near_miss_report(rid2)["status"] == "REJECTED")
+    # SUBMITTED → EVALUATED(evaluate) → IN_REVIEW(재개, 평가필드 초기화)
+    rid3 = _fresh_submitted(reporter)["id"]
+    db.evaluate_near_miss(rid3, "B", current_user=actor_cu)
+    check("SUBMITTED→EVALUATED(evaluate)", db.get_near_miss_report(rid3)["status"] == "EVALUATED")
+    db.update_near_miss_status(rid3, "IN_REVIEW", current_user=actor_cu)
+    check("EVALUATED→IN_REVIEW(재개)", db.get_near_miss_report(rid3)["status"] == "IN_REVIEW")
+    check("재개 시 확정등급 초기화", str(db.get_near_miss_report(rid3).get("confirmed_grade") or "") == "")
+    # IN_REVIEW → EVALUATED(evaluate) → CLOSED(종결, 평가필드 유지)
+    db.evaluate_near_miss(rid3, "A", current_user=actor_cu)
+    check("IN_REVIEW→EVALUATED(evaluate)", db.get_near_miss_report(rid3)["status"] == "EVALUATED")
+    db.update_near_miss_status(rid3, "CLOSED", current_user=actor_cu)
+    check("EVALUATED→CLOSED(종결)", db.get_near_miss_report(rid3)["status"] == "CLOSED")
+    check("종결 후 확정등급 유지", db.get_near_miss_report(rid3)["confirmed_grade"] == "A")
+
+
+def test_full_transition_table_positive() -> None:
+    print("전체 전이표 양성 케이스 — ADMIN·안전담당자 (P3-2 양성 공백 보강)")
+    admin = _actor_of_role("ADMIN")
+    reporter = _actor_of_role("USER")
+    _walk_transition_table({"emp_no": admin["emp_no"]}, reporter)
+
+    # 안전담당자 USER: sample CSV 에 is_safety_officer 컬럼이 없어 능력 근거를 실제로
+    # 실을 수 없으므로 능력 조회 지점(_safety_officer_flag)만 주입한다(monkeypatch 근거
+    # 명시). supabase 모드는 users.is_safety_officer(006) 실컬럼으로 대체되며 그 실 읽기
+    # 경로는 test_safety_officer_capability_real_read_path 가 별도로 덮는다.
+    so = _actor_of_role("USER")
+    reporter2 = _actor_of_role("USER", exclude=(so["emp_no"],))
+    orig = db._safety_officer_flag
+    db._safety_officer_flag = lambda emp: str(emp).strip() == so["emp_no"]
+    try:
+        _walk_transition_table({"emp_no": so["emp_no"]}, reporter2)
+    finally:
+        db._safety_officer_flag = orig
+
+
+def test_authz_then_stale_race() -> None:
+    print("인가 통과 후 원자 조건부 UPDATE stale 경합 결합 (P3-2 결합)")
+    manager = _actor_of_role("MANAGER")
+    reporter = _actor_of_role("USER")
+    rid = _fresh_submitted(reporter)["id"]
+    # 능력 있는 MANAGER 라 인가는 통과하지만, 읽기~쓰기 사이 다른 사용자가 먼저 전이해
+    # 원자 조건부 UPDATE 가 0행(False)이면 stale 로 거부돼야 한다(lost update 금지).
+    orig = db._sample_update_near_miss
+    db._sample_update_near_miss = lambda *a, **k: False
+    try:
+        exc = raises(lambda: db.update_near_miss_status(
+            rid, "IN_REVIEW", current_user={"emp_no": manager["emp_no"]}), ValueError)
+    finally:
+        db._sample_update_near_miss = orig
+    check("인가 통과해도 stale 경합이면 거부", exc is not None and "이미 변경" in str(exc))
+    check("경합 거부 후 상태 불변(SUBMITTED)", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
 
 
 # =========================================================================
@@ -595,7 +779,7 @@ def test_update_owner_case_sensitive_distinct() -> None:
     st.session_state.pop(db._NEAR_MISS_STORE, None)
     orig_find = db.find_user_by_emp_no
 
-    def finder(emp):
+    def finder(emp, **kw):
         # 대소문자만 다른 두 활성 계정(정확 대소문자 보존) — 로그인 exact-preference 모사.
         e = str(emp).strip()
         if e in ("ABC", "abc"):
@@ -1018,6 +1202,11 @@ def main() -> int:
         test_evaluate_requires_capability,
         test_safety_officer_can_evaluate,
         test_inactive_user_action_blocked,
+        test_evaluated_direct_transition_blocked,
+        test_status_change_audit_attribution,
+        test_safety_officer_capability_real_read_path,
+        test_full_transition_table_positive,
+        test_authz_then_stale_race,
         test_update_owner_submitted_allows_edit,
         test_update_non_owner_blocked,
         test_update_non_submitted_blocked,

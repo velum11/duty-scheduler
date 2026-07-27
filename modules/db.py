@@ -1553,7 +1553,10 @@ def _near_miss_actor(current_user, *, action: str) -> dict:
     if not isinstance(current_user, dict):
         raise ValueError(f"{action}에는 인증된 현재 사용자 정보가 필요합니다.")
     emp_no = str(current_user.get("emp_no") or "").strip()
-    record = find_user_by_emp_no(emp_no) if emp_no else None
+    # 인가 판정 근거(role·is_active·is_safety_officer)는 30초 읽기 캐시(_fetch_users)를
+    # 우회한 권위 읽기로 가져온다 — 권한 회수/비활성화 직후 최대 30초 stale 통과를
+    # 막는다(Codex P2-1). 조회 화면용 읽기 캐시는 훼손하지 않는다.
+    record = find_user_by_emp_no(emp_no, use_cache=False) if emp_no else None
     if not emp_no or record is None:
         raise ValueError(f"{action} 행위자 사번을 확인할 수 없습니다: {emp_no!r}")
     # 지연 import — auth 는 db 를 import 하므로 모듈 최상위 import 는 순환이 된다(Codex P2).
@@ -1900,6 +1903,15 @@ def update_near_miss_status(
     target = str(status).strip()
     if target not in NEAR_MISS_STATUSES:
         raise ValueError(f"유효하지 않은 상태입니다: {target}")
+    # 평가확정(EVALUATED)은 이 경로로 만들 수 없다(Codex P2-2). 여기서는 확정등급·
+    # 평가자·평가시각을 세팅하지 않으므로, 허용하면 sample 은 불완전 EVALUATED 저장,
+    # supabase 는 near_miss_eval_consistency 제약 위반이 된다. EVALUATED 전이는
+    # evaluate_near_miss 전용으로 강제한다(전이표 SUBMITTED/IN_REVIEW→EVALUATED 는
+    # evaluate_near_miss 가 소비하므로 표는 그대로 두고 진입부에서만 차단한다).
+    # evaluate_near_miss 는 이 파사드를 재사용하지 않고 직접 원자 UPDATE 하므로 이
+    # 차단이 정상 평가 경로를 막지 않는다.
+    if target == "EVALUATED":
+        raise ValueError("평가 확정은 evaluate_near_miss 로만 가능합니다.")
     # 인증·권위 재조회 강제(무인증/사번 미상/비활성 → DB 요청 전 ValueError).
     actor = _near_miss_actor(current_user, action="아차사고 상태 변경")
     current = get_near_miss_report(report_id)
@@ -2042,15 +2054,33 @@ def _safety_officer_flag(emp_no) -> bool:
         return False
 
 
-def find_user_by_emp_no(emp_no: str):
+def _uncached_users() -> pd.DataFrame:
+    """인가 판정 전용 권위 사용자 조회 — 30초 읽기 캐시(_fetch_users)를 우회한다.
+
+    권한 회수·비활성화 직후 아차사고 상태변경/평가 인가가 최대 30초 stale 통과하는 것을
+    막기 위해(Codex P2-1), 이 경로만 캐시를 건너뛰어 원격에서 다시 읽는다. 조회 화면용
+    읽기 캐시(get_users→_fetch_users)는 그대로 두어 성능을 훼손하지 않는다. sample 모드는
+    애초에 이 캐시를 쓰지 않으므로 get_users() 와 동일하다(오류 은폐 없음: 원격 오류는
+    그대로 전파된다)."""
+    if is_sample_mode():
+        return get_users()
+    df = supabase_repository.get_users()
+    return _empty_contract(df.reset_index(drop=True), USER_COLUMNS)
+
+
+def find_user_by_emp_no(emp_no: str, *, use_cache: bool = True):
     """사번으로 사용자 1명을 dict 로 반환. 없으면 None.
 
     사번 조회는 앞뒤 공백을 제거하고 대소문자를 구분하지 않는다
     (영문 사번 ADMIN·admin·Admin 은 동일 사용자). 정규화(trim+casefold)는
     비교에만 쓰고, DB 의 원래 emp_no 값은 변경하지 않는다.
     대소문자만 다른 사번이 여러 건이면 활성 사용자 → 정확한 대소문자 순으로 우선한다.
+
+    ``use_cache=False`` 는 인가 판정용 권위 읽기로, 30초 읽기 캐시를 우회한다
+    (권한 회수/비활성화 즉시 반영 — Codex P2-1). 로그인·화면 조회 등 기본 호출은
+    캐시를 사용한다.
     """
-    df = get_users()
+    df = get_users() if use_cache else _uncached_users()
     if df.empty:
         return None
     raw = str(emp_no).strip()
