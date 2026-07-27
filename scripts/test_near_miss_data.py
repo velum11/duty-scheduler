@@ -219,6 +219,7 @@ def test_facade_strips_client_audit_fields() -> None:
 def test_reevaluate_already_evaluated_rejected() -> None:
     print("이미 EVALUATED 인 보고서 재평가 거부(덮어쓰기 방지) (P1-3 잔여)")
     st.session_state.pop(db._NEAR_MISS_STORE, None)
+    st.session_state.pop(db._NEAR_MISS_IMPROVEMENT_STORE, None)
     reporter = _sample_emp(0)
     evaluator = _sample_emp(1)
     rec = db.create_near_miss_report(_base_payload(), current_user=reporter)
@@ -231,8 +232,9 @@ def test_reevaluate_already_evaluated_rejected() -> None:
     check("재평가는 '상태 이미 변경' 으로 거부", exc is not None and "이미 변경" in str(exc))
     check("확정 등급 덮어써지지 않음(A 유지)", db.get_near_miss_report(rid)["confirmed_grade"] == "A")
 
-    # CLOSED 로 종결한 뒤에도 재평가 불가.
-    db.update_near_miss_status(rid, "CLOSED", current_user=evaluator)
+    # 확인된 개선조치를 갖춘 뒤 하드게이트로 종결(007). 종결 후에도 재평가 불가.
+    _close_via_confirmed_capa(rid, assignee=reporter, closer=evaluator)
+    check("하드게이트 종결로 CLOSED 진입", db.get_near_miss_report(rid)["status"] == "CLOSED")
     exc2 = raises(lambda: db.evaluate_near_miss(rid, "B", current_user=evaluator), ValueError)
     check("CLOSED 재평가도 거부", exc2 is not None and "이미 변경" in str(exc2))
 
@@ -240,6 +242,7 @@ def test_reevaluate_already_evaluated_rejected() -> None:
 def test_same_state_retransition_blocked() -> None:
     print("update_near_miss_status 동일상태 재전이 차단(종말상태 반복전이 방지)")
     st.session_state.pop(db._NEAR_MISS_STORE, None)
+    st.session_state.pop(db._NEAR_MISS_IMPROVEMENT_STORE, None)
     reporter = _sample_emp(0)
     evaluator = _sample_emp(1)
 
@@ -262,11 +265,13 @@ def test_same_state_retransition_blocked() -> None:
     rec2 = db.create_near_miss_report(_base_payload(), current_user=reporter)
     rid2 = rec2["id"]
     db.evaluate_near_miss(rid2, "A", current_user=evaluator)
-    db.update_near_miss_status(rid2, "CLOSED", current_user=evaluator)
+    _close_via_confirmed_capa(rid2, assignee=reporter, closer=evaluator)
     check("종결 상태 진입", db.get_near_miss_report(rid2)["status"] == "CLOSED")
+    # 007: →CLOSED 는 update_near_miss_status 진입부에서 차단되고 close_near_miss_report 로 위임.
     exc2 = raises(lambda: db.update_near_miss_status(
         rid2, "CLOSED", current_user=evaluator), ValueError)
-    check("CLOSED→CLOSED 재호출 거부", exc2 is not None and "허용되지 않은 상태 전이" in str(exc2))
+    check("CLOSED 직접전이는 close_near_miss_report 로 차단",
+          exc2 is not None and "close_near_miss_report" in str(exc2))
 
     # 정상 전이(cur != target, 허용표 포함)는 이 변경에 영향받지 않는다.
     rec3 = db.create_near_miss_report(_base_payload(), current_user=reporter)
@@ -351,12 +356,14 @@ def test_status_change_capability_gate() -> None:
     exc = raises(lambda: db.update_near_miss_status(
         rec["id"], "IN_REVIEW", current_user={"emp_no": user["emp_no"], "role": "ADMIN"}), ValueError)
     check("위조 role=ADMIN 무시하고 차단", exc is not None and "권한" in str(exc))
-    # EVALUATED→CLOSED 도 USER 차단(평가자 전이).
+    # 007: EVALUATED→CLOSED 직접전이는 update_near_miss_status 진입부에서 role 과 무관하게
+    # 차단되고 close_near_miss_report 로 위임된다(확인된 개선조치 하드게이트).
     rec2 = _fresh_submitted(reporter)
     db.evaluate_near_miss(rec2["id"], "A", current_user={"emp_no": manager["emp_no"]})
     exc2 = raises(lambda: db.update_near_miss_status(
         rec2["id"], "CLOSED", current_user={"emp_no": user["emp_no"]}), ValueError)
-    check("USER EVALUATED→CLOSED 차단", exc2 is not None and "권한" in str(exc2))
+    check("USER EVALUATED→CLOSED 직접전이 차단(close_near_miss_report 위임)",
+          exc2 is not None and "close_near_miss_report" in str(exc2))
     check("차단 시 EVALUATED 유지", db.get_near_miss_report(rec2["id"])["status"] == "EVALUATED")
     # 양성 대조: 평가자(MANAGER)는 정상 전이 허용(정상 플로우 비파괴).
     rec3 = _fresh_submitted(reporter)
@@ -588,7 +595,8 @@ def _walk_transition_table(actor_cu: dict, reporter: dict) -> None:
     # IN_REVIEW → EVALUATED(evaluate) → CLOSED(종결, 평가필드 유지)
     db.evaluate_near_miss(rid3, "A", current_user=actor_cu)
     check("IN_REVIEW→EVALUATED(evaluate)", db.get_near_miss_report(rid3)["status"] == "EVALUATED")
-    db.update_near_miss_status(rid3, "CLOSED", current_user=actor_cu)
+    # 종결은 확인된 개선조치를 갖춘 하드게이트 경로(007)로만. 담당자=reporter, 확인자=actor.
+    _close_via_confirmed_capa(rid3, assignee=reporter, closer=actor_cu)
     check("EVALUATED→CLOSED(종결)", db.get_near_miss_report(rid3)["status"] == "CLOSED")
     check("종결 후 확정등급 유지", db.get_near_miss_report(rid3)["confirmed_grade"] == "A")
 
@@ -653,7 +661,22 @@ def _valid_edit(**over) -> dict:
 
 def _fresh_submitted(reporter: dict) -> dict:
     st.session_state.pop(db._NEAR_MISS_STORE, None)
+    st.session_state.pop(db._NEAR_MISS_IMPROVEMENT_STORE, None)
     return db.create_near_miss_report(_base_payload(), current_user=reporter)
+
+
+def _close_via_confirmed_capa(rid, *, assignee: dict, closer: dict):
+    """007 종결 경로: 개선조치 등록·제출·확인 후 close_near_miss_report 로 종결한다.
+
+    update_near_miss_status 의 직접 →CLOSED 는 007 이후 차단되므로(확인된 활성 개선조치
+    하드게이트), 종결을 검증하는 기존 테스트를 새 계약(close_near_miss_report)으로 갱신한다.
+    확인자(closer)는 담당자(assignee)와 달라야 한다(자기확인 금지)."""
+    db.upsert_near_miss_improvement(
+        rid, {"assignee_emp_no": assignee["emp_no"], "action_body": "조치", "result_body": "결과"},
+        current_user=closer)
+    db.submit_near_miss_improvement(rid, current_user=closer)
+    db.confirm_near_miss_improvement(rid, current_user=closer)
+    return db.close_near_miss_report(rid, current_user=closer)
 
 
 def test_update_owner_submitted_allows_edit() -> None:
@@ -723,8 +746,8 @@ def test_update_non_submitted_blocked() -> None:
     exc2 = raises(lambda: db.update_near_miss_report(rid, _valid_edit(), current_user=reporter), ValueError)
     check("EVALUATED 수정 차단", exc2 is not None and "SUBMITTED" in str(exc2))
 
-    # CLOSED 에서 수정 불가.
-    db.update_near_miss_status(rid, "CLOSED", current_user=evaluator)
+    # CLOSED 에서 수정 불가(007 하드게이트 종결 경로로 CLOSED 진입).
+    _close_via_confirmed_capa(rid, assignee=reporter, closer=evaluator)
     exc3 = raises(lambda: db.update_near_miss_report(rid, _valid_edit(), current_user=reporter), ValueError)
     check("CLOSED 수정 차단", exc3 is not None and "SUBMITTED" in str(exc3))
 

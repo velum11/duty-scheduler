@@ -1929,3 +1929,368 @@ def _near_miss_stat_key(by: str):
     if by == "status":
         return lambda r: str(r.get("status") or "")
     raise ValueError(f"지원하지 않는 통계 기준입니다: {by}")
+
+
+# =========================================================================
+# 아차사고 개선조치(CAPA) — migration 007 (DRAFT: 실행/원격 write 승인 게이트 전)
+# =========================================================================
+# 007 적용 전 라이브 DB 에는 near_miss_improvements 테이블과 near_miss_reports 의
+# 보완요청 컬럼(revision_request_reason 등)이 없다. 조회는 호출부(db 파사드)가
+# near_miss_improvement_extensions_ready() 로 분기해 안전한 빈 결과로 폴백하고, 저장은
+# 이 계층에서 명확한 오류로 차단한다(006 관행 동일). 종결은 원자 RPC 로만 한다.
+NEAR_MISS_IMPROVEMENT_TABLE = "near_miss_improvements"
+NEAR_MISS_IMPROVEMENT_SUBMIT_STATES = ("DRAFT", "SUBMITTED")
+NEAR_MISS_IMPROVEMENT_CONFIRM_STATES = ("PENDING", "CONFIRMED", "REJECTED")
+
+# 화면(파사드)이 보는 자연키 계약. 사람 참조는 ID/FK 로 저장하고 여기서 emp_no 로 되돌린다.
+NEAR_MISS_IMPROVEMENT_COLUMNS = [
+    "id", "report_id",
+    "assignee_emp_no", "designated_confirmer_emp_no", "confirmed_by_emp_no", "rejected_by_emp_no",
+    "action_body", "result_body", "due_date",
+    "submit_status", "confirm_status",
+    "submitted_at", "confirmed_at", "rejected_at", "revision_note",
+    "is_active", "created_at", "updated_at",
+]
+
+_NMI_READY: bool | None = None
+_NMI_PROBE: str | None = None
+_NMI_NOT_READY_MESSAGE = (
+    "아차사고 개선조치 스키마가 아직 준비되지 않아 저장할 수 없습니다. "
+    "개선조치 스키마(007)를 적용한 뒤 다시 시도하세요."
+)
+_NMI_STALE_MESSAGE = (
+    "개선조치 상태가 이미 변경되어 요청을 적용할 수 없습니다(다른 사용자가 먼저 처리). "
+    "목록을 재조회한 뒤 다시 시도하세요."
+)
+
+
+def reset_near_miss_improvement_readiness() -> None:
+    """개선조치(007) readiness 캐시를 비운다(다음 확인에서 재프로브 — 적용 반영 경로)."""
+    global _NMI_READY, _NMI_PROBE
+    _NMI_READY = None
+    _NMI_PROBE = None
+
+
+def near_miss_improvement_extensions_ready() -> bool:
+    """007 개선조치 스키마(near_miss_improvements 테이블 + near_miss_reports 보완요청 컬럼)
+    사용 가능 여부. 006 관행(near_miss_extensions_ready)과 동일한 3-state 정합화:
+    미적용은 False 로 캐시, probe 자체 실패(일시 장애)는 캐시하지 않고 재프로브한다."""
+    global _NMI_READY, _NMI_PROBE
+    if _NMI_READY is None:
+        try:
+            client().table(NEAR_MISS_IMPROVEMENT_TABLE).select("id").limit(1).execute()
+            client().table(NEAR_MISS_TABLE).select("revision_request_reason").limit(1).execute()
+            _NMI_READY = True
+            _NMI_PROBE = READINESS_READY
+        except Exception as exc:
+            if any(marker in repr(exc) for marker in _MISSING_COLUMN_MARKERS):
+                _NMI_READY = False
+                _NMI_PROBE = READINESS_NOT_READY
+            else:
+                _NMI_PROBE = None
+                return False
+    return _NMI_READY
+
+
+def near_miss_improvement_extensions_probe(*, force: bool = False) -> str:
+    """007 개선조치 스키마 준비 상태 3-state(read-only). near_miss_extensions_probe 관행 복제.
+
+    반환: READINESS_READY / READINESS_NOT_READY(미적용) / READINESS_PROBE_ERROR(확인 실패).
+    PROBE_ERROR 는 캐시하지 않는다(sticky 방지 — outage 를 '미적용'으로 고착시키지 않음)."""
+    global _NMI_READY, _NMI_PROBE
+    if force:
+        _NMI_PROBE = None
+    if _NMI_PROBE is not None:
+        return _NMI_PROBE
+    try:
+        client().table(NEAR_MISS_IMPROVEMENT_TABLE).select("id").limit(1).execute()
+        client().table(NEAR_MISS_TABLE).select("revision_request_reason").limit(1).execute()
+        _NMI_PROBE = READINESS_READY
+        _NMI_READY = True
+    except Exception as exc:
+        if any(marker in repr(exc) for marker in _MISSING_COLUMN_MARKERS):
+            _NMI_PROBE = READINESS_NOT_READY
+            _NMI_READY = False
+        else:
+            _NMI_PROBE = None
+            _NMI_READY = None
+            return READINESS_PROBE_ERROR
+    return _NMI_PROBE
+
+
+def _near_miss_improvement_natural(rows: list[dict]) -> list[dict]:
+    """개선조치 행(ID/FK)을 화면 자연키 계약으로 변환한다."""
+    _, emp_by_id = _user_maps()
+
+    def emp(uid):
+        return emp_by_id.get(str(uid), "") if uid is not None else ""
+
+    out = []
+    for row in rows:
+        out.append({
+            "id": row.get("id"),
+            "report_id": row.get("report_id"),
+            "assignee_emp_no": emp(row.get("assignee_user_id")),
+            "designated_confirmer_emp_no": emp(row.get("designated_confirmer_user_id")),
+            "confirmed_by_emp_no": emp(row.get("confirmed_by_user_id")),
+            "rejected_by_emp_no": emp(row.get("rejected_by_user_id")),
+            "action_body": str(row.get("action_body") or ""),
+            "result_body": str(row.get("result_body") or ""),
+            "due_date": str(row.get("due_date") or "") or None,
+            "submit_status": str(row.get("submit_status") or ""),
+            "confirm_status": str(row.get("confirm_status") or ""),
+            "submitted_at": str(row.get("submitted_at") or "") or None,
+            "confirmed_at": str(row.get("confirmed_at") or "") or None,
+            "rejected_at": str(row.get("rejected_at") or "") or None,
+            "revision_note": row.get("revision_note") or None,
+            "is_active": _clean_bool(row.get("is_active")),
+            "created_at": str(row.get("created_at") or ""),
+            "updated_at": str(row.get("updated_at") or ""),
+        })
+    return out
+
+
+def _near_miss_improvement_body(payload: dict) -> dict:
+    """개선조치 본문 입력(자연키)을 검증·정규화해 ID/FK 저장 dict 로 만든다(신원/상태 제외).
+
+    assignee/designated_confirmer 는 emp_no 로 받아 FK 로 해석한다. 본문·기한만 담으며
+    submit/confirm 상태·확인/반려 행위자·시각은 절대 포함하지 않는다(서버측 확정 대상)."""
+    user_by_emp, _ = _user_maps()
+
+    def resolve(emp_key):
+        emp = _clean_text(payload.get(emp_key), nullable=True)
+        if not emp:
+            return None
+        if emp not in user_by_emp:
+            raise SupabaseDataError(f"사용자 사번을 찾을 수 없습니다: {emp}")
+        return user_by_emp[emp]
+
+    due = _clean_text(payload.get("due_date"), nullable=True)
+    if due:
+        try:
+            date.fromisoformat(due)
+        except ValueError as exc:
+            raise SupabaseDataError(f"조치 기한 형식이 유효하지 않습니다: {due}") from exc
+    return {
+        "assignee_user_id": resolve("assignee_emp_no"),
+        "designated_confirmer_user_id": resolve("designated_confirmer_emp_no"),
+        "action_body": _clean_text(payload.get("action_body")),
+        "result_body": _clean_text(payload.get("result_body")),
+        "due_date": due or None,
+    }
+
+
+def get_near_miss_improvement(report_id) -> dict | None:
+    """보고서의 개선조치(자연키 dict) 또는 None. 007 미적용이면 None(안전 폴백)."""
+    if not near_miss_improvement_extensions_ready():
+        return None
+    rows = _select_all(
+        NEAR_MISS_IMPROVEMENT_TABLE, "*",
+        lambda query: query.eq("report_id", report_id).limit(1),
+    )
+    natural = _near_miss_improvement_natural(rows)
+    return natural[0] if natural else None
+
+
+def _nmi_raw(report_id) -> dict | None:
+    """개선조치 원본 행(FK 그대로) 1건 — 상태·소유 판정용 내부 조회."""
+    rows = _select_all(
+        NEAR_MISS_IMPROVEMENT_TABLE, "*",
+        lambda query: query.eq("report_id", report_id).limit(1),
+    )
+    return rows[0] if rows else None
+
+
+def upsert_near_miss_improvement(report_id, payload: dict, *, updated_by=None) -> dict:
+    """개선조치를 DRAFT 로 저장한다(없으면 생성, 있으면 편집).
+
+    편집은 항상 DRAFT/PENDING 으로 되돌리며(확인/반려 행위자·시각 초기화), 이미 확인
+    (CONFIRMED)된 개선조치는 편집할 수 없다(강등 방지). 상태는 조건부 UPDATE(where
+    confirm_status <> 'CONFIRMED')로 서버측에서도 다시 강제한다(lost update/강등 방지)."""
+    if not near_miss_improvement_extensions_ready():
+        raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
+    body = _near_miss_improvement_body(payload)
+    existing = _nmi_raw(report_id)
+    attribution = _clean_text(updated_by, nullable=True)
+    if existing is None:
+        record = {
+            "report_id": report_id,
+            **body,
+            "submit_status": "DRAFT",
+            "confirm_status": "PENDING",
+            "is_active": True,
+            "created_by": attribution,
+            "updated_by": attribution,
+        }
+        response = _execute(
+            client().table(NEAR_MISS_IMPROVEMENT_TABLE).insert(record),
+            "생성", NEAR_MISS_IMPROVEMENT_TABLE, retry_transient=False,
+        )
+        saved = (response.data or [None])[0]
+        if saved is None:
+            raise SupabaseDataError("개선조치 생성 결과가 비어 있습니다.")
+        return _near_miss_improvement_natural([saved])[0]
+    if str(existing.get("confirm_status") or "") == "CONFIRMED":
+        raise SupabaseDataError("이미 확인(CONFIRMED)된 개선조치는 수정할 수 없습니다.")
+    updates = {
+        **body,
+        "submit_status": "DRAFT",
+        "confirm_status": "PENDING",
+        "submitted_at": None,
+        "confirmed_by_user_id": None,
+        "confirmed_at": None,
+        "rejected_by_user_id": None,
+        "rejected_at": None,
+        "updated_by": attribution,
+    }
+    query = (
+        client().table(NEAR_MISS_IMPROVEMENT_TABLE).update(updates)
+        .eq("report_id", report_id)
+        .neq("confirm_status", "CONFIRMED")
+    )
+    response = _execute(query, "수정", NEAR_MISS_IMPROVEMENT_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
+        raise SupabaseDataError(_NMI_STALE_MESSAGE)
+    return _near_miss_improvement_natural([saved])[0]
+
+
+def submit_near_miss_improvement(report_id, *, updated_by=None) -> dict:
+    """DRAFT→SUBMITTED. 담당자·조치 결과가 채워져 있어야 한다(DB CHECK 미러)."""
+    if not near_miss_improvement_extensions_ready():
+        raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
+    existing = _nmi_raw(report_id)
+    if existing is None:
+        raise SupabaseDataError("제출할 개선조치가 없습니다.")
+    if existing.get("assignee_user_id") is None:
+        raise SupabaseDataError("조치 담당자가 지정되어야 제출할 수 있습니다.")
+    if not str(existing.get("result_body") or "").strip():
+        raise SupabaseDataError("조치 결과가 입력되어야 제출할 수 있습니다.")
+    from datetime import datetime, timezone
+    updates = {
+        "submit_status": "SUBMITTED",
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": _clean_text(updated_by, nullable=True),
+    }
+    query = (
+        client().table(NEAR_MISS_IMPROVEMENT_TABLE).update(updates)
+        .eq("report_id", report_id)
+        .eq("submit_status", "DRAFT")
+    )
+    response = _execute(query, "제출", NEAR_MISS_IMPROVEMENT_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
+        raise SupabaseDataError(_NMI_STALE_MESSAGE)
+    return _near_miss_improvement_natural([saved])[0]
+
+
+def confirm_near_miss_improvement(report_id, *, confirmed_by_emp_no: str, updated_by=None) -> dict:
+    """PENDING→CONFIRMED. 실제 확인 행위자(confirmed_by)를 서버측 사번으로 귀속하고,
+    자기확인(담당자==확인자)을 차단한다(DB CHECK 이중). SUBMITTED·PENDING 조건부 UPDATE."""
+    if not near_miss_improvement_extensions_ready():
+        raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
+    user_by_emp, _ = _user_maps()
+    confirmer = _clean_text(confirmed_by_emp_no)
+    if confirmer not in user_by_emp:
+        raise SupabaseDataError(f"확인자 사번을 찾을 수 없습니다: {confirmer}")
+    existing = _nmi_raw(report_id)
+    if existing is None:
+        raise SupabaseDataError("확인할 개선조치가 없습니다.")
+    if existing.get("assignee_user_id") == user_by_emp[confirmer]:
+        raise SupabaseDataError("조치 담당자는 자신의 개선조치를 확인할 수 없습니다(자기확인 금지).")
+    from datetime import datetime, timezone
+    updates = {
+        "confirm_status": "CONFIRMED",
+        "confirmed_by_user_id": user_by_emp[confirmer],
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        "rejected_by_user_id": None,
+        "rejected_at": None,
+        "updated_by": _clean_text(updated_by, nullable=True),
+    }
+    query = (
+        client().table(NEAR_MISS_IMPROVEMENT_TABLE).update(updates)
+        .eq("report_id", report_id)
+        .eq("submit_status", "SUBMITTED")
+        .eq("confirm_status", "PENDING")
+    )
+    response = _execute(query, "확인", NEAR_MISS_IMPROVEMENT_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
+        raise SupabaseDataError(_NMI_STALE_MESSAGE)
+    return _near_miss_improvement_natural([saved])[0]
+
+
+def reject_near_miss_improvement(report_id, note: str, *, rejected_by_emp_no: str, updated_by=None) -> dict:
+    """PENDING→REJECTED. 반려 사유(note) 필수, 반려 행위자 서버측 귀속."""
+    if not near_miss_improvement_extensions_ready():
+        raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
+    reason = _clean_text(note, nullable=True)
+    if not reason:
+        raise SupabaseDataError("개선조치를 반려하려면 사유가 필요합니다.")
+    user_by_emp, _ = _user_maps()
+    rejecter = _clean_text(rejected_by_emp_no)
+    if rejecter not in user_by_emp:
+        raise SupabaseDataError(f"반려 행위자 사번을 찾을 수 없습니다: {rejecter}")
+    from datetime import datetime, timezone
+    updates = {
+        "confirm_status": "REJECTED",
+        "rejected_by_user_id": user_by_emp[rejecter],
+        "rejected_at": datetime.now(timezone.utc).isoformat(),
+        "confirmed_by_user_id": None,
+        "confirmed_at": None,
+        "revision_note": reason,
+        "updated_by": _clean_text(updated_by, nullable=True),
+    }
+    query = (
+        client().table(NEAR_MISS_IMPROVEMENT_TABLE).update(updates)
+        .eq("report_id", report_id)
+        .eq("submit_status", "SUBMITTED")
+        .eq("confirm_status", "PENDING")
+    )
+    response = _execute(query, "반려", NEAR_MISS_IMPROVEMENT_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
+        raise SupabaseDataError(_NMI_STALE_MESSAGE)
+    return _near_miss_improvement_natural([saved])[0]
+
+
+def reset_near_miss_improvement_on_reopen(report_id, *, updated_by=None) -> dict | None:
+    """report 재개(EVALUATED→IN_REVIEW) 시 확인된 개선조치를 CONFIRMED→PENDING 으로 되돌린다.
+
+    confirmed_by/confirmed_at 를 초기화하고 result_body/submit_status/due_date 는 보존한다.
+    개선조치가 없거나 이미 확인 상태가 아니면 no-op(None). 강등방어 트리거는 부모가 아직
+    CLOSED 가 아니므로(재개는 EVALUATED→IN_REVIEW) 이 초기화를 막지 않는다."""
+    if not near_miss_improvement_extensions_ready():
+        raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
+    updates = {
+        "confirm_status": "PENDING",
+        "confirmed_by_user_id": None,
+        "confirmed_at": None,
+        "updated_by": _clean_text(updated_by, nullable=True),
+    }
+    query = (
+        client().table(NEAR_MISS_IMPROVEMENT_TABLE).update(updates)
+        .eq("report_id", report_id)
+        .eq("confirm_status", "CONFIRMED")
+    )
+    response = _execute(query, "재개초기화", NEAR_MISS_IMPROVEMENT_TABLE)
+    saved = (response.data or [None])[0]
+    return _near_miss_improvement_natural([saved])[0] if saved else None
+
+
+def close_near_miss_report(report_id, *, actor_emp_no: str) -> dict | None:
+    """확인+종결 하드게이트 원자 RPC(close_near_miss_report)를 호출한다.
+
+    인가·확인된 활성 개선조치 존재·조건부 EVALUATED→CLOSED 전이는 모두 서버(RPC)에서
+    단일 트랜잭션으로 강제한다. RPC 는 actor 사번을 신뢰하지 않고 users 에서 재조회한다."""
+    if not near_miss_improvement_extensions_ready():
+        raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
+    actor = _clean_text(actor_emp_no)
+    if not actor:
+        raise SupabaseDataError("종결 행위자 사번이 필요합니다.")
+    _execute_rpc = client().rpc(
+        "close_near_miss_report",
+        {"p_report_id": report_id, "p_actor_emp_no": actor},
+    )
+    _execute(_execute_rpc, "종결", NEAR_MISS_TABLE, retry_transient=False)
+    return get_near_miss_report(report_id)

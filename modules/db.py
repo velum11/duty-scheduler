@@ -1912,6 +1912,14 @@ def update_near_miss_status(
     # 차단이 정상 평가 경로를 막지 않는다.
     if target == "EVALUATED":
         raise ValueError("평가 확정은 evaluate_near_miss 로만 가능합니다.")
+    # 종결(CLOSED)도 이 경로로 만들 수 없다(007, Codex round-2 P1-#2). 종결은 확인된
+    # 활성 개선조치를 요구하는 하드게이트(close_near_miss_report/RPC/trigger)로만 가능하다.
+    # EVALUATED 차단과 같은 방식으로 진입부에서 거부한다(무인증 호출도 동일 사유로 거부).
+    if target == "CLOSED":
+        raise ValueError(
+            "종결(CLOSED)은 close_near_miss_report 로만 가능합니다. "
+            "확인(CONFIRMED)된 개선조치가 있어야 종결할 수 있습니다."
+        )
     # 인증·권위 재조회 강제(무인증/사번 미상/비활성 → DB 요청 전 ValueError).
     actor = _near_miss_actor(current_user, action="아차사고 상태 변경")
     current = get_near_miss_report(report_id)
@@ -1940,6 +1948,9 @@ def update_near_miss_status(
     reason = str(rejection_reason).strip() if target == "REJECTED" else None
     # 감사 귀속은 인증된 세션 행위자 사번으로 확정한다(폴백 없음, 위조 방지).
     attribution = actor["emp_no"]
+    # 재개(EVALUATED→IN_REVIEW): report 평가필드 초기화(clear_eval)와 함께 확인된
+    # 개선조치도 CONFIRMED→PENDING 으로 되돌린다(확인 근거가 재개 후에도 남지 않게 — 007).
+    reopening = cur_status == "EVALUATED" and target == "IN_REVIEW"
     if is_sample_mode():
         ok = _sample_update_near_miss(
             report_id, expected_status=cur_status, clear_eval=clear_eval,
@@ -1947,12 +1958,21 @@ def update_near_miss_status(
         )
         if not ok:
             raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        if reopening:
+            _nmi_sample_reset_on_reopen(report_id)
         return get_near_miss_report(report_id)
     try:
-        return supabase_repository.update_near_miss_status(
+        result = supabase_repository.update_near_miss_status(
             report_id, target, expected_status=cur_status, rejection_reason=reason,
             clear_evaluation=clear_eval, updated_by=attribution,
         )
+        # supabase 재개 초기화는 별도 UPDATE 다(report 전이와 원자 단일 트랜잭션은
+        # 아니다 — 잔여 위험). 007 미적용(개선조치 스키마 부재)이면 건너뛴다.
+        if reopening and near_miss_improvement_schema_ready():
+            supabase_repository.reset_near_miss_improvement_on_reopen(
+                report_id, updated_by=attribution
+            )
+        return result
     finally:
         _invalidate_near_miss()
 
@@ -2035,6 +2055,272 @@ def near_miss_stats(by: str = "status", filters: dict | None = None) -> dict:
     """
     df = get_near_miss_reports(filters)
     return supabase_repository._aggregate_near_miss(df.to_dict("records"), by)
+
+
+# --- 아차사고 개선조치(CAPA) — migration 007 (DRAFT: 실행/원격 write 승인 게이트 전) ---
+# 보고서 1건당 개선조치 1건(1:1). 등록/제출/확인/반려 라이프사이클과 확인+종결 하드게이트
+# 를 데이터 계층에서 강제한다. sample 모드는 세션 스토어에서 DB CHECK/자기확인/하드게이트/
+# 강등방어 규칙을 파이썬으로 동일 재현하고(오류 은폐 금지), supabase 모드는 007 테이블·
+# RPC·trigger 로 강제한다. 신원·인가는 아차사고 보고 경로(P1-a)와 같은 패턴을 미러한다.
+NEAR_MISS_IMPROVEMENT_COLUMNS = supabase_repository.NEAR_MISS_IMPROVEMENT_COLUMNS
+_NEAR_MISS_IMPROVEMENT_STORE = "store_near_miss_improvements"
+
+# 클라이언트(화면)가 payload 로 보내도 파사드가 무시하고 서버측에서만 확정하는 필드.
+# 실제 확인/반려 행위자·시각·상태·감사는 위조할 수 없다(서버 귀속).
+_NEAR_MISS_IMPROVEMENT_SERVER_FIELDS = frozenset({
+    "id", "report_id", "submit_status", "confirm_status",
+    "submitted_at", "confirmed_at", "confirmed_by_emp_no", "confirmed_by_user_id",
+    "rejected_at", "rejected_by_emp_no", "rejected_by_user_id",
+    "is_active", "created_by", "updated_by", "created_at", "updated_at",
+})
+
+_NEAR_MISS_IMPROVEMENT_CONFIRMED = "CONFIRMED"
+_NEAR_MISS_IMPROVEMENT_NO_CAPA_MESSAGE = (
+    "확인(CONFIRMED)된 활성 개선조치가 없어 종결할 수 없습니다. "
+    "개선조치를 등록·제출하고 확인을 받은 뒤 종결하세요."
+)
+
+
+def near_miss_improvement_schema_ready() -> bool:
+    """007 개선조치 스키마 사용 가능 여부. sample 은 항상 True."""
+    if is_sample_mode():
+        return True
+    return supabase_repository.near_miss_improvement_extensions_ready()
+
+
+def near_miss_improvement_schema_probe(*, force: bool = False) -> str:
+    """007 개선조치 스키마 준비 상태 3-state(배너/재확인 UX 용). near_miss_schema_probe 관행 복제.
+
+    반환: READINESS_READY / READINESS_NOT_READY(미적용) / READINESS_PROBE_ERROR(확인 실패).
+    sample 은 항상 READY."""
+    if is_sample_mode():
+        return supabase_repository.READINESS_READY
+    return supabase_repository.near_miss_improvement_extensions_probe(force=force)
+
+
+def _nmi_store() -> dict:
+    """sample 모드 개선조치 backing store(report_id→자연키 레코드, 세션 유지·실DB 미변경)."""
+    if _NEAR_MISS_IMPROVEMENT_STORE not in st.session_state:
+        st.session_state[_NEAR_MISS_IMPROVEMENT_STORE] = {}
+    return st.session_state[_NEAR_MISS_IMPROVEMENT_STORE]
+
+
+def _nmi_sample_body(payload: dict) -> dict:
+    """개선조치 본문 입력(자연키)을 검증·정규화한다(신원/상태 제외 — 서버측 확정 대상).
+
+    supabase 경로(_near_miss_improvement_body)와 같은 필드·규칙을 파이썬으로 재현한다."""
+    payload = dict(payload or {})
+
+    def resolve(emp_key):
+        emp = str(payload.get(emp_key) or "").strip()
+        if not emp:
+            return ""
+        if find_user_by_emp_no(emp) is None:
+            raise ValueError(f"사용자 사번을 찾을 수 없습니다: {emp}")
+        return emp
+
+    due = str(payload.get("due_date") or "").strip()
+    if due:
+        date.fromisoformat(due)  # 형식 오류 시 ValueError
+    return {
+        "assignee_emp_no": resolve("assignee_emp_no"),
+        "designated_confirmer_emp_no": resolve("designated_confirmer_emp_no"),
+        "action_body": str(payload.get("action_body") or ""),
+        "result_body": str(payload.get("result_body") or ""),
+        "due_date": due or None,
+    }
+
+
+def _nmi_new_id(store: dict) -> int:
+    ids = [int(r["id"]) for r in store.values() if str(r.get("id") or "").isdigit()]
+    return (max(ids) + 1) if ids else 1
+
+
+def _nmi_sample_reset_on_reopen(report_id) -> None:
+    """sample: report 재개 시 확인된 개선조치를 CONFIRMED→PENDING 초기화(결과/기한 보존)."""
+    store = _nmi_store()
+    rec = store.get(str(report_id))
+    if rec is None or rec.get("confirm_status") != _NEAR_MISS_IMPROVEMENT_CONFIRMED:
+        return
+    rec = dict(rec)
+    rec.update({
+        "confirm_status": "PENDING",
+        "confirmed_by_emp_no": "",
+        "confirmed_at": None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+    store[str(report_id)] = rec
+
+
+def get_near_miss_improvement(report_id) -> dict | None:
+    """보고서의 개선조치(자연키 dict) 또는 None."""
+    if is_sample_mode():
+        rec = _nmi_store().get(str(report_id))
+        return dict(rec) if rec else None
+    return supabase_repository.get_near_miss_improvement(report_id)
+
+
+def upsert_near_miss_improvement(report_id, payload: dict, *, current_user) -> dict:
+    """개선조치를 DRAFT 로 저장한다(담당자/조치/결과/기한). 없으면 생성, 있으면 편집.
+
+    행위자 신원은 payload/위젯이 아니라 인증된 ``current_user``에서 서버측 확정한다
+    (무인증/비활성 차단). 편집은 항상 DRAFT/PENDING 으로 되돌리며, 이미 확인(CONFIRMED)된
+    개선조치는 편집할 수 없다(강등 방지). server-owned 필드(상태·확인/반려 행위자·시각·
+    감사)는 payload 에서 제거되어 저장되지 않는다."""
+    actor = _near_miss_actor(current_user, action="개선조치 저장")
+    if get_near_miss_report(report_id) is None:
+        raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
+    safe = {k: v for k, v in dict(payload or {}).items()
+            if k not in _NEAR_MISS_IMPROVEMENT_SERVER_FIELDS}
+    if is_sample_mode():
+        body = _nmi_sample_body(safe)
+        store = _nmi_store()
+        key = str(report_id)
+        now = datetime.now(timezone.utc).isoformat()
+        existing = store.get(key)
+        if existing is None:
+            record = {
+                "id": _nmi_new_id(store), "report_id": report_id, **body,
+                "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
+                "submit_status": "DRAFT", "confirm_status": "PENDING",
+                "submitted_at": None, "confirmed_at": None, "rejected_at": None,
+                "revision_note": None, "is_active": True,
+                "created_by": actor["emp_no"], "updated_by": actor["emp_no"],
+                "created_at": now, "updated_at": now,
+            }
+        else:
+            if existing.get("confirm_status") == _NEAR_MISS_IMPROVEMENT_CONFIRMED:
+                raise ValueError("이미 확인(CONFIRMED)된 개선조치는 수정할 수 없습니다.")
+            record = dict(existing)
+            record.update(body)
+            record.update({
+                "submit_status": "DRAFT", "confirm_status": "PENDING",
+                "submitted_at": None, "confirmed_at": None, "rejected_at": None,
+                "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
+                "updated_by": actor["emp_no"], "updated_at": now,
+            })
+        store[key] = record
+        return dict(record)
+    return supabase_repository.upsert_near_miss_improvement(
+        report_id, safe, updated_by=actor["emp_no"]
+    )
+
+
+def submit_near_miss_improvement(report_id, *, current_user) -> dict:
+    """DRAFT→SUBMITTED. 담당자·조치 결과가 있어야 제출할 수 있다(DB CHECK 미러)."""
+    actor = _near_miss_actor(current_user, action="개선조치 제출")
+    if is_sample_mode():
+        store = _nmi_store()
+        rec = store.get(str(report_id))
+        if rec is None:
+            raise ValueError("제출할 개선조치가 없습니다.")
+        if rec.get("submit_status") != "DRAFT":
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        if not str(rec.get("assignee_emp_no") or "").strip():
+            raise ValueError("조치 담당자가 지정되어야 제출할 수 있습니다.")
+        if not str(rec.get("result_body") or "").strip():
+            raise ValueError("조치 결과가 입력되어야 제출할 수 있습니다.")
+        rec = dict(rec)
+        rec.update({
+            "submit_status": "SUBMITTED",
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+            "updated_by": actor["emp_no"],
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        store[str(report_id)] = rec
+        return dict(rec)
+    return supabase_repository.submit_near_miss_improvement(report_id, updated_by=actor["emp_no"])
+
+
+def confirm_near_miss_improvement(report_id, *, current_user) -> dict:
+    """PENDING→CONFIRMED. 실제 확인 행위자=인증 actor(서버 귀속, select 값 아님).
+
+    확인은 평가 능력(auth.can_evaluate_near_miss)이 필수이며, 자기확인(담당자==확인자)은
+    차단한다(DB CHECK 이중). 이미 확인/반려됐거나 미제출이면 stale."""
+    actor = _near_miss_actor(current_user, action="개선조치 확인")
+    from modules import auth  # 지연 import(순환 회피)
+    if not auth.can_evaluate_near_miss(actor):
+        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
+    if is_sample_mode():
+        store = _nmi_store()
+        rec = store.get(str(report_id))
+        if rec is None:
+            raise ValueError("확인할 개선조치가 없습니다.")
+        if str(rec.get("assignee_emp_no") or "").strip() == actor["emp_no"]:
+            raise ValueError("조치 담당자는 자신의 개선조치를 확인할 수 없습니다(자기확인 금지).")
+        if not (rec.get("submit_status") == "SUBMITTED" and rec.get("confirm_status") == "PENDING"):
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        now = datetime.now(timezone.utc).isoformat()
+        rec = dict(rec)
+        rec.update({
+            "confirm_status": _NEAR_MISS_IMPROVEMENT_CONFIRMED,
+            "confirmed_by_emp_no": actor["emp_no"], "confirmed_at": now,
+            "rejected_by_emp_no": "", "rejected_at": None,
+            "updated_by": actor["emp_no"], "updated_at": now,
+        })
+        store[str(report_id)] = rec
+        return dict(rec)
+    return supabase_repository.confirm_near_miss_improvement(
+        report_id, confirmed_by_emp_no=actor["emp_no"], updated_by=actor["emp_no"]
+    )
+
+
+def reject_near_miss_improvement(report_id, note: str, *, current_user) -> dict:
+    """PENDING→REJECTED. 반려 사유 필수. 반려 능력은 확인과 동일(평가 능력)."""
+    actor = _near_miss_actor(current_user, action="개선조치 반려")
+    from modules import auth  # 지연 import(순환 회피)
+    if not auth.can_evaluate_near_miss(actor):
+        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
+    if not str(note or "").strip():
+        raise ValueError("개선조치를 반려하려면 사유가 필요합니다.")
+    if is_sample_mode():
+        store = _nmi_store()
+        rec = store.get(str(report_id))
+        if rec is None:
+            raise ValueError("반려할 개선조치가 없습니다.")
+        if not (rec.get("submit_status") == "SUBMITTED" and rec.get("confirm_status") == "PENDING"):
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        now = datetime.now(timezone.utc).isoformat()
+        rec = dict(rec)
+        rec.update({
+            "confirm_status": "REJECTED",
+            "rejected_by_emp_no": actor["emp_no"], "rejected_at": now,
+            "confirmed_by_emp_no": "", "confirmed_at": None,
+            "revision_note": str(note).strip(),
+            "updated_by": actor["emp_no"], "updated_at": now,
+        })
+        store[str(report_id)] = rec
+        return dict(rec)
+    return supabase_repository.reject_near_miss_improvement(
+        report_id, note, rejected_by_emp_no=actor["emp_no"], updated_by=actor["emp_no"]
+    )
+
+
+def close_near_miss_report(report_id, *, current_user) -> dict | None:
+    """확인+종결 하드게이트: 확인된 활성 개선조치가 있어야 report 를 EVALUATED→CLOSED 로 종결한다.
+
+    supabase 는 원자 RPC(close_near_miss_report)로, sample 은 동일 규칙을 파이썬으로 재현한다.
+    인가(평가 능력)·확인된 개선조치 존재·조건부 전이(EVALUATED 에서만, stale 차단)를 강제한다.
+    이 경로 밖의 일반 상태변경(update_near_miss_status)은 →CLOSED 를 거부한다."""
+    actor = _near_miss_actor(current_user, action="아차사고 종결")
+    from modules import auth  # 지연 import(순환 회피)
+    if not auth.can_evaluate_near_miss(actor):
+        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
+    if is_sample_mode():
+        # (1) 확인된 활성 개선조치 존재 확인(없으면 종결 불가 — RPC/trigger 하드계약 미러).
+        rec = _nmi_store().get(str(report_id))
+        if not (rec and bool(rec.get("is_active"))
+                and rec.get("confirm_status") == _NEAR_MISS_IMPROVEMENT_CONFIRMED):
+            raise ValueError(_NEAR_MISS_IMPROVEMENT_NO_CAPA_MESSAGE)
+        # (2) 조건부 EVALUATED→CLOSED(다른 상태/동시전이는 stale 로 거부).
+        ok = _sample_update_near_miss(report_id, expected_status="EVALUATED", status="CLOSED")
+        if not ok:
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        return get_near_miss_report(report_id)
+    try:
+        return supabase_repository.close_near_miss_report(report_id, actor_emp_no=actor["emp_no"])
+    finally:
+        _invalidate_near_miss()
 
 
 # --- 조회 헬퍼 ---
