@@ -22,15 +22,19 @@
 --     (기존에 다른 형태로 near_miss_improvements 가 있으면 조용히 no-op 되는 함정을 차단).
 --
 -- SECURITY DEFINER 하드닝 (Codex 필수):
---   종결/재개 RPC 는 SECURITY DEFINER 로 서버측 인가·게이트를 원자 트랜잭션에서 강제하되,
---   PUBLIC/anon/authenticated 의 EXECUTE 를 회수하고 service_role 에만 부여한다.
---   search_path 를 고정하고 모든 객체를 schema-qualified 로 참조해 권한 상승 경로를 막는다.
+--   종결/재개 RPC 는 SECURITY DEFINER 로 (facade 가 지목한 행위자의) 활성·능력 검증과
+--   상태 게이트를 원자 트랜잭션에서 강제하되, PUBLIC/anon/authenticated 의 EXECUTE 를
+--   회수하고 service_role 에만 부여한다. search_path 를 고정하고 모든 객체를
+--   schema-qualified 로 참조해 권한 상승 경로를 막는다.
 --
--- 신뢰 경계 (Codex P2-3):
---   RPC 인자 p_actor_emp_no 는 "인증된 신원"이 아니라, 신뢰된 service-role 호출자(facade)가
---   전달하는 권위 사번이다. facade 는 서버 세션에서 확정한 행위자 사번만 전달하며, RPC 는
---   그 값을 신뢰하지 않고 users 에서 재조회해 능력·활성 여부를 다시 판정한다(이중 방어).
---   클라이언트 역할(anon/authenticated)은 EXECUTE 가 회수되어 RPC 를 직접 호출할 수 없다.
+-- 신뢰 경계 (Codex P2-3 — 종합감사 P2 정정):
+--   RPC 인자 p_actor_emp_no 는 신뢰된 service-role 호출자(facade)가 전달한 권위 사번이며,
+--   RPC 는 이 값을 "행위자의 신원"으로 신뢰한다(신원 자체의 인증은 앱 계층의 신뢰경계이지
+--   DB 가 하는 일이 아니다 — 과장 금지). RPC 가 검증하는 것은 그 신원이 아니라 그 사용자의
+--   is_active·능력(ADMIN/MANAGER 또는 안전담당자)이며, users 에서 재조회해 확인한다(전달된
+--   role/능력 주장은 신뢰하지 않는다). 즉 DB 는 구조·상태 불변식과 "지목된 행위자가 능력이
+--   있는가"만 보장하고, "누가 실제로 호출했는가"의 인증은 앱 계층 소관이다. 클라이언트
+--   역할(anon/authenticated)은 EXECUTE 가 회수되어 RPC 를 직접 호출할 수 없다.
 --
 -- 적용 시 확인(환경 의존 — 마이그레이션에서 강제하기 어려움, Codex P2-3):
 --   * SECURITY DEFINER 함수의 owner 가 최소권한 역할인지(과도한 소유자 권한 상속 방지).
@@ -415,6 +419,35 @@ before update on public.near_miss_reports
 for each row execute function public.near_miss_close_requires_confirmed_capa();
 
 -- =========================================================================
+-- 4b) report_id 불변 trigger — 개선조치의 report_id 는 부모 보고서와의 identity 결속이라
+--     어떤 UPDATE 로도 변경할 수 없다(확정 불변식 ③ "개선조치 report_id 불변").
+--     report_id UNIQUE·FK 는 삽입 무결성만 보장하고 UPDATE 이동(다른 report 로 재귀속)은
+--     막지 못한다. 강등방어 trigger(아래 5)의 report_id 검사는 부모 CLOSED + 대상 행이
+--     확인된 활성 개선조치인 분기 안에서만 동작하므로, 조기반환되는 DRAFT/PENDING/REJECTED
+--     행이나 부모가 EVALUATED 인 CONFIRMED CAPA 는 다른 report 로 옮겨질 수 있었다(종합감사
+--     P1-B). 이 trigger 는 상태·조기반환·분기와 무관하게 report_id 이동을 무조건 거부한다.
+--     대상 행의 NEW/OLD 만 비교하고 다른 객체를 참조하지 않으므로 SECURITY DEFINER·별도
+--     search_path 가 필요없다(최소권한 — SECURITY INVOKER 기본).
+-- =========================================================================
+create or replace function public.near_miss_improvement_report_id_immutable()
+returns trigger
+language plpgsql
+as $$
+begin
+    if new.report_id is distinct from old.report_id then
+        raise exception '개선조치의 report_id 는 변경할 수 없습니다(부모 보고서 결속 불변): % -> %.',
+            old.report_id, new.report_id;
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists near_miss_improvement_report_id_immutable on public.near_miss_improvements;
+create trigger near_miss_improvement_report_id_immutable
+before update on public.near_miss_improvements
+for each row execute function public.near_miss_improvement_report_id_immutable();
+
+-- =========================================================================
 -- 5) 강등 방어 trigger — CLOSED 된 보고서의 확인된 활성 개선조치는 사후에 무를 수 없다.
 --    (confirm_status 강등·is_active=false·삭제 시도를 거부해 하드 계약이 사후에 깨지지
 --     않게 한다 — Codex P2 "거부" 권고안.)
@@ -471,9 +504,10 @@ for each row execute function public.near_miss_improvement_guard_closed_parent()
 
 -- =========================================================================
 -- 6) 확인+종결 하드게이트 원자 RPC — close_near_miss_report.
---    단일 트랜잭션에서 (1) actor 재조회·인가 (2) 확인된 활성 개선조치 존재 (3) 조건부
---    CLOSED 전이(stale 차단)를 수행한다. 인자(actor 사번)는 신뢰하지 않고 재조회한다.
---    (4)의 트리거가 동일 계약을 이중 방어한다.
+--    단일 트랜잭션에서 (1) 행위자 활성·능력 검증 (2) 확인된 활성 개선조치 존재 (3) 조건부
+--    CLOSED 전이(stale 차단)를 수행한다. 인자(actor 사번)는 facade 가 확정한 행위자 신원으로
+--    신뢰하되, 그 사용자의 활성·능력은 users 에서 재조회해 검증한다(전달된 능력 주장은 신뢰
+--    안 함). (4)의 트리거가 동일 상태 불변식을 이중 방어한다.
 -- =========================================================================
 create or replace function public.close_near_miss_report(p_report_id bigint, p_actor_emp_no text)
 returns public.near_miss_reports
@@ -485,8 +519,9 @@ declare
     v_actor public.users%rowtype;
     v_report public.near_miss_reports%rowtype;
 begin
-    -- (1) actor 재조회(인자 신뢰 금지) — 활성 + 평가 능력(ADMIN/MANAGER 또는 안전담당자).
-    --     사번 비교는 trim+대소문자 무시(원본은 변환하지 않고 저장값 그대로 사용).
+    -- (1) 행위자 능력 검증 — 인자 사번을 신원으로 신뢰하되 그 사용자의 활성 + 평가 능력
+    --     (ADMIN/MANAGER 또는 안전담당자)은 users 에서 재조회해 확인한다(전달된 능력 주장
+    --     불신). 사번 비교는 trim+대소문자 무시(원본은 변환하지 않고 저장값 그대로 사용).
     select * into v_actor
     from public.users
     where btrim(lower(emp_no)) = btrim(lower(coalesce(p_actor_emp_no, '')))
@@ -544,7 +579,7 @@ revoke execute on function public.close_near_miss_report(bigint, text) from auth
 grant execute on function public.close_near_miss_report(bigint, text) to service_role;
 
 comment on function public.close_near_miss_report(bigint, text) is
-    'Atomic near-miss closure hard-gate (SECURITY DEFINER). Re-derives the actor from users (does not trust the argument), requires evaluation capability + active, requires a CONFIRMED active improvement, and conditionally transitions the report EVALUATED->CLOSED (stale-safe). EXECUTE restricted to service_role.';
+    'Atomic near-miss closure hard-gate (SECURITY DEFINER). Trusts the passed emp_no as the actor identity (identity authN is the app-layer trust boundary) but re-derives that user''s is_active + evaluation capability from users (does not trust any passed role/capability claim), requires a CONFIRMED active improvement, and conditionally transitions the report EVALUATED->CLOSED (stale-safe). EXECUTE restricted to service_role.';
 
 -- 검증용(선택, read-only): 확인된 활성 개선조치가 없는 CLOSED 보고서가 없어야 한다(계약 위반 탐지).
 --   select r.id from public.near_miss_reports r
@@ -574,7 +609,8 @@ declare
     v_actor public.users%rowtype;
     v_report public.near_miss_reports%rowtype;
 begin
-    -- (1) actor 재조회(인자 신뢰 금지) — 활성 + 평가 능력(ADMIN/MANAGER 또는 안전담당자).
+    -- (1) 행위자 능력 검증 — 인자 사번을 신원으로 신뢰하되 그 사용자의 활성 + 평가 능력
+    --     (ADMIN/MANAGER 또는 안전담당자)은 users 에서 재조회해 확인한다(전달된 능력 주장 불신).
     select * into v_actor
     from public.users
     where btrim(lower(emp_no)) = btrim(lower(coalesce(p_actor_emp_no, '')))
@@ -635,4 +671,4 @@ revoke execute on function public.reopen_near_miss_report(bigint, text) from aut
 grant execute on function public.reopen_near_miss_report(bigint, text) to service_role;
 
 comment on function public.reopen_near_miss_report(bigint, text) is
-    'Atomic near-miss reopen (SECURITY DEFINER). Re-derives the actor from users (does not trust the argument), requires evaluation capability + active, and in one transaction transitions the report EVALUATED->IN_REVIEW (clearing evaluation fields) and resets the active CONFIRMED improvement to PENDING (clearing confirmer/confirmed_at, preserving result/submit/due). EXECUTE restricted to service_role.';
+    'Atomic near-miss reopen (SECURITY DEFINER). Trusts the passed emp_no as the actor identity (identity authN is the app-layer trust boundary) but re-derives that user''s is_active + evaluation capability from users (does not trust any passed role/capability claim), and in one transaction transitions the report EVALUATED->IN_REVIEW (clearing evaluation fields) and resets the active CONFIRMED improvement to PENDING (clearing confirmer/confirmed_at, preserving result/submit/due). EXECUTE restricted to service_role.';

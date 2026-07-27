@@ -2311,10 +2311,16 @@ def upsert_near_miss_improvement(report_id, payload: dict, *, current_user) -> d
     """개선조치를 DRAFT 로 저장한다(담당자/조치/결과/기한). 없으면 생성, 있으면 편집.
 
     행위자 신원은 payload/위젯이 아니라 인증된 ``current_user``에서 서버측 확정한다
-    (무인증/비활성 차단). 편집은 항상 DRAFT/PENDING 으로 되돌리며, 이미 확인(CONFIRMED)된
-    개선조치는 편집할 수 없다(강등 방지). server-owned 필드(상태·확인/반려 행위자·시각·
-    감사)는 payload 에서 제거되어 저장되지 않는다."""
+    (무인증/비활성 차단). CAPA 저장은 평가 능력(auth.can_evaluate_near_miss:
+    ADMIN/MANAGER 또는 안전담당자)이 필수다 — 활성 일반 USER 가 facade 직접 호출로 CAPA
+    를 등록/편집하지 못하게 confirm/reject/close 와 동일하게 상단에서 fail-closed 로
+    차단한다. 편집은 항상 DRAFT/PENDING 으로 되돌리며, 이미 확인(CONFIRMED)된 개선조치는
+    편집할 수 없다(강등 방지). server-owned 필드(상태·확인/반려 행위자·시각·감사)는
+    payload 에서 제거되어 저장되지 않는다(report_id 포함 — 부모 결속 불변)."""
     actor = _near_miss_actor(current_user, action="개선조치 저장")
+    from modules import auth  # 지연 import(순환 회피)
+    if not auth.can_evaluate_near_miss(actor):
+        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
     if get_near_miss_report(report_id) is None:
         raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
     safe = {k: v for k, v in dict(payload or {}).items()
@@ -2354,8 +2360,14 @@ def upsert_near_miss_improvement(report_id, payload: dict, *, current_user) -> d
 
 
 def submit_near_miss_improvement(report_id, *, current_user) -> dict:
-    """DRAFT→SUBMITTED. 담당자·조치 결과가 있어야 제출할 수 있다(DB CHECK 미러)."""
+    """DRAFT→SUBMITTED. 담당자·조치 결과가 있어야 제출할 수 있다(DB CHECK 미러).
+
+    제출도 평가 능력(auth.can_evaluate_near_miss)이 필수다 — 저장(upsert)과 동일하게
+    활성 일반 USER 의 facade 직접 제출을 상단에서 fail-closed 로 차단한다."""
     actor = _near_miss_actor(current_user, action="개선조치 제출")
+    from modules import auth  # 지연 import(순환 회피)
+    if not auth.can_evaluate_near_miss(actor):
+        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
     if is_sample_mode():
         store = _nmi_store()
         rec = store.get(str(report_id))

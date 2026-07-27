@@ -772,6 +772,82 @@ def test_close_supabase_path_calls_rpc() -> None:
 
 
 # =========================================================================
+# CAPA 저장·제출 능력 게이트 (종합감사 P1-A)
+# =========================================================================
+def test_capa_save_submit_capability_gate() -> None:
+    print("CAPA 저장·제출 능력 게이트: 활성 USER 차단 / ADMIN·MANAGER·안전담당자 허용 (종합감사 P1-A)")
+    _reset()
+    reporter = _actor_of_role("USER")
+    manager = _actor_of_role("MANAGER")
+    admin = _actor_of_role("ADMIN")
+    rid = _evaluated_report(reporter, manager)
+
+    # 활성 일반 USER 는 능력이 없어 upsert(저장) 차단 — 무인증/비활성이 아니라 능력 부재.
+    excu = raises(lambda: db.upsert_near_miss_improvement(
+        rid, {"assignee_emp_no": reporter["emp_no"], "result_body": "USER 저장 시도"},
+        current_user={"emp_no": reporter["emp_no"]}), ValueError)
+    check("활성 USER upsert 능력 차단", excu is not None and "권한" in str(excu))
+    check("USER 차단 후 개선조치 미생성", db.get_near_miss_improvement(rid) is None)
+
+    # ADMIN 저장 허용(양성).
+    db.upsert_near_miss_improvement(rid, {
+        "assignee_emp_no": reporter["emp_no"], "result_body": "ADMIN 조치"}, current_user=admin)
+    check("ADMIN upsert 허용", db.get_near_miss_improvement(rid)["result_body"] == "ADMIN 조치")
+
+    # 활성 일반 USER 는 submit(제출)도 차단.
+    excs = raises(lambda: db.submit_near_miss_improvement(
+        rid, current_user={"emp_no": reporter["emp_no"]}), ValueError)
+    check("활성 USER submit 능력 차단", excs is not None and "권한" in str(excs))
+    check("USER 제출 차단 후 DRAFT 유지",
+          db.get_near_miss_improvement(rid)["submit_status"] == "DRAFT")
+
+    # ADMIN 제출 허용(양성).
+    rec = db.submit_near_miss_improvement(rid, current_user=admin)
+    check("ADMIN submit 허용", rec["submit_status"] == "SUBMITTED")
+
+    # 안전담당자(USER 역할이지만 is_safety_officer=True)도 저장·제출 허용(능력 근거=플래그).
+    _reset()
+    so = _actor_of_role("USER")
+    reporter2 = _actor_of_role("USER", exclude=(so["emp_no"],))
+    rid2 = _evaluated_report(reporter2, manager)
+    orig = db._safety_officer_flag
+    db._safety_officer_flag = lambda emp, **_: str(emp).strip() == so["emp_no"]
+    try:
+        db.upsert_near_miss_improvement(rid2, {
+            "assignee_emp_no": reporter2["emp_no"], "result_body": "안전담당자 조치"},
+            current_user={"emp_no": so["emp_no"]})
+        check("안전담당자 upsert 허용",
+              db.get_near_miss_improvement(rid2)["result_body"] == "안전담당자 조치")
+        rec2 = db.submit_near_miss_improvement(rid2, current_user={"emp_no": so["emp_no"]})
+        check("안전담당자 submit 허용", rec2["submit_status"] == "SUBMITTED")
+    finally:
+        db._safety_officer_flag = orig
+
+
+# =========================================================================
+# report_id 불변 sample parity (종합감사 P1-B)
+# =========================================================================
+def test_report_id_immutable_sample() -> None:
+    print("sample: 개선조치 report_id 이동 불가(부모 결속 불변, 종합감사 P1-B parity)")
+    _reset()
+    reporter = _actor_of_role("USER")
+    manager = _actor_of_role("MANAGER")
+    rid_a = _evaluated_report(reporter, manager)
+    rid_b = _evaluated_report(reporter, manager)
+    db.upsert_near_miss_improvement(rid_a, {
+        "assignee_emp_no": reporter["emp_no"], "result_body": "A 조치"}, current_user=manager)
+
+    # payload 로 report_id 를 rid_b 로 바꾸려 해도 server-field 로 제거되어 이동하지 않는다.
+    rec = db.upsert_near_miss_improvement(rid_a, {
+        "report_id": rid_b, "result_body": "A 조치 수정"}, current_user=manager)
+    check("upsert 후에도 report_id 는 rid_a 유지", str(rec["report_id"]) == str(rid_a))
+    check("rid_b 로 개선조치가 이동/생성되지 않음", db.get_near_miss_improvement(rid_b) is None)
+    check("rid_a 개선조치 그대로 존재", db.get_near_miss_improvement(rid_a) is not None)
+    check("rid_a 결과는 수정 반영(이동 아님)",
+          db.get_near_miss_improvement(rid_a)["result_body"] == "A 조치 수정")
+
+
+# =========================================================================
 # 007 SQL 계약(정적) — 테이블/제약/RPC/trigger/하드닝 존재
 # =========================================================================
 def test_migration_007_sql_contract() -> None:
@@ -836,6 +912,22 @@ def test_migration_007_sql_contract() -> None:
     # P1-1: 강등방어 trigger 는 report_id 이동(부모 재지정)도 차단한다.
     check("강등방어 report_id 불변",
           "new.report_id is distinct from old.report_id" in low)
+
+    # 종합감사 P1-B: report_id 불변은 CLOSED 분기와 무관하게 무조건 강제해야 한다.
+    #   전용 BEFORE UPDATE trigger(near_miss_improvement_report_id_immutable)가 존재하고,
+    #   그 함수 본문은 부모 상태(closed/v_parent_status)와 무관한 무조건 경로여야 한다.
+    check("report_id 불변 전용 trigger 정의",
+          "function public.near_miss_improvement_report_id_immutable()" in low)
+    check("report_id 불변 trigger before update on improvements",
+          "before update on public.near_miss_improvements" in low
+          and "near_miss_improvement_report_id_immutable()" in low)
+    _imm_start = low.find("create or replace function public.near_miss_improvement_report_id_immutable()")
+    _imm_body = low[_imm_start:low.find("$$;", _imm_start)] if _imm_start >= 0 else ""
+    check("report_id 불변 검사가 전용 함수 본문에 존재",
+          "new.report_id is distinct from old.report_id" in _imm_body
+          and "raise exception" in _imm_body)
+    check("report_id 불변이 무조건 경로(CLOSED/부모상태 분기 밖)",
+          "closed" not in _imm_body and "v_parent_status" not in _imm_body)
     # P1-2: close RPC·강등방어·재개 RPC 는 FOR UPDATE 로 직렬화한다(락 순서 improvement→report).
     check("FOR UPDATE 직렬화(≥3)", low.count("for update") >= 3)
 
@@ -900,6 +992,8 @@ def main() -> int:
         test_request_revision_supabase_path,
         test_confirm_supabase_path_server_attribution,
         test_close_supabase_path_calls_rpc,
+        test_capa_save_submit_capability_gate,
+        test_report_id_immutable_sample,
         test_migration_007_sql_contract,
     ):
         test()

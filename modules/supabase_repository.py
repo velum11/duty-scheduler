@@ -2297,8 +2297,9 @@ def reset_near_miss_improvement_on_reopen(report_id, *, updated_by=None) -> dict
 def close_near_miss_report(report_id, *, actor_emp_no: str) -> dict | None:
     """확인+종결 하드게이트 원자 RPC(close_near_miss_report)를 호출한다.
 
-    인가·확인된 활성 개선조치 존재·조건부 EVALUATED→CLOSED 전이는 모두 서버(RPC)에서
-    단일 트랜잭션으로 강제한다. RPC 는 actor 사번을 신뢰하지 않고 users 에서 재조회한다."""
+    행위자 능력 검증·확인된 활성 개선조치 존재·조건부 EVALUATED→CLOSED 전이는 모두 서버(RPC)
+    에서 단일 트랜잭션으로 강제한다. RPC 는 전달된 actor 사번을 행위자 신원으로 신뢰하되(신원
+    인증은 앱 계층 신뢰경계), 그 사용자의 활성·능력만 users 에서 재조회해 검증한다."""
     if not near_miss_improvement_extensions_ready():
         raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
     actor = _clean_text(actor_emp_no)
@@ -2318,7 +2319,8 @@ def reopen_near_miss_report(report_id, *, actor_emp_no: str) -> dict | None:
     report EVALUATED→IN_REVIEW 전이(평가필드 초기화)와 확인된 활성 개선조치 CONFIRMED→PENDING
     초기화(confirmer/confirmed_at 초기화, result/submit/due 보존)를 단일 트랜잭션으로 원자
     실행한다. 과거의 '전이 후 별도 리셋' 2단계가 남기던 stale CONFIRMED 재사용 창을 없앤다.
-    RPC 는 actor 사번을 신뢰하지 않고 users 에서 재조회해 능력·활성을 다시 판정한다."""
+    RPC 는 전달된 actor 사번을 행위자 신원으로 신뢰하되(신원 인증은 앱 계층 신뢰경계), 그
+    사용자의 활성·능력만 users 에서 재조회해 검증한다."""
     if not near_miss_improvement_extensions_ready():
         raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
     actor = _clean_text(actor_emp_no)
