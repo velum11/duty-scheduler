@@ -26,6 +26,8 @@ os.environ["DUTY_DATA_MODE"] = "sample"
 
 from modules import nav  # noqa: E402
 from views import near_miss_evaluate as nme  # noqa: E402
+from views import near_miss_improvement as nmi  # noqa: E402
+from views import near_miss_my as nmy  # noqa: E402
 from views import near_miss_stats as nms  # noqa: E402
 
 PASS = 0
@@ -107,6 +109,64 @@ kpi_src = inspect.getsource(nms._kpi_cards)
 check("KPI 행에 '보고서 종결률' 타일 추가", "보고서 종결률" in kpi_src)
 # KPI 타일 라벨 자체에 'CAPA' 명칭을 쓰지 않는다(미확인 종결을 CAPA 완료로 오표기 금지).
 check("KPI 타일 라벨에 'CAPA' 명칭 미사용", "CAPA" not in kpi_src)
+
+
+# ===== 4) stats 기한초과(overdue) 지표 (007 배선·fail-closed) =====
+print("stats 기한초과")
+check("기한초과 타일 KPI 행에 추가", "기한초과" in kpi_src)
+check("overdue None → '—'(007 미준비 방어)", nms._overdue_label(None) == "—")
+check("overdue 0 → '0건'(실집계 0 은 표시)", nms._overdue_label(0) == "0건")
+check("overdue 4 → '4건'", nms._overdue_label(4) == "4건")
+overdue_src = inspect.getsource(nms._overdue_count)
+check("overdue 는 007 readiness 게이트(미준비 None)",
+      "near_miss_improvement_schema_probe" in overdue_src and "READINESS_READY" in overdue_src)
+check("overdue 조건: 미확인(CONFIRMED 제외) + due_date 과거",
+      "CONFIRMED" in overdue_src and "due" in overdue_src)
+
+
+# ===== 5) 개선조치 관리(near_miss_improvement) MASTER_DETAIL 폐루프 =====
+print("개선조치 관리 CAPA 폐루프")
+check("SCREEN_ARCHETYPE == 'MASTER_DETAIL'", nmi.SCREEN_ARCHETYPE == "MASTER_DETAIL")
+render_src = inspect.getsource(nmi.render)
+check("진입가드: can_evaluate_near_miss", "can_evaluate_near_miss" in render_src)
+body_src = inspect.getsource(nmi._render_body)
+check("MASTER_DETAIL split 사용(master_detail_frame)", "master_detail_frame" in body_src)
+act_src = inspect.getsource(nmi._render_actions)
+for label in ("조치 저장", "제출", "확인", "재조치 요청"):
+    check(f"scope 액션 라벨 '{label}'", f'"{label}"' in act_src)
+check("자기확인 차단 게이트(self_confirm)", "self_confirm" in act_src and "자기확인" in act_src)
+check("신원 서버측 확정(current_user=auth.get_current_user())",
+      "current_user=auth.get_current_user()" in act_src)
+close_src = inspect.getsource(nmi._render_close)
+check("보고서 종결 라벨 존재", '"보고서 종결"' in close_src)
+check("2단계 종결: 확인 세션키 가드", "_CLOSE_CONFIRM_KEY" in close_src)
+check("2단계 종결: 종결 확정 + 취소", '"종결 확정"' in close_src and '"취소"' in close_src)
+check("불가역 고지 문구", "불가역" in close_src)
+check("종결은 close_near_miss_report 파사드로만", "close_near_miss_report" in close_src)
+# 007 미적용 fail-closed: 쓰기 활성은 readiness.write_enabled 로만 판정(가짜 성공 없음).
+check("쓰기 활성은 readiness.write_enabled 게이트", "readiness.write_enabled" in act_src)
+
+
+# ===== 6) 평가 보완요청(near_miss_evaluate) — 반려와 별개 =====
+print("평가 보완요청")
+check("보완요청 scope 액션 라벨 존재", '"보완요청"' in detail_src)
+check("보완요청 → request_near_miss_revision 파사드", "request_near_miss_revision" in detail_src)
+check("보완요청 활성 게이트: status == 'IN_REVIEW'", 'status != "IN_REVIEW"' in detail_src)
+check("보완요청 전용 사유 필드(반려 사유와 별개)", "nm_revreason_" in detail_src)
+check("반려 버튼 여전히 존재(별도 의미)", '"반려"' in detail_src)
+check("보완요청도 current_user 서버측 확정",
+      "request_near_miss_revision" in detail_src and "auth.get_current_user()" in detail_src)
+
+
+# ===== 7) 내 아차사고 보완요청 배너(near_miss_my) — info, 별개 시각 =====
+print("내 아차사고 보완요청 배너")
+rev_src = inspect.getsource(nmy._render_revision_banner)
+check("보완요청 조회 파사드 사용", "get_near_miss_revision_request" in rev_src)
+check("보완요청 배너 kind='info'(반려 warn 과 별개 시각)", 'banner("info"' in rev_src)
+check("보완요청 문구 사용", "보완요청" in rev_src)
+my_detail_src = inspect.getsource(nmy._render_detail)
+check("SUBMITTED 에서 보완요청 배너 호출", "_render_revision_banner" in my_detail_src)
+check("반려(REJECTED) 배너는 warn 유지(별개 시각)", 'banner("warn"' in my_detail_src)
 
 
 print()

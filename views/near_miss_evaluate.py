@@ -27,6 +27,11 @@ scope 액션(``erp.detail_actions``)이 담당한다 — 파사드 직접 호출
     없이 상태만 바꾼다(보완요청 SUBMITTED 반송은 사유 저장이 007 종속이라 이번 범위 아님).
   - ``db.update_near_miss_status(report_id, "REJECTED", rejection_reason=,
     current_user=...)`` — 반려 상태전이(전이표 밖이면 ValueError).
+  - ``db.request_near_miss_revision(report_id, reason, current_user=...)`` — 보완요청
+    (IN_REVIEW→SUBMITTED 반송 + 사유 서버기록). 반려(REJECTED, 종결분기)와 **의미가
+    다르다**: 보완요청은 보고자에게 재작성을 요청하는 것이고 사유는 rejection_reason 을
+    재사용하지 않는다. IN_REVIEW 에서만 가능하며 007 미적용/probe 오류면 파사드가
+    fail-closed 로 차단한다(사유 없는 반송 방지).
   - ``db.near_miss_schema_probe()`` — migration 006 준비 상태(3-state) 배너.
 
 신원 위조 방지: 두 쓰기 호출 모두 ``current_user=auth.get_current_user()`` 를 그대로
@@ -358,6 +363,12 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     reason = st.text_area(
         "반려 사유(반려 시 필수)", key=f"nm_reason_{selected_id}", height=56, disabled=not can_write,
     )
+    # 보완요청 전용 사유(반려와 별개 필드·별개 의미: 보완요청=보고자 재작성 요청, 반려=종결분기).
+    # IN_REVIEW 에서만 의미가 있어 그 외 상태에서는 입력을 비활성화한다.
+    revision_reason = st.text_area(
+        "보완요청 사유(보완요청 시 필수)", key=f"nm_revreason_{selected_id}", height=56,
+        disabled=(not can_write) or status != "IN_REVIEW",
+    )
 
     # 상세 패널 scope 액션(§0.4) — 실제 쓰기는 이 두 버튼만 담당한다(page 액션바에는
     # 없음). disabled/help 판정은 여기서 그대로 계산해 넘기고, erp.detail_actions 는
@@ -365,7 +376,7 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     # 오류/stale 처리는 이 화면(아래 클릭 분기 + ``_run_action``)이 그대로 소유한다.
     # 검토착수(SUBMITTED→IN_REVIEW): 아직 검토에 착수하지 않은(SUBMITTED) 케이스에서만
     # 활성. 큐는 SUBMITTED/IN_REVIEW 만 담으므로 IN_REVIEW 는 이미 착수한 상태라 비활성.
-    # 전용 사유 필드가 없어 payload 없이 상태만 전이한다(보완요청은 007 종속 — 이번 범위 아님).
+    # 검토착수는 전용 사유 필드 없이 상태만 전이한다(보완요청은 아래 별도 버튼·전용 사유).
     review_disabled = (not can_write) or status != "SUBMITTED"
     if not can_write:
         review_help = readiness.message
@@ -382,6 +393,17 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         None if str(reason or "").strip() else "반려 사유를 입력하세요."
     )
 
+    # 보완요청(IN_REVIEW→SUBMITTED): 검토중 케이스만 활성, 사유 필수. 반려와 별도 버튼·의미.
+    revision_disabled = (not can_write) or status != "IN_REVIEW" or not str(revision_reason or "").strip()
+    if not can_write:
+        revision_help = readiness.message
+    elif status != "IN_REVIEW":
+        revision_help = "검토중(IN_REVIEW) 케이스만 보완요청할 수 있습니다."
+    elif not str(revision_reason or "").strip():
+        revision_help = "보완요청 사유를 입력하세요."
+    else:
+        revision_help = None
+
     # 종결(EVALUATED→CLOSED)은 이 평가 대기 화면의 책임이 아니다 — 큐가 SUBMITTED/IN_REVIEW
     # 만 담아 여기서는 항상 비활성일 수밖에 없었다. 종결 UI 는 향후 개선조치 관리 화면에서
     # 재설계하며(별도 제품 결정 — BACKLOG 추적), db.py 의 EVALUATED→CLOSED 전이 능력
@@ -389,6 +411,7 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     clicks = erp.detail_actions(_PAGE_ID, [
         ("검토착수", "default", review_disabled, review_help),
         ("평가확정", "primary", eval_disabled, eval_help),
+        ("보완요청", "default", revision_disabled, revision_help),
         ("반려", "default", reject_disabled, reject_help),
     ])
 
@@ -401,6 +424,11 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     if clicks.get("평가확정"):
         _run_action(user, "평가확정", lambda: db.evaluate_near_miss(
             selected_id, grade, current_user=auth.get_current_user(),
+        ))
+    if clicks.get("보완요청"):
+        # 보완요청: IN_REVIEW→SUBMITTED 반송 + 사유 서버기록(보고자 재작성 요청). 반려와 별개.
+        _run_action(user, "보완요청", lambda: db.request_near_miss_revision(
+            selected_id, revision_reason, current_user=auth.get_current_user(),
         ))
     if clicks.get("반려"):
         _run_action(user, "반려", lambda: db.update_near_miss_status(

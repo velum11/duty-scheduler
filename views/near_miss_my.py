@@ -13,8 +13,12 @@ DESIGN.md §0 화면 유형: ``MASTER_DETAIL`` — 읽기 목록(본인 작성 �
 ``db.update_near_miss_report`` 는 병렬 작업으로 추가되는 중이라, 부재 시
 ``hasattr(db, "update_near_miss_report")`` 로 진입을 가드하고 통합 대기 안내만 노출한다.
 
+보완요청 피드백: 평가자가 보완요청(반송)한 제출됨(SUBMITTED) 건은 ``info`` 배너로 사유를
+안내한다(반려 ≠ 보완요청 — 별도 시각·문구). 보고자는 기존 SUBMITTED 자기수정·재제출
+경로로 자연 연결된다(별도 재제출 버튼 없음).
+
 범위 밖(의도적 미구현): 제출 취소(deferred — 버튼 없음/안내만, 삭제로 대체하지 않음),
-보완요청(반려 ≠ 보완요청, 후속 플로우로 이연), 복잡한 상태 시스템.
+복잡한 상태 시스템.
 """
 from __future__ import annotations
 
@@ -213,6 +217,11 @@ def _render_detail(user: dict, reports: pd.DataFrame) -> None:
     )
     if status == "REJECTED" and _clean(report.get("rejection_reason")):
         banner("warn", f"반려 사유: {_clean(report.get('rejection_reason'))}")
+    # 보완요청(반송) 피드백 — 제출됨(SUBMITTED) 상태에서 평가자가 재작성을 요청한 경우.
+    # 반려(REJECTED=종결분기)와 별개 의미·별개 문구·별개 시각(info)이며, 보고자는 기존
+    # SUBMITTED 자기수정·재제출 경로로 자연 연결된다(별도 재제출 버튼 없음).
+    if status == "SUBMITTED":
+        _render_revision_banner(selected_id)
 
     st.markdown(f"**작업명** {escape(_clean(report.get('work_name')) or '-')}")
     cause = _clean(report.get("cause_code"))
@@ -231,6 +240,27 @@ def _render_detail(user: dict, reports: pd.DataFrame) -> None:
                  height=68, disabled=True, key=f"nm_my_sd_{selected_id}")
 
     _render_edit_entry(user, report, status)
+
+
+def _render_revision_banner(report_id) -> None:
+    """제출됨 건에 걸린 보완요청(사유/요청자/시각)을 안내한다.
+
+    반려(REJECTED) 배너는 ``warn``(경고), 보완요청은 ``info``(파랑)로 **별도 시각**을 준다
+    — 반려는 종결분기, 보완요청은 재작성 요청이라 성격이 다르다. 007 미적용이면 조회가
+    None 이라 배너가 뜨지 않는다(가짜 표시 없음)."""
+    try:
+        rev = db.get_near_miss_revision_request(report_id)
+    except Exception:
+        return
+    if not rev:
+        return
+    reason = _clean(rev.get("revision_request_reason"))
+    if not reason:
+        return
+    requester = _clean(rev.get("revision_requested_by_emp_no"))
+    at = _clean(rev.get("revision_requested_at"))
+    meta = " / ".join(p for p in (requester, at) if p)
+    banner("info", f"보완요청: {reason}" + (f" — 요청 {meta}" if meta else ""))
 
 
 def _render_edit_entry(user: dict, report: dict, status: str) -> None:
