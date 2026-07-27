@@ -122,6 +122,18 @@ _MISSING_COLUMN_MARKERS = (
 )
 
 
+def is_missing_column_error(exc: Exception) -> bool:
+    """예외가 '컬럼/스키마 미적용'(undefined-column / schema-cache) 신호인지 판정한다.
+
+    True → 마이그레이션 미적용 등 **정상적 미준비**(호출부가 능력 없음=False 로 접어도
+    되는 fail-closed 상황). False → 그 외(권한/네트워크 등) 오류로, '미적용'으로 단정할
+    수 없다(호출부가 은폐하지 말고 전파할 근거). ``near_miss_extensions_ready()``/
+    ``near_miss_extensions_probe()`` 의 NOT_READY vs PROBE_ERROR 판정과 **같은 표식**을
+    써서, 능력 조회 폴백과 readiness 3-state 가 '무엇을 미준비로 볼지'에서 어긋나지
+    않게 한다."""
+    return any(marker in repr(exc) for marker in _MISSING_COLUMN_MARKERS)
+
+
 def _sanitized_error(
     action: str, table: str, exc: Exception, *, transient: bool = False
 ) -> SupabaseDataError:

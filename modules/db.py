@@ -2038,11 +2038,21 @@ def near_miss_stats(by: str = "status", filters: dict | None = None) -> dict:
 
 
 # --- 조회 헬퍼 ---
-def _safety_officer_flag(emp_no) -> bool:
+def _safety_officer_flag(emp_no, *, strict: bool = False) -> bool:
     """사용자의 안전담당자 지정 여부(users.is_safety_officer, migration 006).
 
-    sample 모드는 CSV 에 해당 컬럼이 없어 항상 False. supabase 모드는 원격 조회하며
-    컬럼 미적용(006 전)·오류는 안전하게 False 로 접는다.
+    sample 모드는 CSV 에 해당 컬럼이 없어 항상 False. supabase 모드는 원격 조회한다.
+
+    ``strict`` 는 인가(write 게이트) 경로 전용이다.
+      - 기본(strict=False, 표시/로그인): 조회 오류를 안전하게 False 로 접는다(기존
+        거동 보존 — 표시 경로가 일시 오류로 화면을 깨지 않는다).
+      - strict=True(인가): **정상적 미준비**(006 미적용/컬럼 부재)만 False 로 접고
+        (fail-closed), 그 외 **일시 데이터소스 오류는 False 로 은폐하지 않고 전파**한다.
+        일시 원격 오류가 '안전담당자 아님(권한 없음)'으로 둔갑해 실제 안전담당자의
+        능력을 조용히 떨어뜨리는 것을 막는다(AGENTS.md '에러를 숨기지 않는다').
+    '미준비 vs 일시오류'는 readiness 3-state 와 같은 표식을 쓰는
+    ``supabase_repository.is_missing_column_error`` 로 구분한다.
+
     주의(세션 캐시): 로그인 시점의 값이 세션 사용자 dict 에 실린다. 플래그를 바꾸면
     재로그인해야 반영된다(get_current_user 가 세션 사용자를 우선 반환하기 때문).
     """
@@ -2050,8 +2060,11 @@ def _safety_officer_flag(emp_no) -> bool:
         return False
     try:
         return supabase_repository.user_is_safety_officer(str(emp_no).strip())
-    except DATA_SOURCE_ERRORS:
-        return False
+    except DATA_SOURCE_ERRORS as exc:
+        if not strict or supabase_repository.is_missing_column_error(exc):
+            # 비strict(표시/로그인) 또는 정상적 미준비(006 미적용/컬럼 부재) → False.
+            return False
+        raise  # strict(인가) 경로의 일시 데이터소스 오류는 은폐하지 않고 전파한다.
 
 
 def _uncached_users() -> pd.DataFrame:
@@ -2103,7 +2116,19 @@ def find_user_by_emp_no(emp_no: str, *, use_cache: bool = True):
         record = match.iloc[0].to_dict()
     # 안전담당자 지정 플래그(006)를 세션 사용자 dict 에 실어 능력 헬퍼가 읽게 한다.
     # USER_COLUMNS/get_users 계약은 건드리지 않는다(그 컬럼 계약은 테스트로 고정).
-    record["is_safety_officer"] = _safety_officer_flag(record.get("emp_no"))
+    #
+    # 인가 경로(use_cache=False)는 이 조회의 일시 오류를 False 로 은폐하지 않는다
+    # (strict — Codex P2). 단 능력이 role 로 이미 결정되는 사용자(ADMIN/MANAGER:
+    # auth.can_evaluate_near_miss 가 플래그 없이 True)에게는 안전담당자 조회가 인가에
+    # 무의미하므로 strict 에서 제외한다 — 그들이 필요로 하지 않는 조회의 일시 오류가
+    # write 를 막지 않게(ADMIN/MANAGER 경로 비영향 보존). 인가 판정 자체는 여전히
+    # auth.can_evaluate_near_miss 단일 SoT 가 하고, 여기서는 조회 strict 여부만 정한다.
+    # 표시/로그인(use_cache=True)은 항상 관대하게 False 로 접는다.
+    role = str(record.get("role") or "").strip().upper()
+    strict_flag = (not use_cache) and role not in ("ADMIN", "MANAGER")
+    record["is_safety_officer"] = _safety_officer_flag(
+        record.get("emp_no"), strict=strict_flag
+    )
     return record
 
 

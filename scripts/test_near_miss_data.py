@@ -33,6 +33,7 @@ if str(ROOT) not in sys.path:
 
 os.environ["DUTY_DATA_MODE"] = "sample"  # Supabase 미접속 보장
 
+import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from modules import auth, db  # noqa: E402
@@ -78,6 +79,15 @@ def _base_payload(**over) -> dict:
     }
     payload.update(over)
     return payload
+
+
+def _users_frame(rows: list[dict]) -> pd.DataFrame:
+    """USER_COLUMNS 계약 프레임(supabase 모드 조회 mock 용)."""
+    df = pd.DataFrame(rows)
+    for col in db.USER_COLUMNS:
+        if col not in df.columns:
+            df[col] = None
+    return df[db.USER_COLUMNS].reset_index(drop=True)
 
 
 # =========================================================================
@@ -407,7 +417,7 @@ def test_safety_officer_can_evaluate() -> None:
     rid = rec["id"]
     # sample CSV 에는 is_safety_officer 컬럼이 없어 항상 False → 능력조회 지점만 주입한다.
     orig = db._safety_officer_flag
-    db._safety_officer_flag = lambda emp: str(emp).strip() == user["emp_no"]
+    db._safety_officer_flag = lambda emp, **_: str(emp).strip() == user["emp_no"]
     try:
         check("전제: 안전담당자 능력 인정",
               auth.can_evaluate_near_miss(db.find_user_by_emp_no(user["emp_no"])))
@@ -431,7 +441,7 @@ def test_inactive_user_action_blocked() -> None:
     rid = rec["id"]
     # 비활성 사용자를 안전담당자(능력 보유)로 만들어도 is_active 게이트가 먼저 차단해야 한다.
     orig = db._safety_officer_flag
-    db._safety_officer_flag = lambda emp: str(emp).strip() == inactive["emp_no"]
+    db._safety_officer_flag = lambda emp, **_: str(emp).strip() == inactive["emp_no"]
     try:
         exc = raises(lambda: db.evaluate_near_miss(
             rid, "B", current_user={"emp_no": inactive["emp_no"]}), ValueError)
@@ -596,7 +606,7 @@ def test_full_transition_table_positive() -> None:
     so = _actor_of_role("USER")
     reporter2 = _actor_of_role("USER", exclude=(so["emp_no"],))
     orig = db._safety_officer_flag
-    db._safety_officer_flag = lambda emp: str(emp).strip() == so["emp_no"]
+    db._safety_officer_flag = lambda emp, **_: str(emp).strip() == so["emp_no"]
     try:
         _walk_transition_table({"emp_no": so["emp_no"]}, reporter2)
     finally:
@@ -1187,6 +1197,159 @@ def test_migration_006_sql_contract() -> None:
     check("테이블 drop 없음(재실행 안전)", "drop table" not in low.replace("drop table if exists public.near_miss_reports;", ""))
 
 
+# =========================================================================
+# P1-a 재감사 반영 — 인가 조회 계약(P3-1 uncached / P3-2 종단 · P2 에러 투명성)
+# =========================================================================
+def test_find_user_uncached_contract() -> None:
+    print("find_user_by_emp_no(use_cache=False) 캐시 우회·비훼손·오류전파·sample 동일 (P3-1)")
+    # (d) sample 모드: uncached 와 cached 가 동일 레코드(사이에 캐시 계층이 없다).
+    a = db.find_user_by_emp_no("1001", use_cache=True)
+    b = db.find_user_by_emp_no("1001", use_cache=False)
+    check("sample: use_cache True/False 같은 사용자", a is not None and b is not None and a["emp_no"] == b["emp_no"])
+    check("sample: 두 경로 dict 동등", a == b)
+
+    # (a)(b)(c) supabase 모드 시뮬레이션 — 캐시 소스(_fetch_users)와 uncached 소스
+    # (sr.get_users)를 서로 다른 프레임으로 두고, 어느 소스에서 읽는지·호출 여부를 관측한다.
+    saved = {
+        "sample": db.is_sample_mode, "fetch": db._fetch_users,
+        "sruser": sr.get_users, "flag": db._safety_officer_flag,
+    }
+    calls = {"fetch": 0, "sruser": 0}
+
+    def cached():
+        calls["fetch"] += 1
+        return _users_frame([{"emp_no": "7000", "name": "c", "dept_code": "CACHED",
+                              "role": "USER", "is_active": True}])
+
+    def uncached(*a, **k):
+        calls["sruser"] += 1
+        return _users_frame([{"emp_no": "7000", "name": "u", "dept_code": "UNCACHED",
+                              "role": "USER", "is_active": True}])
+
+    db.is_sample_mode = lambda: False
+    db._fetch_users = cached
+    sr.get_users = uncached
+    db._safety_officer_flag = lambda emp, **_: False  # 캐시 경로 검증에 안전담당 조회는 무관.
+    try:
+        # (a) use_cache=False 는 uncached 소스(sr.get_users)에서 읽는다.
+        rec_u = db.find_user_by_emp_no("7000", use_cache=False)
+        check("uncached 소스에서 읽음(dept=UNCACHED)", rec_u is not None and rec_u["dept_code"] == "UNCACHED")
+        check("uncached 는 sr.get_users 호출", calls["sruser"] == 1)
+        check("uncached 는 캐시 소스(_fetch_users) 미호출", calls["fetch"] == 0)
+
+        # (b) 이어진 use_cache=True 는 캐시 소스에서 읽는다(uncached 읽기가 캐시를 훼손하지 않음).
+        rec_c = db.find_user_by_emp_no("7000", use_cache=True)
+        check("cached 소스에서 읽음(dept=CACHED)", rec_c is not None and rec_c["dept_code"] == "CACHED")
+        check("cached 는 _fetch_users 호출", calls["fetch"] == 1)
+
+        # (c) uncached 경로의 원격 오류는 전파한다(None·빈 결과로 은폐하지 않음).
+        def boom(*a, **k):
+            raise sr.SupabaseDataError("Supabase users 조회 실패: connection reset")
+
+        sr.get_users = boom
+        exc = raises(lambda: db.find_user_by_emp_no("7000", use_cache=False), sr.SupabaseDataError)
+        check("uncached 원격 오류 전파", exc is not None)
+    finally:
+        db.is_sample_mode = saved["sample"]
+        db._fetch_users = saved["fetch"]
+        sr.get_users = saved["sruser"]
+        db._safety_officer_flag = saved["flag"]
+
+
+def test_safety_officer_authz_error_transparency() -> None:
+    print("인가 안전담당자 조회: 미준비=False(fail-closed) vs 일시오류=전파, ADMIN 비영향 (P2)")
+    # 표식 분류가 미준비(undefined-column)와 일시오류(네트워크)를 가른다.
+    check("미준비(undefined-column) 분류",
+          sr.is_missing_column_error(sr.SupabaseDataError("... column is_safety_officer does not exist (42703)")) is True)
+    check("일시오류(네트워크) 분류(미준비 아님)",
+          sr.is_missing_column_error(sr.SupabaseDataError("connection timed out")) is False)
+
+    saved = {"sample": db.is_sample_mode, "sruser": sr.get_users, "sofl": sr.user_is_safety_officer}
+    db.is_sample_mode = lambda: False
+
+    def not_ready(emp):
+        raise sr.SupabaseDataError("Supabase users 조회 실패: column users.is_safety_officer does not exist (42703)")
+
+    def transient(emp):
+        raise sr.SupabaseDataError("Supabase users 조회 실패: network unreachable: connection timed out")
+
+    try:
+        # (1) 미준비(006 미적용/컬럼 부재): 인가 경로라도 능력 없음(False)로 접는다(fail-closed).
+        sr.get_users = lambda *a, **k: _users_frame([
+            {"emp_no": "U1", "name": "u", "dept_code": "D", "role": "USER", "is_active": True}])
+        sr.user_is_safety_officer = not_ready
+        rec = db.find_user_by_emp_no("U1", use_cache=False)
+        check("미준비 → is_safety_officer False(fail-closed)", rec is not None and rec["is_safety_officer"] is False)
+        check("미준비 → USER 평가 능력 없음", auth.can_evaluate_near_miss(rec) is False)
+
+        # (2) 일시 데이터소스 오류: False 로 은폐하지 않고 전파(권한없음으로 둔갑 금지).
+        sr.user_is_safety_officer = transient
+        exc = raises(lambda: db.find_user_by_emp_no("U1", use_cache=False), sr.SupabaseDataError)
+        check("USER 인가 조회 일시오류 → 전파(은폐 금지)", exc is not None)
+        excT = raises(lambda: db.evaluate_near_miss(1, "B", current_user={"emp_no": "U1"}), Exception)
+        check("evaluate 진입 시 일시오류 전파(SupabaseDataError)", isinstance(excT, sr.SupabaseDataError))
+        check("전파 오류는 '권한없음' ValueError 가 아님", not isinstance(excT, ValueError))
+
+        # (3) 표시/로그인(use_cache=True, strict=False)은 일시오류도 관대하게 False(기존 거동 보존).
+        rec_disp = db.find_user_by_emp_no("U1", use_cache=True)
+        check("표시 경로는 일시오류도 False 로 접음", rec_disp is not None and rec_disp["is_safety_officer"] is False)
+
+        # (4) ADMIN: 능력이 role 로 결정 → 안전담당자 조회 일시오류가 인가를 막지 않는다.
+        sr.get_users = lambda *a, **k: _users_frame([
+            {"emp_no": "A1", "name": "a", "dept_code": "D", "role": "ADMIN", "is_active": True}])
+        sr.user_is_safety_officer = transient
+        rec_admin = db.find_user_by_emp_no("A1", use_cache=False)  # 예외 없이 반환
+        check("ADMIN 인가 조회 일시오류 비영향(전파 안 함)", rec_admin is not None and rec_admin["is_safety_officer"] is False)
+        check("ADMIN 능력은 role 로 True(플래그 불필요)", auth.can_evaluate_near_miss(rec_admin) is True)
+    finally:
+        db.is_sample_mode = saved["sample"]
+        sr.get_users = saved["sruser"]
+        sr.user_is_safety_officer = saved["sofl"]
+        db._invalidate_users()
+
+
+def test_near_miss_actor_end_to_end_real_flag() -> None:
+    print("종단: _near_miss_actor→find_user(use_cache=False)→실 컬럼 읽기→실제 평가 전이 (P3-2)")
+    saved = {
+        "sample": db.is_sample_mode, "sruser": sr.get_users,
+        "sofl": sr.user_is_safety_officer, "getrep": db.get_near_miss_report,
+        "repoeval": sr.evaluate_near_miss,
+    }
+    db.is_sample_mode = lambda: False
+    calls = {"sofl": 0, "eval": 0}
+    try:
+        # 안전담당자 USER — use_cache=False 실 조회 + is_safety_officer 실 컬럼 읽기 + 실제 전이를
+        # 하나의 경로로 실행한다(기존엔 컬럼읽기와 actor 능력판정을 따로 검사).
+        sr.get_users = lambda *a, **k: _users_frame([
+            {"emp_no": "SO1", "name": "so", "dept_code": "D", "role": "USER", "is_active": True}])
+
+        def real_flag_read(emp):
+            calls["sofl"] += 1
+            return str(emp).strip() == "SO1"  # 006 컬럼 값(True)
+
+        def repo_eval(report_id, grade, *, evaluator_emp_no, expected_status, updated_by):
+            calls["eval"] += 1
+            return {"id": report_id, "status": "EVALUATED", "confirmed_grade": grade,
+                    "evaluator_emp_no": evaluator_emp_no}
+
+        sr.user_is_safety_officer = real_flag_read
+        db.get_near_miss_report = lambda rid: {"id": rid, "status": "SUBMITTED", "reporter_emp_no": "OTHER"}
+        sr.evaluate_near_miss = repo_eval
+
+        out = db.evaluate_near_miss(42, "B", current_user={"emp_no": "SO1"})
+        check("종단 평가 성공(EVALUATED)", out is not None and out["status"] == "EVALUATED")
+        check("평가자=권위 안전담당자 사번(서버확정)", out["evaluator_emp_no"] == "SO1")
+        check("능력근거가 실 컬럼 읽기에서 옴", calls["sofl"] >= 1)
+        check("실제 전이(repo evaluate) 1회 실행", calls["eval"] == 1)
+    finally:
+        db.is_sample_mode = saved["sample"]
+        sr.get_users = saved["sruser"]
+        sr.user_is_safety_officer = saved["sofl"]
+        db.get_near_miss_report = saved["getrep"]
+        sr.evaluate_near_miss = saved["repoeval"]
+        db._invalidate_near_miss()
+
+
 def main() -> int:
     for test in (
         test_auth_bool_canonicalization,
@@ -1219,6 +1382,9 @@ def main() -> int:
         test_create_no_blind_retry_on_transient,
         test_readiness_three_state,
         test_probe_error_not_sticky,
+        test_find_user_uncached_contract,
+        test_safety_officer_authz_error_transparency,
+        test_near_miss_actor_end_to_end_real_flag,
         test_migration_006_sql_contract,
     ):
         test()
