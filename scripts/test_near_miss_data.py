@@ -270,6 +270,174 @@ def test_same_state_retransition_blocked() -> None:
 
 
 # =========================================================================
+# P1-a — update_near_miss_status / evaluate_near_miss 서버측 인증·인가
+#         (Codex 2회 검수 확정: 이미 배포된 상태전이·평가 경로의 보안 갭 봉인)
+# =========================================================================
+def _actor_of_role(role: str, *, active: bool = True, exclude=()):
+    """sample 사용자 중 주어진 role·활성 여부에 맞는 세션 사용자(emp_no 만 신뢰).
+
+    파사드는 넘긴 dict 의 role 을 믿지 않고 사번으로 권위 레코드를 재조회하므로,
+    테스트도 emp_no 만 담아 넘긴다(위조 role 무시 계약을 그대로 검증)."""
+    exclude = set(exclude)
+    df = db.get_users()
+    for _, row in df.iterrows():
+        emp = str(row["emp_no"])
+        if (str(row.get("role") or "").strip().upper() == role.upper()
+                and bool(row.get("is_active")) == active and emp not in exclude):
+            return {"emp_no": emp}
+    raise AssertionError(f"sample 사용자에 role={role} active={active} 없음")
+
+
+def test_status_change_requires_authenticated_actor() -> None:
+    print("update_near_miss_status 무인증/사번미상/비활성 차단 (P1-a F1)")
+    manager = _actor_of_role("MANAGER")
+    reporter = _actor_of_role("USER")
+    rec = _fresh_submitted(reporter)  # SUBMITTED
+    rid = rec["id"]
+    # 무인증(current_user=None) → DB 요청 전 ValueError.
+    check("current_user=None 차단",
+          raises(lambda: db.update_near_miss_status(rid, "IN_REVIEW", current_user=None), ValueError) is not None)
+    # updated_by 폴백으로도 우회 불가(폴백 경로 제거 확인).
+    check("updated_by 폴백 우회 불가",
+          raises(lambda: db.update_near_miss_status(
+              rid, "IN_REVIEW", current_user=None, updated_by=manager["emp_no"]), ValueError) is not None)
+    # 사번 미상 → 차단.
+    check("사번 미상 차단",
+          raises(lambda: db.update_near_miss_status(
+              rid, "IN_REVIEW", current_user={"emp_no": "없는사번"}), ValueError) is not None)
+    check("차단 시 상태 불변(SUBMITTED)", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
+    # 비활성 사용자 → _near_miss_actor 단계에서 '비활성' 차단.
+    inactive = _actor_of_role("USER", active=False)
+    exc = raises(lambda: db.update_near_miss_status(
+        rid, "IN_REVIEW", current_user={"emp_no": inactive["emp_no"]}), ValueError)
+    check("비활성 사용자 차단", exc is not None and "비활성" in str(exc))
+
+
+def test_status_change_capability_gate() -> None:
+    print("update_near_miss_status 평가능력 없는 USER 전이 차단 + 위조 role 무시 (P1-a F2)")
+    manager = _actor_of_role("MANAGER")
+    user = _actor_of_role("USER")
+    reporter = _actor_of_role("USER")
+    # 비평가자 USER 는 SUBMITTED→(EVALUATED/REJECTED/IN_REVIEW) 전이 불가.
+    for target, kwargs in (("EVALUATED", {}), ("REJECTED", {"rejection_reason": "x"}), ("IN_REVIEW", {})):
+        rec = _fresh_submitted(reporter)
+        rid = rec["id"]
+        exc = raises(lambda: db.update_near_miss_status(
+            rid, target, current_user={"emp_no": user["emp_no"]}, **kwargs), ValueError)
+        check(f"USER SUBMITTED→{target} 차단", exc is not None and "권한" in str(exc))
+        check(f"USER {target} 시도 후 상태 불변", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
+    # 위조 role=ADMIN 은 무시된다(권위 레코드가 USER 라 차단).
+    rec = _fresh_submitted(reporter)
+    exc = raises(lambda: db.update_near_miss_status(
+        rec["id"], "IN_REVIEW", current_user={"emp_no": user["emp_no"], "role": "ADMIN"}), ValueError)
+    check("위조 role=ADMIN 무시하고 차단", exc is not None and "권한" in str(exc))
+    # EVALUATED→CLOSED 도 USER 차단(평가자 전이).
+    rec2 = _fresh_submitted(reporter)
+    db.evaluate_near_miss(rec2["id"], "A", current_user={"emp_no": manager["emp_no"]})
+    exc2 = raises(lambda: db.update_near_miss_status(
+        rec2["id"], "CLOSED", current_user={"emp_no": user["emp_no"]}), ValueError)
+    check("USER EVALUATED→CLOSED 차단", exc2 is not None and "권한" in str(exc2))
+    check("차단 시 EVALUATED 유지", db.get_near_miss_report(rec2["id"])["status"] == "EVALUATED")
+    # 양성 대조: 평가자(MANAGER)는 정상 전이 허용(정상 플로우 비파괴).
+    rec3 = _fresh_submitted(reporter)
+    db.update_near_miss_status(rec3["id"], "IN_REVIEW", current_user={"emp_no": manager["emp_no"]})
+    check("MANAGER SUBMITTED→IN_REVIEW 허용", db.get_near_miss_report(rec3["id"])["status"] == "IN_REVIEW")
+
+
+def test_rejected_to_submitted_authz() -> None:
+    print("REJECTED→SUBMITTED 재개: 소유자 OR 평가자 허용·타인 USER 차단 (P1-a F9)")
+    manager = _actor_of_role("MANAGER")
+    owner = _actor_of_role("USER")
+    other = _actor_of_role("USER", exclude=(owner["emp_no"],))
+
+    def _rejected_report(reporter) -> object:
+        rec = _fresh_submitted(reporter)
+        db.update_near_miss_status(
+            rec["id"], "REJECTED", rejection_reason="반려", current_user={"emp_no": manager["emp_no"]})
+        return rec["id"]
+
+    # (a) 소유자 USER 재제출 허용(능력 없어도 소유자라 허용).
+    rid_a = _rejected_report(owner)
+    db.update_near_miss_status(rid_a, "SUBMITTED", current_user={"emp_no": owner["emp_no"]})
+    check("소유자 USER REJECTED→SUBMITTED 허용", db.get_near_miss_report(rid_a)["status"] == "SUBMITTED")
+
+    # (b) 타인 USER(비소유자·비평가자) 차단.
+    rid_b = _rejected_report(owner)
+    exc = raises(lambda: db.update_near_miss_status(
+        rid_b, "SUBMITTED", current_user={"emp_no": other["emp_no"]}), ValueError)
+    check("타인 USER 재제출 차단", exc is not None and "권한" in str(exc))
+    check("차단 시 REJECTED 유지", db.get_near_miss_report(rid_b)["status"] == "REJECTED")
+
+    # (c) 평가자(비소유자)도 재개 허용(능력 경로).
+    rid_c = _rejected_report(owner)
+    db.update_near_miss_status(rid_c, "SUBMITTED", current_user={"emp_no": manager["emp_no"]})
+    check("평가자 REJECTED→SUBMITTED 허용", db.get_near_miss_report(rid_c)["status"] == "SUBMITTED")
+
+
+def test_evaluate_requires_capability() -> None:
+    print("evaluate_near_miss 평가능력 없는 USER 호출 차단 + 위조 role 무시 (P1-a F2)")
+    user = _actor_of_role("USER")
+    reporter = _actor_of_role("USER", exclude=(user["emp_no"],))
+    rec = _fresh_submitted(reporter)
+    rid = rec["id"]
+    exc = raises(lambda: db.evaluate_near_miss(rid, "B", current_user={"emp_no": user["emp_no"]}), ValueError)
+    check("USER evaluate_near_miss 차단", exc is not None and "권한" in str(exc))
+    check("차단 시 상태 불변(SUBMITTED)", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
+    check("확정 등급 미설정", str(db.get_near_miss_report(rid).get("confirmed_grade") or "") == "")
+    exc2 = raises(lambda: db.evaluate_near_miss(
+        rid, "B", current_user={"emp_no": user["emp_no"], "role": "MANAGER"}), ValueError)
+    check("위조 role=MANAGER 무시하고 차단", exc2 is not None and "권한" in str(exc2))
+
+
+def test_safety_officer_can_evaluate() -> None:
+    print("안전담당자 USER 는 평가 허용 (P1-a 능력 근거=is_safety_officer)")
+    user = _actor_of_role("USER")
+    reporter = _actor_of_role("USER", exclude=(user["emp_no"],))
+    rec = _fresh_submitted(reporter)
+    rid = rec["id"]
+    # sample CSV 에는 is_safety_officer 컬럼이 없어 항상 False → 능력조회 지점만 주입한다.
+    orig = db._safety_officer_flag
+    db._safety_officer_flag = lambda emp: str(emp).strip() == user["emp_no"]
+    try:
+        check("전제: 안전담당자 능력 인정",
+              auth.can_evaluate_near_miss(db.find_user_by_emp_no(user["emp_no"])))
+        updated = db.evaluate_near_miss(rid, "B", current_user={"emp_no": user["emp_no"]})
+        check("안전담당자 USER 평가 허용", updated["status"] == "EVALUATED")
+        check("평가자는 안전담당자 사번으로 확정", updated["evaluator_emp_no"] == user["emp_no"])
+        # 반려도 능력 경로로 허용(SUBMITTED→REJECTED)되는지 별건으로 확인.
+        rec2 = _fresh_submitted(reporter)
+        db.update_near_miss_status(
+            rec2["id"], "REJECTED", rejection_reason="사유", current_user={"emp_no": user["emp_no"]})
+        check("안전담당자 USER 반려 허용", db.get_near_miss_report(rec2["id"])["status"] == "REJECTED")
+    finally:
+        db._safety_officer_flag = orig
+
+
+def test_inactive_user_action_blocked() -> None:
+    print("비활성 사용자는 능력이 있어도 행위 차단 (Codex P2 is_active 게이트)")
+    inactive = _actor_of_role("USER", active=False)
+    reporter = _actor_of_role("USER")
+    rec = _fresh_submitted(reporter)
+    rid = rec["id"]
+    # 비활성 사용자를 안전담당자(능력 보유)로 만들어도 is_active 게이트가 먼저 차단해야 한다.
+    orig = db._safety_officer_flag
+    db._safety_officer_flag = lambda emp: str(emp).strip() == inactive["emp_no"]
+    try:
+        exc = raises(lambda: db.evaluate_near_miss(
+            rid, "B", current_user={"emp_no": inactive["emp_no"]}), ValueError)
+        check("비활성+안전담당자도 평가 차단", exc is not None and "비활성" in str(exc))
+        exc2 = raises(lambda: db.update_near_miss_status(
+            rid, "IN_REVIEW", current_user={"emp_no": inactive["emp_no"]}), ValueError)
+        check("비활성 상태변경 차단", exc2 is not None and "비활성" in str(exc2))
+        check("차단 시 상태 불변(SUBMITTED)", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
+        excA = raises(lambda: db._near_miss_actor(
+            {"emp_no": inactive["emp_no"]}, action="테스트"), ValueError)
+        check("_near_miss_actor 비활성 직접 차단", excA is not None and "비활성" in str(excA))
+    finally:
+        db._safety_officer_flag = orig
+
+
+# =========================================================================
 # 보고자 자기수정(update_near_miss_report) — 소유자+SUBMITTED 게이트, 서버필드 보호
 # =========================================================================
 def _valid_edit(**over) -> dict:
@@ -844,6 +1012,12 @@ def main() -> int:
         test_facade_strips_client_audit_fields,
         test_reevaluate_already_evaluated_rejected,
         test_same_state_retransition_blocked,
+        test_status_change_requires_authenticated_actor,
+        test_status_change_capability_gate,
+        test_rejected_to_submitted_authz,
+        test_evaluate_requires_capability,
+        test_safety_officer_can_evaluate,
+        test_inactive_user_action_blocked,
         test_update_owner_submitted_allows_edit,
         test_update_non_owner_blocked,
         test_update_non_submitted_blocked,

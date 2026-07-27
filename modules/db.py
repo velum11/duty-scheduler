@@ -1527,26 +1527,46 @@ _NEAR_MISS_STALE_MESSAGE = (
 # 보고서(EVALUATED/CLOSED)는 재평가로 덮어쓸 수 없다(lost update 방지).
 _NEAR_MISS_PRE_EVAL_STATES = frozenset({"SUBMITTED", "IN_REVIEW"})
 
+# 서버측 인가 실패(능력·소유자 게이트 미충족) 메시지. 상태전이·평가확정은 평가자
+# (ADMIN/MANAGER/안전담당자) 능력이 필요하고, REJECTED→SUBMITTED 재개만 보고자 본인
+# 이 추가로 허용된다(docs/database.md §8 행위자 계약).
+_NEAR_MISS_NOT_AUTHORIZED_MESSAGE = (
+    "이 작업을 수행할 권한이 없습니다. 아차사고 평가·상태 변경은 관리자·매니저 또는 "
+    "안전담당자만 할 수 있습니다."
+)
+
 
 def _near_miss_actor(current_user, *, action: str) -> dict:
     """세션 사용자에서 행위자 신원을 서버측으로 확정한다(위조 방지).
 
     화면은 반드시 인증된 현재 사용자(auth.get_current_user 반환값)를 넘겨야 하며,
-    위젯 입력값이 아니다. **사번(emp_no)만** 신뢰하고, 사번·부서는 세션 dict 가 아니라
-    그 사번으로 조회한 DB 권위 사용자 레코드에서 다시 도출한다 — 위조된
-    current_user(예: 사번은 유효하나 dept_code 를 타 부서로 조작)로 다른 부서에 귀속시키는
-    것을 막는다. payload 의 신원 필드는 신뢰하지 않는다. 신원을 확인할 수 없으면 DB 요청
-    전에 차단한다."""
+    위젯 입력값이 아니다. **사번(emp_no)만** 신뢰하고, 사번·부서·역할·안전담당 여부는
+    세션 dict 가 아니라 그 사번으로 조회한 DB 권위 사용자 레코드에서 다시 도출한다 —
+    위조된 current_user(예: 사번은 유효하나 dept_code/role 을 조작)로 다른 부서에
+    귀속시키거나 권한을 가장하는 것을 막는다. payload 의 신원 필드는 신뢰하지 않는다.
+    비활성(is_active=false) 사용자는 행위할 수 없다. 신원을 확인할 수 없으면 DB 요청
+    전에 차단한다.
+
+    반환 dict 는 emp_no·dept_code 와 함께 능력 판정 근거(role·is_safety_officer)를
+    담아, 인가는 auth.can_evaluate_near_miss(actor) 단일 SoT 로 판정한다(db 에 능력
+    규칙을 중복 구현하지 않는다)."""
     if not isinstance(current_user, dict):
         raise ValueError(f"{action}에는 인증된 현재 사용자 정보가 필요합니다.")
     emp_no = str(current_user.get("emp_no") or "").strip()
     record = find_user_by_emp_no(emp_no) if emp_no else None
     if not emp_no or record is None:
         raise ValueError(f"{action} 행위자 사번을 확인할 수 없습니다: {emp_no!r}")
-    # 사번·부서 모두 권위 레코드에서 가져온다(세션 dict 의 dept_code 는 무시).
+    # 지연 import — auth 는 db 를 import 하므로 모듈 최상위 import 는 순환이 된다(Codex P2).
+    from modules import auth
+    # 비활성 사용자는 인증됐더라도 행위 차단(fail-closed).
+    if not auth._as_bool(record.get("is_active", True)):
+        raise ValueError(f"{action} 권한이 없습니다: 비활성 사용자입니다({emp_no}).")
+    # 사번·부서·능력근거 모두 권위 레코드에서 가져온다(세션 dict 의 dept_code/role 무시).
     return {
         "emp_no": str(record.get("emp_no") or emp_no).strip(),
         "dept_code": str(record.get("dept_code") or "").strip(),
+        "role": str(record.get("role") or "").strip().upper(),
+        "is_safety_officer": auth._as_bool(record.get("is_safety_officer", False)),
     }
 
 
@@ -1858,15 +1878,30 @@ def update_near_miss_status(
 ) -> dict | None:
     """아차사고 상태를 전이 규칙에 맞게 변경한다.
 
+    행위자 신원은 payload/위젯이 아니라 인증된 ``current_user``(세션 사용자,
+    auth.get_current_user() 반환값)에서 **서버측으로 확정**한다 — 무인증·사번 미상·
+    비활성 사용자는 DB 요청 전에 ValueError 로 차단한다(``updated_by`` 폴백 없음).
+
+    **전이별 인가**(docs/database.md §8 행위자 계약):
+      - ``REJECTED→SUBMITTED`` 재개: 보고서 소유자(보고자 사번 일치) **또는** 평가
+        능력(can_evaluate_near_miss)이면 허용.
+      - 그 외 모든 전이(SUBMITTED→*, IN_REVIEW→*, EVALUATED→*): 평가 능력
+        (can_evaluate_near_miss) 필수. 인증된 일반 USER 라도 능력이 없으면 차단한다.
+    인가 판정은 auth.can_evaluate_near_miss(actor) 단일 SoT 를 쓰며 db 에 능력 규칙을
+    중복 구현하지 않는다. 게이트가 파사드 상단이라 sample/supabase 계약이 동일하다.
+
     허용되지 않은 전이·반려 사유 누락은 ValueError. 평가상태(EVALUATED/CLOSED)를
     벗어나면 평가 필드를 함께 초기화한다(DB 제약 충족). 전이는 읽은 현재 상태를
     기대값으로 하는 원자적 조건부 UPDATE 로 수행하며, 그 사이 다른 사용자가 먼저
-    상태를 바꿨으면(TOCTOU) 덮어쓰지 않고 stale 오류를 낸다. ``current_user`` 는
-    감사(updated_by) 귀속에 쓰인다(세션 사용자, 위젯 값 아님).
+    상태를 바꿨으면(TOCTOU) 덮어쓰지 않고 stale 오류를 낸다. 감사(updated_by)는
+    인증된 세션 행위자 사번으로 확정한다(``updated_by`` 인자는 하위호환용으로 남기되
+    무시한다 — 위조 방지).
     """
     target = str(status).strip()
     if target not in NEAR_MISS_STATUSES:
         raise ValueError(f"유효하지 않은 상태입니다: {target}")
+    # 인증·권위 재조회 강제(무인증/사번 미상/비활성 → DB 요청 전 ValueError).
+    actor = _near_miss_actor(current_user, action="아차사고 상태 변경")
     current = get_near_miss_report(report_id)
     if current is None:
         raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
@@ -1879,10 +1914,20 @@ def update_near_miss_status(
         raise ValueError(f"허용되지 않은 상태 전이입니다: {cur_status} → {target}")
     if target == "REJECTED" and not str(rejection_reason or "").strip():
         raise ValueError("반려하려면 반려 사유가 필요합니다.")
+    # 전이별 서버측 인가. REJECTED→SUBMITTED 재개만 보고자 소유자에게도 열려 있고,
+    # 그 외 전이는 평가 능력이 필수다. 능력 판정은 auth 단일 SoT 로 위임한다.
+    from modules import auth  # 지연 import(순환 회피, Codex P2)
+    if cur_status == "REJECTED" and target == "SUBMITTED":
+        owner = str(current.get("reporter_emp_no") or "").strip()
+        # 소유자 비교는 권위 사번 원본끼리의 정확 일치(trim only) — 수정/생성 경로와 동일.
+        if not (owner == actor["emp_no"] or auth.can_evaluate_near_miss(actor)):
+            raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
+    elif not auth.can_evaluate_near_miss(actor):
+        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
     clear_eval = target not in _NEAR_MISS_EVAL_STATES
     reason = str(rejection_reason).strip() if target == "REJECTED" else None
-    # updated_by 는 세션 사용자(서버측)에서 확정한다. 명시 인자는 세션이 없을 때만 폴백.
-    attribution = _near_miss_updated_by(current_user) or updated_by
+    # 감사 귀속은 인증된 세션 행위자 사번으로 확정한다(폴백 없음, 위조 방지).
+    attribution = actor["emp_no"]
     if is_sample_mode():
         ok = _sample_update_near_miss(
             report_id, expected_status=cur_status, clear_eval=clear_eval,
@@ -1906,8 +1951,11 @@ def evaluate_near_miss(
     """평가 확정: status=EVALUATED + 확정등급/평가자/평가시각 설정.
 
     평가자(evaluator)·평가시각은 payload/위젯이 아니라 인증된 ``current_user``에서
-    **서버측으로 확정**한다 — 다른 사람이 평가한 것처럼 위조하는 것을 막는다. 확정 등급
-    유효성을 검증하고, 보고서가 **평가 이전 상태(SUBMITTED/IN_REVIEW)**일 때만 평가한다.
+    **서버측으로 확정**한다 — 다른 사람이 평가한 것처럼 위조하는 것을 막는다. 평가는
+    평가 능력(auth.can_evaluate_near_miss — ADMIN/MANAGER/안전담당자)이 서버측에서
+    필수이며, 인증된 일반 USER 가 파사드를 직접 호출해도 차단한다(화면 게이트를 계약으로
+    승격). 확정 등급 유효성을 검증하고, 보고서가 **평가 이전 상태(SUBMITTED/IN_REVIEW)**
+    일 때만 평가한다.
     이미 평가/종결된 보고서(EVALUATED/CLOSED)는 재평가로 덮어쓸 수 없으며 stale 오류를
     낸다. 읽은 현재 상태를 기대값으로 하는 원자적 조건부 UPDATE 로 확정하므로 두 평가자가
     동시에 확정해도 하나만 성공하고 다른 하나는 '상태가 이미 변경됨'을 받는다.
@@ -1916,6 +1964,11 @@ def evaluate_near_miss(
     if grade not in NEAR_MISS_GRADES:
         raise ValueError(f"확정 등급이 유효하지 않습니다: {grade}")
     actor = _near_miss_actor(current_user, action="아차사고 평가")
+    # 서버측 능력 게이트: 평가확정은 평가자(ADMIN/MANAGER/안전담당자)만. 화면 게이트를
+    # 계약으로 승격한다(인증된 일반 USER 가 파사드를 직접 호출해도 차단). auth 단일 SoT.
+    from modules import auth  # 지연 import(순환 회피, Codex P2)
+    if not auth.can_evaluate_near_miss(actor):
+        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
     evaluator = actor["emp_no"]
     current = get_near_miss_report(report_id)
     if current is None:
