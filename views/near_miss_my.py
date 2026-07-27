@@ -246,11 +246,17 @@ def _render_revision_banner(report_id) -> None:
     """제출됨 건에 걸린 보완요청(사유/요청자/시각)을 안내한다.
 
     반려(REJECTED) 배너는 ``warn``(경고), 보완요청은 ``info``(파랑)로 **별도 시각**을 준다
-    — 반려는 종결분기, 보완요청은 재작성 요청이라 성격이 다르다. 007 미적용이면 조회가
-    None 이라 배너가 뜨지 않는다(가짜 표시 없음)."""
+    — 반려는 종결분기, 보완요청은 재작성 요청이라 성격이 다르다. 007 미적용이면 facade 가
+    None 을 돌려주므로 배너가 뜨지 않는다(정상 부재 = 가짜 표시 없음). 반면 실제 조회
+    오류는 '보완요청 없음'으로 조용히 삼키지 않고 danger 배너로 표면화한다 — 보완요청이
+    걸린 건을 오류 때문에 못 본 채 방치하지 않기 위함이다(오류≠정상 부재)."""
     try:
         rev = db.get_near_miss_revision_request(report_id)
+    except db.DATA_SOURCE_ERRORS as exc:
+        banner("danger", f"보완요청을 불러오지 못했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
+        return
     except Exception:
+        banner("danger", "보완요청을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
     if not rev:
         return

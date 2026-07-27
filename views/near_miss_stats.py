@@ -158,8 +158,10 @@ def _overdue_count() -> int | None:
     """활성 개선조치(007) 중 기한초과 건수 = due_date < 오늘 AND confirm_status<>CONFIRMED.
 
     007 미준비(NOT_READY/PROBE_ERROR)면 ``None`` 을 돌려 '—'로 방어한다(가짜 0 금지).
-    전용 집계 파사드가 없어 보고서를 순회하며 개별 개선조치를 조회한다(조회 실패 행은
-    건너뛴다 — 지표 하나로 집계 화면 전체를 막지 않는다)."""
+    전용 집계 파사드가 없어 보고서를 순회하며 개별 개선조치를 조회한다. 개별 조회가
+    실패하면 축소된 수치(최악의 경우 0)를 내지 않고 ``None`` 을 돌려 '—'(미상)로 처리한다
+    — READY 이후의 실제 조회 오류를 잘못된 0/축소 수치로 위장하지 않는다(오류≠정상 0).
+    지표 하나가 미상이 되어도 다른 집계 패널은 정상 표시되므로 화면 전체를 막지는 않는다."""
     if db.near_miss_improvement_schema_probe() != db.READINESS_READY:
         return None
     try:
@@ -174,7 +176,7 @@ def _overdue_count() -> int | None:
         try:
             imp = db.get_near_miss_improvement(rid)
         except Exception:
-            continue
+            return None  # 축소 수치/가짜 0 금지 — 미상('—')으로 정직하게 표시.
         if not imp or not bool(imp.get("is_active", True)):
             continue
         if str(imp.get("confirm_status") or "") == "CONFIRMED":

@@ -1,0 +1,163 @@
+"""아차사고 조회 오류 표면화 회귀 (종합감사 P2 — '조회 오류 은폐' 수정).
+
+계약: READY 이후의 실제 조회 오류를 '미작성/보완요청 없음/overdue 0' 같은 정상 부재로
+위장하지 않는다(오류 ≠ 정상 부재). 정상 부재(None)는 그대로 정상으로 표시한다.
+
+세 화면의 오류 경로는 모두 순수 헬퍼(st 미접촉)로 분기되므로, 개별 조회 파사드에 오류를
+주입해 다음을 직접 검증한다.
+  1) near_miss_improvement._improvements_for  — 조회 실패는 None 아닌 _LOAD_FAILED sentinel
+                                                (행 라벨 '조회실패'), 정상 부재 None 은 '미작성'.
+  2) near_miss_my._render_revision_banner     — 조회 실패는 danger 배너, 없음은 무배너.
+  3) near_miss_stats._overdue_count           — 개별 조회 실패는 축소 수치/가짜 0 아닌 None('—').
+"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+os.environ["DUTY_DATA_MODE"] = "sample"
+
+import pandas as pd  # noqa: E402
+
+from modules import db  # noqa: E402
+from views import near_miss_improvement as nmi  # noqa: E402
+from views import near_miss_my as nmy  # noqa: E402
+from views import near_miss_stats as nms  # noqa: E402
+
+PASS = 0
+FAIL: list[str] = []
+
+
+def check(name: str, cond: bool) -> None:
+    global PASS
+    if cond:
+        PASS += 1
+        print(f"  ok - {name}")
+    else:
+        FAIL.append(name)
+        print(f"  FAIL - {name}")
+
+
+class _Boom(db.DATA_SOURCE_ERRORS[1]):  # SupabaseDataError — 실제 데이터소스 오류 모사.
+    pass
+
+
+def _swap(mod, name, value):
+    """모듈 속성 임시 교체 컨텍스트(원복 보장)."""
+    class _Ctx:
+        def __enter__(self_):
+            self_.orig = getattr(mod, name)
+            setattr(mod, name, value)
+            return self_
+
+        def __exit__(self_, *a):
+            setattr(mod, name, self_.orig)
+            return False
+    return _Ctx()
+
+
+_REPORTS = pd.DataFrame([{"id": "r1"}, {"id": "r2"}])
+
+
+# ===== 1) near_miss_improvement._improvements_for =====
+print("개선조치 큐 enrich — 조회 실패 vs 정상 부재 구분")
+
+with _swap(db, "get_near_miss_improvement", lambda rid: (_ for _ in ()).throw(_Boom("boom"))):
+    out = nmi._improvements_for(_REPORTS)
+check("조회 실패는 None 아닌 _LOAD_FAILED sentinel", out["r1"] is nmi._LOAD_FAILED)
+check("모든 실패 행이 sentinel(미작성으로 접히지 않음)",
+      all(v is nmi._LOAD_FAILED for v in out.values()))
+check("sentinel 의 확인상태 라벨은 '조회실패'(미작성 아님)",
+      nmi._confirm_state_of(nmi._LOAD_FAILED) == nmi._LOAD_FAILED_LABEL)
+
+with _swap(db, "get_near_miss_improvement", lambda rid: None):
+    out_absent = nmi._improvements_for(_REPORTS)
+check("정상 부재(None)는 그대로 None — 미작성으로 정상 표시", out_absent["r1"] is None)
+check("정상 부재는 '미작성' 라벨(오류 표식과 구분)",
+      nmi._confirm_state_of(None) == "미작성")
+
+# 그리드 행: sentinel 은 담당자·확인상태 모두 '조회실패'로 노출(미지정/미작성 위장 없음).
+_QUEUE_REPORTS = pd.DataFrame([
+    {"id": "r1", "report_no": "NM-1", "work_name": "작업A",
+     "confirmed_grade": "B", "incident_date": "2026-07-01"},
+    {"id": "r2", "report_no": "NM-2", "work_name": "작업B",
+     "confirmed_grade": "C", "incident_date": "2026-07-02"},
+])
+with _swap(db, "get_near_miss_improvement", lambda rid: (_ for _ in ()).throw(_Boom("boom"))):
+    rows = nmi._queue_rows(_QUEUE_REPORTS, nmi._improvements_for(_QUEUE_REPORTS))
+check("그리드 행 확인상태='조회실패'", set(rows["확인상태"]) == {nmi._LOAD_FAILED_LABEL})
+check("그리드 행 담당자='조회실패'(미지정 위장 아님)",
+      set(rows["담당자"]) == {nmi._LOAD_FAILED_LABEL})
+
+
+# ===== 2) near_miss_my._render_revision_banner =====
+print("내 아차사고 보완요청 — 조회 실패 표면화 vs 무배너")
+
+_banners: list[tuple] = []
+
+
+def _rec_banner(kind, msg):
+    _banners.append((kind, msg))
+
+
+with _swap(nmy, "banner", _rec_banner):
+    # 조회 실패 → danger 배너(조용한 생략 금지).
+    _banners.clear()
+    with _swap(db, "get_near_miss_revision_request",
+               lambda rid: (_ for _ in ()).throw(_Boom("boom"))):
+        nmy._render_revision_banner("r1")
+    check("보완요청 조회 실패 → 배너 1건", len(_banners) == 1)
+    check("보완요청 조회 실패 → danger 배너(오류 표면화)",
+          bool(_banners) and _banners[0][0] == "danger")
+
+    # 정상 부재(None) → 무배너(가짜 표시 없음).
+    _banners.clear()
+    with _swap(db, "get_near_miss_revision_request", lambda rid: None):
+        nmy._render_revision_banner("r1")
+    check("보완요청 없음(None) → 무배너(정상)", _banners == [])
+
+    # 정상 존재 → info 배너(반려 warn 과 별개 시각).
+    _banners.clear()
+    with _swap(db, "get_near_miss_revision_request",
+               lambda rid: {"revision_request_reason": "보완해주세요"}):
+        nmy._render_revision_banner("r1")
+    check("보완요청 존재 → info 배너", _banners and _banners[0][0] == "info")
+
+
+# ===== 3) near_miss_stats._overdue_count =====
+print("아차사고 분석 기한초과 — 개별 조회 실패는 None('—'), 가짜 0/축소 금지")
+
+_PAST_DUE = {"is_active": True, "confirm_status": "PENDING", "due_date": "2000-01-01"}
+
+with _swap(db, "near_miss_improvement_schema_probe", lambda **k: db.READINESS_READY), \
+        _swap(db, "get_near_miss_reports", lambda f=None: _REPORTS):
+    # 개별 개선조치 조회가 던지면 축소 수치/0 이 아니라 None(미상).
+    with _swap(db, "get_near_miss_improvement",
+               lambda rid: (_ for _ in ()).throw(_Boom("boom"))):
+        overdue_err = nms._overdue_count()
+    check("개별 조회 실패 → None(미상, 가짜 0/축소 금지)", overdue_err is None)
+    check("None 은 KPI 에서 '—'로 표기", nms._overdue_label(overdue_err) == "—")
+
+    # 대조군: 모두 기한초과면 실제 건수(축소 없음).
+    with _swap(db, "get_near_miss_improvement", lambda rid: dict(_PAST_DUE)):
+        overdue_all = nms._overdue_count()
+    check("정상 경로: 기한초과 실제 건수 집계", overdue_all == len(_REPORTS))
+    check("정상 건수는 '{n}건'으로 표기", nms._overdue_label(overdue_all) == f"{len(_REPORTS)}건")
+
+    # 대조군: 진짜 0(모두 확인됨)은 0 그대로(오류 아님).
+    with _swap(db, "get_near_miss_improvement",
+               lambda rid: {"is_active": True, "confirm_status": "CONFIRMED", "due_date": "2000-01-01"}):
+        overdue_zero = nms._overdue_count()
+    check("진짜 0(모두 확인)은 0 유지 — 오류와 구분", overdue_zero == 0)
+
+
+print()
+if FAIL:
+    print(f"FAILED ({len(FAIL)}): " + "; ".join(FAIL))
+    sys.exit(1)
+print(f"ALL PASSED ({PASS} checks)")

@@ -77,6 +77,12 @@ _SUBMIT_COLOR = {"DRAFT": TOKENS["ink-3"], "SUBMITTED": TOKENS["info"]}
 
 _CONFIRMED = "CONFIRMED"
 
+# 개별 개선조치 조회 '실패' sentinel — '미작성'(정상 부재, None)과 명확히 구분한다.
+# READY 이후의 실제 조회 오류를 정상 상태(미작성)로 위장하지 않기 위한 표식이며,
+# 표면화(행 라벨 '조회실패' + 상단 error 배너)는 _queue_rows/_render_body 소관이다.
+_LOAD_FAILED = object()
+_LOAD_FAILED_LABEL = "조회실패"
+
 _NOT_READY_MSG = (
     "개선조치 스키마(007)가 아직 적용되지 않아 저장·제출·확인·종결을 진행할 수 없습니다"
     "(조회만 가능). 스키마를 적용한 뒤 다시 시도하세요."
@@ -179,6 +185,13 @@ def _render_body(user: dict) -> None:
         return
 
     improvements = _improvements_for(reports)
+    errored = [rid for rid, imp in improvements.items() if imp is _LOAD_FAILED]
+    if errored:
+        # 조회 실패를 '미작성/0'으로 삼키지 않고 표면화한다(오류≠정상 부재).
+        st.error(
+            f"개선조치 {len(errored)}건을 불러오지 못했습니다 — 목록의 '조회실패' 행은 "
+            "실제 상태가 아닙니다. 데이터 연결 상태를 확인하고 새로고침하세요."
+        )
 
     list_col, detail_col = erp.master_detail_frame(list_ratio=1.5, detail_ratio=1.1)
     with list_col:
@@ -205,7 +218,12 @@ def _load_queue() -> pd.DataFrame:
 
 
 def _improvements_for(reports: pd.DataFrame) -> dict:
-    """보고서별 개선조치(자연키 dict 또는 None). 007 미적용이면 전부 None(구조만 표시)."""
+    """보고서별 개선조치(자연키 dict / None / _LOAD_FAILED).
+
+    007 미준비면 facade 가 None 을 돌려주며(정상 부재 = '미작성'), 이는 readiness 배너로
+    이미 안내된다. READY 이후의 실제 조회 오류는 None 으로 접지 않고 ``_LOAD_FAILED``
+    sentinel 로 남겨, 개별 조회 실패로 큐 전체를 막지 않으면서도 오류를 '미작성'(정상
+    부재)으로 위장하지 않는다(해당 행은 '조회실패'로 구분 표시 + 상단 error 배너)."""
     out: dict = {}
     if reports is None or reports.empty:
         return out
@@ -213,8 +231,7 @@ def _improvements_for(reports: pd.DataFrame) -> dict:
         try:
             out[rid] = db.get_near_miss_improvement(rid)
         except Exception:
-            # 개별 조회 실패로 큐 전체를 막지 않는다 — 해당 행만 '미작성'으로 표시된다.
-            out[rid] = None
+            out[rid] = _LOAD_FAILED
     return out
 
 
@@ -235,6 +252,8 @@ def _flag(cond) -> str:
 
 
 def _confirm_state_of(imp) -> str:
+    if imp is _LOAD_FAILED:
+        return _LOAD_FAILED_LABEL
     if not imp:
         return "미작성"
     return str(imp.get("confirm_status") or "").strip() or "미작성"
@@ -250,6 +269,12 @@ def _queue_rows(reports: pd.DataFrame, improvements: dict) -> pd.DataFrame:
         rid = str(r.get("id"))
         imp = improvements.get(rid)
         confirm_state = _confirm_state_of(imp)
+        if imp is _LOAD_FAILED:
+            assignee = _LOAD_FAILED_LABEL       # 조회 실패는 '미지정'(정상)으로 위장하지 않는다.
+        elif imp:
+            assignee = _user_label(imp.get("assignee_emp_no"))
+        else:
+            assignee = "미지정"
         rows.append({
             "_row_id": f"e:{rid}",
             "_row_state": "existing",
@@ -257,7 +282,7 @@ def _queue_rows(reports: pd.DataFrame, improvements: dict) -> pd.DataFrame:
             "보고번호": str(r.get("report_no") or "-"),
             "작업명": str(r.get("work_name") or "-"),
             "확정등급": str(r.get("confirmed_grade") or "-"),
-            "담당자": _user_label(imp.get("assignee_emp_no")) if imp else "미지정",
+            "담당자": assignee,
             "확인상태": _CONFIRM_LABEL.get(confirm_state, confirm_state),
             "발생일": str(r.get("incident_date") or "-"),
         })
@@ -337,10 +362,18 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
 
     _render_report_summary(report)
 
+    # 개선조치 프리필 조회 실패를 None('미작성')으로 접으면, 기존 개선조치가 있는데도
+    # 빈 폼처럼 보여 덮어쓰기 저장 위험이 있다 — 오류를 표면화하고 폼/액션을 열지 않는다
+    # (report 조회 실패 처리와 동일 관행). 007 미준비의 정상 None 은 여기 도달 전
+    # facade 가 None 을 돌려주며 readiness 배너가 이미 안내한다.
     try:
         imp = db.get_near_miss_improvement(selected_id)
+    except db.DATA_SOURCE_ERRORS as exc:
+        st.error(f"개선조치를 불러오지 못했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
+        return
     except Exception:
-        imp = None
+        st.error("개선조치를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
+        return
 
     form = _render_capa_form(selected_id, imp, readiness)
     _render_actions(user, report, imp, form, readiness)
@@ -582,13 +615,19 @@ def _render_close(report: dict, imp, disabled: bool, help_: str | None) -> None:
 def _render_summary(reports: pd.DataFrame, improvements: dict) -> None:
     total = 0 if reports is None or reports.empty else len(reports)
     confirmed = sum(1 for imp in improvements.values()
-                    if imp and str(imp.get("confirm_status") or "") == _CONFIRMED)
-    in_progress = total - confirmed
-    erp.status_region([
+                    if imp and imp is not _LOAD_FAILED
+                    and str(imp.get("confirm_status") or "") == _CONFIRMED)
+    errored = sum(1 for imp in improvements.values() if imp is _LOAD_FAILED)
+    # 조회 실패 건을 '진행·미작성'으로 합산하면 오류가 정상 진행처럼 보인다 — 분리 집계한다.
+    in_progress = max(total - confirmed - errored, 0)
+    stats = [
         ("종결 대기", f"{total}건"),
         ("확인 완료", f"{confirmed}건"),
-        ("진행·미작성", f"{max(in_progress, 0)}건"),
-    ])
+        ("진행·미작성", f"{in_progress}건"),
+    ]
+    if errored:
+        stats.append(("조회 실패", f"{errored}건"))
+    erp.status_region(stats)
 
 
 # ---------- 액션 실행(예외 흡수) ----------
