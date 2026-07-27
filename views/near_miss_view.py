@@ -21,11 +21,11 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import db, ui
+from modules import db, nav, ui
 from views import workspace
 from views.common import erp
 from views.common import scaffold
-from views.master import TOKENS
+from views.master import TOKENS, icon_toolbar_specs
 from views.master.lifecycle import Readiness, ReadinessState
 
 _PAGE_ID = "near_miss_view"
@@ -81,13 +81,29 @@ def render(user: dict) -> None:
     # near_miss_view 는 nav.py 에 등록돼 있다(그룹 '아차사고' › '조회'). 제목/설명은 nav.py
     # 라벨과 정합되게 명시한다(desc 는 nav.py 와 동일 문구). page_chrome_for 로 nav 라벨을
     # 단일 출처에서 끌어오는 통일은 후속(통합 담당) — 현재는 screen_frame 명시 문자열로 충분.
-    erp.screen_frame(
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="아차사고 조회",
         desc="아차사고 보고서를 조건별로 조회합니다.",
         breadcrumb="아차사고 › 조회",
         badges=scaffold.mode_badge(),
+        toolbar="icons",
     )
+    # 상단 파랑 밴드 아이콘 툴바(기준정보·근무표 편성과 동일 표준). 조회/새로고침(search
+    # 아이콘)만 활성 — 클릭은 on_click 플래그로 남겨 아래에서 소비한다(구 pill 의 조회·
+    # 새로고침 OR clicked 게이트와 동일). 추가·삭제·저장은 조회 전용이라 N/A(shaded).
+    if band is not None:
+        band.render_icons(icon_toolbar_specs(
+            _PAGE_ID, info_content=nav.page_desc(_PAGE_ID),
+            add={"key": f"{_PAGE_ID}__add_na", "disabled": True,
+                 "help": "이 화면에서는 사용하지 않습니다"},
+            refresh={"key": f"{_PAGE_ID}_go", "help": "조회/새로고침",
+                     "on_click": lambda: st.session_state.update({f"{_PAGE_ID}_go_req": True})},
+            delete={"key": f"{_PAGE_ID}__del_na", "disabled": True,
+                    "help": "이 화면에서는 사용하지 않습니다"},
+            save={"key": f"{_PAGE_ID}__save_na", "disabled": True,
+                  "help": "이 화면에서는 사용하지 않습니다"},
+        ))
 
     # 접근 범위(제품 결정 — Coordinator): 아차사고 조회는 전 사용자에게 열려 있고
     # 회사 전체 범위이며, 신고자 이름·상세 내용을 숨기지 않는다. 과거 평가자 전용 게이트
@@ -105,9 +121,9 @@ def render(user: dict) -> None:
         st.error("조직 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # 영역 순서(§0.3): title → top actions(조회·새로고침) → conditions → primary → status.
-    acts = erp.top_action_bar(_PAGE_ID, [("조회", "primary"), ("새로고침", "default")])
-    clicked = bool(acts.get("조회") or acts.get("새로고침"))
+    # 영역 순서(§0.3): title(밴드 아이콘 툴바) → conditions → primary → status.
+    # 조회/새로고침 클릭 플래그를 소비한다(위 render_icons on_click 이 남긴 플래그).
+    clicked = bool(st.session_state.pop(f"{_PAGE_ID}_go_req", False))
     q = _collect_conditions("all", None, dept_names)
 
     saved = workspace.run_query(_PAGE_ID, clicked, q)

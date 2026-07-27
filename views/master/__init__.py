@@ -91,6 +91,7 @@ from views.master.style import (
     GRID_CSS,
     SELECT_CELL_RULE,
     TOKENS,
+    TOOLBAR_GLYPHS,
     banner,
     banner_html,
     cell_dirty_rule,
@@ -120,17 +121,14 @@ _ICO_LEAD = (
     "<rect x='3' y='4' width='18' height='16' rx='1.5'/><line x1='3' y1='9' x2='21' y2='9'/>"
     "<line x1='9' y1='9' x2='9' y2='20'/></svg>"
 )
+# 장식 클러스터 아이콘(라벨→글리프). 글리프 path 는 단일 원천(style.TOOLBAR_GLYPHS)에서
+# 가져와 기능 아이콘 툴바(mask-image)와 동일한 룩을 보장한다. 정보/인쇄/저장/즐겨찾기/새로고침.
 _TOOLBAR = [
-    ("정보", "<circle cx='12' cy='12' r='9'/><line x1='12' y1='11' x2='12' y2='16'/>"
-             "<line x1='12' y1='7.5' x2='12' y2='8'/>"),
-    ("인쇄", "<polyline points='6 9 6 3 18 3 18 9'/><rect x='4' y='9' width='16' height='8' rx='1'/>"
-             "<rect x='7' y='14' width='10' height='6'/>"),
-    ("저장", "<path d='M19 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10l5 5v11a2 2 0 0 1-2 2z'/>"
-             "<polyline points='17 21 17 13 8 13 8 21'/><polyline points='8 3 8 8 15 8'/>"),
-    ("즐겨찾기", "<polygon points='12 3 14.9 8.9 21.5 9.8 16.7 14.4 17.9 20.9 12 17.8 6.1 20.9 "
-             "7.3 14.4 2.5 9.8 9.1 8.9'/>"),
-    ("새로고침", "<polyline points='21 4 21 10 15 10'/>"
-             "<path d='M19 13a7.5 7.5 0 1 1-1.8-6.2L21 10'/>"),
+    ("정보", TOOLBAR_GLYPHS["info"]),
+    ("인쇄", TOOLBAR_GLYPHS["print"]),
+    ("저장", TOOLBAR_GLYPHS["save"]),
+    ("즐겨찾기", TOOLBAR_GLYPHS["star"]),
+    ("새로고침", TOOLBAR_GLYPHS["refresh"]),
 ]
 
 

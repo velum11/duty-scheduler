@@ -46,7 +46,7 @@ import pandas as pd
 import streamlit as st
 from st_aggrid import JsCode
 
-from modules import auth, db
+from modules import auth, db, nav
 from views.common import erp, scaffold
 from views.master import (
     DraftState,
@@ -55,6 +55,7 @@ from views.master import (
     ReadinessState,
     count_strip,
     empty_state,
+    icon_toolbar_specs,
     master_grid_height,
     render_master_grid,
     sheet_head,
@@ -121,13 +122,29 @@ _ROW_CLICK = JsCode(
 
 
 def render(user: dict) -> None:
-    erp.screen_frame(
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="평가 관리",
         desc="등록된 아차사고를 검토해 등급을 확정하거나 반려합니다.",
         breadcrumb="아차사고 › 평가 관리",
         badges=scaffold.mode_badge(),
+        toolbar="icons",
     )
+    # 상단 파랑 밴드 아이콘 툴바(공통 표준). 이 화면의 page-scope 조회 액션은 새로고침
+    # 뿐이다 — search 아이콘 클릭이 유발하는 rerun 만으로 _load_pending_reports() 가 매
+    # 렌더 무조건 재조회한다(구 pill 과 동일 — on_click 없이 클릭=rerun). 평가확정·반려·
+    # 종결(쓰기)은 상세 패널 scope 액션 소관이라 밴드 추가·삭제·저장은 N/A(shaded).
+    if band is not None:
+        band.render_icons(icon_toolbar_specs(
+            _PAGE_ID, info_content=nav.page_desc("near_miss_evaluate"),
+            add={"key": f"{_PAGE_ID}__add_na", "disabled": True,
+                 "help": "이 화면에서는 사용하지 않습니다"},
+            refresh={"key": f"{_PAGE_ID}_refresh", "help": "새로고침", "on_click": None},
+            delete={"key": f"{_PAGE_ID}__del_na", "disabled": True,
+                    "help": "이 화면에서는 사용하지 않습니다"},
+            save={"key": f"{_PAGE_ID}__save_na", "disabled": True,
+                  "help": "이 화면에서는 사용하지 않습니다"},
+        ))
     if not auth.can_evaluate_near_miss(user):
         empty_state(
             "평가 권한이 없습니다",
@@ -155,11 +172,9 @@ def _render_body(user: dict) -> None:
             db.near_miss_schema_probe(force=True)
             st.rerun()
 
-    # page-scope 조회 액션(§0.3 top actions) — 유일한 버튼은 새로고침. st.button 클릭
-    # 자체가 이미 rerun 을 유발하고, 아래 _load_pending_reports() 는 매 렌더 무조건
-    # 재조회하므로(구 master_action_bar REFRESH flag 소비와 동일 결과 — 그 flag 도 별도
-    # 분기 없이 소비만 했다) 클릭 반환값을 추가로 배선할 필요가 없다.
-    erp.top_action_bar(_PAGE_ID, [("새로고침", "default")])
+    # page-scope 조회 액션(새로고침)은 상단 밴드 아이콘으로 이전했다(render 의 render_icons).
+    # 아이콘 클릭이 유발하는 rerun 만으로 아래 _load_pending_reports() 가 매 렌더 무조건
+    # 재조회하므로 별도 배선이 필요 없다(인페이지 pill 제거).
 
     try:
         reports = _load_pending_reports()

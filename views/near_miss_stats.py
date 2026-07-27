@@ -17,10 +17,10 @@ from html import escape
 
 import streamlit as st
 
-from modules import db, ui
+from modules import db, nav, ui
 from views.common import erp
 from views.common import scaffold
-from views.master import TOKENS
+from views.master import TOKENS, icon_toolbar_specs
 from views.master.lifecycle import Readiness, ReadinessState
 
 _PAGE_ID = "near_miss_stats"
@@ -48,13 +48,28 @@ def render(user: dict) -> None:
     # near_miss_stats 는 nav.py 에 등록돼 있다(그룹 '아차사고' › '집계'). 제목/설명은
     # page_chrome_for 대신 screen_frame 에 직접 넘긴다 — near_miss_view.render 와 동일하게
     # nav 라벨과의 단일 출처 통일은 후속(통합 담당) 과제로 남겨둔다.
-    erp.screen_frame(
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="아차사고 분석",
         desc="아차사고 등급·부서·기간·원인·상태별 분포를 분석합니다.",
         breadcrumb="아차사고 › 아차사고 분석",
         badges=scaffold.mode_badge(),
+        toolbar="icons",
     )
+    # 상단 파랑 밴드 아이콘 툴바(공통 표준). 조회조건이 없는 집계 화면이라 새로고침만
+    # 활성 — search 아이콘 클릭의 rerun 만으로 아래 5건 통계 호출이 재실행된다(구 pill 과
+    # 동일). 추가·삭제·저장은 순수 조회라 N/A(shaded).
+    if band is not None:
+        band.render_icons(icon_toolbar_specs(
+            _PAGE_ID, info_content=nav.page_desc(_PAGE_ID),
+            add={"key": f"{_PAGE_ID}__add_na", "disabled": True,
+                 "help": "이 화면에서는 사용하지 않습니다"},
+            refresh={"key": f"{_PAGE_ID}_refresh", "help": "새로고침", "on_click": None},
+            delete={"key": f"{_PAGE_ID}__del_na", "disabled": True,
+                    "help": "이 화면에서는 사용하지 않습니다"},
+            save={"key": f"{_PAGE_ID}__save_na", "disabled": True,
+                  "help": "이 화면에서는 사용하지 않습니다"},
+        ))
     _inject_panel_style()
 
     # 접근 범위(제품 결정 — Coordinator): 아차사고 분석은 전 사용자에게 열려 있고 회사
@@ -62,10 +77,8 @@ def render(user: dict) -> None:
     _readiness().banner()
     filters: dict = {}
 
-    # 영역 순서(§0.3): title → top actions → 지표카드(status) → 분포 패널(primary).
-    # 조회조건이 없는 화면이므로 새로고침 버튼은 별도 wiring 없이 rerun 만으로 아래 5건
-    # 통계 호출을 재실행한다.
-    erp.top_action_bar(_PAGE_ID, [("새로고침", "default")])
+    # 영역 순서(§0.3): title(밴드 아이콘 툴바) → 지표카드(status) → 분포 패널(primary).
+    # 새로고침은 상단 밴드 아이콘으로 이전했다(위 render_icons — 인페이지 pill 제거).
 
     try:
         status_counts = db.near_miss_stats(by="status", filters=filters)

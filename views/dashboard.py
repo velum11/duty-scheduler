@@ -13,10 +13,11 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import db, ui
+from modules import db, nav, ui
 from views import workspace
 from views.common import erp
 from views.common import scaffold
+from views.master import icon_toolbar_specs
 
 # 버킷 표시 순서와 대표 색상(카테고리 accent — 색만이 아닌 라벨 병기로 이중 부호화).
 # classify_work_group 은 주간/야간/OFF/휴가/None 을 반환한다. OFF→휴무(라벨만),
@@ -77,13 +78,29 @@ def render(user: dict) -> None:
         _render_user(user)
         return
 
-    erp.screen_frame(
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="대시보드",
         desc="오늘 근무 현황과 근무표 등록 현황을 확인합니다.",
         breadcrumb="홈 › 대시보드",
         badges=scaffold.mode_badge(),
+        toolbar="icons",
     )
+    # 상단 파랑 밴드 아이콘 툴바(사용자 관리·근무표 편성과 동일 표준). 조회 전용 화면이라
+    # 조회/새로고침(search 아이콘)만 활성이고 추가·삭제·저장은 N/A(shaded). 새로고침은 별도
+    # wiring 없이 버튼 클릭이 유발하는 rerun 만으로 아래 근무 조회가 재실행된다(구 pill 과
+    # 동일 — on_click 없이 클릭=rerun). 인페이지 pill(top_action_bar)은 제거했다.
+    if band is not None:
+        band.render_icons(icon_toolbar_specs(
+            "dashboard", info_content=nav.page_desc("dashboard"),
+            add={"key": "dashboard__add_na", "disabled": True,
+                 "help": "이 화면에서는 사용하지 않습니다"},
+            refresh={"key": "dashboard_refresh", "help": "새로고침", "on_click": None},
+            delete={"key": "dashboard__del_na", "disabled": True,
+                    "help": "이 화면에서는 사용하지 않습니다"},
+            save={"key": "dashboard__save_na", "disabled": True,
+                  "help": "이 화면에서는 사용하지 않습니다"},
+        ))
     the_date = _date_nav_bar()
     _inject_board_style()
 
@@ -97,9 +114,8 @@ def render(user: dict) -> None:
         )
         return
 
-    # 영역 순서(§0.3): title → top actions → status(KPI) → primary(그룹 보드).
-    # 새로고침은 별도 wiring 없이 rerun 만으로 아래 근무 조회가 재실행된다.
-    erp.top_action_bar("dashboard", [("새로고침", "default")])
+    # 영역 순서(§0.3): title(밴드 아이콘 툴바 포함) → status(KPI) → primary(그룹 보드).
+    # 새로고침은 상단 밴드 아이콘으로 이전했다(위 render_icons).
 
     # 조직 조회(get_org_groups/dept_group_map/team_name 등)도 오류 처리 범위에 포함한다
     # — 최초 근무 조회만 감싸면 보드 구성 중 데이터소스 오류가 화면 전체 예외가 된다.

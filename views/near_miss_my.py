@@ -27,9 +27,9 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import auth, db, ui
+from modules import auth, db, nav, ui
 from views.common import erp, scaffold
-from views.master import TOKENS, banner
+from views.master import TOKENS, banner, icon_toolbar_specs
 from views.master.lifecycle import Readiness, ReadinessState
 
 _PAGE_ID = "near_miss_my"
@@ -60,13 +60,28 @@ _LIST_COL_CONFIG = {
 
 
 def render(user: dict) -> None:
-    erp.screen_frame(
+    band = erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="내 아차사고",
         desc="본인이 등록한 아차사고와 처리 상태를 확인합니다.",
         breadcrumb="아차사고 › 내 아차사고",
         badges=scaffold.mode_badge(),
+        toolbar="icons",
     )
+    # 상단 파랑 밴드 아이콘 툴바(공통 표준). page-scope 조회 액션은 새로고침뿐 — search
+    # 아이콘 클릭의 rerun 만으로 아래 목록이 재조회된다(구 pill 과 동일). 유일한 쓰기(본문
+    # 수정)는 상세 패널 scope 액션 소관이라 밴드 추가·삭제·저장은 N/A(shaded).
+    if band is not None:
+        band.render_icons(icon_toolbar_specs(
+            _PAGE_ID, info_content=nav.page_desc(_PAGE_ID),
+            add={"key": f"{_PAGE_ID}__add_na", "disabled": True,
+                 "help": "이 화면에서는 사용하지 않습니다"},
+            refresh={"key": f"{_PAGE_ID}_refresh", "help": "새로고침", "on_click": None},
+            delete={"key": f"{_PAGE_ID}__del_na", "disabled": True,
+                    "help": "이 화면에서는 사용하지 않습니다"},
+            save={"key": f"{_PAGE_ID}__save_na", "disabled": True,
+                  "help": "이 화면에서는 사용하지 않습니다"},
+        ))
 
     emp_no = str(user.get("emp_no") or "").strip()
     if not emp_no:
@@ -76,8 +91,8 @@ def render(user: dict) -> None:
 
     _readiness().banner()
 
-    # 영역 순서(§0.3): title → top actions(새로고침) → primary(목록) + details(상세).
-    erp.top_action_bar(_PAGE_ID, [("새로고침", "default")])
+    # 영역 순서(§0.3): title(밴드 아이콘 툴바) → primary(목록) + details(상세).
+    # 새로고침은 상단 밴드 아이콘으로 이전했다(위 render_icons — 인페이지 pill 제거).
 
     try:
         reports = db.get_near_miss_reports({"reporter_emp_no": emp_no})

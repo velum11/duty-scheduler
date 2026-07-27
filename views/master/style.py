@@ -16,6 +16,7 @@ design-contract.md(§1~§25, 상태→시각 매트릭스)의 시각 계약을 �
 from __future__ import annotations
 
 from html import escape
+from urllib.parse import quote
 
 import streamlit as st
 
@@ -51,6 +52,106 @@ TOKENS: dict[str, str] = {
 def token(name: str) -> str:
     """토큰 값(색상)을 반환한다. 미정의 토큰은 그대로 돌려준다(임의 색 허용)."""
     return TOKENS.get(name, name)
+
+
+# ---------------------------------------------------------------------------
+# 손제작 라인 아이콘 글리프(단일 원천) — Feather/Lucide 계열: viewBox 24,
+# stroke=currentColor, stroke-width 1.8, round cap/join. 두 툴바가 이 하나를 공유한다:
+#   (1) 장식 타이틀 밴드 클러스터(`views/master/__init__::_TOOLBAR`) — 인라인 <svg> 로 렌더.
+#   (2) 기능 아이콘 툴바(`.st-key-ms_iconbar`) — 아래 mask-image 로 같은 글리프를 칠한다
+#       (st.button 클릭 계약은 그대로, Material 폰트 글리프만 이 SVG 라인 아이콘으로 교체).
+# 값은 <svg> 안쪽 path 조각(래퍼·stroke 속성 제외)이라 두 소비 경로가 동일 룩을 낸다.
+# 기존 5개(info/print/save/star/refresh)는 장식 클러스터에서 그대로 재사용, 신규 3개
+# (globe/add/delete)는 동일 스타일로 신규 저작 — 섞여 보이지 않게 한다.
+# ---------------------------------------------------------------------------
+TOOLBAR_GLYPHS: dict[str, str] = {
+    # ── 기존 재사용(장식 클러스터와 동일 path) ──
+    "info": ("<circle cx='12' cy='12' r='9'/><line x1='12' y1='11' x2='12' y2='16'/>"
+             "<line x1='12' y1='7.5' x2='12' y2='8'/>"),
+    "print": ("<polyline points='6 9 6 3 18 3 18 9'/>"
+              "<rect x='4' y='9' width='16' height='8' rx='1'/>"
+              "<rect x='7' y='14' width='10' height='6'/>"),
+    "save": ("<path d='M19 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10l5 5v11a2 2 0 0 1-2 2z'/>"
+             "<polyline points='17 21 17 13 8 13 8 21'/><polyline points='8 3 8 8 15 8'/>"),
+    "star": ("<polygon points='12 3 14.9 8.9 21.5 9.8 16.7 14.4 17.9 20.9 12 17.8 6.1 20.9 "
+             "7.3 14.4 2.5 9.8 9.1 8.9'/>"),
+    "refresh": ("<polyline points='21 4 21 10 15 10'/>"
+                "<path d='M19 13a7.5 7.5 0 1 1-1.8-6.2L21 10'/>"),
+    # ── 신규 저작(동일 스타일 — globe/add(+)/delete(휴지통)) ──
+    "globe": ("<circle cx='12' cy='12' r='9'/><line x1='3' y1='12' x2='21' y2='12'/>"
+              "<path d='M12 3a14 14 0 0 1 3.6 9 14 14 0 0 1-3.6 9 14 14 0 0 1-3.6-9 "
+              "14 14 0 0 1 3.6-9z'/>"),
+    "add": "<line x1='12' y1='5' x2='12' y2='19'/><line x1='5' y1='12' x2='19' y2='12'/>",
+    "delete": ("<polyline points='3 6 5 6 21 6'/>"
+               "<path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>"
+               "<path d='M10 6V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2'/>"
+               "<line x1='10' y1='11' x2='10' y2='17'/><line x1='14' y1='11' x2='14' y2='17'/>"),
+}
+
+# 기능 아이콘 툴바 슬롯(0..7, icon_toolbar_specs 순서와 정합) → 글리프 이름.
+# 0 정보 · 1 globe · 2 추가 · 3 조회/새로고침(=refresh 재사용) · 4 삭제 · 5 인쇄 · 6 저장 · 7 즐겨찾기.
+_ICONBAR_SLOT_GLYPHS: list[str] = [
+    "info", "globe", "add", "refresh", "delete", "print", "save", "star",
+]
+
+
+def _glyph_data_uri(paths: str) -> str:
+    """path 조각을 mask-image 용 data-URI(완전한 SVG)로 만든다.
+
+    mask-image 는 소스의 알파를 마스크로 쓰므로(mask-mode: match-source→alpha) stroke 는
+    불투명 색이면 충분하다(실제 색은 background-color 가 칠함). standalone 이미지라
+    ``xmlns`` 가 필수다. ``quote`` 로 전부 퍼센트 인코딩해 ``#``·``<``·``>``·따옴표·공백을
+    안전하게 데이터 URI 에 싣는다.
+    """
+    svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' "
+        "stroke='#000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>"
+        + paths + "</svg>"
+    )
+    return "data:image/svg+xml," + quote(svg, safe="")
+
+
+def _iconbar_mask_css() -> str:
+    """기능 아이콘 툴바(`.st-key-ms_iconbar`)의 Material 폰트 글리프를 손제작 SVG 라인
+    아이콘으로 교체하는 CSS(시각 전용 — 클릭/키/disabled 계약 무변경).
+
+    스코프: 항상 ``.st-key-ms_iconbar`` 컨테이너 하위로 한정하고, 슬롯은 고정 컬럼 순서
+    (``st.columns([1]*8)``)의 ``div[data-testid="stColumn"]:nth-child(N)`` 로 지정한다
+    (위젯 key 는 화면마다 다르므로 화면 독립적인 컬럼 위치로 매핑). Material 글리프
+    (``stIconMaterial``)는 숨기고, 버튼의 ``::before`` 의사요소를 17×17 상자로 만들어
+    ``mask-image``(글리프) + ``background-color``(흰색/비활성 시 흐림)로 칠한다.
+    """
+    parts = [
+        # Material 폰트 글리프 숨김 — 대신 ::before 마스크 상자를 칠한다.
+        '.st-key-ms_iconbar div.stButton button [data-testid="stIconMaterial"]'
+        '{display:none!important;}',
+        # 마스크 상자는 **절대 위치로 버튼 중앙에 고정**한다. 버튼은 flex 컨테이너이고
+        # 빈 라벨 래퍼(≈19px)가 flex 형제로 남아, ::before 를 flex 항목으로 두면 30px 버튼을
+        # 넘겨 flex-shrink 로 아이콘이 17px 미만으로 눌린다(라이브 측정 실증). 절대 위치는
+        # flex 흐름에서 빠져 항상 17×17(.ms-tool svg 와 동일)로 렌더된다. pointer-events:none
+        # 으로 클릭은 버튼이 받는다(클릭 계약 무변경).
+        '.st-key-ms_iconbar div.stButton button{position:relative;}',
+        '.st-key-ms_iconbar div.stButton button::before{content:"";position:absolute;'
+        'top:50%;left:50%;width:17px;height:17px;transform:translate(-50%,-50%);'
+        'pointer-events:none;background-color:#FFFFFF;'
+        '-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;'
+        '-webkit-mask-position:center;mask-position:center;'
+        '-webkit-mask-size:contain;mask-size:contain;}',
+        # shaded/disabled(globe·인쇄·즐겨찾기·N/A) — 흐리게(기존 disabled 색과 동일 0.4).
+        '.st-key-ms_iconbar div.stButton button:disabled::before'
+        '{background-color:rgba(255,255,255,.4);}',
+    ]
+    for i, name in enumerate(_ICONBAR_SLOT_GLYPHS, start=1):
+        uri = _glyph_data_uri(TOOLBAR_GLYPHS[name])
+        parts.append(
+            f'.st-key-ms_iconbar div[data-testid="stColumn"]:nth-child({i}) '
+            f'div.stButton button::before'
+            f'{{-webkit-mask-image:url("{uri}");mask-image:url("{uri}");}}'
+        )
+    return "".join(parts)
+
+
+_ICONBAR_MASK_CSS: str = _iconbar_mask_css()
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +283,12 @@ div[data-testid="stColumn"]:has(> div .st-key-ms_iconbar) { flex:0 0 auto !impor
 div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 .st-key-ms_iconbar div[data-testid="stColumn"] {
   flex:0 0 30px !important; width:30px !important; min-width:30px !important; }
-.st-key-ms_iconbar div[data-testid="stHorizontalBlock"] { gap:.1rem; }  /* .ms-band-tools gap 와 동일 */
+/* 기능 툴바 아이콘 간격을 장식 클러스터(.ms-band-tools)와 동일한 tight-pack 리듬으로
+   맞춘다. st.columns 의 기본 컬럼 gap(emotion 클래스, 라이브 측정 8.4px)은 !important 로
+   주입돼 특이도만으로는 이기지 못하므로, 여기서도 !important 로 .1rem(=.ms-band-tools gap)
+   을 강제한다. 8개 슬롯을 넓게 벌리지 않고 우측에 오밀조밀 붙인다(레이아웃/간격만 변경 —
+   슬롯 수·글리프·클릭 계약 무변경). */
+.st-key-ms_iconbar div[data-testid="stHorizontalBlock"] { gap:.1rem !important; }  /* .ms-band-tools gap 와 동일 */
 .st-key-ms_iconbar div.stButton { display:flex; justify-content:center; }
 /* 기능 아이콘 버튼을 **기존 장식 클러스터(.ms-tool)와 동일**하게 맞춘다: 30×30 · radius4 ·
    무테두리 · 흰색 · hover rgba(255,255,255,.16) · transition 120ms(= .ms-tool 값 복제).
@@ -321,6 +427,9 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 def inject_page_styles() -> None:
     """페이지 크롬 CSS 를 1회 주입한다(화면 render 시작에서 호출)."""
     st.markdown(_PAGE_CSS, unsafe_allow_html=True)
+    # 기능 아이콘 툴바의 Material 글리프 → 손제작 SVG 라인 아이콘(mask-image) 교체.
+    # 별도 <style> 로 원 규칙 뒤에 두어 stIconMaterial 숨김이 소스순서로 확실히 이긴다.
+    st.markdown(f"<style>{_ICONBAR_MASK_CSS}</style>", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------

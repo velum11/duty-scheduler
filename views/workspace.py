@@ -16,8 +16,9 @@ import pandas as pd
 import streamlit as st
 from st_aggrid import AgGrid, DataReturnMode, GridOptionsBuilder, JsCode
 
-from modules import db, ui
+from modules import db, nav, ui
 from views.common import erp
+from views.master import icon_toolbar_specs  # KPtech 아이콘 툴바 스펙 빌더(공통 계약)
 
 ALL = "(전체)"
 RETIRED_LABEL = "(퇴직)"
@@ -822,7 +823,7 @@ def master_download(view: pd.DataFrame, name: str, key: str) -> None:
 
 
 # ---------- 근무표 등록/수정 · 전체 근무표 조회 (공통 본문) ----------
-def schedule_screen(user: dict, page_id: str) -> None:
+def schedule_screen(user: dict, page_id: str, band=None) -> None:
     scheds = db.get_schedules()
     depts = db.get_departments()
     teams = db.get_teams()
@@ -834,19 +835,33 @@ def schedule_screen(user: dict, page_id: str) -> None:
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
     manager_locked = user["role"] == "MANAGER" and user.get("dept_code")
 
-    # 영역 순서(§0.3): title(screen_frame, 호출부 소관) → top actions → conditions.
-    acts = erp.top_action_bar(page_id, [("조회", "primary"), ("새로고침", "default")])
-    clicked = bool(acts.get("조회") or acts.get("새로고침"))
+    # 영역 순서(§0.3): title(screen_frame, 호출부 소관 — 밴드 아이콘 툴바 포함) → conditions.
+    # 조회/새로고침은 상단 파랑 밴드의 search 아이콘 하나로 통합했다(인페이지 pill 제거).
+    # 클릭은 on_click 플래그({page_id}_go_req)로 남겨(위젯 렌더 순서·경합과 무관하게 유실
+    # 없음) 여기서 소비한다 — 구 pill 의 clicked 게이트와 동일 의미. 추가·삭제·저장은 조회
+    # 전용 화면이라 N/A(shaded).
+    clicked = bool(st.session_state.pop(f"{page_id}_go_req", False))
 
     # 화면 레벨 스켈레톤 표출 트리거 — 데이터 정체성(조회조건 q) 기준으로 전환을 판정한다.
-    # q 가 바뀌는 로드(부서·월·조·검색어 변경 = 실제로 다른 데이터)에서만 스켈레톤을 칠하고,
-    # 같은 조건 재조회·검색어 입력 등 q 불변 rerun 에는 칠하지 않는다(fingerprint 재사용 =
-    # warm/미변경 무점멸). 새로고침은 조건이 같아도 강제 재조회이므로 별도 세대값을 올려
-    # 표출 대상에 포함한다(콜드 새로고침 커버). q 는 아래 run_query 결과에서 확정된다.
+    # 통합 아이콘은 조회+새로고침을 겸하므로 클릭 시 세대값을 올려 강제 재조회(콜드 스켈레톤)
+    # 표출 대상에 포함한다(구 새로고침 pill 동작 보존 — 조회 결과 자체는 동일).
     _rg_key = f"{page_id}_refreshgen"
-    if acts.get("새로고침"):
+    if clicked:
         st.session_state[_rg_key] = st.session_state.get(_rg_key, 0) + 1
     refresh_gen = st.session_state.get(_rg_key, 0)
+
+    if band is not None:
+        band.render_icons(icon_toolbar_specs(
+            page_id, info_content=nav.page_desc(page_id),
+            add={"key": f"{page_id}__add_na", "disabled": True,
+                 "help": "이 화면에서는 사용하지 않습니다"},
+            refresh={"key": f"{page_id}_go", "help": "조회/새로고침",
+                     "on_click": lambda: st.session_state.update({f"{page_id}_go_req": True})},
+            delete={"key": f"{page_id}__del_na", "disabled": True,
+                    "help": "이 화면에서는 사용하지 않습니다"},
+            save={"key": f"{page_id}__save_na", "disabled": True,
+                  "help": "이 화면에서는 사용하지 않습니다"},
+        ))
 
     # condition_panel 의 select Field 는 index/value 인자를 받지 않고 항상 위젯 key 의
     # 세션 상태에 의존한다 — 최초 렌더(키 미존재)에서 기존 selectbox(index=...) 와 같은
