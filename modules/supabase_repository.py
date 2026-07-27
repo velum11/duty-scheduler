@@ -1828,7 +1828,17 @@ def update_near_miss_status(
     처리 — TOCTOU) 보고서가 없어진 것이므로 덮어쓰지 않고 stale 오류를 올린다."""
     if not near_miss_extensions_ready():
         raise SupabaseDataError(_NM_NOT_READY_MESSAGE)
-    updates: dict = {"status": str(status).strip()}
+    target = str(status).strip()
+    # →CLOSED 는 이 일반 상태변경 경로로 직접 UPDATE 할 수 없다(Codex P1-3, repository 이중방어).
+    # 종결은 확인된 활성 개선조치를 요구하는 하드게이트 RPC(close_near_miss_report)로만 가능하며,
+    # DB trigger(near_miss_close_requires_confirmed_capa)도 EVALUATED→CLOSED 만 허용한다. facade
+    # 진입부 차단에 더해 repository 계층에서도 fail-closed 로 막는다.
+    if target.upper() == "CLOSED":
+        raise SupabaseDataError(
+            "종결(CLOSED)은 일반 상태변경으로 할 수 없습니다. "
+            "close_near_miss_report(확인+종결 하드게이트 RPC)를 사용하세요."
+        )
+    updates: dict = {"status": target}
     if rejection_reason is not None:
         updates["rejection_reason"] = _clean_text(rejection_reason, nullable=True)
     if clear_evaluation:
@@ -2255,7 +2265,13 @@ def reject_near_miss_improvement(report_id, note: str, *, rejected_by_emp_no: st
 
 
 def reset_near_miss_improvement_on_reopen(report_id, *, updated_by=None) -> dict | None:
-    """report 재개(EVALUATED→IN_REVIEW) 시 확인된 개선조치를 CONFIRMED→PENDING 으로 되돌린다.
+    """[SUPERSEDED — Codex P1-4] 비원자 재개 초기화(단독 UPDATE).
+
+    facade 재개 경로는 이제 원자 RPC ``reopen_near_miss_report`` 를 사용한다(report 전이 +
+    개선조치 초기화 단일 트랜잭션). 이 함수는 그 2단계 중 뒤 절반만 수행하므로 재개 경로에서
+    더는 호출하지 않는다(원자성 창 문제 때문). 하위호환/보조용으로만 남긴다.
+
+    report 재개(EVALUATED→IN_REVIEW) 시 확인된 개선조치를 CONFIRMED→PENDING 으로 되돌린다.
 
     confirmed_by/confirmed_at 를 초기화하고 result_body/submit_status/due_date 는 보존한다.
     개선조치가 없거나 이미 확인 상태가 아니면 no-op(None). 강등방어 트리거는 부모가 아직
@@ -2293,4 +2309,24 @@ def close_near_miss_report(report_id, *, actor_emp_no: str) -> dict | None:
         {"p_report_id": report_id, "p_actor_emp_no": actor},
     )
     _execute(_execute_rpc, "종결", NEAR_MISS_TABLE, retry_transient=False)
+    return get_near_miss_report(report_id)
+
+
+def reopen_near_miss_report(report_id, *, actor_emp_no: str) -> dict | None:
+    """재개 원자 RPC(reopen_near_miss_report)를 호출한다(Codex P1-4).
+
+    report EVALUATED→IN_REVIEW 전이(평가필드 초기화)와 확인된 활성 개선조치 CONFIRMED→PENDING
+    초기화(confirmer/confirmed_at 초기화, result/submit/due 보존)를 단일 트랜잭션으로 원자
+    실행한다. 과거의 '전이 후 별도 리셋' 2단계가 남기던 stale CONFIRMED 재사용 창을 없앤다.
+    RPC 는 actor 사번을 신뢰하지 않고 users 에서 재조회해 능력·활성을 다시 판정한다."""
+    if not near_miss_improvement_extensions_ready():
+        raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
+    actor = _clean_text(actor_emp_no)
+    if not actor:
+        raise SupabaseDataError("재개 행위자 사번이 필요합니다.")
+    _execute_rpc = client().rpc(
+        "reopen_near_miss_report",
+        {"p_report_id": report_id, "p_actor_emp_no": actor},
+    )
+    _execute(_execute_rpc, "재개", NEAR_MISS_TABLE, retry_transient=False)
     return get_near_miss_report(report_id)

@@ -461,6 +461,125 @@ def test_confirm_supabase_path_server_attribution() -> None:
     check("report_id 전달", captured.get("report_id") == 7)
 
 
+def test_sample_self_confirm_case_insensitive() -> None:
+    print("sample 자기확인 대소문자 무차별 차단 + 담당자 사번 정규화 저장 (P2-4)")
+    _reset()
+    # sample 사번은 숫자라 대소문자 차이가 없다. 알파벳 사번 담당자(=확인 능력 있는 MANAGER)를
+    # 실제 프레임에 덧붙여 대소문자 우회 시나리오를 만든다.
+    orig_users = db.get_users
+    base = orig_users()
+    extra = base[base["emp_no"] == "1002"].iloc[[0]].copy()
+    extra["emp_no"] = "CapaMgr"
+    frame = pd.concat([base, extra], ignore_index=True)
+    db.get_users = lambda *a, **k: frame
+    try:
+        reporter = {"emp_no": "1003"}
+        manager = {"emp_no": "1002"}
+        rid = _evaluated_report(reporter, manager)
+        # 담당자를 소문자 'capamgr' 로 지정(DB 원본 표기는 'CapaMgr').
+        db.upsert_near_miss_improvement(
+            rid, {"assignee_emp_no": "capamgr", "result_body": "결과"}, current_user=manager)
+        db.submit_near_miss_improvement(rid, current_user=manager)
+        check("담당자 사번 정규화 저장(DB 원본 표기)",
+              db.get_near_miss_improvement(rid)["assignee_emp_no"] == "CapaMgr")
+        # 같은 사람을 대문자 'CAPAMGR' 로 확인자 지정 → 자기확인 차단(대소문자 무차별).
+        exc = raises(lambda: db.confirm_near_miss_improvement(
+            rid, current_user={"emp_no": "CAPAMGR"}), ValueError)
+        check("대소문자 다른 자기확인 차단", exc is not None and "자기확인" in str(exc))
+        check("자기확인 차단 후 PENDING 유지",
+              db.get_near_miss_improvement(rid)["confirm_status"] == "PENDING")
+    finally:
+        db.get_users = orig_users
+
+
+def test_repo_update_status_rejects_direct_closed() -> None:
+    print("supabase_repository.update_near_miss_status 직접 →CLOSED 거부 (P1-3 repository 이중방어)")
+    orig_ready = sr.near_miss_extensions_ready
+    sr.near_miss_extensions_ready = lambda: True
+    try:
+        exc = raises(lambda: sr.update_near_miss_status(1, "CLOSED"), sr.SupabaseDataError)
+        check("repo 직접 CLOSED 거부", exc is not None and "close_near_miss_report" in str(exc))
+        exc2 = raises(lambda: sr.update_near_miss_status(1, "closed"), sr.SupabaseDataError)
+        check("repo 직접 closed(소문자) 거부", exc2 is not None)
+    finally:
+        sr.near_miss_extensions_ready = orig_ready
+
+
+def test_reopen_supabase_path_uses_atomic_rpc() -> None:
+    print("supabase 경로 재개: 원자 RPC(reopen_near_miss_report)로 위임(2단계 아님) (P1-4)")
+    manager = _actor_of_role("MANAGER")
+    auth_record = db.find_user_by_emp_no(manager["emp_no"])
+    captured: dict = {}
+    calls = {"reset": 0, "plain": 0}
+
+    orig_sample = db.is_sample_mode
+    orig_find = db.find_user_by_emp_no
+    orig_get = db.get_near_miss_report
+    orig_ready = db.near_miss_improvement_schema_ready
+    orig_reopen = db.supabase_repository.reopen_near_miss_report
+    orig_reset = db.supabase_repository.reset_near_miss_improvement_on_reopen
+    orig_plain = db.supabase_repository.update_near_miss_status
+    db.is_sample_mode = lambda: False
+    db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
+    db.get_near_miss_report = lambda rid: {"id": rid, "status": "EVALUATED", "reporter_emp_no": "1003"}
+    db.near_miss_improvement_schema_ready = lambda: True
+    db.supabase_repository.reopen_near_miss_report = (
+        lambda report_id, *, actor_emp_no: (
+            captured.update({"report_id": report_id, "actor_emp_no": actor_emp_no})
+            or {"status": "IN_REVIEW"}))
+    db.supabase_repository.reset_near_miss_improvement_on_reopen = (
+        lambda *a, **k: calls.__setitem__("reset", calls["reset"] + 1))
+    db.supabase_repository.update_near_miss_status = (
+        lambda *a, **k: calls.__setitem__("plain", calls["plain"] + 1) or {"status": "X"})
+    try:
+        out = db.update_near_miss_status(11, "IN_REVIEW", current_user={"emp_no": manager["emp_no"]})
+    finally:
+        db.is_sample_mode = orig_sample
+        db.find_user_by_emp_no = orig_find
+        db.get_near_miss_report = orig_get
+        db.near_miss_improvement_schema_ready = orig_ready
+        db.supabase_repository.reopen_near_miss_report = orig_reopen
+        db.supabase_repository.reset_near_miss_improvement_on_reopen = orig_reset
+        db.supabase_repository.update_near_miss_status = orig_plain
+
+    check("재개는 원자 RPC 로 위임", out and out.get("status") == "IN_REVIEW")
+    check("actor_emp_no 서버귀속", captured.get("actor_emp_no") == manager["emp_no"])
+    check("report_id 전달", captured.get("report_id") == 11)
+    check("비원자 2단계 reset 미사용", calls["reset"] == 0)
+    check("일반 상태변경 경로 미사용", calls["plain"] == 0)
+
+
+def test_reopen_supabase_path_error_propagates() -> None:
+    print("supabase 경로 재개 RPC 실패는 조용히 건너뛰지 않고 전파 (P1-4 중간실패 전파)")
+    manager = _actor_of_role("MANAGER")
+    auth_record = db.find_user_by_emp_no(manager["emp_no"])
+
+    def _boom(report_id, *, actor_emp_no):
+        raise RuntimeError("원자 재개 실패(테스트)")
+
+    orig_sample = db.is_sample_mode
+    orig_find = db.find_user_by_emp_no
+    orig_get = db.get_near_miss_report
+    orig_ready = db.near_miss_improvement_schema_ready
+    orig_reopen = db.supabase_repository.reopen_near_miss_report
+    db.is_sample_mode = lambda: False
+    db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
+    db.get_near_miss_report = lambda rid: {"id": rid, "status": "EVALUATED", "reporter_emp_no": "1003"}
+    db.near_miss_improvement_schema_ready = lambda: True
+    db.supabase_repository.reopen_near_miss_report = _boom
+    try:
+        exc = raises(lambda: db.update_near_miss_status(
+            12, "IN_REVIEW", current_user={"emp_no": manager["emp_no"]}), RuntimeError)
+    finally:
+        db.is_sample_mode = orig_sample
+        db.find_user_by_emp_no = orig_find
+        db.get_near_miss_report = orig_get
+        db.near_miss_improvement_schema_ready = orig_ready
+        db.supabase_repository.reopen_near_miss_report = orig_reopen
+
+    check("재개 RPC 오류 전파(은폐 없음)", exc is not None and "원자 재개 실패" in str(exc))
+
+
 def test_close_supabase_path_calls_rpc() -> None:
     print("supabase 경로 close: RPC(close_near_miss_report)로 위임")
     manager = _actor_of_role("MANAGER")
@@ -547,6 +666,38 @@ def test_migration_007_sql_contract() -> None:
     check("강등방어 before update or delete",
           "before update or delete on public.near_miss_improvements" in low)
 
+    # P1-3: 종결 trigger 는 EVALUATED 에서만 CLOSED 를 허용한다(유일 소스 강제).
+    check("종결 trigger EVALUATED 소스 강제",
+          "old.status is distinct from 'evaluated'" in low)
+    # P1-1: 강등방어 trigger 는 report_id 이동(부모 재지정)도 차단한다.
+    check("강등방어 report_id 불변",
+          "new.report_id is distinct from old.report_id" in low)
+    # P1-2: close RPC·강등방어·재개 RPC 는 FOR UPDATE 로 직렬화한다(락 순서 improvement→report).
+    check("FOR UPDATE 직렬화(≥3)", low.count("for update") >= 3)
+
+    # P1-4: 재개 원자 RPC + 하드닝(EXECUTE 회수·service_role 부여·EVALUATED→IN_REVIEW).
+    check("reopen RPC 정의", "function public.reopen_near_miss_report(bigint, text)" in low)
+    check("SECURITY DEFINER 함수 ≥4(trigger 2 + rpc 2)", low.count("security definer") >= 4)
+    check("reopen RPC EXECUTE 회수",
+          "revoke execute on function public.reopen_near_miss_report(bigint, text) from public" in low
+          and "from anon" in low and "from authenticated" in low)
+    check("reopen RPC service_role 부여",
+          "grant execute on function public.reopen_near_miss_report(bigint, text) to service_role" in low)
+    check("reopen RPC EVALUATED→IN_REVIEW", "status = 'in_review'" in low)
+
+    # P2-2: 보완요청 all-or-none CHECK + REJECTED 반려사유 필수.
+    check("보완요청 all-or-none CHECK",
+          "near_miss_reports_revision_request_all_or_none" in low)
+    check("REJECTED revision_note 필수", "btrim(coalesce(revision_note" in low)
+
+    # P2-1: 강화된 스키마 assertion(타입·NOT NULL·FK·CHECK 정의).
+    check("스키마 assertion 타입/NOT NULL", "atttypid = 'bigint'::regtype" in low)
+    check("스키마 assertion FK 존재", "confrelid = 'public.near_miss_reports'::regclass" in low)
+    check("스키마 assertion CHECK 정의", "pg_get_constraintdef" in low)
+
+    # P2-3: 신뢰 경계·적용게이트 owner/public 주석.
+    check("신뢰 경계 주석", "신뢰 경계" in sql)
+
     # 인덱스
     check("종결대기 인덱스", "near_miss_improvement_confirm_active_idx" in low)
     check("overdue 인덱스", "near_miss_improvement_overdue_idx" in low)
@@ -575,6 +726,10 @@ def main() -> int:
         test_direct_close_transition_blocked,
         test_child_demotion_defense_sample,
         test_reopen_resets_confirmed_capa,
+        test_sample_self_confirm_case_insensitive,
+        test_repo_update_status_rejects_direct_closed,
+        test_reopen_supabase_path_uses_atomic_rpc,
+        test_reopen_supabase_path_error_propagates,
         test_confirm_supabase_path_server_attribution,
         test_close_supabase_path_calls_rpc,
         test_migration_007_sql_contract,

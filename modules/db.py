@@ -1962,17 +1962,18 @@ def update_near_miss_status(
             _nmi_sample_reset_on_reopen(report_id)
         return get_near_miss_report(report_id)
     try:
-        result = supabase_repository.update_near_miss_status(
+        # 재개(EVALUATED→IN_REVIEW)는 report 전이 + 확인 개선조치 초기화를 원자 RPC 로 묶는다
+        # (Codex P1-4). 과거의 '전이 후 별도 리셋' 2단계가 남기던 stale CONFIRMED 재사용 창을
+        # 없앤다. 007 미적용(개선조치 스키마 부재)이면 초기화할 개선조치가 없으므로 일반 전이를
+        # 쓴다. RPC 오류는 조용히 건너뛰지 않고 전파한다(중간 실패 은폐 금지).
+        if reopening and near_miss_improvement_schema_ready():
+            return supabase_repository.reopen_near_miss_report(
+                report_id, actor_emp_no=attribution
+            )
+        return supabase_repository.update_near_miss_status(
             report_id, target, expected_status=cur_status, rejection_reason=reason,
             clear_evaluation=clear_eval, updated_by=attribution,
         )
-        # supabase 재개 초기화는 별도 UPDATE 다(report 전이와 원자 단일 트랜잭션은
-        # 아니다 — 잔여 위험). 007 미적용(개선조치 스키마 부재)이면 건너뛴다.
-        if reopening and near_miss_improvement_schema_ready():
-            supabase_repository.reset_near_miss_improvement_on_reopen(
-                report_id, updated_by=attribution
-            )
-        return result
     finally:
         _invalidate_near_miss()
 
@@ -2115,9 +2116,13 @@ def _nmi_sample_body(payload: dict) -> dict:
         emp = str(payload.get(emp_key) or "").strip()
         if not emp:
             return ""
-        if find_user_by_emp_no(emp) is None:
+        found = find_user_by_emp_no(emp)
+        if found is None:
             raise ValueError(f"사용자 사번을 찾을 수 없습니다: {emp}")
-        return emp
+        # 담당자/확인자 참조는 권위 사번(DB 원본 표기)으로 정규화해 저장한다(Codex P2-4).
+        # supabase 경로가 user_id 로 해소하는 것과 같은 표준화 — 대소문자만 다른 입력이
+        # 자기확인 비교를 우회하지 못하게 한다(비교도 casefold 로 이중 방어).
+        return str(found.get("emp_no") or emp).strip()
 
     due = str(payload.get("due_date") or "").strip()
     if due:
@@ -2246,7 +2251,11 @@ def confirm_near_miss_improvement(report_id, *, current_user) -> dict:
         rec = store.get(str(report_id))
         if rec is None:
             raise ValueError("확인할 개선조치가 없습니다.")
-        if str(rec.get("assignee_emp_no") or "").strip() == actor["emp_no"]:
+        # 자기확인 비교는 로그인 사번 비교 관행과 동일하게 trim+casefold(대소문자 무시)로
+        # 한다(Codex P2-4) — 담당자를 다른 case 로 지정해도 자기확인이 통과하지 않는다.
+        # DB CHECK 는 정확 비교라 live 는 이미 안전하나 sample parity 를 맞춘다.
+        if (str(rec.get("assignee_emp_no") or "").strip().casefold()
+                == str(actor["emp_no"]).strip().casefold()):
             raise ValueError("조치 담당자는 자신의 개선조치를 확인할 수 없습니다(자기확인 금지).")
         if not (rec.get("submit_status") == "SUBMITTED" and rec.get("confirm_status") == "PENDING"):
             raise ValueError(_NEAR_MISS_STALE_MESSAGE)
