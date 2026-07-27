@@ -5,9 +5,10 @@ DESIGN.md §0 화면 유형: ``READ_VIEW`` — 현재는 안내(notice)만 렌�
 데이터·write 를 절대 만들지 않는다**. 이 화면은 준비 상태 고지 + 향후 필요한 데이터
 구조 요약만 보여준다.
 
-권한: ADMIN 전용. 경계는 nav.py 의 자식 항목 ``roles=("ADMIN",)`` 로 route guard
-(``app.py``)와 메뉴 노출이 이미 집행한다 — 화면 본문에 role 하드코딩을 두지 않는다
-(중복 게이트 제거, Codex 지적 반영).
+권한: 평가 관리와 동일한 능력 게이트(평가자 — ADMIN/MANAGER/안전담당자). 경계는
+nav.py 의 자식 항목 ``capability=CAP_EVALUATE_NEAR_MISS`` 로 route guard(``app.py``)와
+메뉴 노출이 이미 집행한다 — 화면 본문에 role/능력 하드코딩을 두지 않는다(중복 게이트
+제거, Codex 지적 반영).
 
 향후 필요한 데이터 구조(요약 — 스키마 확정 시 migration 으로 도입)
 ------------------------------------------------------------------
@@ -35,7 +36,7 @@ _IMPROVEMENT_DESC = "아차사고 개선조치를 관리합니다."
 
 
 def render(user: dict) -> None:
-    # 접근 경계는 nav route guard(ADMIN)가 이미 집행한다 — 화면 본문에 role 게이트를 두지 않는다.
+    # 접근 경계는 nav route guard(평가 능력)가 이미 집행한다 — 화면 본문에 게이트를 두지 않는다.
     # toolbar="icons": 상단 파랑 밴드를 타 화면과 동일한 KPtech 아이콘 툴바 포맷으로 통일한다
     # (2026-07-27, 구 정적 장식 5아이콘 대체). 저장 기능이 준비되지 않은 안내 셸이라 밴드의
     # 4개 액션 아이콘은 전부 shaded, 정보 아이콘만 활성으로 둔다.

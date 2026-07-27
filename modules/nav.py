@@ -30,7 +30,8 @@ _MY_SCHEDULE = {
 }
 
 # USER 전용 App Shell(반응형 상단 메뉴)의 평면 항목. 능력 게이트가 붙은 항목
-# (평가 관리)은 caps 로만 노출된다 — user_menu(caps) 가 필터링한다.
+# (평가 관리·개선조치 관리)은 caps 로만 노출된다 — user_menu(caps) 가 필터링한다.
+# 안전담당자 USER 는 이 caps 항목들이 USER route guard(nav.allowed)로도 라우팅되게 한다.
 USER_MENU = [
     {"id": "dashboard", "label": "대시보드", "icon": ":material/home:"},
     {"id": "schedule_view", "label": "월간 근무표", "icon": ":material/calendar_month:"},
@@ -39,13 +40,15 @@ USER_MENU = [
     {"id": "near_miss_my", "label": "내 아차사고", "icon": ":material/inbox:"},
     {"id": "near_miss_evaluate", "label": "평가 관리", "icon": ":material/fact_check:",
      "capability": CAP_EVALUATE_NEAR_MISS},
+    {"id": "near_miss_improvement", "label": "개선조치 관리", "icon": ":material/build:",
+     "capability": CAP_EVALUATE_NEAR_MISS},
     {"id": "near_miss_view", "label": "아차사고 조회", "icon": ":material/search:"},
     {"id": "near_miss_stats", "label": "아차사고 분석", "icon": ":material/analytics:"},
 ]
 
 # 아차사고 6개 항목은 근무표·기준정보처럼 **그룹**('아차사고 관리') 아래 자식으로 묶는다
 # (그룹 헤더 + 자식 — 평면 아님, 사용자 정정). 노출은 **자식 단위**로 다르므로(base 4 는
-# 전원, 평가 관리는 능력, 개선조치는 ADMIN) 각 자식에 자체 roles/capability 를 둔다.
+# 전원, 평가 관리·개선조치는 능력) 각 자식에 자체 roles/capability 를 둔다.
 # 그룹은 보이는 자식이 하나라도 있으면 노출된다(visible_groups 가 자식을 필터링한다).
 _ALL_ROLES = ("USER", "MANAGER", "ADMIN")
 _NEAR_MISS_GROUP = {
@@ -72,10 +75,11 @@ _NEAR_MISS_GROUP = {
             "roles": (), "capability": CAP_EVALUATE_NEAR_MISS,
         },
         {
-            # 개선조치 관리 — ADMIN 전용(기준정보 그룹과 같은 static roles 메커니즘).
+            # 개선조치 관리 — 평가 관리와 동일한 능력 게이트(평가자만). role 하드코딩 없이
+            # capability 로만 노출한다(구 ADMIN 전용 → 안전담당자 USER 도 포함하도록 통일).
             "id": "near_miss_improvement", "label": "개선조치 관리",
             "desc": "아차사고 개선조치를 관리합니다.",
-            "roles": ("ADMIN",),
+            "roles": (), "capability": CAP_EVALUATE_NEAR_MISS,
         },
         {
             "id": "near_miss_view", "label": "아차사고 조회",
@@ -184,7 +188,7 @@ def _admits(spec: dict, role: str, caps) -> bool:
 def _child_admits(child: dict, group: dict, role: str, caps) -> bool:
     """자식 항목 노출 판정. 자식이 자체 규칙(roles/capability)을 가지면 그것으로,
     없으면 그룹 규칙을 상속한다 — 그룹 하나 안에서 항목별로 노출을 달리한다
-    (예: '아차사고 관리' 아래 base 4=전원, 평가 관리=능력, 개선조치=ADMIN)."""
+    (예: '아차사고 관리' 아래 base 4=전원, 평가 관리·개선조치=능력)."""
     if "roles" in child or "capability" in child:
         return _admits(child, role, caps)
     return _admits(group, role, caps)

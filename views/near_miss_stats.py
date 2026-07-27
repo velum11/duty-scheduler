@@ -136,13 +136,30 @@ def _readiness() -> ReadinessState:
 def _kpi_cards(status_counts: dict, total: int) -> None:
     pending = status_counts.get("SUBMITTED", 0) + status_counts.get("IN_REVIEW", 0)
     evaluated = status_counts.get("EVALUATED", 0)
-    closed_or_rejected = status_counts.get("CLOSED", 0) + status_counts.get("REJECTED", 0)
+    closed = status_counts.get("CLOSED", 0)
+    closed_or_rejected = closed + status_counts.get("REJECTED", 0)
     erp.status_region([
         ("총 건수", f"{total}건"),
         ("평가 대기", f"{pending}건"),
         ("평가완료", f"{evaluated}건"),
         ("종결·반려", f"{closed_or_rejected}건"),
+        ("보고서 종결률", _closure_rate_label(closed, evaluated)),
     ])
+
+
+def _closure_rate_label(closed: int, evaluated: int) -> str:
+    """보고서 종결률 = CLOSED / (CLOSED + EVALUATED). 평가 이후 파이프라인에서 종결까지
+    도달한 보고서의 비율이다.
+
+    ※ 명칭은 정확히 '보고서 종결률' — 'CAPA 종결률'이 아니다. 007 개선조치 하드게이트
+    (담당자/확인자 승인)가 적용·검증되기 전에는 status=CLOSED 가 CAPA 완료를 보증하지
+    않으므로, 미확인 종결을 CAPA 완료로 오표기하지 않는다(Codex 확정).
+
+    분모(CLOSED+EVALUATED)가 0이면 산정 불가 — '—'로 방어한다(0% 오표기 금지)."""
+    denom = closed + evaluated
+    if denom == 0:
+        return "—"
+    return f"{round(closed / denom * 100)}%"
 
 
 # ---------- 분포 패널 ----------

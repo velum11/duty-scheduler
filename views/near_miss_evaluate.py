@@ -22,6 +22,9 @@ scope 액션(``erp.detail_actions``)이 담당한다 — 파사드 직접 호출
     최신 상태 확인).
   - ``db.evaluate_near_miss(report_id, grade, current_user=...)`` — 평가확정
     (SUBMITTED/IN_REVIEW 에서만 허용, 서버측에서 평가자·시각을 확정한다).
+  - ``db.update_near_miss_status(report_id, "IN_REVIEW", current_user=...)`` — 검토착수
+    상태전이(SUBMITTED 에서만, 전이표 밖이면 ValueError). 전용 사유 필드가 없어 payload
+    없이 상태만 바꾼다(보완요청 SUBMITTED 반송은 사유 저장이 007 종속이라 이번 범위 아님).
   - ``db.update_near_miss_status(report_id, "REJECTED", rejection_reason=,
     current_user=...)`` — 반려 상태전이(전이표 밖이면 ValueError).
   - ``db.near_miss_schema_probe()`` — migration 006 준비 상태(3-state) 배너.
@@ -360,6 +363,17 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     # 없음). disabled/help 판정은 여기서 그대로 계산해 넘기고, erp.detail_actions 는
     # 순수 UI(버튼 렌더 + 클릭 반환)만 담당한다 — facade 호출·current_user 전달·
     # 오류/stale 처리는 이 화면(아래 클릭 분기 + ``_run_action``)이 그대로 소유한다.
+    # 검토착수(SUBMITTED→IN_REVIEW): 아직 검토에 착수하지 않은(SUBMITTED) 케이스에서만
+    # 활성. 큐는 SUBMITTED/IN_REVIEW 만 담으므로 IN_REVIEW 는 이미 착수한 상태라 비활성.
+    # 전용 사유 필드가 없어 payload 없이 상태만 전이한다(보완요청은 007 종속 — 이번 범위 아님).
+    review_disabled = (not can_write) or status != "SUBMITTED"
+    if not can_write:
+        review_help = readiness.message
+    elif status != "SUBMITTED":
+        review_help = "이미 검토에 착수한 케이스입니다."
+    else:
+        review_help = None
+
     eval_disabled = not can_write
     eval_help = None if can_write else readiness.message
 
@@ -373,10 +387,17 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     # 재설계하며(별도 제품 결정 — BACKLOG 추적), db.py 의 EVALUATED→CLOSED 전이 능력
     # 자체는 데이터 계약으로 그대로 유지한다(이 화면에서 버튼만 제거).
     clicks = erp.detail_actions(_PAGE_ID, [
+        ("검토착수", "default", review_disabled, review_help),
         ("평가확정", "primary", eval_disabled, eval_help),
         ("반려", "default", reject_disabled, reject_help),
     ])
 
+    if clicks.get("검토착수"):
+        # 검토착수 후 케이스는 IN_REVIEW 로 여전히 큐(대기)에 남는다. _run_action 은 기존
+        # 패턴대로 선택을 닫고 성공 배너를 띄운다 — 목록에서 다시 선택해 평가/반려를 이어간다.
+        _run_action(user, "검토착수", lambda: db.update_near_miss_status(
+            selected_id, "IN_REVIEW", current_user=auth.get_current_user(),
+        ))
     if clicks.get("평가확정"):
         _run_action(user, "평가확정", lambda: db.evaluate_near_miss(
             selected_id, grade, current_user=auth.get_current_user(),
