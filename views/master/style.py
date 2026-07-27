@@ -126,7 +126,7 @@ def _iconbar_mask_css() -> str:
         '.st-key-ms_iconbar div.stButton button [data-testid="stIconMaterial"]'
         '{display:none!important;}',
         # 마스크 상자는 **절대 위치로 버튼 중앙에 고정**한다. 버튼은 flex 컨테이너이고
-        # 빈 라벨 래퍼(≈19px)가 flex 형제로 남아, ::before 를 flex 항목으로 두면 30px 버튼을
+        # 빈 라벨 래퍼(≈19px)가 flex 형제로 남아, ::before 를 flex 항목으로 두면 32px 버튼을
         # 넘겨 flex-shrink 로 아이콘이 17px 미만으로 눌린다(라이브 측정 실증). 절대 위치는
         # flex 흐름에서 빠져 항상 17×17(.ms-tool svg 와 동일)로 렌더된다. pointer-events:none
         # 으로 클릭은 버튼이 받는다(클릭 계약 무변경).
@@ -281,12 +281,12 @@ div[data-testid="stLayoutWrapper"]:has(> .st-key-ms_iconband) { display:contents
 .st-key-ms_iconband .ms-band-badge { display:flex; justify-content:flex-end; margin-right:.4rem; }
 /* 아이콘 영역·배지 컬럼은 콘텐츠 폭으로 고정하고 제목 컬럼이 대신 줄어들게 한다
    (min-width:0 + ms-title ellipsis). 좁은 폭(1024)에서 아이콘이 비율 컬럼에 눌려 겹치던
-   문제(음수 gap)를 없앤다 — 아이콘은 항상 30px 슬롯(.ms-tool 과 동일), 제목은 말줄임. */
+   문제(음수 gap)를 없앤다 — 아이콘은 항상 32px 슬롯(§4 히트영역 ≥32×32 하한), 제목은 말줄임. */
 div[data-testid="stColumn"]:has(> div .st-key-ms_iconbar) { flex:0 0 auto !important; width:auto !important; }
 div[data-testid="stColumn"]:has(> div .ms-band-badge) { flex:0 0 auto !important; width:auto !important; }
 div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 .st-key-ms_iconbar div[data-testid="stColumn"] {
-  flex:0 0 30px !important; width:30px !important; min-width:30px !important; }
+  flex:0 0 32px !important; width:32px !important; min-width:32px !important; }
 /* 기능 툴바 아이콘 간격 — 각 아이콘 버튼이 서로 붙지 않고 개별적으로 분리돼 보이도록
    벌린다(참고 이미지 방향, 2026-07-27 사용자 승인). st.columns 의 기본 컬럼 gap(emotion
    클래스, 라이브 측정 8.4px)은 !important 로 주입돼 특이도만으로는 이기지 못하므로 여기서도
@@ -294,12 +294,13 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
    개별로 읽히게 한다(레이아웃/간격만 변경 — 슬롯 수·글리프·클릭 계약 무변경). */
 .st-key-ms_iconbar div[data-testid="stHorizontalBlock"] { gap:.4rem !important; }
 .st-key-ms_iconbar div.stButton { display:flex; justify-content:center; }
-/* 기능 아이콘 버튼을 **기존 장식 클러스터(.ms-tool)와 동일**하게 맞춘다: 30×30 · radius4 ·
-   무테두리 · 흰색 · hover rgba(255,255,255,.16) · transition 120ms(= .ms-tool 값 복제).
-   Material 아이콘은 outlined(FILL 0, wght 400)·17px 로 장식 SVG 라인 아이콘과 같은 계열·
-   굵기·크기로 맞춘다(.ms-tool svg 17×17 과 동일). 별도 룩을 만들지 않는다. */
+/* 기능 아이콘 버튼: 장식 클러스터(.ms-tool)와 같은 룩(무테두리·흰색·hover rgba(255,255,255,.16)·
+   transition 120ms)을 유지하되, 실제 인터랙션 타깃이므로 히트영역은 DESIGN §4 하한 32×32 로
+   맞춘다(장식 .ms-tool 은 cursor:default 비클릭이라 30px 유지 — 다른 밴드 변종이라 나란히
+   비교되지 않음). Material 아이콘은 outlined(FILL 0, wght 400)·17px 로 장식 SVG 라인 아이콘과
+   같은 계열·굵기·크기로 맞춘다(.ms-tool svg 17×17 과 동일). 별도 룩을 만들지 않는다. */
 .st-key-ms_iconbar div.stButton button {
-  width:30px !important; min-width:30px !important; height:30px !important; min-height:30px !important;
+  width:32px !important; min-width:32px !important; height:32px !important; min-height:32px !important;
   padding:0 !important; border-radius:7px !important;  /* 모서리를 살짝 더 둥근 사각형으로(참고 이미지, 2026-07-27) */
   background:transparent !important; border:none !important; box-shadow:none !important;
   color:#FFFFFF !important; transition:background-color 120ms ease !important; }
