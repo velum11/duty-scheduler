@@ -1535,6 +1535,24 @@ _NEAR_MISS_NOT_AUTHORIZED_MESSAGE = (
     "안전담당자만 할 수 있습니다."
 )
 
+# 재개(EVALUATED→IN_REVIEW) probe 오류(fail-closed) 메시지. 007 적용 여부가 불명일 때
+# 일반 UPDATE 로 조용히 빠져 CAPA 리셋을 건너뛰는 fail-open 창을 막고 명시적으로 전파한다.
+_NEAR_MISS_REOPEN_PROBE_ERROR_MESSAGE = (
+    "개선조치 스키마 준비 상태를 확인할 수 없어 재개를 진행할 수 없습니다"
+    "(일시 오류 가능). 잠시 후 다시 시도하세요."
+)
+
+# 보완요청(반송, IN_REVIEW→SUBMITTED) 전용 안내. 반려(REJECTED, 종결분기)와 의미가
+# 다르며, 사유를 저장할 007 컬럼이 준비되지 않으면 사유 없는 반송을 만들지 않도록
+# fail-closed 로 차단한다.
+_NEAR_MISS_REVISION_VIA_FACADE_MESSAGE = (
+    "보완요청(반송)은 request_near_miss_revision 로만 가능합니다. 보완 사유가 필요합니다."
+)
+_NEAR_MISS_REVISION_NOT_READY_MESSAGE = (
+    "보완요청 스키마가 아직 준비되지 않아 보완 사유를 저장할 수 없습니다. "
+    "개선조치·보완요청 스키마(007)를 적용한 뒤 다시 시도하세요."
+)
+
 
 def _near_miss_actor(current_user, *, action: str) -> dict:
     """세션 사용자에서 행위자 신원을 서버측으로 확정한다(위조 방지).
@@ -1932,6 +1950,13 @@ def update_near_miss_status(
     # 차단한다 — cur==target 을 예외 취급하지 않고 그대로 허용표 검사를 받게 한다.
     if not near_miss_transition_allowed(cur_status, target):
         raise ValueError(f"허용되지 않은 상태 전이입니다: {cur_status} → {target}")
+    # 보완요청(반송, IN_REVIEW→SUBMITTED)은 이 일반 경로로 만들 수 없다. 반송은 전용
+    # 사유(revision_request 3필드)를 서버측으로 기록해야 하며 사유 없는 반송은 만들지
+    # 않는다 — request_near_miss_revision 전용 파사드로만 가능하게 한다(EVALUATED/CLOSED
+    # 를 전용 경로로 강제하는 것과 같은 관행). REJECTED→SUBMITTED(재개/재제출)는 →SUBMITTED
+    # 지만 소스가 REJECTED 라 여기서 걸리지 않고 그대로 허용된다(보고자 본인 경로 포함).
+    if cur_status == "IN_REVIEW" and target == "SUBMITTED":
+        raise ValueError(_NEAR_MISS_REVISION_VIA_FACADE_MESSAGE)
     if target == "REJECTED" and not str(rejection_reason or "").strip():
         raise ValueError("반려하려면 반려 사유가 필요합니다.")
     # 전이별 서버측 인가. REJECTED→SUBMITTED 재개만 보고자 소유자에게도 열려 있고,
@@ -1952,6 +1977,11 @@ def update_near_miss_status(
     # 개선조치도 CONFIRMED→PENDING 으로 되돌린다(확인 근거가 재개 후에도 남지 않게 — 007).
     reopening = cur_status == "EVALUATED" and target == "IN_REVIEW"
     if is_sample_mode():
+        # 재개는 report 전이(clear_eval) + 확인 개선조치 초기화의 2단계다. sample 은 세션-로컬
+        # dict 라 완전 트랜잭션이 불가하므로 best-effort 롤백으로 부분성공을 막는다(Codex P2):
+        # report 변경 전 스냅샷을 떠 두고, CAPA 리셋이 실패하면 report 를 재개 이전으로 원복한다.
+        # 완전 원자성은 아니다(주석 명시) — supabase 만 원자 RPC 로 보장한다.
+        snapshot = get_near_miss_report(report_id) if reopening else None
         ok = _sample_update_near_miss(
             report_id, expected_status=cur_status, clear_eval=clear_eval,
             status=target, rejection_reason=reason,
@@ -1959,20 +1989,86 @@ def update_near_miss_status(
         if not ok:
             raise ValueError(_NEAR_MISS_STALE_MESSAGE)
         if reopening:
-            _nmi_sample_reset_on_reopen(report_id)
+            try:
+                _nmi_sample_reset_on_reopen(report_id)
+            except Exception:
+                if snapshot is not None:
+                    _sample_restore_near_miss(report_id, snapshot)
+                raise
         return get_near_miss_report(report_id)
     try:
         # 재개(EVALUATED→IN_REVIEW)는 report 전이 + 확인 개선조치 초기화를 원자 RPC 로 묶는다
         # (Codex P1-4). 과거의 '전이 후 별도 리셋' 2단계가 남기던 stale CONFIRMED 재사용 창을
-        # 없앤다. 007 미적용(개선조치 스키마 부재)이면 초기화할 개선조치가 없으므로 일반 전이를
-        # 쓴다. RPC 오류는 조용히 건너뛰지 않고 전파한다(중간 실패 은폐 금지).
-        if reopening and near_miss_improvement_schema_ready():
-            return supabase_repository.reopen_near_miss_report(
-                report_id, actor_emp_no=attribution
-            )
+        # 없앤다. readiness 는 3-state 로 판정한다(P1-2 fail-open 제거):
+        #   READY      → 원자 reopen RPC(확인 개선조치 CONFIRMED→PENDING 초기화 포함)
+        #   NOT_READY  → 007 미적용이라 초기화할 개선조치가 없음 → 일반 EVALUATED→IN_REVIEW
+        #   PROBE_ERROR→ 준비상태 불명(일시/네트워크/권한). 여기서 일반 UPDATE 로 빠지면 007
+        #                적용 환경에서 CAPA 리셋을 건너뛰는 fail-open 이므로 전파(fail-closed).
+        # RPC 오류는 조용히 건너뛰지 않고 전파한다(중간 실패 은폐 금지).
+        if reopening:
+            probe = near_miss_improvement_schema_probe()
+            if probe == READINESS_PROBE_ERROR:
+                raise supabase_repository.SupabaseDataError(
+                    _NEAR_MISS_REOPEN_PROBE_ERROR_MESSAGE
+                )
+            if probe == READINESS_READY:
+                return supabase_repository.reopen_near_miss_report(
+                    report_id, actor_emp_no=attribution
+                )
+            # NOT_READY: 007 미적용 — 초기화 대상 개선조치가 없어 일반 전이로 진행한다.
         return supabase_repository.update_near_miss_status(
             report_id, target, expected_status=cur_status, rejection_reason=reason,
             clear_evaluation=clear_eval, updated_by=attribution,
+        )
+    finally:
+        _invalidate_near_miss()
+
+
+def request_near_miss_revision(report_id, reason: str, *, current_user) -> dict | None:
+    """보완요청(반송): IN_REVIEW→SUBMITTED 로 되돌리며 보완 사유를 서버측으로 기록한다.
+
+    반려(REJECTED, 종결분기)와 의미가 다르며 ``rejection_reason`` 을 재사용하지 않는다.
+    보완요청은 보고자에게 재작성을 요청하는 것이고, 반려는 종결(폐기) 분기다.
+
+    - 보완 사유(``reason``)는 필수다(빈값이면 ValueError) — 사유 없는 반송은 만들지 않는다.
+    - 요청자(revision_requested_by)·요청시각은 payload/위젯이 아니라 인증된 ``current_user``
+      에서 **서버측 확정**한다(위조 무시). 인가는 평가 능력(auth.can_evaluate_near_miss)
+      이 필수다(화면 게이트를 계약으로 승격).
+    - 보완요청은 검토중(IN_REVIEW)에서만 가능하다. 재개(EVALUATED→IN_REVIEW)와는 다른 전이다.
+    - supabase 는 007 보완요청 컬럼이 준비된 경우에만 기록한다. 미적용/probe 오류면
+      fail-closed 로 차단한다(사유를 저장할 수 없는 상태에서 반송만 만들지 않음).
+    """
+    reason_text = str(reason or "").strip()
+    if not reason_text:
+        raise ValueError("보완요청을 하려면 보완 사유가 필요합니다.")
+    actor = _near_miss_actor(current_user, action="아차사고 보완요청")
+    current = get_near_miss_report(report_id)
+    if current is None:
+        raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
+    cur_status = str(current.get("status") or "").strip()
+    if cur_status != "IN_REVIEW":
+        raise ValueError(
+            f"보완요청(반송)은 검토중(IN_REVIEW) 상태에서만 가능합니다: 현재 {cur_status}"
+        )
+    from modules import auth  # 지연 import(순환 회피)
+    if not auth.can_evaluate_near_miss(actor):
+        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
+    requester = actor["emp_no"]  # 서버귀속(위조 requested_by 무시)
+    if is_sample_mode():
+        ok = _sample_update_near_miss(
+            report_id, expected_status=cur_status, clear_eval=True, status="SUBMITTED",
+        )
+        if not ok:
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        _nm_sample_record_revision(report_id, reason_text, requester)
+        return get_near_miss_report(report_id)
+    # supabase: 007 보완요청 컬럼이 있어야 사유를 기록할 수 있다. 3-state fail-closed —
+    # NOT_READY(미적용)·PROBE_ERROR(불명) 모두 차단해 사유 없는 반송을 막는다.
+    if near_miss_improvement_schema_probe() != READINESS_READY:
+        raise supabase_repository.SupabaseDataError(_NEAR_MISS_REVISION_NOT_READY_MESSAGE)
+    try:
+        return supabase_repository.request_near_miss_revision(
+            report_id, reason_text, requester_emp_no=requester, expected_status=cur_status,
         )
     finally:
         _invalidate_near_miss()
@@ -2065,6 +2161,52 @@ def near_miss_stats(by: str = "status", filters: dict | None = None) -> dict:
 # RPC·trigger 로 강제한다. 신원·인가는 아차사고 보고 경로(P1-a)와 같은 패턴을 미러한다.
 NEAR_MISS_IMPROVEMENT_COLUMNS = supabase_repository.NEAR_MISS_IMPROVEMENT_COLUMNS
 _NEAR_MISS_IMPROVEMENT_STORE = "store_near_miss_improvements"
+# sample 모드 보완요청(revision_request) 세션-로컬 저장소(report_id→사유/요청자/시각).
+# supabase 는 near_miss_reports 의 revision_request_* 컬럼(007)에 기록하므로 read 계약이
+# NEAR_MISS_COLUMNS 에 아직 노출되지 않는다(표시는 UI 소관 — BACKLOG defer). 저장 위치만
+# 모드별로 다르고 파사드 뒤로 감춰지며, 서버귀속·사유필수 동작은 두 모드가 일치한다.
+_NEAR_MISS_REVISION_STORE = "store_near_miss_revision_requests"
+
+
+def _nm_revision_store() -> dict:
+    """sample 보완요청 backing store(report_id→revision_request 자연키, 세션 유지)."""
+    if _NEAR_MISS_REVISION_STORE not in st.session_state:
+        st.session_state[_NEAR_MISS_REVISION_STORE] = {}
+    return st.session_state[_NEAR_MISS_REVISION_STORE]
+
+
+def _nm_sample_record_revision(report_id, reason: str, requester_emp_no: str) -> None:
+    """sample: 보완요청 사유·요청자·요청시각을 서버측 값으로 기록(위조 무시는 파사드가 보장)."""
+    _nm_revision_store()[str(report_id)] = {
+        "revision_request_reason": str(reason),
+        "revision_requested_by_emp_no": str(requester_emp_no),
+        "revision_requested_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _sample_restore_near_miss(report_id, snapshot: dict) -> None:
+    """sample 재개 best-effort 롤백: report 를 스냅샷(재개 이전)의 상태/평가필드로 원복한다.
+
+    CAPA 리셋 실패 시에만 호출된다 — 부분성공(report 만 IN_REVIEW, CAPA CONFIRMED 잔존)을
+    막기 위한 보상이며 완전 원자성은 아니다(세션-로컬 dict 한계)."""
+    _sample_update_near_miss(
+        report_id,
+        status=snapshot.get("status"),
+        confirmed_grade=snapshot.get("confirmed_grade"),
+        evaluator_emp_no=snapshot.get("evaluator_emp_no"),
+        evaluated_at=snapshot.get("evaluated_at"),
+        allow_null=("confirmed_grade", "evaluated_at"),
+    )
+
+
+def get_near_miss_revision_request(report_id) -> dict | None:
+    """보고서의 마지막 보완요청(사유/요청자 사번/요청시각) 또는 None. 표시용(읽기).
+
+    sample 은 세션 저장소에서, supabase 는 007 컬럼에서 읽는다. 007 미적용이면 None."""
+    if is_sample_mode():
+        rec = _nm_revision_store().get(str(report_id))
+        return dict(rec) if rec else None
+    return supabase_repository.get_near_miss_revision_request(report_id)
 
 # 클라이언트(화면)가 payload 로 보내도 파사드가 무시하고 서버측에서만 확정하는 필드.
 # 실제 확인/반려 행위자·시각·상태·감사는 위조할 수 없다(서버 귀속).

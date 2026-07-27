@@ -569,12 +569,17 @@ def test_safety_officer_capability_real_read_path() -> None:
 
 def _walk_transition_table(actor_cu: dict, reporter: dict) -> None:
     """능력 있는 actor 로 전이표의 모든 간선을 양성 통과시킨다(EVALUATED 는 evaluate 경유)."""
-    # SUBMITTED → IN_REVIEW → SUBMITTED(반송)
+    # SUBMITTED → IN_REVIEW → SUBMITTED(보완요청 — 전용 파사드·사유 필수)
     rid = _fresh_submitted(reporter)["id"]
     db.update_near_miss_status(rid, "IN_REVIEW", current_user=actor_cu)
     check("SUBMITTED→IN_REVIEW", db.get_near_miss_report(rid)["status"] == "IN_REVIEW")
-    db.update_near_miss_status(rid, "SUBMITTED", current_user=actor_cu)
-    check("IN_REVIEW→SUBMITTED(반송)", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
+    # IN_REVIEW→SUBMITTED(반송)은 일반 경로로는 차단되고 보완요청 전용 파사드로만 가능하다.
+    exc_plain = raises(lambda: db.update_near_miss_status(
+        rid, "SUBMITTED", current_user=actor_cu), ValueError)
+    check("일반 경로 IN_REVIEW→SUBMITTED 차단",
+          exc_plain is not None and "request_near_miss_revision" in str(exc_plain))
+    db.request_near_miss_revision(rid, "보완 사유", current_user=actor_cu)
+    check("IN_REVIEW→SUBMITTED(보완요청)", db.get_near_miss_report(rid)["status"] == "SUBMITTED")
     # SUBMITTED → REJECTED → SUBMITTED(재개)
     db.update_near_miss_status(rid, "REJECTED", rejection_reason="사유", current_user=actor_cu)
     check("SUBMITTED→REJECTED", db.get_near_miss_report(rid)["status"] == "REJECTED")

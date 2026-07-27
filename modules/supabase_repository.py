@@ -2330,3 +2330,75 @@ def reopen_near_miss_report(report_id, *, actor_emp_no: str) -> dict | None:
     )
     _execute(_execute_rpc, "재개", NEAR_MISS_TABLE, retry_transient=False)
     return get_near_miss_report(report_id)
+
+
+def request_near_miss_revision(
+    report_id, reason: str, *, requester_emp_no: str, expected_status=None,
+) -> dict | None:
+    """보완요청(반송): IN_REVIEW→SUBMITTED + revision_request 3필드(사유/요청자/시각) 기록.
+
+    보완요청 컬럼(revision_request_reason 등, 007)이 있어야 한다. 요청자 사번은 users 로
+    해소해 ``revision_requested_by_user_id`` (FK)로 저장한다 — 서버귀속(파사드가 인증 actor
+    로 확정). all-or-none CHECK(near_miss_reports_revision_request_all_or_none)를 만족하도록
+    세 필드를 함께 세팅하고, 평가 이전 상태로 되돌리므로 평가필드를 비운다
+    (near_miss_eval_consistency 충족). ``expected_status`` 조건부 UPDATE 로 TOCTOU(다른
+    평가자가 먼저 전이)를 막는다 — 0행이면 stale 오류.
+
+    이 경로는 구조 불변식(하드게이트)이 아니라 앱계층 인가 대상이라 RPC 가 아닌 일반
+    UPDATE 다(CHECK 로 데이터 정합만 DB 가 보장). 행위자 인가는 파사드가 소유한다."""
+    if not near_miss_improvement_extensions_ready():
+        raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
+    reason_text = _clean_text(reason)
+    if not reason_text:
+        raise SupabaseDataError("보완 사유가 필요합니다.")
+    user_by_emp, _ = _user_maps()
+    requester = _clean_text(requester_emp_no)
+    if requester not in user_by_emp:
+        raise SupabaseDataError(f"요청자 사번을 찾을 수 없습니다: {requester}")
+    from datetime import datetime, timezone
+    updates = {
+        "status": "SUBMITTED",
+        "confirmed_grade": None,
+        "evaluator_user_id": None,
+        "evaluated_at": None,
+        "revision_request_reason": reason_text,
+        "revision_requested_by_user_id": user_by_emp[requester],
+        "revision_requested_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": requester,
+    }
+    query = client().table(NEAR_MISS_TABLE).update(updates).eq("id", report_id)
+    if expected_status is not None:
+        query = query.eq("status", str(expected_status).strip())
+    response = _execute(query, "보완요청", NEAR_MISS_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
+        if expected_status is not None:
+            raise SupabaseDataError(_NM_STALE_MESSAGE)  # 조건부 0행 = 이미 전이됨/변경됨
+        return get_near_miss_report(report_id)
+    return _near_miss_natural([saved])[0]
+
+
+def get_near_miss_revision_request(report_id) -> dict | None:
+    """보고서의 보완요청 3필드(사유/요청자 사번/요청시각) 또는 None. 007 미적용이면 None.
+
+    read-only 표시 경로 — 007 컬럼에서 직접 읽어 요청자 user_id 를 사번으로 되돌린다."""
+    if not near_miss_improvement_extensions_ready():
+        return None
+    _, emp_by_id = _user_maps()
+    rows = _select_all(
+        NEAR_MISS_TABLE,
+        "revision_request_reason,revision_requested_by_user_id,revision_requested_at",
+        lambda query: query.eq("id", report_id).limit(1),
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    reason = row.get("revision_request_reason")
+    if not reason:
+        return None
+    by_id = row.get("revision_requested_by_user_id")
+    return {
+        "revision_request_reason": str(reason),
+        "revision_requested_by_emp_no": emp_by_id.get(str(by_id), "") if by_id is not None else "",
+        "revision_requested_at": str(row.get("revision_requested_at") or "") or None,
+    }

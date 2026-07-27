@@ -515,20 +515,17 @@ def test_reopen_supabase_path_uses_atomic_rpc() -> None:
     orig_sample = db.is_sample_mode
     orig_find = db.find_user_by_emp_no
     orig_get = db.get_near_miss_report
-    orig_ready = db.near_miss_improvement_schema_ready
+    orig_probe = db.near_miss_improvement_schema_probe
     orig_reopen = db.supabase_repository.reopen_near_miss_report
-    orig_reset = db.supabase_repository.reset_near_miss_improvement_on_reopen
     orig_plain = db.supabase_repository.update_near_miss_status
     db.is_sample_mode = lambda: False
     db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
     db.get_near_miss_report = lambda rid: {"id": rid, "status": "EVALUATED", "reporter_emp_no": "1003"}
-    db.near_miss_improvement_schema_ready = lambda: True
+    db.near_miss_improvement_schema_probe = lambda **k: db.READINESS_READY  # 007 적용(ready)
     db.supabase_repository.reopen_near_miss_report = (
         lambda report_id, *, actor_emp_no: (
             captured.update({"report_id": report_id, "actor_emp_no": actor_emp_no})
             or {"status": "IN_REVIEW"}))
-    db.supabase_repository.reset_near_miss_improvement_on_reopen = (
-        lambda *a, **k: calls.__setitem__("reset", calls["reset"] + 1))
     db.supabase_repository.update_near_miss_status = (
         lambda *a, **k: calls.__setitem__("plain", calls["plain"] + 1) or {"status": "X"})
     try:
@@ -537,16 +534,86 @@ def test_reopen_supabase_path_uses_atomic_rpc() -> None:
         db.is_sample_mode = orig_sample
         db.find_user_by_emp_no = orig_find
         db.get_near_miss_report = orig_get
-        db.near_miss_improvement_schema_ready = orig_ready
+        db.near_miss_improvement_schema_probe = orig_probe
         db.supabase_repository.reopen_near_miss_report = orig_reopen
-        db.supabase_repository.reset_near_miss_improvement_on_reopen = orig_reset
         db.supabase_repository.update_near_miss_status = orig_plain
 
     check("재개는 원자 RPC 로 위임", out and out.get("status") == "IN_REVIEW")
     check("actor_emp_no 서버귀속", captured.get("actor_emp_no") == manager["emp_no"])
     check("report_id 전달", captured.get("report_id") == 11)
-    check("비원자 2단계 reset 미사용", calls["reset"] == 0)
     check("일반 상태변경 경로 미사용", calls["plain"] == 0)
+
+
+def test_reopen_supabase_path_not_ready_uses_plain() -> None:
+    print("supabase 경로 재개: 007 미적용(NOT_READY)이면 일반 전이(리셋 대상 없음) (P1-2 (a))")
+    manager = _actor_of_role("MANAGER")
+    auth_record = db.find_user_by_emp_no(manager["emp_no"])
+    calls = {"plain": 0, "rpc": 0}
+
+    orig_sample = db.is_sample_mode
+    orig_find = db.find_user_by_emp_no
+    orig_get = db.get_near_miss_report
+    orig_probe = db.near_miss_improvement_schema_probe
+    orig_reopen = db.supabase_repository.reopen_near_miss_report
+    orig_plain = db.supabase_repository.update_near_miss_status
+    db.is_sample_mode = lambda: False
+    db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
+    db.get_near_miss_report = lambda rid: {"id": rid, "status": "EVALUATED", "reporter_emp_no": "1003"}
+    db.near_miss_improvement_schema_probe = lambda **k: db.READINESS_NOT_READY  # 007 미적용
+    db.supabase_repository.reopen_near_miss_report = (
+        lambda *a, **k: calls.__setitem__("rpc", calls["rpc"] + 1) or {"status": "IN_REVIEW"})
+    db.supabase_repository.update_near_miss_status = (
+        lambda *a, **k: calls.__setitem__("plain", calls["plain"] + 1) or {"status": "IN_REVIEW"})
+    try:
+        out = db.update_near_miss_status(13, "IN_REVIEW", current_user={"emp_no": manager["emp_no"]})
+    finally:
+        db.is_sample_mode = orig_sample
+        db.find_user_by_emp_no = orig_find
+        db.get_near_miss_report = orig_get
+        db.near_miss_improvement_schema_probe = orig_probe
+        db.supabase_repository.reopen_near_miss_report = orig_reopen
+        db.supabase_repository.update_near_miss_status = orig_plain
+
+    check("미적용 재개는 일반 전이 위임", out and out.get("status") == "IN_REVIEW")
+    check("미적용 시 원자 RPC 미사용", calls["rpc"] == 0)
+    check("미적용 시 일반 상태변경 사용", calls["plain"] == 1)
+
+
+def test_reopen_supabase_path_probe_error_fails_closed() -> None:
+    print("supabase 경로 재개: probe 오류(PROBE_ERROR)면 전파·일반 UPDATE 우회 안 함 (P1-2 (b))")
+    manager = _actor_of_role("MANAGER")
+    auth_record = db.find_user_by_emp_no(manager["emp_no"])
+    calls = {"plain": 0, "rpc": 0}
+
+    orig_sample = db.is_sample_mode
+    orig_find = db.find_user_by_emp_no
+    orig_get = db.get_near_miss_report
+    orig_probe = db.near_miss_improvement_schema_probe
+    orig_reopen = db.supabase_repository.reopen_near_miss_report
+    orig_plain = db.supabase_repository.update_near_miss_status
+    db.is_sample_mode = lambda: False
+    db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
+    db.get_near_miss_report = lambda rid: {"id": rid, "status": "EVALUATED", "reporter_emp_no": "1003"}
+    db.near_miss_improvement_schema_probe = lambda **k: db.READINESS_PROBE_ERROR  # 일시/네트워크 오류
+    db.supabase_repository.reopen_near_miss_report = (
+        lambda *a, **k: calls.__setitem__("rpc", calls["rpc"] + 1) or {"status": "IN_REVIEW"})
+    db.supabase_repository.update_near_miss_status = (
+        lambda *a, **k: calls.__setitem__("plain", calls["plain"] + 1) or {"status": "IN_REVIEW"})
+    try:
+        exc = raises(lambda: db.update_near_miss_status(
+            14, "IN_REVIEW", current_user={"emp_no": manager["emp_no"]}),
+            db.supabase_repository.SupabaseDataError)
+    finally:
+        db.is_sample_mode = orig_sample
+        db.find_user_by_emp_no = orig_find
+        db.get_near_miss_report = orig_get
+        db.near_miss_improvement_schema_probe = orig_probe
+        db.supabase_repository.reopen_near_miss_report = orig_reopen
+        db.supabase_repository.update_near_miss_status = orig_plain
+
+    check("probe 오류는 전파(fail-closed)", exc is not None)
+    check("probe 오류 시 원자 RPC 미사용", calls["rpc"] == 0)
+    check("probe 오류 시 일반 UPDATE 우회 안 함", calls["plain"] == 0)
 
 
 def test_reopen_supabase_path_error_propagates() -> None:
@@ -560,12 +627,12 @@ def test_reopen_supabase_path_error_propagates() -> None:
     orig_sample = db.is_sample_mode
     orig_find = db.find_user_by_emp_no
     orig_get = db.get_near_miss_report
-    orig_ready = db.near_miss_improvement_schema_ready
+    orig_probe = db.near_miss_improvement_schema_probe
     orig_reopen = db.supabase_repository.reopen_near_miss_report
     db.is_sample_mode = lambda: False
     db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
     db.get_near_miss_report = lambda rid: {"id": rid, "status": "EVALUATED", "reporter_emp_no": "1003"}
-    db.near_miss_improvement_schema_ready = lambda: True
+    db.near_miss_improvement_schema_probe = lambda **k: db.READINESS_READY
     db.supabase_repository.reopen_near_miss_report = _boom
     try:
         exc = raises(lambda: db.update_near_miss_status(
@@ -574,10 +641,107 @@ def test_reopen_supabase_path_error_propagates() -> None:
         db.is_sample_mode = orig_sample
         db.find_user_by_emp_no = orig_find
         db.get_near_miss_report = orig_get
-        db.near_miss_improvement_schema_ready = orig_ready
+        db.near_miss_improvement_schema_probe = orig_probe
         db.supabase_repository.reopen_near_miss_report = orig_reopen
 
     check("재개 RPC 오류 전파(은폐 없음)", exc is not None and "원자 재개 실패" in str(exc))
+
+
+def _in_review_report(reporter: dict, evaluator: dict):
+    """SUBMITTED 보고서를 만들고 IN_REVIEW(검토착수)로 전이해 report_id 를 돌려준다."""
+    rec = db.create_near_miss_report(_base_payload(), current_user=reporter)
+    db.update_near_miss_status(rec["id"], "IN_REVIEW", current_user=evaluator)
+    return rec["id"]
+
+
+def test_request_revision_sample() -> None:
+    print("request_near_miss_revision(sample): 사유필수·서버귀속·인가·IN_REVIEW→SUBMITTED (Phase1 #2)")
+    _reset()
+    st.session_state.pop(db._NEAR_MISS_REVISION_STORE, None)
+    reporter = _actor_of_role("USER")
+    manager = _actor_of_role("MANAGER")
+    rid = _in_review_report(reporter, manager)
+
+    # 사유 필수.
+    exc = raises(lambda: db.request_near_miss_revision(rid, "   ", current_user=manager), ValueError)
+    check("빈 사유 차단", exc is not None and "사유" in str(exc))
+    # 무인증 차단.
+    check("무인증 차단",
+          raises(lambda: db.request_near_miss_revision(rid, "사유", current_user=None), ValueError) is not None)
+    # 능력 없는 USER 차단(인가).
+    excu = raises(lambda: db.request_near_miss_revision(
+        rid, "사유", current_user={"emp_no": reporter["emp_no"]}), ValueError)
+    check("USER 인가 차단", excu is not None and "권한" in str(excu))
+    # 차단들 이후에도 여전히 IN_REVIEW(전이 안 됨).
+    check("차단 시 IN_REVIEW 유지", db.get_near_miss_report(rid)["status"] == "IN_REVIEW")
+
+    # 정상 보완요청: IN_REVIEW→SUBMITTED + 사유/요청자/시각 서버기록.
+    out = db.request_near_miss_revision(rid, "덮개 상세 보완 바람", current_user=manager)
+    check("IN_REVIEW→SUBMITTED 전이", out and out.get("status") == "SUBMITTED")
+    rev = db.get_near_miss_revision_request(rid)
+    check("사유 기록", rev is not None and rev["revision_request_reason"] == "덮개 상세 보완 바람")
+    check("요청자 서버귀속(인증 actor 사번)", rev["revision_requested_by_emp_no"] == manager["emp_no"])
+    check("요청시각 서버기록", bool(str(rev.get("revision_requested_at") or "")))
+
+    # 이미 SUBMITTED(IN_REVIEW 아님) → 차단.
+    exc2 = raises(lambda: db.request_near_miss_revision(rid, "사유", current_user=manager), ValueError)
+    check("IN_REVIEW 아니면 차단", exc2 is not None and "IN_REVIEW" in str(exc2))
+
+    # 일반 파사드로는 IN_REVIEW→SUBMITTED 반송이 차단된다(사유 없는 반송 금지).
+    rid2 = _in_review_report(reporter, manager)
+    excp = raises(lambda: db.update_near_miss_status(rid2, "SUBMITTED", current_user=manager), ValueError)
+    check("일반 경로 반송 차단", excp is not None and "request_near_miss_revision" in str(excp))
+
+
+def test_request_revision_supabase_path() -> None:
+    print("request_near_miss_revision(supabase): repo 위임·서버귀속·probe fail-closed (Phase1 #2)")
+    manager = _actor_of_role("MANAGER")
+    auth_record = db.find_user_by_emp_no(manager["emp_no"])
+    captured: dict = {}
+
+    orig_sample = db.is_sample_mode
+    orig_find = db.find_user_by_emp_no
+    orig_get = db.get_near_miss_report
+    orig_probe = db.near_miss_improvement_schema_probe
+    orig_repo = db.supabase_repository.request_near_miss_revision
+    db.is_sample_mode = lambda: False
+    db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
+    db.get_near_miss_report = lambda rid: {"id": rid, "status": "IN_REVIEW", "reporter_emp_no": "1003"}
+    db.supabase_repository.request_near_miss_revision = (
+        lambda report_id, reason, *, requester_emp_no, expected_status=None: (
+            captured.update({"report_id": report_id, "reason": reason,
+                             "requester_emp_no": requester_emp_no,
+                             "expected_status": expected_status})
+            or {"status": "SUBMITTED"}))
+    try:
+        # READY → repo 위임 + 서버귀속.
+        db.near_miss_improvement_schema_probe = lambda **k: db.READINESS_READY
+        out = db.request_near_miss_revision(20, "보완 사유", current_user={"emp_no": manager["emp_no"]})
+        check("READY 면 repo 위임", out and out.get("status") == "SUBMITTED")
+        check("사유 전달", captured.get("reason") == "보완 사유")
+        check("요청자 서버귀속(인증 actor)", captured.get("requester_emp_no") == manager["emp_no"])
+        check("expected_status=IN_REVIEW 조건부", captured.get("expected_status") == "IN_REVIEW")
+
+        # NOT_READY → fail-closed(차단, repo 미호출).
+        captured.clear()
+        db.near_miss_improvement_schema_probe = lambda **k: db.READINESS_NOT_READY
+        excn = raises(lambda: db.request_near_miss_revision(
+            20, "사유", current_user={"emp_no": manager["emp_no"]}),
+            db.supabase_repository.SupabaseDataError)
+        check("NOT_READY 보완요청 차단(사유 없는 반송 방지)", excn is not None and not captured)
+
+        # PROBE_ERROR → fail-closed(차단, repo 미호출).
+        db.near_miss_improvement_schema_probe = lambda **k: db.READINESS_PROBE_ERROR
+        exce = raises(lambda: db.request_near_miss_revision(
+            20, "사유", current_user={"emp_no": manager["emp_no"]}),
+            db.supabase_repository.SupabaseDataError)
+        check("PROBE_ERROR 보완요청 차단", exce is not None and not captured)
+    finally:
+        db.is_sample_mode = orig_sample
+        db.find_user_by_emp_no = orig_find
+        db.get_near_miss_report = orig_get
+        db.near_miss_improvement_schema_probe = orig_probe
+        db.supabase_repository.request_near_miss_revision = orig_repo
 
 
 def test_close_supabase_path_calls_rpc() -> None:
@@ -729,7 +893,11 @@ def main() -> int:
         test_sample_self_confirm_case_insensitive,
         test_repo_update_status_rejects_direct_closed,
         test_reopen_supabase_path_uses_atomic_rpc,
+        test_reopen_supabase_path_not_ready_uses_plain,
+        test_reopen_supabase_path_probe_error_fails_closed,
         test_reopen_supabase_path_error_propagates,
+        test_request_revision_sample,
+        test_request_revision_supabase_path,
         test_confirm_supabase_path_server_attribution,
         test_close_supabase_path_calls_rpc,
         test_migration_007_sql_contract,
