@@ -48,10 +48,12 @@
 -- 수동 롤백 (역순; 007 이전 데이터 유지):
 --   drop trigger if exists near_miss_close_requires_confirmed_capa on public.near_miss_reports;
 --   drop trigger if exists near_miss_improvement_guard_closed_parent on public.near_miss_improvements;
+--   drop trigger if exists near_miss_improvement_report_id_immutable on public.near_miss_improvements;
 --   drop function if exists public.reopen_near_miss_report(bigint, text);
 --   drop function if exists public.close_near_miss_report(bigint, text);
 --   drop function if exists public.near_miss_close_requires_confirmed_capa();
 --   drop function if exists public.near_miss_improvement_guard_closed_parent();
+--   drop function if exists public.near_miss_improvement_report_id_immutable();
 --   drop table if exists public.near_miss_improvements;
 --   alter table public.near_miss_reports drop constraint if exists near_miss_reports_revision_request_all_or_none;
 --   alter table public.near_miss_reports drop column if exists revision_request_reason;

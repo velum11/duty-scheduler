@@ -2028,6 +2028,25 @@ def near_miss_improvement_extensions_probe(*, force: bool = False) -> str:
     return _NMI_PROBE
 
 
+def _near_miss_improvement_read_gate() -> bool:
+    """개선조치(007) **조회** 게이트(read-only 3-state). 쓰기 게이트와 달리 미적용과
+    일시오류를 구분한다.
+
+    반환 True(READY) → 조회 진행. False(NOT_READY=007 미적용) → 호출부가 None(정상
+    부재, 무배너)로 처리한다. PROBE_ERROR(일시/네트워크/권한 오류)는 **정상 부재로 접지
+    않고 예외를 전파**해 상위 뷰의 danger 배너로 표면화한다(오류 ≠ 미적용). 즉 쓰기
+    게이트(``near_miss_improvement_extensions_ready`` False → NOT_READY 로 차단)가
+    NOT_READY·PROBE_ERROR 를 모두 fail-closed 하는 것과 달리, 읽기는 일시오류만 표면화하고
+    진짜 미적용은 조용한 부재로 둔다(가짜 '보완요청 없음'/'미작성' 위장 방지)."""
+    probe = near_miss_improvement_extensions_probe()
+    if probe == READINESS_PROBE_ERROR:
+        raise SupabaseDataError(
+            "아차사고 개선조치 스키마 준비 상태를 확인할 수 없습니다(일시 오류). "
+            "데이터 연결 상태를 확인한 뒤 다시 시도하세요."
+        )
+    return probe == READINESS_READY
+
+
 def _near_miss_improvement_natural(rows: list[dict]) -> list[dict]:
     """개선조치 행(ID/FK)을 화면 자연키 계약으로 변환한다."""
     _, emp_by_id = _user_maps()
@@ -2091,8 +2110,11 @@ def _near_miss_improvement_body(payload: dict) -> dict:
 
 
 def get_near_miss_improvement(report_id) -> dict | None:
-    """보고서의 개선조치(자연키 dict) 또는 None. 007 미적용이면 None(안전 폴백)."""
-    if not near_miss_improvement_extensions_ready():
+    """보고서의 개선조치(자연키 dict) 또는 None. 007 미적용이면 None(정상 부재).
+
+    readiness 확인이 일시오류(PROBE_ERROR)면 None 으로 접지 않고 예외를 전파한다 —
+    호출부(큐 enrich·overdue 집계)가 이를 '조회실패'/미상으로 표면화하도록(오류 은폐 금지)."""
+    if not _near_miss_improvement_read_gate():
         return None
     rows = _select_all(
         NEAR_MISS_IMPROVEMENT_TABLE, "*",
@@ -2383,8 +2405,11 @@ def request_near_miss_revision(
 def get_near_miss_revision_request(report_id) -> dict | None:
     """보고서의 보완요청 3필드(사유/요청자 사번/요청시각) 또는 None. 007 미적용이면 None.
 
-    read-only 표시 경로 — 007 컬럼에서 직접 읽어 요청자 user_id 를 사번으로 되돌린다."""
-    if not near_miss_improvement_extensions_ready():
+    read-only 표시 경로 — 007 컬럼에서 직접 읽어 요청자 user_id 를 사번으로 되돌린다.
+    007 미적용은 None(정상 부재, 무배너)이지만, readiness 확인 일시오류(PROBE_ERROR)는
+    None 으로 접지 않고 예외를 전파한다 — near_miss_my 의 danger 배너가 표면화하도록
+    (오류를 '보완요청 없음'으로 위장하지 않는다)."""
+    if not _near_miss_improvement_read_gate():
         return None
     _, emp_by_id = _user_maps()
     rows = _select_all(

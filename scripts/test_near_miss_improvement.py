@@ -135,6 +135,59 @@ def test_improvement_schema_probe_three_state() -> None:
 
 
 # =========================================================================
+# 조회 게이트 readiness 일시오류 표면화 (종합감사 P2-query)
+# =========================================================================
+def test_improvement_read_gate_surfaces_probe_error() -> None:
+    """개선조치 조회 readiness 게이트: 미적용(NOT_READY)은 None(정상 부재), 일시오류
+    (PROBE_ERROR)는 None 으로 접지 않고 예외 전파(near_miss_my danger 배너 표면화).
+
+    supabase 조회 경로(리포지토리)를 직접 검증한다 — 캐시되지 않은 readiness 오류 경로는
+    facade 직접 예외만 보던 test_near_miss_error_surfacing 이 다루지 않던 구멍."""
+    print("개선조치 조회 게이트 — NOT_READY→None vs PROBE_ERROR→예외 전파 (P2-query)")
+    saved_client = sr.client
+
+    class _MissingQuery:  # 007 미적용(테이블/컬럼 부재) 시그널.
+        def select(self, *a, **k): return self
+        def limit(self, *a, **k): return self
+        def eq(self, *a, **k): return self
+        def execute(self):
+            raise Exception('relation "near_miss_improvements" does not exist (42P01)')
+
+    class _FlakyQuery:  # 일시/네트워크/권한 오류 시그널.
+        def select(self, *a, **k): return self
+        def limit(self, *a, **k): return self
+        def eq(self, *a, **k): return self
+        def execute(self):
+            raise Exception("network unreachable: connection timed out")
+
+    try:
+        # (a) NOT_READY(007 미적용) → 정상 부재 None, 예외 없음.
+        sr.reset_near_miss_improvement_readiness()
+        sr.client = lambda: type("C", (), {"table": lambda self, n: _MissingQuery()})()
+        check("미적용 → get_near_miss_revision_request None",
+              sr.get_near_miss_revision_request("r1") is None)
+        sr.reset_near_miss_improvement_readiness()
+        check("미적용 → get_near_miss_improvement None",
+              sr.get_near_miss_improvement("r1") is None)
+
+        # (b) 일시오류(PROBE_ERROR) → None 으로 은폐하지 않고 예외 전파.
+        sr.reset_near_miss_improvement_readiness()
+        sr.client = lambda: type("C", (), {"table": lambda self, n: _FlakyQuery()})()
+        exc_rev = raises(lambda: sr.get_near_miss_revision_request("r1"), sr.SupabaseDataError)
+        check("일시오류 → revision_request 예외 전파(무배너 은폐 아님)", exc_rev is not None)
+        sr.reset_near_miss_improvement_readiness()
+        exc_imp = raises(lambda: sr.get_near_miss_improvement("r1"), sr.SupabaseDataError)
+        check("일시오류 → improvement 예외 전파(미작성 위장 아님)", exc_imp is not None)
+
+        # 전파 예외는 파사드 DATA_SOURCE_ERRORS 로 잡힌다(뷰 danger 배너 경로).
+        check("전파 예외는 DATA_SOURCE_ERRORS(뷰 danger 배너 포착)",
+              isinstance(exc_rev, db.DATA_SOURCE_ERRORS))
+    finally:
+        sr.client = saved_client
+        sr.reset_near_miss_improvement_readiness()
+
+
+# =========================================================================
 # upsert(DRAFT) — 신원 서버확정·server-field 위조 무시·검증
 # =========================================================================
 def test_upsert_creates_draft_server_fields() -> None:
@@ -972,6 +1025,7 @@ def test_migration_007_sql_contract() -> None:
 def main() -> int:
     for test in (
         test_improvement_schema_probe_three_state,
+        test_improvement_read_gate_surfaces_probe_error,
         test_upsert_creates_draft_server_fields,
         test_submit_requires_assignee_and_result,
         test_confirm_server_attribution_and_self_confirm,
