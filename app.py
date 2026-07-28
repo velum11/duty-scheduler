@@ -41,11 +41,16 @@ def _caps_for(user: dict) -> set:
     """메뉴/route guard 가 공유하는 능력 집합을 세션 사용자에서 계산한다.
 
     nav 는 DEPENDENCY-FREE 이므로(auth import 없음) 능력 판정은 여기(호출부)에서 하고
-    nav 필터에 caps 로 넘긴다. 현재는 아차사고 평가 능력 하나뿐이다.
+    nav 필터에 caps 로 넘긴다. 아차사고 평가 능력(정적)과 개선조치 접근(배정 기반 동적)을
+    각각 판정한다 — 개선조치는 평가자/ADMIN 뿐 아니라 배정된 담당자·지정 확인자도 노출되며,
+    판정 facade(has_near_miss_improvement_access)가 평가자/ADMIN 단축·경량 EXISTS·비크래시라
+    매 렌더 호출해도 부담이 적다(메뉴는 권한경계 아님 — route guard·facade 가 행단위 재검증).
     """
     caps = set()
     if auth.can_evaluate_near_miss(user):
         caps.add(nav.CAP_EVALUATE_NEAR_MISS)
+    if db.has_near_miss_improvement_access(user):
+        caps.add(nav.CAP_ACCESS_NEAR_MISS_IMPROVEMENT)
     return caps
 
 

@@ -1,9 +1,10 @@
 """아차사고 UI 게이트 회귀 — 능력 통일(nav)·평가 검토착수·stats 보고서 종결률.
 
 007 스키마와 무관하게 즉시 구현된 UI 계약을 고정한다(비회귀 그물):
-  1) nav 능력 게이트 통일 — near_miss_improvement 가 평가 관리와 동일하게 CAP_EVALUATE_NEAR_MISS
-     로만 노출(구 roles=("ADMIN",) 제거). ADMIN/MANAGER/안전담당자 caps 노출, 능력 없으면 차단.
-     USER_MENU(평면) 에 개선조치 항목이 caps 로만 포함 — USER route guard(nav.allowed) 정합.
+  1) nav 능력 게이트 — near_miss_improvement 는 '배정 기반' 접근 능력
+     (CAP_ACCESS_NEAR_MISS_IMPROVEMENT)으로 노출하고, 평가 관리는 평가 능력
+     (CAP_EVALUATE_NEAR_MISS)으로 노출한다(두 능력 분리 — Phase2). 정적 roles 없음.
+     USER_MENU(평면)·route guard(nav.allowed)가 동일 caps 로 노출·차단 일치한다.
   2) 평가 관리(near_miss_evaluate) — 상세 scope 액션에 검토착수(SUBMITTED→IN_REVIEW) 배선,
      status=="SUBMITTED" 에서만 활성. EVALUATED 종결 버튼은 이 화면에 없음(개선조치 소관).
   3) stats(near_miss_stats) — _closure_rate_label 은 CLOSED/(CLOSED+EVALUATED), 0분모 방어('—'),
@@ -44,35 +45,52 @@ def check(name: str, cond: bool) -> None:
         print(f"  FAIL - {name}")
 
 
-CAPS = {nav.CAP_EVALUATE_NEAR_MISS}
+CAPS = {nav.CAP_EVALUATE_NEAR_MISS}                         # 평가 능력만.
+IMPR_CAPS = {nav.CAP_ACCESS_NEAR_MISS_IMPROVEMENT}          # 개선조치 접근 능력만(배정 기반).
+ALL_CAPS = CAPS | IMPR_CAPS
 
 
-# ===== 1) nav 능력 게이트 통일 =====
-print("nav 능력 게이트 통일")
-# 그룹 자식(near_miss_improvement)이 capability 로 전환됐고 static ADMIN roles 는 제거됐다.
+# ===== 1) nav 능력 게이트 (개선조치=접근 능력 / 평가 관리=평가 능력, 분리) =====
+print("nav 능력 게이트 (개선조치 접근 능력 분리)")
+# 개선조치 child 는 접근 능력 capability 로 노출되고 static ADMIN roles 는 없다.
 _child = next(c for g in nav.MENU_GROUPS if g["id"] == "near_miss"
               for c in g["children"] if c["id"] == "near_miss_improvement")
-check("개선조치 child capability=CAP_EVALUATE_NEAR_MISS",
-      _child.get("capability") == nav.CAP_EVALUATE_NEAR_MISS)
+check("개선조치 child capability=CAP_ACCESS_NEAR_MISS_IMPROVEMENT",
+      _child.get("capability") == nav.CAP_ACCESS_NEAR_MISS_IMPROVEMENT)
 check("개선조치 child 에 static ADMIN roles 제거", tuple(_child.get("roles", ())) == ())
+# 평가 관리 child 는 여전히 평가 능력(두 능력 분리 회귀).
+_eval_child = next(c for g in nav.MENU_GROUPS if g["id"] == "near_miss"
+                   for c in g["children"] if c["id"] == "near_miss_evaluate")
+check("평가 관리 child capability=CAP_EVALUATE_NEAR_MISS",
+      _eval_child.get("capability") == nav.CAP_EVALUATE_NEAR_MISS)
 
-# route guard 정합 — 능력 보유 role 은 그룹 경로로 개선조치 접근, 능력 없으면 차단.
-check("ADMIN(caps) 개선조치 allowed", nav.allowed("near_miss_improvement", "ADMIN", CAPS))
-check("MANAGER(caps) 개선조치 allowed", nav.allowed("near_miss_improvement", "MANAGER", CAPS))
+# route guard 정합 — 개선조치는 접근 능력으로만 노출/라우팅, 평가 능력만으론 불충분(분리).
+check("ADMIN(개선조치 caps) 개선조치 allowed", nav.allowed("near_miss_improvement", "ADMIN", IMPR_CAPS))
+check("MANAGER(개선조치 caps) 개선조치 allowed", nav.allowed("near_miss_improvement", "MANAGER", IMPR_CAPS))
 check("caps 없는 role 은 개선조치 차단(ADMIN caps=None)",
       not nav.allowed("near_miss_improvement", "ADMIN", None))
+check("평가 능력만으론 개선조치 미노출(능력 분리)",
+      not nav.allowed("near_miss_improvement", "ADMIN", CAPS))
+# 반대로 평가 관리는 평가 능력으로 노출되고 개선조치 접근능력만으론 불충분.
+check("평가 관리는 평가 능력으로 allowed", nav.allowed("near_miss_evaluate", "ADMIN", CAPS))
+check("개선조치 접근능력만으론 평가 관리 미노출",
+      not nav.allowed("near_miss_evaluate", "ADMIN", IMPR_CAPS))
 
-# USER_MENU(평면) — 개선조치·평가 관리는 caps 로만 노출.
+# USER_MENU(평면) — 개선조치는 접근 능력, 평가 관리는 평가 능력으로만 노출.
 user_ids_no_caps = {i["id"] for i in nav.user_menu(None)}
-user_ids_caps = {i["id"] for i in nav.user_menu(CAPS)}
+user_ids_impr = {i["id"] for i in nav.user_menu(IMPR_CAPS)}
+user_ids_eval = {i["id"] for i in nav.user_menu(CAPS)}
 check("USER_MENU 에 개선조치 정의 존재",
       any(i["id"] == "near_miss_improvement" for i in nav.USER_MENU))
 check("무능력 USER 는 개선조치·평가 관리 미노출",
       not ({"near_miss_improvement", "near_miss_evaluate"} & user_ids_no_caps))
-check("능력 USER 는 개선조치·평가 관리 노출",
-      {"near_miss_improvement", "near_miss_evaluate"} <= user_ids_caps)
-check("안전담당자 USER route guard: 개선조치 allowed",
-      nav.allowed("near_miss_improvement", "USER", CAPS))
+check("접근 능력 USER 는 개선조치 노출(배정 기반)",
+      "near_miss_improvement" in user_ids_impr)
+check("접근 능력만으론 평가 관리 미노출(능력 분리)",
+      "near_miss_evaluate" not in user_ids_impr)
+check("평가 능력 USER 는 평가 관리 노출", "near_miss_evaluate" in user_ids_eval)
+check("배정/안전담당자 USER route guard: 개선조치 allowed",
+      nav.allowed("near_miss_improvement", "USER", IMPR_CAPS))
 check("무능력 USER route guard: 개선조치 차단",
       not nav.allowed("near_miss_improvement", "USER", None))
 
@@ -135,15 +153,33 @@ check("stats 뷰는 overdue 를 파사드로 위임(near_miss_overdue_count)",
 print("개선조치 관리 CAPA 폐루프")
 check("SCREEN_ARCHETYPE == 'MASTER_DETAIL'", nmi.SCREEN_ARCHETYPE == "MASTER_DETAIL")
 render_src = inspect.getsource(nmi.render)
-check("진입가드: can_evaluate_near_miss", "can_evaluate_near_miss" in render_src)
+# Phase2: 진입가드는 배정 기반 접근 facade 로(평가 능력 단독이 아니라 담당자·확인자 포함).
+check("진입가드: has_near_miss_improvement_access(배정 기반)",
+      "has_near_miss_improvement_access" in render_src)
 body_src = inspect.getsource(nmi._render_body)
 check("MASTER_DETAIL split 사용(master_detail_frame)", "master_detail_frame" in body_src)
+# Phase2: 큐는 actor-aware(list_near_miss_improvements) + 담당자 스코핑(_scope_reports).
+impr_for_src = inspect.getsource(nmi._improvements_for)
+check("큐 actor-aware(list_near_miss_improvements)", "list_near_miss_improvements" in impr_for_src)
+check("담당자 큐 스코핑(_scope_reports)", "_scope_reports" in body_src)
+
 act_src = inspect.getsource(nmi._render_actions)
 for label in ("조치 저장", "제출", "확인", "재조치 요청"):
     check(f"scope 액션 라벨 '{label}'", f'"{label}"' in act_src)
 check("자기확인 차단 게이트(self_confirm)", "self_confirm" in act_src and "자기확인" in act_src)
 check("신원 서버측 확정(current_user=auth.get_current_user())",
       "current_user=auth.get_current_user()" in act_src)
+# Phase2: 행단위 역할 variant — 작업(can_work)/검토(can_review)/배정(can_assign)로 버튼 분기.
+detail_src2 = inspect.getsource(nmi._render_detail)
+check("상세 행단위 인가 판정(can_work/can_review/can_assign)",
+      "can_work_improvement" in detail_src2 and "can_review_improvement" in detail_src2
+      and "can_evaluate_near_miss" in detail_src2)
+check("작업 버튼(조치 저장·제출)은 can_work 게이트", "if can_work" in act_src)
+check("확인·재조치·종결은 can_review 게이트", "if can_review" in act_src)
+check("배정 저장은 can_assign 기반", "배정 저장" in act_src and "can_assign" in act_src)
+form_src = inspect.getsource(nmi._render_capa_form)
+check("배정필드는 can_assign 읽기전용", "disabled=not can_assign" in form_src)
+check("작업필드는 can_work 읽기전용", "disabled=not can_work" in form_src)
 close_src = inspect.getsource(nmi._render_close)
 check("보고서 종결 라벨 존재", '"보고서 종결"' in close_src)
 check("2단계 종결: 확인 세션키 가드", "_CLOSE_CONFIRM_KEY" in close_src)

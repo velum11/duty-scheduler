@@ -78,10 +78,9 @@ _SUBMIT_COLOR = {"DRAFT": TOKENS["ink-3"], "SUBMITTED": TOKENS["info"]}
 
 _CONFIRMED = "CONFIRMED"
 
-# 개별 개선조치 조회 '실패' sentinel — '미작성'(정상 부재, None)과 명확히 구분한다.
-# READY 이후의 실제 조회 오류를 정상 상태(미작성)로 위장하지 않기 위한 표식이며,
-# 표면화(행 라벨 '조회실패' + 상단 error 배너)는 _queue_rows/_render_body 소관이다.
-_LOAD_FAILED = object()
+# 큐 개선조치 조회 '실패' 표시 라벨 — '미작성'(정상 부재)과 명확히 구분한다. READY 이후의
+# 실제 조회 오류를 정상 상태(미작성)로 위장하지 않기 위한 표식이며, 표면화(담당자·확인상태 열
+# 라벨 '조회실패' + 상단 error 배너 + 담당자 시야 fail-closed)는 _queue_rows/_render_body 소관이다.
 _LOAD_FAILED_LABEL = "조회실패"
 
 _NOT_READY_MSG = (
@@ -147,12 +146,14 @@ def render(user: dict) -> None:
             save={"key": f"{_PAGE_ID}__save_na", "disabled": True, "help": _na},
         ))
 
-    # 접근 경계는 nav route guard(평가 능력)가 이미 집행하지만, 화면 단독 진입가드로도
-    # 이중 방어한다(스펙 요구) — 능력 없으면 조회 전용 안내만 노출한다.
-    if not auth.can_evaluate_near_miss(user):
+    # 접근 경계는 nav route guard 가 이미 집행하지만, 화면 단독 진입가드로도 이중 방어한다.
+    # 판정은 배정 기반 접근 facade(has_near_miss_improvement_access) — 평가자/ADMIN 즉시 True,
+    # 배정된 담당자·지정 확인자(007 READY)는 True, 그 외/미인증/비활성은 False(fail-closed·
+    # 비크래시). 007 미적용 supabase 에선 평가자/ADMIN 만 True 로 기존 fail-closed 와 정합한다.
+    if not db.has_near_miss_improvement_access(user):
         empty_state(
             "개선조치 관리 권한이 없습니다",
-            "관리자·매니저 또는 안전담당자만 개선조치를 등록·확인하고 종결할 수 있습니다.",
+            "배정된 담당자·지정 확인자, 또는 관리자·매니저·안전담당자만 개선조치를 다룰 수 있습니다.",
         )
         return
     _render_body(user)
@@ -185,22 +186,26 @@ def _render_body(user: dict) -> None:
         st.error("종결 대기 목록을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    improvements = _improvements_for(reports, user)
-    errored = [rid for rid, imp in improvements.items() if imp is _LOAD_FAILED]
-    if errored:
+    # 큐 스코핑은 actor-aware(list_near_miss_improvements) — 평가자/ADMIN 은 전체, 그 외
+    # (담당자·지정 확인자)는 자기 배정건만. is_reviewer(=평가 능력)가 '전체 시야' 여부를
+    # 가른다(개선조치 조회 없이도 즉시 판정 — 담당자 행 스코핑 결정에만 쓴다).
+    is_reviewer = auth.can_evaluate_near_miss(user)
+    improvements, load_failed = _improvements_for(reports, user)
+    if load_failed:
         # 조회 실패를 '미작성/0'으로 삼키지 않고 표면화한다(오류≠정상 부재).
         st.error(
-            f"개선조치 {len(errored)}건을 불러오지 못했습니다 — 목록의 '조회실패' 행은 "
-            "실제 상태가 아닙니다. 데이터 연결 상태를 확인하고 새로고침하세요."
+            "개선조치 목록을 불러오지 못했습니다 — 담당자·확인상태 열은 실제 상태가 아닙니다. "
+            "데이터 연결 상태를 확인하고 새로고침하세요."
         )
+    scoped = _scope_reports(reports, improvements, is_reviewer, load_failed)
 
     list_col, detail_col = erp.master_detail_frame(list_ratio=1.5, detail_ratio=1.1)
     with list_col:
-        grid_df = _render_queue(reports, improvements)
+        grid_df = _render_queue(scoped, improvements, load_failed)
     with detail_col:
         _render_detail(user, readiness)
 
-    _render_summary(reports, improvements)
+    _render_summary(scoped, improvements, load_failed)
 
     picked = _picked_report_id(grid_df)
     if picked is not None and picked != st.session_state.get(_SEL_KEY):
@@ -218,25 +223,42 @@ def _load_queue() -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def _improvements_for(reports: pd.DataFrame, user: dict) -> dict:
-    """보고서별 개선조치(자연키 dict / None / _LOAD_FAILED).
+def _improvements_for(reports: pd.DataFrame, user: dict) -> tuple[dict, bool]:
+    """보고서별 개선조치(report_id(str)→자연키 dict)와 조회 실패 플래그.
 
-    007 미준비면 facade 가 None 을 돌려주며(정상 부재 = '미작성'), 이는 readiness 배너로
-    이미 안내된다. READY 이후의 실제 조회 오류는 None 으로 접지 않고 ``_LOAD_FAILED``
-    sentinel 로 남겨, 개별 조회 실패로 큐 전체를 막지 않으면서도 오류를 '미작성'(정상
-    부재)으로 위장하지 않는다(해당 행은 '조회실패'로 구분 표시 + 상단 error 배너).
+    actor-aware 큐 스코핑 facade(``list_near_miss_improvements``)로 한 번에 조회한다 —
+    평가자/ADMIN 은 전체를, 그 외(담당자·지정 확인자)는 자신이 배정된 개선조치만 담긴다.
+    dict 에 없는 report_id 는 (평가자 시야에선) 미작성/미배정, (담당자 시야에선) 자기
+    배정건이 아님을 뜻한다.
 
-    조회는 actor-aware(``current_user=user``) — 이 화면은 평가자/ADMIN 게이트라 스코핑은
-    사실상 전량 통과지만, fail-open 없는 계약(current_user 필수)을 지킨다."""
-    out: dict = {}
+    007 미준비면 facade 가 빈 dict 를 돌려주며(정상 부재 = '미작성'), 이는 readiness 배너로
+    이미 안내된다. READY 이후의 실제 조회 오류는 빈 dict('미작성')로 위장하지 않고
+    ``load_failed=True`` 로 표면화한다(오류≠정상 부재) — 큐 담당자·확인상태 열을 '조회실패'로
+    구분 표시하고 상단 error 배너로 안내하며, 담당자 시야는 미스코핑 노출을 막기 위해 빈 큐로
+    fail-closed 한다(``_scope_reports``)."""
     if reports is None or reports.empty:
-        return out
-    for rid in reports["id"].astype(str):
-        try:
-            out[rid] = db.get_near_miss_improvement(rid, current_user=user)
-        except Exception:
-            out[rid] = _LOAD_FAILED
-    return out
+        return {}, False
+    report_ids = list(reports["id"].astype(str))
+    try:
+        return db.list_near_miss_improvements(report_ids, current_user=user), False
+    except Exception:
+        return {}, True
+
+
+def _scope_reports(reports: pd.DataFrame, improvements: dict,
+                   is_reviewer: bool, load_failed: bool) -> pd.DataFrame:
+    """담당자(비평가자) 시야를 자기 배정건으로 좁힌다. 평가자/ADMIN 은 전체 유지.
+
+    큐 보고서(EVALUATED)는 개선조치 조회와 독립이라, 담당자에게도 전량 보이면 미배정 건이
+    노출된다 — actor-aware 개선조치 dict 의 report_id 로만 남긴다. 조회 실패 시 담당자는 어떤
+    건이 자기 배정인지 알 수 없으므로 빈 큐로 fail-closed 한다(평가자/ADMIN 은 전체 유지·열
+    라벨만 '조회실패')."""
+    if reports is None or reports.empty or is_reviewer:
+        return reports
+    if load_failed:
+        return reports.iloc[0:0]
+    ids = set(improvements.keys())
+    return reports[reports["id"].astype(str).isin(ids)].reset_index(drop=True)
 
 
 def _user_label(emp_no) -> str:
@@ -256,15 +278,13 @@ def _flag(cond) -> str:
 
 
 def _confirm_state_of(imp) -> str:
-    if imp is _LOAD_FAILED:
-        return _LOAD_FAILED_LABEL
     if not imp:
         return "미작성"
     return str(imp.get("confirm_status") or "").strip() or "미작성"
 
 
 # ---------- 큐 그리드 ----------
-def _queue_rows(reports: pd.DataFrame, improvements: dict) -> pd.DataFrame:
+def _queue_rows(reports: pd.DataFrame, improvements: dict, load_failed: bool) -> pd.DataFrame:
     if reports is None or reports.empty:
         return pd.DataFrame(columns=_QUEUE_ROW_COLS)
     frame = reports.sort_values("incident_date", ascending=False, kind="stable").reset_index(drop=True)
@@ -272,13 +292,17 @@ def _queue_rows(reports: pd.DataFrame, improvements: dict) -> pd.DataFrame:
     for _, r in frame.iterrows():
         rid = str(r.get("id"))
         imp = improvements.get(rid)
-        confirm_state = _confirm_state_of(imp)
-        if imp is _LOAD_FAILED:
-            assignee = _LOAD_FAILED_LABEL       # 조회 실패는 '미지정'(정상)으로 위장하지 않는다.
+        if load_failed:
+            # 조회 실패는 '미지정/미작성'(정상)으로 위장하지 않고 두 열을 '조회실패'로 표시한다.
+            assignee = _LOAD_FAILED_LABEL
+            confirm_label = _LOAD_FAILED_LABEL
         elif imp:
             assignee = _user_label(imp.get("assignee_emp_no"))
+            confirm_state = _confirm_state_of(imp)
+            confirm_label = _CONFIRM_LABEL.get(confirm_state, confirm_state)
         else:
             assignee = "미지정"
+            confirm_label = _CONFIRM_LABEL.get("미작성", "미작성")
         rows.append({
             "_row_id": f"e:{rid}",
             "_row_state": "existing",
@@ -287,7 +311,7 @@ def _queue_rows(reports: pd.DataFrame, improvements: dict) -> pd.DataFrame:
             "작업명": str(r.get("work_name") or "-"),
             "확정등급": str(r.get("confirmed_grade") or "-"),
             "담당자": assignee,
-            "확인상태": _CONFIRM_LABEL.get(confirm_state, confirm_state),
+            "확인상태": confirm_label,
             "발생일": str(r.get("incident_date") or "-"),
         })
     return pd.DataFrame(rows, columns=_QUEUE_ROW_COLS)
@@ -317,9 +341,9 @@ def _picked_report_id(grid_df: pd.DataFrame):
     return rid[2:] if rid.startswith("e:") else rid
 
 
-def _render_queue(reports: pd.DataFrame, improvements: dict) -> pd.DataFrame:
+def _render_queue(reports: pd.DataFrame, improvements: dict, load_failed: bool) -> pd.DataFrame:
     selected_id = st.session_state.get(_SEL_KEY)
-    rows = _queue_rows(reports, improvements)
+    rows = _queue_rows(reports, improvements, load_failed)
     sheet_head("종결 대기 큐", count=len(rows))
 
     spec = MasterGridSpec(
@@ -379,8 +403,19 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         st.error("개선조치를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    form = _render_capa_form(selected_id, imp, readiness)
-    _render_actions(user, report, imp, form, readiness)
+    # 행단위 인가(재감사 #1) — 이 개선조치(imp)에 대한 actor 의 능력으로 폼 편집·버튼을 가른다.
+    #   can_work   = 저장된 담당자 본인 또는 ADMIN → 작업필드 편집·조치저장·제출.
+    #   can_review = 지정 확인자 본인 또는 평가자/ADMIN → 확인·재조치요청·보고서 종결.
+    #   can_assign = 평가자/ADMIN → 담당자·확인자 배정(select) 편집.
+    # facade 가 서버측 인가·필드 strip 을 전담하지만, 화면도 같은 경계를 표시해 혼동을 막는다
+    # (읽기전용 필드·미표시 버튼). 신원은 항상 auth.get_current_user() — 위젯 값이 아니다.
+    can_work = auth.can_work_improvement(user, imp)
+    can_review = auth.can_review_improvement(user, imp)
+    can_assign = auth.can_evaluate_near_miss(user)
+
+    form = _render_capa_form(selected_id, imp, readiness, can_work=can_work, can_assign=can_assign)
+    _render_actions(user, report, imp, form, readiness,
+                    can_work=can_work, can_review=can_review, can_assign=can_assign)
 
 
 def _render_report_summary(report: dict) -> None:
@@ -425,8 +460,14 @@ def _select_index(options: list[str], value) -> int:
     return options.index(value) if value in options else 0
 
 
-def _render_capa_form(selected_id, imp, readiness: ReadinessState) -> dict:
-    """CAPA 입력 폼(담당자·확인자·기한·조치 내용/결과) + 상태 배지. 반환은 위젯 현재값."""
+def _render_capa_form(selected_id, imp, readiness: ReadinessState,
+                      *, can_work: bool, can_assign: bool) -> dict:
+    """CAPA 입력 폼(담당자·확인자·기한·조치 내용/결과) + 상태 배지. 반환은 위젯 현재값.
+
+    행단위 편집 경계: 배정 필드(담당자·확인자)는 can_assign(평가자/ADMIN)만, 작업 필드
+    (기한·조치 내용/결과)는 can_work(배정 담당자 본인·ADMIN)만 편집 가능하고 그 외에는
+    읽기전용(disabled)으로 표시한다 — facade 가 어차피 strip 하지만 화면도 경계를 드러내
+    혼동을 막는다. 읽기전용이라도 위젯은 저장된 값을 반환하므로 반환 dict 는 온전하다."""
     submit_status = str(imp.get("submit_status") or "") if imp else ""
     confirm_status = _confirm_state_of(imp)
     submit_badge = _badge(_SUBMIT_LABEL.get(submit_status, "미작성"),
@@ -444,35 +485,41 @@ def _render_capa_form(selected_id, imp, readiness: ReadinessState) -> dict:
     options, labels = _user_options()
     fmt = lambda emp: labels.get(emp, emp)  # noqa: E731
 
+    if not can_assign:
+        st.caption("담당자·확인자 배정은 평가자·관리자만 변경할 수 있습니다.")
     c1, c2 = st.columns(2)
     with c1:
         assignee = st.selectbox(
             "조치 담당자", options,
             index=_select_index(options, imp.get("assignee_emp_no") if imp else ""),
             format_func=fmt, key=f"nm_impr_assignee_{selected_id}",
+            disabled=not can_assign,
         )
     with c2:
         confirmer = st.selectbox(
             "조치 확인자", options,
             index=_select_index(options, imp.get("designated_confirmer_emp_no") if imp else ""),
             format_func=fmt, key=f"nm_impr_confirmer_{selected_id}",
+            disabled=not can_assign,
         )
 
+    if not can_work:
+        st.caption("조치 내용·결과·기한은 배정된 담당자만 편집할 수 있습니다(조회 전용).")
     due_raw = str(imp.get("due_date") or "").strip() if imp else ""
     try:
         due_default = date.fromisoformat(due_raw) if due_raw else date.today()
     except ValueError:
         due_default = date.today()
     due = st.date_input("조치 기한", value=due_default, format="YYYY-MM-DD",
-                        key=f"nm_impr_due_{selected_id}")
+                        key=f"nm_impr_due_{selected_id}", disabled=not can_work)
 
     action_body = st.text_area(
         "조치 내용", value=str(imp.get("action_body") or "") if imp else "",
-        height=80, key=f"nm_impr_action_{selected_id}",
+        height=80, key=f"nm_impr_action_{selected_id}", disabled=not can_work,
     )
     result_body = st.text_area(
         "조치 결과", value=str(imp.get("result_body") or "") if imp else "",
-        height=80, key=f"nm_impr_result_{selected_id}",
+        height=80, key=f"nm_impr_result_{selected_id}", disabled=not can_work,
     )
     return {
         "assignee_emp_no": assignee,
@@ -483,7 +530,17 @@ def _render_capa_form(selected_id, imp, readiness: ReadinessState) -> dict:
     }
 
 
-def _render_actions(user: dict, report: dict, imp, form: dict, readiness: ReadinessState) -> None:
+def _render_actions(user: dict, report: dict, imp, form: dict, readiness: ReadinessState,
+                    *, can_work: bool, can_review: bool, can_assign: bool) -> None:
+    """행단위 역할 variant scope 액션(§0.4). 버튼 노출을 능력으로 가른다:
+
+      - can_work(담당자/ADMIN): 조치 저장·제출.
+      - can_assign(평가자/ADMIN): 배정 저장(담당자·확인자 지정).
+      - can_review(확인자/평가자/ADMIN): 확인·재조치 요청·보고서 종결.
+
+    버튼 활성은 readiness·status 에 더해 위 행단위 능력으로 판정한다(재감사 #1). 자기확인
+    (담당자==세션) 시 확인은 disabled+help 로 남기고 facade 도 차단한다. 실제 쓰기·신원전달
+    (auth.get_current_user())·예외흡수는 이 화면 소관이다."""
     selected_id = str(report.get("id"))
     can_write = readiness.write_enabled
     actor_emp = str(user.get("emp_no") or "").strip()
@@ -497,62 +554,72 @@ def _render_actions(user: dict, report: dict, imp, form: dict, readiness: Readin
     is_pending = is_submitted and confirm_status == "PENDING"
     self_confirm = bool(stored_assignee) and stored_assignee.casefold() == actor_emp.casefold()
 
-    # 재조치 요청 사유(전용 필드 — 반려와 별개 의미). 제출·확인대기일 때만 입력 가능.
-    reject_reason = st.text_area(
-        "재조치 요청 사유(요청 시 필수)", key=f"nm_impr_reject_{selected_id}", height=52,
-        disabled=(not can_write) or not is_pending,
-    )
-    reject_reason = str(reject_reason or "").strip()
+    # 재조치 요청 사유(전용 필드 — 반려와 별개 의미)는 검토 권한자만 본다. 제출·확인대기일 때만 입력.
+    reject_reason = ""
+    if can_review:
+        reject_reason = str(st.text_area(
+            "재조치 요청 사유(요청 시 필수)", key=f"nm_impr_reject_{selected_id}", height=52,
+            disabled=(not can_write) or not is_pending,
+        ) or "").strip()
 
-    # ---- 상태 의존 활성/help ----
-    save_disabled = (not can_write) or is_confirmed
-    save_help = readiness.message if not can_write else (
-        "확인된 개선조치는 수정할 수 없습니다." if is_confirmed else None)
+    actions: list[tuple] = []
 
-    submit_disabled = (not can_write) or submit_status != "DRAFT"
-    if not can_write:
-        submit_help = readiness.message
-    elif imp is None:
-        submit_help = "먼저 조치를 저장한 뒤 제출하세요."
-    elif submit_status != "DRAFT":
-        submit_help = "이미 제출된 개선조치입니다."
-    else:
-        submit_help = None
+    # ---- 저장(작업 or 배정) — can_work 또는 can_assign. 라벨로 무엇을 저장하는지 드러낸다. ----
+    save_label = None
+    if can_work or can_assign:
+        save_disabled = (not can_write) or is_confirmed
+        save_help = readiness.message if not can_write else (
+            "확인된 개선조치는 수정할 수 없습니다." if is_confirmed else None)
+        if can_work and can_assign:
+            save_label = "저장"          # ADMIN(또는 담당자 겸 평가자): 배정+작업 동시(facade 두 branch).
+        elif can_work:
+            save_label = "조치 저장"       # 담당자: 작업필드만(배정필드 facade strip).
+        else:
+            save_label = "배정 저장"       # 평가자: 담당자·확인자 배정만(작업필드 facade strip).
+        actions.append((save_label, "default", save_disabled, save_help))
 
-    confirm_disabled = (not can_write) or not is_pending or self_confirm
-    if not can_write:
-        confirm_help = readiness.message
-    elif not is_pending:
-        confirm_help = "제출된(확인대기) 개선조치만 확인할 수 있습니다."
-    elif self_confirm:
-        confirm_help = "조치 담당자 본인은 확인할 수 없습니다(자기확인 금지)."
-    else:
-        confirm_help = None
+    # ---- 제출 — can_work(담당자/ADMIN)만. 비담당 평가자에겐 미표시. ----
+    if can_work:
+        submit_disabled = (not can_write) or submit_status != "DRAFT"
+        if not can_write:
+            submit_help = readiness.message
+        elif imp is None:
+            submit_help = "먼저 조치를 저장한 뒤 제출하세요."
+        elif submit_status != "DRAFT":
+            submit_help = "이미 제출된 개선조치입니다."
+        else:
+            submit_help = None
+        actions.append(("제출", "primary", submit_disabled, submit_help))
 
-    reject_disabled = (not can_write) or not is_pending or not reject_reason
-    if not can_write:
-        reject_help = readiness.message
-    elif not is_pending:
-        reject_help = "제출된(확인대기) 개선조치만 재조치를 요청할 수 있습니다."
-    elif not reject_reason:
-        reject_help = "재조치 요청 사유를 입력하세요."
-    else:
-        reject_help = None
+    # ---- 확인·재조치 요청 — can_review(확인자/평가자/ADMIN)만. 담당자에겐 미표시. ----
+    if can_review:
+        confirm_disabled = (not can_write) or not is_pending or self_confirm
+        if not can_write:
+            confirm_help = readiness.message
+        elif not is_pending:
+            confirm_help = "제출된(확인대기) 개선조치만 확인할 수 있습니다."
+        elif self_confirm:
+            confirm_help = "조치 담당자 본인은 확인할 수 없습니다(자기확인 금지)."
+        else:
+            confirm_help = None
 
-    close_disabled = (not can_write) or not is_confirmed
-    close_help = readiness.message if not can_write else (
-        None if is_confirmed else "확인된 개선조치가 있어야 보고서를 종결할 수 있습니다.")
+        reject_disabled = (not can_write) or not is_pending or not reject_reason
+        if not can_write:
+            reject_help = readiness.message
+        elif not is_pending:
+            reject_help = "제출된(확인대기) 개선조치만 재조치를 요청할 수 있습니다."
+        elif not reject_reason:
+            reject_help = "재조치 요청 사유를 입력하세요."
+        else:
+            reject_help = None
 
-    # scope 액션(§0.4) — 워크플로 진행 4버튼. 실제 쓰기·신원전달·예외흡수는 이 화면 소관.
-    clicks = erp.detail_actions(_PAGE_ID, [
-        ("조치 저장", "default", save_disabled, save_help),
-        ("제출", "primary", submit_disabled, submit_help),
-        ("확인", "primary", confirm_disabled, confirm_help),
-        ("재조치 요청", "default", reject_disabled, reject_help),
-    ])
+        actions.append(("확인", "primary", confirm_disabled, confirm_help))
+        actions.append(("재조치 요청", "default", reject_disabled, reject_help))
 
-    if clicks.get("조치 저장"):
-        _run_action("조치 저장", lambda: db.upsert_near_miss_improvement(
+    clicks = erp.detail_actions(_PAGE_ID, actions)
+
+    if save_label and clicks.get(save_label):
+        _run_action(save_label, lambda: db.upsert_near_miss_improvement(
             selected_id, dict(form), current_user=auth.get_current_user(),
         ), keep_selection=True)
     if clicks.get("제출"):
@@ -568,7 +635,12 @@ def _render_actions(user: dict, report: dict, imp, form: dict, readiness: Readin
         ), keep_selection=True)
 
     # 종결 액션은 파괴적(불가역)이라 워크플로 버튼과 분리하고 2단계 확인을 강제한다.
-    _render_close(report, imp, close_disabled, close_help)
+    # 검토 권한자(확인자/평가자/ADMIN)만 노출 — 담당자 뷰엔 종결이 아예 표시되지 않는다.
+    if can_review:
+        close_disabled = (not can_write) or not is_confirmed
+        close_help = readiness.message if not can_write else (
+            None if is_confirmed else "확인된 개선조치가 있어야 보고서를 종결할 수 있습니다.")
+        _render_close(report, imp, close_disabled, close_help)
 
 
 def _save_then_submit(report_id, form: dict) -> dict:
@@ -616,22 +688,21 @@ def _render_close(report: dict, imp, disabled: bool, help_: str | None) -> None:
 
 
 # ---------- 하단 요약 ----------
-def _render_summary(reports: pd.DataFrame, improvements: dict) -> None:
+def _render_summary(reports: pd.DataFrame, improvements: dict, load_failed: bool) -> None:
     total = 0 if reports is None or reports.empty else len(reports)
+    if load_failed:
+        # 조회 실패를 '진행·미작성 0'으로 접으면 오류가 정상 진행처럼 보인다 — 실패로 명시한다.
+        erp.status_region([("종결 대기", f"{total}건"), ("개선조치", "조회 실패")])
+        return
     confirmed = sum(1 for imp in improvements.values()
-                    if imp and imp is not _LOAD_FAILED
-                    and str(imp.get("confirm_status") or "") == _CONFIRMED)
-    errored = sum(1 for imp in improvements.values() if imp is _LOAD_FAILED)
-    # 조회 실패 건을 '진행·미작성'으로 합산하면 오류가 정상 진행처럼 보인다 — 분리 집계한다.
-    in_progress = max(total - confirmed - errored, 0)
-    stats = [
+                    if imp and str(imp.get("confirm_status") or "") == _CONFIRMED)
+    # scoped 큐 기준(평가자=전체 EVALUATED, 담당자=자기 배정건) 확인완료/진행·미작성 집계.
+    in_progress = max(total - confirmed, 0)
+    erp.status_region([
         ("종결 대기", f"{total}건"),
         ("확인 완료", f"{confirmed}건"),
         ("진행·미작성", f"{in_progress}건"),
-    ]
-    if errored:
-        stats.append(("조회 실패", f"{errored}건"))
-    erp.status_region(stats)
+    ])
 
 
 # ---------- 액션 실행(예외 흡수) ----------

@@ -549,10 +549,15 @@ def app_shell(user: dict) -> str:
 def _menu_caps(user: dict) -> set:
     """메뉴 필터링용 능력 집합을 세션 사용자에서 계산한다(nav 는 DEPENDENCY-FREE —
     능력 판정은 호출부인 여기서 하고 nav 필터에 caps 로 넘긴다). app.py::_caps_for 와
-    동일 계약(같은 caps 를 메뉴 렌더와 route guard 가 공유해야 노출·차단이 일치한다)."""
+    동일 계약(같은 caps 를 메뉴 렌더와 route guard 가 공유해야 노출·차단이 일치한다).
+
+    개선조치 접근은 배정 기반 동적 판정(has_near_miss_improvement_access)이라 평가 능력과
+    별개로 계산한다 — 배정된 담당자·지정 확인자(일반 USER)도 개선조치 메뉴가 노출된다."""
     caps = set()
     if auth.can_evaluate_near_miss(user):
         caps.add(nav.CAP_EVALUATE_NEAR_MISS)
+    if db.has_near_miss_improvement_access(user):
+        caps.add(nav.CAP_ACCESS_NEAR_MISS_IMPROVEMENT)
     return caps
 
 

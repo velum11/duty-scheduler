@@ -23,6 +23,13 @@ App Shell 코드를 바꾸지 않고 이 목록에 그룹/하위 메뉴 dict 만
 #: 문자열 상수를 한곳에 두어 화면·shell·route guard 가 같은 이름을 쓰게 한다.
 CAP_EVALUATE_NEAR_MISS = "evaluate_near_miss"
 
+#: 개선조치 화면 접근 능력(호출부가 db.has_near_miss_improvement_access(user) 결과를 담는다).
+#: 평가자/ADMIN 뿐 아니라 배정된 담당자·지정 확인자(일반 USER)도 접근하므로 평가 능력
+#: (CAP_EVALUATE_NEAR_MISS)과 구분한다 — 개선조치 노출은 정적 role/평가가 아니라 '배정 기반'
+#: 동적 판정이다. 메뉴는 권한경계가 아니며 route guard·화면 진입가드·facade 가 행단위로
+#: 재검증한다(nav 는 DEPENDENCY-FREE — 판정은 호출부가 하고 이 토큰으로 caps 에 담아 넘긴다).
+CAP_ACCESS_NEAR_MISS_IMPROVEMENT = "access_near_miss_improvement"
+
 _MY_SCHEDULE = {
     "id": "my_schedule",
     "label": "내 근무표",
@@ -41,7 +48,7 @@ USER_MENU = [
     {"id": "near_miss_evaluate", "label": "평가 관리", "icon": ":material/fact_check:",
      "capability": CAP_EVALUATE_NEAR_MISS},
     {"id": "near_miss_improvement", "label": "개선조치 관리", "icon": ":material/build:",
-     "capability": CAP_EVALUATE_NEAR_MISS},
+     "capability": CAP_ACCESS_NEAR_MISS_IMPROVEMENT},
     {"id": "near_miss_view", "label": "아차사고 조회", "icon": ":material/search:"},
     {"id": "near_miss_stats", "label": "아차사고 분석", "icon": ":material/analytics:"},
 ]
@@ -75,11 +82,13 @@ _NEAR_MISS_GROUP = {
             "roles": (), "capability": CAP_EVALUATE_NEAR_MISS,
         },
         {
-            # 개선조치 관리 — 평가 관리와 동일한 능력 게이트(평가자만). role 하드코딩 없이
-            # capability 로만 노출한다(구 ADMIN 전용 → 안전담당자 USER 도 포함하도록 통일).
+            # 개선조치 관리 — '배정 기반' 접근 능력 게이트. 평가 관리(평가자만)와 달리 배정된
+            # 담당자·지정 확인자(일반 USER)도 노출되므로 CAP_ACCESS_NEAR_MISS_IMPROVEMENT 로
+            # 노출한다(호출부가 db.has_near_miss_improvement_access 로 동적 판정). role 하드코딩
+            # 없이 capability 로만. 메뉴는 권한경계가 아니며 route guard·facade 가 행단위 재검증한다.
             "id": "near_miss_improvement", "label": "개선조치 관리",
             "desc": "아차사고 개선조치를 관리합니다.",
-            "roles": (), "capability": CAP_EVALUATE_NEAR_MISS,
+            "roles": (), "capability": CAP_ACCESS_NEAR_MISS_IMPROVEMENT,
         },
         {
             "id": "near_miss_view", "label": "아차사고 조회",

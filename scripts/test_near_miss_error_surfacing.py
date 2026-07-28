@@ -5,8 +5,9 @@
 
 세 화면의 오류 경로는 모두 순수 헬퍼(st 미접촉)로 분기되므로, 개별 조회 파사드에 오류를
 주입해 다음을 직접 검증한다.
-  1) near_miss_improvement._improvements_for  — 조회 실패는 None 아닌 _LOAD_FAILED sentinel
-                                                (행 라벨 '조회실패'), 정상 부재 None 은 '미작성'.
+  1) near_miss_improvement._improvements_for  — actor-aware bulk(list_near_miss_improvements).
+                                                조회 실패는 빈 dict 로 접지 않고 load_failed=True
+                                                (행 라벨 '조회실패'), 정상 부재는 빈 dict + 미작성.
   2) near_miss_my._render_revision_banner     — 조회 실패는 danger 배너, 없음은 무배너.
   3) db.near_miss_overdue_count               — 평가자/ADMIN 전용, 개별 조회 실패는 축소 수치/
                                                 가짜 0 아닌 None('—'), 일반 USER 는 미노출(None).
@@ -65,34 +66,37 @@ def _swap(mod, name, value):
 _REPORTS = pd.DataFrame([{"id": "r1"}, {"id": "r2"}])
 
 
-# ===== 1) near_miss_improvement._improvements_for =====
+# ===== 1) near_miss_improvement._improvements_for (actor-aware bulk + load_failed) =====
 print("개선조치 큐 enrich — 조회 실패 vs 정상 부재 구분")
 
-_VIEWER = {"emp_no": "x"}  # _improvements_for 는 actor-aware(current_user 필수) — swap 은 무시.
+_VIEWER = {"emp_no": "x"}  # _improvements_for 는 actor-aware(current_user 필수).
 
-with _swap(db, "get_near_miss_improvement", lambda rid, **kw: (_ for _ in ()).throw(_Boom("boom"))):
-    out = nmi._improvements_for(_REPORTS, _VIEWER)
-check("조회 실패는 None 아닌 _LOAD_FAILED sentinel", out["r1"] is nmi._LOAD_FAILED)
-check("모든 실패 행이 sentinel(미작성으로 접히지 않음)",
-      all(v is nmi._LOAD_FAILED for v in out.values()))
-check("sentinel 의 확인상태 라벨은 '조회실패'(미작성 아님)",
-      nmi._confirm_state_of(nmi._LOAD_FAILED) == nmi._LOAD_FAILED_LABEL)
+# 조회 실패(READY 이후 실제 오류)는 빈 dict('미작성')로 접지 않고 load_failed=True 로 표면화한다.
+with _swap(db, "list_near_miss_improvements",
+           lambda ids, **kw: (_ for _ in ()).throw(_Boom("boom"))):
+    imps, load_failed = nmi._improvements_for(_REPORTS, _VIEWER)
+check("조회 실패 → load_failed=True(오류 표면화)", load_failed is True)
+check("조회 실패 시 enrich dict 는 비어있음(미작성 위장 아님)", imps == {})
 
-with _swap(db, "get_near_miss_improvement", lambda rid, **kw: None):
-    out_absent = nmi._improvements_for(_REPORTS, _VIEWER)
-check("정상 부재(None)는 그대로 None — 미작성으로 정상 표시", out_absent["r1"] is None)
+# 정상 부재(개선조치 없음)는 빈 dict + load_failed=False — '미작성'으로 정상 표시.
+with _swap(db, "list_near_miss_improvements", lambda ids, **kw: {}):
+    imps_absent, lf_absent = nmi._improvements_for(_REPORTS, _VIEWER)
+check("정상 부재 → load_failed=False", lf_absent is False)
+check("정상 부재 dict 비어있음(그러나 오류 아님)", imps_absent == {})
 check("정상 부재는 '미작성' 라벨(오류 표식과 구분)",
       nmi._confirm_state_of(None) == "미작성")
 
-# 그리드 행: sentinel 은 담당자·확인상태 모두 '조회실패'로 노출(미지정/미작성 위장 없음).
+# 그리드 행: load_failed 면 담당자·확인상태 모두 '조회실패'로 노출(미지정/미작성 위장 없음).
 _QUEUE_REPORTS = pd.DataFrame([
     {"id": "r1", "report_no": "NM-1", "work_name": "작업A",
      "confirmed_grade": "B", "incident_date": "2026-07-01"},
     {"id": "r2", "report_no": "NM-2", "work_name": "작업B",
      "confirmed_grade": "C", "incident_date": "2026-07-02"},
 ])
-with _swap(db, "get_near_miss_improvement", lambda rid, **kw: (_ for _ in ()).throw(_Boom("boom"))):
-    rows = nmi._queue_rows(_QUEUE_REPORTS, nmi._improvements_for(_QUEUE_REPORTS, _VIEWER))
+with _swap(db, "list_near_miss_improvements",
+           lambda ids, **kw: (_ for _ in ()).throw(_Boom("boom"))):
+    imps_q, lf_q = nmi._improvements_for(_QUEUE_REPORTS, _VIEWER)
+rows = nmi._queue_rows(_QUEUE_REPORTS, imps_q, lf_q)
 check("그리드 행 확인상태='조회실패'", set(rows["확인상태"]) == {nmi._LOAD_FAILED_LABEL})
 check("그리드 행 담당자='조회실패'(미지정 위장 아님)",
       set(rows["담당자"]) == {nmi._LOAD_FAILED_LABEL})
