@@ -77,8 +77,10 @@ def render(user: dict) -> None:
     _readiness().banner()
     filters: dict = {}
 
-    # 영역 순서(§0.3): title(밴드 아이콘 툴바) → 지표카드(status) → 분포 패널(primary).
-    # 새로고침은 상단 밴드 아이콘으로 이전했다(위 render_icons — 인페이지 pill 제거).
+    # 영역 순서(§0.3, Codex 정합): title(밴드 아이콘 툴바) → primary(KPI 지표) →
+    # details(분포). 이전엔 KPI 를 status 로, 분포를 primary 로 봐 순서가 역전돼 있었다 —
+    # DASHBOARD 는 지표가 primary(좌상단 우선), 분포가 세부(details)다. 새로고침은 상단 밴드
+    # 아이콘으로 이전했다(위 render_icons — 인페이지 pill 제거).
 
     try:
         status_counts = db.near_miss_stats(by="status", filters=filters)
@@ -98,11 +100,13 @@ def render(user: dict) -> None:
         ui.empty_state("집계할 아차사고 보고서가 없습니다.", head="아차사고 집계")
         return
 
-    # CAPA 기한초과는 신고 분포(전사 공개)와 달리 역할 기반 접근이다 — 파사드가 평가자/
-    # ADMIN 만 집계를 돌려주고 일반 USER 에게는 None('—')을 준다(집계 수치 leak 방지).
+    # primary — KPI 지표(좌상단 우선). CAPA 기한초과는 신고 분포(전사 공개)와 달리 역할 기반
+    # 접근이다 — 파사드가 평가자/ADMIN 만 집계를 돌려주고 일반 USER 에게는 None('—')을 준다
+    # (집계 수치 leak 방지).
     _kpi_cards(status_counts, total, db.near_miss_overdue_count(current_user=user))
     st.write("")
 
+    # details — 분포(등급·상태·부서·원인·월·분기 6종을 컴팩트 테이블 2열로).
     col_a, col_b = st.columns(2)
     with col_a:
         _grade_panel(grade_counts, total)
@@ -136,17 +140,27 @@ def _readiness() -> ReadinessState:
 
 # ---------- KPI 카드 ----------
 def _kpi_cards(status_counts: dict, total: int, overdue: int | None) -> None:
+    """6개 KPI 를 좌상단 우선 2행(우선/보조)으로 렌더한다(Codex: 한 행 6등분 지양).
+
+    한 행 6등분 대신 우선 지표(총 건수·평가 대기·기한초과 — 규모·미처리 백로그·긴급
+    초과)를 상단 행에, 파생·완료 지표(평가완료·종결·반려·보고서 종결률)를 하단 행에 둔다.
+    좌상단이 실제 위계가 되도록 순서를 배치하되, 정확히 현재 6개 KPI 를 보존한다. 각 행은
+    공용 요약 카드 컴포넌트(erp.status_region)를 재사용한다(밴드 새 위젯 없음)."""
     pending = status_counts.get("SUBMITTED", 0) + status_counts.get("IN_REVIEW", 0)
     evaluated = status_counts.get("EVALUATED", 0)
     closed = status_counts.get("CLOSED", 0)
     closed_or_rejected = closed + status_counts.get("REJECTED", 0)
+    # 우선 행(좌상단 우세) — 규모·백로그·긴급 초과.
     erp.status_region([
         ("총 건수", f"{total}건"),
         ("평가 대기", f"{pending}건"),
+        ("기한초과", _overdue_label(overdue)),
+    ])
+    # 보조 행 — 완료·종결·비율.
+    erp.status_region([
         ("평가완료", f"{evaluated}건"),
         ("종결·반려", f"{closed_or_rejected}건"),
         ("보고서 종결률", _closure_rate_label(closed, evaluated)),
-        ("기한초과", _overdue_label(overdue)),
     ])
 
 
@@ -173,25 +187,40 @@ def _closure_rate_label(closed: int, evaluated: int) -> str:
     return f"{round(closed / denom * 100)}%"
 
 
-# ---------- 분포 패널 ----------
+# ---------- 분포 패널(컴팩트 테이블) ----------
 def _panel(title: str, rows: list[tuple[str, int, str]], total: int) -> None:
+    """분포를 라벨·건수·비중 컴팩트 테이블로 렌더한다(카드 반복+수제 막대 지양).
+
+    카드마다 큰 막대를 반복하는 대신 밀도 높은 표 한 행에 라벨(색+텍스트 배지 이중부호화)·
+    건수·비중(%)을 싣고, 막대는 패널 내 최댓값 대비의 **보조 인라인** 신호로만 남긴다.
+    실데이터 집계만 표시하며 허수·장식 차트는 만들지 않는다(빈 분포는 방어 문구로 대체)."""
     max_count = max((c for _, c, _ in rows), default=0) or 1
     body = []
     for label, count, color in rows:
-        pct = round(count / max_count * 100) if max_count else 0
-        share = round(count / total * 100) if total else 0
+        bar = round(count / max_count * 100) if max_count else 0   # 패널 내 상대(막대 = 보조)
+        share = round(count / total * 100) if total else 0         # 전체 대비 비중(수치 열)
         body.append(
-            "<div class='nm-row'>"
-            f"<div class='nm-row-label'>{ui.badge_html(escape(label), color)}</div>"
-            "<div class='nm-row-bar-wrap'>"
-            f"<div class='nm-row-bar' style='width:{pct}%;background:{color}'></div>"
+            "<div class='nm-tr'>"
+            f"<div class='nm-td-l'>{ui.badge_html(escape(label), color)}</div>"
+            "<div class='nm-td-bar'>"
+            f"<div class='nm-td-fill' style='width:{bar}%;background:{color}'></div>"
             "</div>"
-            f"<div class='nm-row-count'>{count}건 <span class='nm-row-pct'>({share}%)</span></div>"
+            f"<div class='nm-td-c'>{count}</div>"
+            f"<div class='nm-td-p'>{share}%</div>"
             "</div>"
         )
+    if not body:
+        body.append("<div class='nm-tr nm-empty'><div>표시할 분포가 없습니다</div></div>")
     with ui.card():
         ui.panel_head(title, f"총 {total}건")
-        st.markdown(f"<div class='nm-panel'>{''.join(body)}</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='nm-tbl'>"
+            "<div class='nm-tr nm-th'><div class='nm-td-l'>항목</div>"
+            "<div class='nm-td-bar'></div><div class='nm-td-c'>건수</div>"
+            "<div class='nm-td-p'>비중</div></div>"
+            f"{''.join(body)}</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def _grade_panel(counts: dict, total: int) -> None:
@@ -272,17 +301,27 @@ def _quarter_of(month_key: str) -> str:
 
 def _inject_panel_style() -> None:
     st.markdown(
-        """
+        f"""
 <style>
-.nm-panel { display:flex; flex-direction:column; gap:.4rem; margin-top:.3rem; }
-.nm-row { display:grid; grid-template-columns:110px 1fr 120px; align-items:center; gap:.5rem; }
-.nm-row-bar-wrap { background:#F1EEE7; border-radius:4px; height:10px; overflow:hidden; }
-.nm-row-bar { height:100%; border-radius:4px; }
-.nm-row-count { font-size:12.5px; color:#24262B; font-variant-numeric:tabular-nums; text-align:right; }
-.nm-row-pct { color:#908C83; }
-@media (max-width:768px) {
-  .nm-row { grid-template-columns:88px 1fr 96px; }
-}
+.nm-tbl {{ display:flex; flex-direction:column; margin-top:.25rem; }}
+.nm-tr {{ display:grid; grid-template-columns:minmax(84px,132px) 1fr 44px 46px;
+  align-items:center; gap:.5rem; padding:2px 0;
+  border-bottom:1px solid {TOKENS['line']}; }}
+.nm-tr:last-child {{ border-bottom:0; }}
+.nm-th {{ font-size:11px; color:{TOKENS['ink-2']}; font-weight:600;
+  border-bottom:1px solid {TOKENS['line-strong']}; padding-bottom:3px; }}
+.nm-th .nm-td-c, .nm-th .nm-td-p {{ text-align:right; }}
+.nm-td-bar {{ background:{TOKENS['surface-2']}; border-radius:3px; height:8px; overflow:hidden; }}
+.nm-th .nm-td-bar {{ background:transparent; }}
+.nm-td-fill {{ height:100%; border-radius:3px; }}
+.nm-td-c {{ font-size:12.5px; color:{TOKENS['ink']};
+  font-variant-numeric:tabular-nums; text-align:right; }}
+.nm-td-p {{ font-size:12px; color:{TOKENS['ink-2']};
+  font-variant-numeric:tabular-nums; text-align:right; }}
+.nm-empty {{ grid-template-columns:1fr; color:{TOKENS['ink-3']}; font-size:12.5px; padding:6px 0; }}
+@media (max-width:768px) {{
+  .nm-tr {{ grid-template-columns:minmax(72px,104px) 1fr 40px 42px; }}
+}}
 </style>
 """,
         unsafe_allow_html=True,
