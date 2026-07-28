@@ -205,3 +205,62 @@ def can_evaluate_near_miss(user) -> bool:
         return False
     role = str(user.get("role", "")).strip().upper()
     return role in ("ADMIN", "MANAGER") or is_safety_officer(user)
+
+
+def is_admin(user) -> bool:
+    """행위자가 ADMIN 인지(role 대소문자 무시). 개선조치 작업/검토 인가의 전역 우회 근거."""
+    if not user:
+        return False
+    return str(user.get("role", "")).strip().upper() == "ADMIN"
+
+
+def _emp_exact_match(actor_emp, stored_emp) -> bool:
+    """권위 사번 정확 일치(trim only, casefold 아님).
+
+    개선조치 인가 *부여*(담당자·확인자 본인 매칭)는 정확 일치를 쓴다 — 대소문자만 다른
+    사번은 계약상 별개 계정(supabase 는 서로 다른 user_id, requirements.md)이므로 casefold
+    로 매칭하면 sample 에서만 다른 계정에 권한이 새어 supabase(user_id 매칭)와 어긋난다.
+    저장된 담당자/확인자 사번과 actor 사번은 같은 사람의 권위 원본값이라 정확 일치로
+    정당한 주체를 배제하지 않는다(아차사고 보고 소유자 게이트와 동일한 근거). 자기확인
+    *금지* 같은 배제 판정은 반대로 casefold(포괄) 를 쓴다 — 우회를 넓게 막아야 하므로."""
+    actor_emp = str(actor_emp or "").strip()
+    return actor_emp != "" and actor_emp == str(stored_emp or "").strip()
+
+
+def can_work_improvement(user, improvement) -> bool:
+    """개선조치 **작업 필드**(조치 저장·제출) 권한: 저장된 배정 담당자 본인 또는 ADMIN.
+
+    ``improvement`` 는 자연키 계약 dict(assignee_emp_no 포함) 또는 None(미배정)이다.
+    미배정(None)이면 담당자 본인 매칭이 성립하지 않으므로 ADMIN 만 참이다 — 담당자는
+    배정 전에 스스로 조치를 만들 수 없다(배정은 평가자/ADMIN 전용)."""
+    if not user:
+        return False
+    if is_admin(user):
+        return True
+    if not improvement:
+        return False
+    return _emp_exact_match(user.get("emp_no"), improvement.get("assignee_emp_no"))
+
+
+def can_review_improvement(user, improvement) -> bool:
+    """개선조치 **검토 행위**(확인·재조치 요청·종결) 권한: 지정 확인자 본인 또는 평가 능력
+    (ADMIN/MANAGER/안전담당자).
+
+    ``improvement=None`` 이면 지정 확인자를 알 수 없어 평가 능력자만 참이다. 자기확인
+    금지(확인 시 담당자 본인 배제)는 이 함수가 아니라 확인 파사드가 추가로 강제한다 —
+    검토 권한과 자기확인 금지는 별개 규칙이다."""
+    if not user:
+        return False
+    if can_evaluate_near_miss(user):   # ADMIN/MANAGER/안전담당자 (ADMIN 포함)
+        return True
+    if not improvement:
+        return False
+    return _emp_exact_match(user.get("emp_no"), improvement.get("designated_confirmer_emp_no"))
+
+
+def can_access_improvement(user, improvement) -> bool:
+    """개선조치 **개별 조회** 권한: 작업 권한 또는 검토 권한 중 하나.
+
+    = 저장된 담당자 · 지정 확인자 · 평가자 · ADMIN. 그 밖의 인증 사용자는 report_id 를
+    넘겼다는 이유만으로 접근할 수 없다(actor-aware 스코핑의 단일 판정 지점)."""
+    return can_work_improvement(user, improvement) or can_review_improvement(user, improvement)

@@ -671,16 +671,17 @@ def _fresh_submitted(reporter: dict) -> dict:
 
 
 def _close_via_confirmed_capa(rid, *, assignee: dict, closer: dict):
-    """007 종결 경로: 개선조치 등록·제출·확인 후 close_near_miss_report 로 종결한다.
+    """007 종결 경로: CAPA 행단위 인가에 맞춰 배정·작업·확인·종결 주체를 분리한다.
 
-    update_near_miss_status 의 직접 →CLOSED 는 007 이후 차단되므로(확인된 활성 개선조치
-    하드게이트), 종결을 검증하는 기존 테스트를 새 계약(close_near_miss_report)으로 갱신한다.
-    확인자(closer)는 담당자(assignee)와 달라야 한다(자기확인 금지)."""
+    closer(평가자/ADMIN)가 담당자를 배정하고, 배정된 담당자(assignee)가 조치를 작성·제출한 뒤
+    closer 가 확인·종결한다(자기확인 금지: closer≠assignee). update_near_miss_status 의 직접
+    →CLOSED 는 007 이후 차단되므로 close_near_miss_report 하드게이트로만 종결한다."""
     db.upsert_near_miss_improvement(
-        rid, {"assignee_emp_no": assignee["emp_no"], "action_body": "조치", "result_body": "결과"},
-        current_user=closer)
-    db.submit_near_miss_improvement(rid, current_user=closer)
-    db.confirm_near_miss_improvement(rid, current_user=closer)
+        rid, {"assignee_emp_no": assignee["emp_no"]}, current_user=closer)       # 배정(평가자)
+    db.upsert_near_miss_improvement(
+        rid, {"action_body": "조치", "result_body": "결과"}, current_user=assignee)  # 담당자 작업
+    db.submit_near_miss_improvement(rid, current_user=assignee)                  # 담당자 제출
+    db.confirm_near_miss_improvement(rid, current_user=closer)                   # 확인(≠담당자)
     return db.close_near_miss_report(rid, current_user=closer)
 
 

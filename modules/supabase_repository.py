@@ -2079,11 +2079,31 @@ def _near_miss_improvement_natural(rows: list[dict]) -> list[dict]:
     return out
 
 
-def _near_miss_improvement_body(payload: dict) -> dict:
-    """개선조치 본문 입력(자연키)을 검증·정규화해 ID/FK 저장 dict 로 만든다(신원/상태 제외).
+def _near_miss_improvement_work_body(payload: dict) -> dict:
+    """개선조치 **작업 필드**(조치 내용/결과/기한)만 검증·정규화한다(신원/상태/배정 제외).
 
-    assignee/designated_confirmer 는 emp_no 로 받아 FK 로 해석한다. 본문·기한만 담으며
-    submit/confirm 상태·확인/반려 행위자·시각은 절대 포함하지 않는다(서버측 확정 대상)."""
+    배정 필드(담당자·확인자)는 여기 포함하지 않는다 — 작업(upsert/submit) 경로와 배정
+    경로를 분리하기 위해서다. submit/confirm 상태·확인/반려 행위자·시각도 절대 포함하지
+    않는다(서버측 확정 대상)."""
+    due = _clean_text(payload.get("due_date"), nullable=True)
+    if due:
+        try:
+            date.fromisoformat(due)
+        except ValueError as exc:
+            raise SupabaseDataError(f"조치 기한 형식이 유효하지 않습니다: {due}") from exc
+    return {
+        "action_body": _clean_text(payload.get("action_body")),
+        "result_body": _clean_text(payload.get("result_body")),
+        "due_date": due or None,
+    }
+
+
+def _near_miss_improvement_assign_body(payload: dict, *, present_only: bool) -> dict:
+    """배정 필드(담당자·지정 확인자)를 emp_no 로 받아 FK(user_id)로 해석한다.
+
+    ``present_only=True`` 면 payload 에 실제로 존재하는 키만 반환한다(키 부재=배정 미변경/
+    보존, 빈 값=해제). ``False`` 면 두 필드를 모두 반환한다(생성 시 초기 배정). 배정·재배정은
+    평가자/ADMIN 전용 명령의 산물이며, 이 헬퍼는 파사드가 배정 권한을 확인한 뒤에만 쓰인다."""
     user_by_emp, _ = _user_maps()
 
     def resolve(emp_key):
@@ -2094,19 +2114,15 @@ def _near_miss_improvement_body(payload: dict) -> dict:
             raise SupabaseDataError(f"사용자 사번을 찾을 수 없습니다: {emp}")
         return user_by_emp[emp]
 
-    due = _clean_text(payload.get("due_date"), nullable=True)
-    if due:
-        try:
-            date.fromisoformat(due)
-        except ValueError as exc:
-            raise SupabaseDataError(f"조치 기한 형식이 유효하지 않습니다: {due}") from exc
-    return {
-        "assignee_user_id": resolve("assignee_emp_no"),
-        "designated_confirmer_user_id": resolve("designated_confirmer_emp_no"),
-        "action_body": _clean_text(payload.get("action_body")),
-        "result_body": _clean_text(payload.get("result_body")),
-        "due_date": due or None,
-    }
+    out: dict = {}
+    for emp_key, id_key in (
+        ("assignee_emp_no", "assignee_user_id"),
+        ("designated_confirmer_emp_no", "designated_confirmer_user_id"),
+    ):
+        if present_only and emp_key not in payload:
+            continue
+        out[id_key] = resolve(emp_key)
+    return out
 
 
 def get_near_miss_improvement(report_id) -> dict | None:
@@ -2133,21 +2149,49 @@ def _nmi_raw(report_id) -> dict | None:
     return rows[0] if rows else None
 
 
-def upsert_near_miss_improvement(report_id, payload: dict, *, updated_by=None) -> dict:
-    """개선조치를 DRAFT 로 저장한다(없으면 생성, 있으면 편집).
+def _resolve_assignee_id_for_restrict(restrict_to_assignee_emp_no):
+    """작업 경로 조건부 UPDATE(WHERE 담당자=행위자)용 담당자 user_id 를 해석한다.
 
-    편집은 항상 DRAFT/PENDING 으로 되돌리며(확인/반려 행위자·시각 초기화), 이미 확인
-    (CONFIRMED)된 개선조치는 편집할 수 없다(강등 방지). 상태는 조건부 UPDATE(where
-    confirm_status <> 'CONFIRMED')로 서버측에서도 다시 강제한다(lost update/강등 방지)."""
+    사번을 확인할 수 없으면 fail-closed(예외) — 조건 없는 광범위 UPDATE 로 새지 않게 한다."""
+    if restrict_to_assignee_emp_no is None:
+        return None
+    user_by_emp, _ = _user_maps()
+    emp = _clean_text(restrict_to_assignee_emp_no)
+    assignee_id = user_by_emp.get(emp)
+    if assignee_id is None:
+        raise SupabaseDataError(f"작업 행위자(담당자) 사번을 확인할 수 없습니다: {emp}")
+    return assignee_id
+
+
+def upsert_near_miss_improvement(
+    report_id, payload: dict, *, updated_by=None,
+    allow_assignment: bool = False, restrict_to_assignee_emp_no=None,
+) -> dict:
+    """개선조치를 DRAFT 로 저장한다(없으면 생성, 있으면 편집). **배정/작업 필드 분리**.
+
+    ``allow_assignment`` (평가자/ADMIN)면 담당자·확인자(배정 필드)를 payload 로 설정·변경한다
+    (생성 시 두 필드, 편집 시 payload 에 있는 키만). False(담당자 작업 경로)면 배정 필드는
+    건드리지 않고 작업 필드만 UPDATE 한다. ``restrict_to_assignee_emp_no`` 가 주어지면 편집
+    UPDATE 에 ``assignee_user_id=행위자`` 조건을 더해 조회~쓰기 사이 재배정 경합을 차단한다
+    (0행=재배정됨=stale). 편집은 항상 DRAFT/PENDING 으로 되돌리며, 이미 확인(CONFIRMED)된
+    개선조치는 편집할 수 없다(강등 방지, where confirm_status<>'CONFIRMED' 이중)."""
     if not near_miss_improvement_extensions_ready():
         raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
-    body = _near_miss_improvement_body(payload)
+    work = _near_miss_improvement_work_body(payload)
     existing = _nmi_raw(report_id)
     attribution = _clean_text(updated_by, nullable=True)
+    restrict_assignee_id = _resolve_assignee_id_for_restrict(restrict_to_assignee_emp_no)
     if existing is None:
+        # 생성은 배정 권한이 있어야 한다(담당자 자가생성 금지 — 파사드가 선차단, 여기 이중).
+        if not allow_assignment:
+            raise SupabaseDataError(
+                "개선조치가 아직 배정되지 않았습니다. 담당자를 먼저 배정해야 합니다."
+            )
+        assign = _near_miss_improvement_assign_body(payload, present_only=False)
         record = {
             "report_id": report_id,
-            **body,
+            **assign,
+            **work,
             "submit_status": "DRAFT",
             "confirm_status": "PENDING",
             "is_active": True,
@@ -2165,7 +2209,7 @@ def upsert_near_miss_improvement(report_id, payload: dict, *, updated_by=None) -
     if str(existing.get("confirm_status") or "") == "CONFIRMED":
         raise SupabaseDataError("이미 확인(CONFIRMED)된 개선조치는 수정할 수 없습니다.")
     updates = {
-        **body,
+        **work,
         "submit_status": "DRAFT",
         "confirm_status": "PENDING",
         "submitted_at": None,
@@ -2175,11 +2219,16 @@ def upsert_near_miss_improvement(report_id, payload: dict, *, updated_by=None) -
         "rejected_at": None,
         "updated_by": attribution,
     }
+    if allow_assignment:
+        # 평가자/ADMIN: payload 에 있는 배정 키만 갱신(부재 키는 보존).
+        updates.update(_near_miss_improvement_assign_body(payload, present_only=True))
     query = (
         client().table(NEAR_MISS_IMPROVEMENT_TABLE).update(updates)
         .eq("report_id", report_id)
         .neq("confirm_status", "CONFIRMED")
     )
+    if restrict_assignee_id is not None:
+        query = query.eq("assignee_user_id", restrict_assignee_id)
     response = _execute(query, "수정", NEAR_MISS_IMPROVEMENT_TABLE)
     saved = (response.data or [None])[0]
     if saved is None:
@@ -2187,8 +2236,11 @@ def upsert_near_miss_improvement(report_id, payload: dict, *, updated_by=None) -
     return _near_miss_improvement_natural([saved])[0]
 
 
-def submit_near_miss_improvement(report_id, *, updated_by=None) -> dict:
-    """DRAFT→SUBMITTED. 담당자·조치 결과가 채워져 있어야 한다(DB CHECK 미러)."""
+def submit_near_miss_improvement(report_id, *, updated_by=None, restrict_to_assignee_emp_no=None) -> dict:
+    """DRAFT→SUBMITTED. 담당자·조치 결과가 채워져 있어야 한다(DB CHECK 미러).
+
+    ``restrict_to_assignee_emp_no`` 가 주어지면 조건부 UPDATE 에 ``assignee_user_id=행위자``
+    를 더해, 제출 직전 재배정 경합을 stale 로 거부한다(담당자 본인 제출 보장, ADMIN 은 비제한)."""
     if not near_miss_improvement_extensions_ready():
         raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
     existing = _nmi_raw(report_id)
@@ -2198,6 +2250,7 @@ def submit_near_miss_improvement(report_id, *, updated_by=None) -> dict:
         raise SupabaseDataError("조치 담당자가 지정되어야 제출할 수 있습니다.")
     if not str(existing.get("result_body") or "").strip():
         raise SupabaseDataError("조치 결과가 입력되어야 제출할 수 있습니다.")
+    restrict_assignee_id = _resolve_assignee_id_for_restrict(restrict_to_assignee_emp_no)
     from datetime import datetime, timezone
     updates = {
         "submit_status": "SUBMITTED",
@@ -2209,6 +2262,8 @@ def submit_near_miss_improvement(report_id, *, updated_by=None) -> dict:
         .eq("report_id", report_id)
         .eq("submit_status", "DRAFT")
     )
+    if restrict_assignee_id is not None:
+        query = query.eq("assignee_user_id", restrict_assignee_id)
     response = _execute(query, "제출", NEAR_MISS_IMPROVEMENT_TABLE)
     saved = (response.data or [None])[0]
     if saved is None:

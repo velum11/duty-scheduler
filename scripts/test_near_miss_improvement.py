@@ -245,21 +245,22 @@ def test_submit_requires_assignee_and_result() -> None:
     manager = _actor_of_role("MANAGER")
     rid = _evaluated_report(reporter, manager)
 
-    # 담당자·결과 없이 제출 불가.
-    db.upsert_near_miss_improvement(rid, {"action_body": "조치만"}, current_user=manager)
-    check("담당자/결과 없으면 제출 차단",
-          raises(lambda: db.submit_near_miss_improvement(rid, current_user=manager), ValueError) is not None)
+    # 평가자가 담당자를 배정하되 조치 결과는 아직 없음(담당자가 조치 내용만 저장).
+    db.upsert_near_miss_improvement(rid, {"assignee_emp_no": reporter["emp_no"]}, current_user=manager)
+    db.upsert_near_miss_improvement(rid, {"action_body": "조치만"}, current_user=reporter)
+    # 조치 결과 없이 담당자 제출 불가.
+    check("결과 없으면 제출 차단",
+          raises(lambda: db.submit_near_miss_improvement(rid, current_user=reporter), ValueError) is not None)
 
-    # 담당자·결과 채우고 제출.
-    db.upsert_near_miss_improvement(rid, {
-        "assignee_emp_no": reporter["emp_no"], "result_body": "결과"}, current_user=manager)
-    rec = db.submit_near_miss_improvement(rid, current_user=manager)
+    # 결과 채우고 담당자 제출.
+    db.upsert_near_miss_improvement(rid, {"result_body": "결과"}, current_user=reporter)
+    rec = db.submit_near_miss_improvement(rid, current_user=reporter)
     check("DRAFT→SUBMITTED", rec["submit_status"] == "SUBMITTED")
     check("submitted_at 서버측 설정", bool(str(rec["submitted_at"] or "")))
     check("confirm_status PENDING 유지", rec["confirm_status"] == "PENDING")
 
     # 이미 SUBMITTED 인데 다시 제출 → stale.
-    exc = raises(lambda: db.submit_near_miss_improvement(rid, current_user=manager), ValueError)
+    exc = raises(lambda: db.submit_near_miss_improvement(rid, current_user=reporter), ValueError)
     check("SUBMITTED 재제출 stale", exc is not None and "이미 변경" in str(exc))
 
 
@@ -267,9 +268,12 @@ def test_submit_requires_assignee_and_result() -> None:
 # confirm — 서버귀속·자기확인 차단·능력 게이트·stale
 # =========================================================================
 def _submitted_improvement(rid, assignee, actor):
+    """CAPA 행단위 인가 흐름: 평가자(actor)가 배정하고, 배정된 담당자(assignee)가 조치를
+    작성·제출한다. 배정과 작업(제출)이 서버측 인가로 분리됐으므로 각각 올바른 주체로 호출한다."""
     db.upsert_near_miss_improvement(rid, {
-        "assignee_emp_no": assignee["emp_no"], "result_body": "결과"}, current_user=actor)
-    db.submit_near_miss_improvement(rid, current_user=actor)
+        "assignee_emp_no": assignee["emp_no"]}, current_user=actor)              # 배정(평가자)
+    db.upsert_near_miss_improvement(rid, {"result_body": "결과"}, current_user=assignee)  # 담당자 작업
+    db.submit_near_miss_improvement(rid, current_user=assignee)                  # 담당자 제출
 
 
 def test_confirm_server_attribution_and_self_confirm() -> None:
@@ -464,9 +468,10 @@ def test_reopen_resets_confirmed_capa() -> None:
     manager = _actor_of_role("MANAGER")
     rid = _evaluated_report(reporter, manager)
     db.upsert_near_miss_improvement(rid, {
-        "assignee_emp_no": reporter["emp_no"], "result_body": "조치결과",
-        "due_date": "2026-08-15"}, current_user=manager)
-    db.submit_near_miss_improvement(rid, current_user=manager)
+        "assignee_emp_no": reporter["emp_no"]}, current_user=manager)   # 배정(평가자)
+    db.upsert_near_miss_improvement(rid, {
+        "result_body": "조치결과", "due_date": "2026-08-15"}, current_user=reporter)  # 담당자 작업
+    db.submit_near_miss_improvement(rid, current_user=reporter)         # 담당자 제출
     db.confirm_near_miss_improvement(rid, current_user={"emp_no": manager["emp_no"]})
     check("사전 CONFIRMED", db.get_near_miss_improvement(rid)["confirm_status"] == "CONFIRMED")
 
@@ -495,9 +500,13 @@ def test_confirm_supabase_path_server_attribution() -> None:
 
     orig_sample = db.is_sample_mode
     orig_find = db.find_user_by_emp_no
+    orig_get = db.get_near_miss_improvement
     orig_repo = db.supabase_repository.confirm_near_miss_improvement
     db.is_sample_mode = lambda: False
     db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
+    # 인가 판정용 원본 개선조치(담당자는 actor 와 다른 사람 → 자기확인 아님, manager 는 평가자).
+    db.get_near_miss_improvement = lambda rid, **kw: {
+        "assignee_emp_no": "1003", "designated_confirmer_emp_no": ""}
     db.supabase_repository.confirm_near_miss_improvement = (
         lambda report_id, *, confirmed_by_emp_no, updated_by: (
             captured.update({"report_id": report_id, "confirmed_by_emp_no": confirmed_by_emp_no,
@@ -507,6 +516,7 @@ def test_confirm_supabase_path_server_attribution() -> None:
     finally:
         db.is_sample_mode = orig_sample
         db.find_user_by_emp_no = orig_find
+        db.get_near_miss_improvement = orig_get
         db.supabase_repository.confirm_near_miss_improvement = orig_repo
 
     check("repo confirmed_by = 인증 actor 사번", captured.get("confirmed_by_emp_no") == manager["emp_no"])
@@ -529,10 +539,11 @@ def test_sample_self_confirm_case_insensitive() -> None:
         reporter = {"emp_no": "1003"}
         manager = {"emp_no": "1002"}
         rid = _evaluated_report(reporter, manager)
-        # 담당자를 소문자 'capamgr' 로 지정(DB 원본 표기는 'CapaMgr').
+        # 담당자를 소문자 'capamgr' 로 지정(DB 원본 표기는 'CapaMgr'). 배정은 평가자(manager).
         db.upsert_near_miss_improvement(
             rid, {"assignee_emp_no": "capamgr", "result_body": "결과"}, current_user=manager)
-        db.submit_near_miss_improvement(rid, current_user=manager)
+        # 제출은 배정된 담당자(CapaMgr) 본인이 한다(작업 권한).
+        db.submit_near_miss_improvement(rid, current_user={"emp_no": "CapaMgr"})
         check("담당자 사번 정규화 저장(DB 원본 표기)",
               db.get_near_miss_improvement(rid)["assignee_emp_no"] == "CapaMgr")
         # 같은 사람을 대문자 'CAPAMGR' 로 확인자 지정 → 자기확인 차단(대소문자 무차별).
@@ -805,9 +816,12 @@ def test_close_supabase_path_calls_rpc() -> None:
 
     orig_sample = db.is_sample_mode
     orig_find = db.find_user_by_emp_no
+    orig_get = db.get_near_miss_improvement
     orig_repo = db.supabase_repository.close_near_miss_report
     db.is_sample_mode = lambda: False
     db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
+    # 종결 인가 판정용 개선조치 조회(평가자 manager 는 None 이어도 can_review 통과 — 하드게이트는 RPC).
+    db.get_near_miss_improvement = lambda rid, **kw: None
     db.supabase_repository.close_near_miss_report = (
         lambda report_id, *, actor_emp_no: (
             captured.update({"report_id": report_id, "actor_emp_no": actor_emp_no})
@@ -817,6 +831,7 @@ def test_close_supabase_path_calls_rpc() -> None:
     finally:
         db.is_sample_mode = orig_sample
         db.find_user_by_emp_no = orig_find
+        db.get_near_miss_improvement = orig_get
         db.supabase_repository.close_near_miss_report = orig_repo
 
     check("close 는 repo(RPC)로 위임", out and out.get("status") == "CLOSED")
@@ -825,56 +840,234 @@ def test_close_supabase_path_calls_rpc() -> None:
 
 
 # =========================================================================
-# CAPA 저장·제출 능력 게이트 (종합감사 P1-A)
+# CAPA 작업(저장·제출) 행단위 인가 — 배정된 담당자 허용 / 비담당자 차단 (Phase1 계약 갱신)
+#   계약 변경: 이전 "활성 USER 저장·제출 전면 차단(평가 능력 필수)"에서, 배정된 담당자
+#   (일반 USER 가능)는 작업 필드 저장·제출 허용, 비담당자·비평가자는 차단으로 바뀌었다.
+#   assertion 약화가 아니라 의도 업무흐름(담당자가 조치를 수행)에 맞춘 행단위 인가다.
 # =========================================================================
 def test_capa_save_submit_capability_gate() -> None:
-    print("CAPA 저장·제출 능력 게이트: 활성 USER 차단 / ADMIN·MANAGER·안전담당자 허용 (종합감사 P1-A)")
+    print("CAPA 작업 인가: 배정 담당자(USER) 저장·제출 허용 / 비담당자 차단 (Phase1 계약 갱신)")
     _reset()
-    reporter = _actor_of_role("USER")
+    assignee = _actor_of_role("USER")
+    other = _actor_of_role("USER", exclude=(assignee["emp_no"],))
     manager = _actor_of_role("MANAGER")
     admin = _actor_of_role("ADMIN")
-    rid = _evaluated_report(reporter, manager)
+    rid = _evaluated_report(assignee, manager)
 
-    # 활성 일반 USER 는 능력이 없어 upsert(저장) 차단 — 무인증/비활성이 아니라 능력 부재.
+    # 미배정 상태에서 담당자 후보(USER)가 스스로 저장 시도 → 차단(배정 선행 필요, 권한 없음).
     excu = raises(lambda: db.upsert_near_miss_improvement(
-        rid, {"assignee_emp_no": reporter["emp_no"], "result_body": "USER 저장 시도"},
-        current_user={"emp_no": reporter["emp_no"]}), ValueError)
-    check("활성 USER upsert 능력 차단", excu is not None and "권한" in str(excu))
-    check("USER 차단 후 개선조치 미생성", db.get_near_miss_improvement(rid) is None)
+        rid, {"result_body": "미배정 저장 시도"},
+        current_user={"emp_no": assignee["emp_no"]}), ValueError)
+    check("미배정 담당자 저장 차단", excu is not None and "권한" in str(excu))
+    check("차단 후 개선조치 미생성", db.get_near_miss_improvement(rid) is None)
 
-    # ADMIN 저장 허용(양성).
-    db.upsert_near_miss_improvement(rid, {
-        "assignee_emp_no": reporter["emp_no"], "result_body": "ADMIN 조치"}, current_user=admin)
-    check("ADMIN upsert 허용", db.get_near_miss_improvement(rid)["result_body"] == "ADMIN 조치")
+    # 평가자(MANAGER)가 담당자를 배정(생성). 배정은 평가자/ADMIN 전용.
+    db.upsert_near_miss_improvement(
+        rid, {"assignee_emp_no": assignee["emp_no"]}, current_user=manager)
+    check("배정 후 개선조치 생성", db.get_near_miss_improvement(rid) is not None)
+    check("배정된 담당자 저장", db.get_near_miss_improvement(rid)["assignee_emp_no"] == assignee["emp_no"])
 
-    # 활성 일반 USER 는 submit(제출)도 차단.
-    excs = raises(lambda: db.submit_near_miss_improvement(
-        rid, current_user={"emp_no": reporter["emp_no"]}), ValueError)
-    check("활성 USER submit 능력 차단", excs is not None and "권한" in str(excs))
-    check("USER 제출 차단 후 DRAFT 유지",
-          db.get_near_miss_improvement(rid)["submit_status"] == "DRAFT")
+    # 배정된 담당자(USER)는 작업 필드 저장 허용(양성).
+    db.upsert_near_miss_improvement(
+        rid, {"result_body": "담당자 조치결과"}, current_user={"emp_no": assignee["emp_no"]})
+    check("배정 담당자 저장 허용", db.get_near_miss_improvement(rid)["result_body"] == "담당자 조치결과")
 
-    # ADMIN 제출 허용(양성).
-    rec = db.submit_near_miss_improvement(rid, current_user=admin)
-    check("ADMIN submit 허용", rec["submit_status"] == "SUBMITTED")
+    # 다른 USER(비담당자)는 저장 차단(타인 조치 작업 금지).
+    exco = raises(lambda: db.upsert_near_miss_improvement(
+        rid, {"result_body": "타인 개입"}, current_user={"emp_no": other["emp_no"]}), ValueError)
+    check("비담당자 USER 저장 차단", exco is not None and "권한" in str(exco))
+    check("비담당자 차단 후 결과 불변",
+          db.get_near_miss_improvement(rid)["result_body"] == "담당자 조치결과")
 
-    # 안전담당자(USER 역할이지만 is_safety_officer=True)도 저장·제출 허용(능력 근거=플래그).
+    # 배정된 담당자(USER) 제출 허용(양성).
+    rec = db.submit_near_miss_improvement(rid, current_user={"emp_no": assignee["emp_no"]})
+    check("배정 담당자 제출 허용", rec["submit_status"] == "SUBMITTED")
+
+    # 비담당자 USER 제출 차단(다른 rid 로 검증 — 위 rid 는 이미 SUBMITTED).
     _reset()
-    so = _actor_of_role("USER")
-    reporter2 = _actor_of_role("USER", exclude=(so["emp_no"],))
-    rid2 = _evaluated_report(reporter2, manager)
-    orig = db._safety_officer_flag
-    db._safety_officer_flag = lambda emp, **_: str(emp).strip() == so["emp_no"]
+    rid2 = _evaluated_report(assignee, manager)
+    db.upsert_near_miss_improvement(rid2, {"assignee_emp_no": assignee["emp_no"]}, current_user=manager)
+    db.upsert_near_miss_improvement(rid2, {"result_body": "결과"}, current_user={"emp_no": assignee["emp_no"]})
+    excs = raises(lambda: db.submit_near_miss_improvement(
+        rid2, current_user={"emp_no": other["emp_no"]}), ValueError)
+    check("비담당자 USER 제출 차단", excs is not None and "권한" in str(excs))
+    check("제출 차단 후 DRAFT 유지", db.get_near_miss_improvement(rid2)["submit_status"] == "DRAFT")
+
+    # ADMIN 은 담당자가 아니어도 작업(저장·제출) 허용(전역 우회).
+    db.upsert_near_miss_improvement(rid2, {"result_body": "ADMIN 보정"}, current_user=admin)
+    check("ADMIN 작업 저장 허용", db.get_near_miss_improvement(rid2)["result_body"] == "ADMIN 보정")
+    rec2 = db.submit_near_miss_improvement(rid2, current_user=admin)
+    check("ADMIN 제출 허용", rec2["submit_status"] == "SUBMITTED")
+
+
+# =========================================================================
+# 배정은 평가자/ADMIN 전용 + 담당자 upsert 는 배정필드 재지정 불가(핵심 보안)
+# =========================================================================
+def test_assignment_authority_and_field_separation() -> None:
+    print("배정은 평가자/ADMIN 만 + 담당자 작업 upsert 는 담당자·확인자 재지정 불가 (Phase1 #2)")
+    _reset()
+    assignee = _actor_of_role("USER")
+    other = _actor_of_role("USER", exclude=(assignee["emp_no"],))
+    manager = _actor_of_role("MANAGER")
+    rid = _evaluated_report(assignee, manager)
+
+    # 평가자만 배정(생성)할 수 있다. USER 는 생성/배정 불가.
+    excu = raises(lambda: db.upsert_near_miss_improvement(
+        rid, {"assignee_emp_no": assignee["emp_no"]},
+        current_user={"emp_no": assignee["emp_no"]}), ValueError)
+    check("USER 는 배정(생성) 불가", excu is not None and "권한" in str(excu))
+
+    # 평가자 배정: 담당자=assignee, 확인자=other.
+    db.upsert_near_miss_improvement(rid, {
+        "assignee_emp_no": assignee["emp_no"],
+        "designated_confirmer_emp_no": other["emp_no"]}, current_user=manager)
+    imp = db.get_near_miss_improvement(rid)
+    check("배정 담당자 저장", imp["assignee_emp_no"] == assignee["emp_no"])
+    check("배정 확인자 저장", imp["designated_confirmer_emp_no"] == other["emp_no"])
+
+    # 담당자(USER)가 작업 upsert 에 담당자·확인자 재지정을 시도해도 무시된다(배정필드 서버전용).
+    db.upsert_near_miss_improvement(rid, {
+        "result_body": "조치", "assignee_emp_no": other["emp_no"],
+        "designated_confirmer_emp_no": assignee["emp_no"]},
+        current_user={"emp_no": assignee["emp_no"]})
+    imp2 = db.get_near_miss_improvement(rid)
+    check("담당자 재지정 무시(담당자 불변)", imp2["assignee_emp_no"] == assignee["emp_no"])
+    check("확인자 재지정 무시(확인자 불변)", imp2["designated_confirmer_emp_no"] == other["emp_no"])
+    check("작업 필드는 반영", imp2["result_body"] == "조치")
+
+    # 평가자는 재배정 가능(배정 권한): 담당자를 other 로 변경.
+    db.upsert_near_miss_improvement(rid, {"assignee_emp_no": other["emp_no"]}, current_user=manager)
+    check("평가자 재배정 반영", db.get_near_miss_improvement(rid)["assignee_emp_no"] == other["emp_no"])
+    # 재배정 후 이전 담당자(assignee)는 더 이상 작업 불가.
+    exco = raises(lambda: db.upsert_near_miss_improvement(
+        rid, {"result_body": "이전 담당자 개입"}, current_user={"emp_no": assignee["emp_no"]}), ValueError)
+    check("재배정 후 이전 담당자 작업 차단", exco is not None)
+
+
+# =========================================================================
+# 지정 확인자(일반 USER) 확인 허용 + 자기확인 차단
+# =========================================================================
+def test_designated_confirmer_user_can_confirm() -> None:
+    print("지정 확인자(일반 USER) 확인 허용 + 담당자 자기확인 차단 (Phase1 매트릭스)")
+    _reset()
+    assignee = _actor_of_role("USER")
+    confirmer = _actor_of_role("USER", exclude=(assignee["emp_no"],))
+    outsider = _actor_of_role("USER", exclude=(assignee["emp_no"], confirmer["emp_no"]))
+    manager = _actor_of_role("MANAGER")
+    rid = _evaluated_report(assignee, manager)
+
+    # 배정: 담당자=assignee, 지정 확인자=confirmer(일반 USER). 담당자가 작업·제출.
+    db.upsert_near_miss_improvement(rid, {
+        "assignee_emp_no": assignee["emp_no"],
+        "designated_confirmer_emp_no": confirmer["emp_no"]}, current_user=manager)
+    db.upsert_near_miss_improvement(rid, {"result_body": "결과"}, current_user={"emp_no": assignee["emp_no"]})
+    db.submit_near_miss_improvement(rid, current_user={"emp_no": assignee["emp_no"]})
+
+    # 관계없는 USER 는 확인 불가(검토 권한 없음).
+    exco = raises(lambda: db.confirm_near_miss_improvement(
+        rid, current_user={"emp_no": outsider["emp_no"]}), ValueError)
+    check("관계없는 USER 확인 차단", exco is not None and "권한" in str(exco))
+
+    # 담당자 본인 자기확인 차단(지정 확인자가 따로 있어도).
+    excsc = raises(lambda: db.confirm_near_miss_improvement(
+        rid, current_user={"emp_no": assignee["emp_no"]}), ValueError)
+    check("담당자 자기확인 차단", excsc is not None)
+    check("자기확인 차단 후 PENDING 유지",
+          db.get_near_miss_improvement(rid)["confirm_status"] == "PENDING")
+
+    # 지정 확인자(일반 USER) 확인 허용 + 서버 귀속.
+    rec = db.confirm_near_miss_improvement(rid, current_user={"emp_no": confirmer["emp_no"]})
+    check("지정 확인자(USER) 확인 허용", rec["confirm_status"] == "CONFIRMED")
+    check("확인 행위자=지정 확인자 서버귀속", rec["confirmed_by_emp_no"] == confirmer["emp_no"])
+
+    # 지정 확인자(USER)는 종결도 가능(검토 권한 = 확인·재조치·종결).
+    out = db.close_near_miss_report(rid, current_user={"emp_no": confirmer["emp_no"]})
+    check("지정 확인자(USER) 종결 허용", out["status"] == "CLOSED")
+
+
+# =========================================================================
+# actor-aware 개별 조회·큐 스코핑 — 담당자/확인자/평가자만, report_id 로만 접근 금지
+# =========================================================================
+def test_actor_aware_access_and_queue_scoping() -> None:
+    print("actor-aware 조회: 담당자·지정 확인자·평가자만 개별 접근 / 큐 스코핑 (Phase1 #3)")
+    _reset()
+    assignee = _actor_of_role("USER")
+    confirmer = _actor_of_role("USER", exclude=(assignee["emp_no"],))
+    outsider = _actor_of_role("USER", exclude=(assignee["emp_no"], confirmer["emp_no"]))
+    manager = _actor_of_role("MANAGER")
+    rid = _evaluated_report(assignee, manager)
+    db.upsert_near_miss_improvement(rid, {
+        "assignee_emp_no": assignee["emp_no"],
+        "designated_confirmer_emp_no": confirmer["emp_no"]}, current_user=manager)
+
+    # 개별 조회 스코핑: 담당자·지정 확인자·평가자는 보이고, 무관 USER 는 None(미노출).
+    check("담당자 개별 조회 허용",
+          db.get_near_miss_improvement(rid, current_user={"emp_no": assignee["emp_no"]}) is not None)
+    check("지정 확인자 개별 조회 허용",
+          db.get_near_miss_improvement(rid, current_user={"emp_no": confirmer["emp_no"]}) is not None)
+    check("평가자 개별 조회 허용",
+          db.get_near_miss_improvement(rid, current_user=manager) is not None)
+    check("무관 USER 개별 조회 미노출(None)",
+          db.get_near_miss_improvement(rid, current_user={"emp_no": outsider["emp_no"]}) is None)
+    # current_user 없이(내부/집계)는 스코핑 없음.
+    check("스코핑 없는 조회는 원본", db.get_near_miss_improvement(rid) is not None)
+
+    # 큐 스코핑: 무관 USER 는 자기 큐에서 이 개선조치를 보지 못한다.
+    scoped_assignee = db.list_near_miss_improvements([rid], current_user={"emp_no": assignee["emp_no"]})
+    scoped_confirmer = db.list_near_miss_improvements([rid], current_user={"emp_no": confirmer["emp_no"]})
+    scoped_outsider = db.list_near_miss_improvements([rid], current_user={"emp_no": outsider["emp_no"]})
+    scoped_manager = db.list_near_miss_improvements([rid], current_user=manager)
+    check("담당자 큐에 포함", str(rid) in scoped_assignee)
+    check("지정 확인자 큐에 포함", str(rid) in scoped_confirmer)
+    check("평가자 큐에 전체 포함", str(rid) in scoped_manager)
+    check("무관 USER 큐에서 제외", str(rid) not in scoped_outsider)
+
+
+# =========================================================================
+# 재배정 경합(조건부 UPDATE) — supabase 작업 경로에 담당자=행위자 조건 결합
+# =========================================================================
+def test_work_path_conditional_reassignment_race() -> None:
+    print("작업 경로 조건부 UPDATE: 담당자 upsert/submit 에 assignee_user_id=행위자 결합 (Phase1 #4)")
+    manager = _actor_of_role("MANAGER")
+    # supabase 경로에서 담당자(USER)가 작업할 때 repo 로 담당자 제한 사번이 전달되는지 확인한다.
+    assignee_rec = db.find_user_by_emp_no("1003")
+    imp_natural = {"assignee_emp_no": "1003", "designated_confirmer_emp_no": ""}
+    captured: dict = {}
+
+    orig_sample = db.is_sample_mode
+    orig_find = db.find_user_by_emp_no
+    orig_get = db.get_near_miss_improvement
+    orig_report = db.get_near_miss_report
+    orig_upsert = db.supabase_repository.upsert_near_miss_improvement
+    orig_submit = db.supabase_repository.submit_near_miss_improvement
+    db.is_sample_mode = lambda: False
+    db.find_user_by_emp_no = lambda emp, **kw: assignee_rec if str(emp).strip() == "1003" else None
+    db.get_near_miss_report = lambda rid: {"id": rid, "status": "EVALUATED"}
+    db.get_near_miss_improvement = lambda rid, **kw: dict(imp_natural)
+    db.supabase_repository.upsert_near_miss_improvement = (
+        lambda report_id, payload, *, updated_by=None, allow_assignment=False,
+        restrict_to_assignee_emp_no=None: (
+            captured.update({"u_allow": allow_assignment, "u_restrict": restrict_to_assignee_emp_no})
+            or {"submit_status": "DRAFT"}))
+    db.supabase_repository.submit_near_miss_improvement = (
+        lambda report_id, *, updated_by=None, restrict_to_assignee_emp_no=None: (
+            captured.update({"s_restrict": restrict_to_assignee_emp_no})
+            or {"submit_status": "SUBMITTED"}))
     try:
-        db.upsert_near_miss_improvement(rid2, {
-            "assignee_emp_no": reporter2["emp_no"], "result_body": "안전담당자 조치"},
-            current_user={"emp_no": so["emp_no"]})
-        check("안전담당자 upsert 허용",
-              db.get_near_miss_improvement(rid2)["result_body"] == "안전담당자 조치")
-        rec2 = db.submit_near_miss_improvement(rid2, current_user={"emp_no": so["emp_no"]})
-        check("안전담당자 submit 허용", rec2["submit_status"] == "SUBMITTED")
+        # 담당자(1003, USER) 작업 upsert → 배정권한 없음 + 담당자 제한 결합.
+        db.upsert_near_miss_improvement(9, {"result_body": "결과"}, current_user={"emp_no": "1003"})
+        db.submit_near_miss_improvement(9, current_user={"emp_no": "1003"})
     finally:
-        db._safety_officer_flag = orig
+        db.is_sample_mode = orig_sample
+        db.find_user_by_emp_no = orig_find
+        db.get_near_miss_improvement = orig_get
+        db.get_near_miss_report = orig_report
+        db.supabase_repository.upsert_near_miss_improvement = orig_upsert
+        db.supabase_repository.submit_near_miss_improvement = orig_submit
+
+    check("작업 upsert 는 배정 미허용(allow_assignment=False)", captured.get("u_allow") is False)
+    check("작업 upsert 담당자 제한 결합(=행위자)", captured.get("u_restrict") == "1003")
+    check("제출 담당자 제한 결합(=행위자)", captured.get("s_restrict") == "1003")
 
 
 # =========================================================================
@@ -1047,6 +1240,10 @@ def main() -> int:
         test_confirm_supabase_path_server_attribution,
         test_close_supabase_path_calls_rpc,
         test_capa_save_submit_capability_gate,
+        test_assignment_authority_and_field_separation,
+        test_designated_confirmer_user_can_confirm,
+        test_actor_aware_access_and_queue_scoping,
+        test_work_path_conditional_reassignment_race,
         test_report_id_immutable_sample,
         test_migration_007_sql_contract,
     ):

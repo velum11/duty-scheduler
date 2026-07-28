@@ -1583,6 +1583,10 @@ def _near_miss_actor(current_user, *, action: str) -> dict:
     if not auth._as_bool(record.get("is_active", True)):
         raise ValueError(f"{action} 권한이 없습니다: 비활성 사용자입니다({emp_no}).")
     # 사번·부서·능력근거 모두 권위 레코드에서 가져온다(세션 dict 의 dept_code/role 무시).
+    # emp_no 는 개선조치 행단위 인가(assignee/designated_confirmer 본인 매칭)의 **권위 신원**
+    # 이다. 사용자 자연키 계약(USER_COLUMNS)·조회 경로는 사용자 id 를 노출하지 않으므로
+    # (sample/supabase 공통), 담당자/확인자 매칭은 저장된 권위 사번(DB 원본 표기) 대 actor
+    # 권위 사번의 정확 일치로 한다(auth.can_work_improvement/can_review_improvement).
     return {
         "emp_no": str(record.get("emp_no") or emp_no).strip(),
         "dept_code": str(record.get("dept_code") or "").strip(),
@@ -2217,10 +2221,35 @@ _NEAR_MISS_IMPROVEMENT_SERVER_FIELDS = frozenset({
     "is_active", "created_by", "updated_by", "created_at", "updated_at",
 })
 
+# 배정 전용 필드(담당자·지정 확인자). 배정·재배정은 평가자/ADMIN 전용 명령이며, 조치
+# 담당자의 작업(upsert/submit) 경로에서는 payload 로 와도 무시된다(재지정 차단) — 담당자가
+# 자신을 다른 사람으로 바꾸거나 확인자를 조작하지 못하게 봉함한다(CAPA 행단위 인가 핵심).
+_NEAR_MISS_IMPROVEMENT_ASSIGN_FIELDS = ("assignee_emp_no", "designated_confirmer_emp_no")
+
 _NEAR_MISS_IMPROVEMENT_CONFIRMED = "CONFIRMED"
 _NEAR_MISS_IMPROVEMENT_NO_CAPA_MESSAGE = (
     "확인(CONFIRMED)된 활성 개선조치가 없어 종결할 수 없습니다. "
     "개선조치를 등록·제출하고 확인을 받은 뒤 종결하세요."
+)
+# 조치 저장·제출(작업 필드) 인가 실패 — 저장된 배정 담당자 본인 또는 ADMIN 만 가능하다.
+_NEAR_MISS_IMPROVEMENT_NOT_ASSIGNEE_MESSAGE = (
+    "이 개선조치를 저장·제출할 권한이 없습니다. 배정된 조치 담당자 본인 또는 관리자만 "
+    "조치 필드를 수정·제출할 수 있습니다."
+)
+# 확인·재조치 요청·종결(검토 행위) 인가 실패 — 지정 확인자 또는 평가자 또는 ADMIN 만 가능.
+_NEAR_MISS_IMPROVEMENT_NOT_REVIEWER_MESSAGE = (
+    "이 개선조치를 확인·재조치 요청·종결할 권한이 없습니다. 지정 확인자 또는 평가자"
+    "(관리자·매니저·안전담당자)만 검토 행위를 할 수 있습니다."
+)
+# 미배정 상태에서 담당자가 조치를 저장하려 할 때 — 배정이 선행돼야 한다(평가자/ADMIN).
+_NEAR_MISS_IMPROVEMENT_NOT_ASSIGNED_MESSAGE = (
+    "개선조치가 아직 배정되지 않았습니다. 평가자·관리자가 조치 담당자를 먼저 배정해야 "
+    "조치를 저장할 수 있습니다."
+)
+# 조회~쓰기 사이 재배정 경합으로 조건부 UPDATE(담당자=행위자)가 0행이 된 경우.
+_NEAR_MISS_IMPROVEMENT_REASSIGNED_MESSAGE = (
+    "배정이 이미 변경되어 요청을 적용할 수 없습니다(다른 담당자로 재배정됨). "
+    "목록을 재조회한 뒤 다시 시도하세요."
 )
 
 
@@ -2248,10 +2277,28 @@ def _nmi_store() -> dict:
     return st.session_state[_NEAR_MISS_IMPROVEMENT_STORE]
 
 
-def _nmi_sample_body(payload: dict) -> dict:
-    """개선조치 본문 입력(자연키)을 검증·정규화한다(신원/상태 제외 — 서버측 확정 대상).
+def _nmi_sample_work_body(payload: dict) -> dict:
+    """개선조치 **작업 필드**(조치 내용/결과/기한)만 검증·정규화한다(신원/상태/배정 제외).
 
-    supabase 경로(_near_miss_improvement_body)와 같은 필드·규칙을 파이썬으로 재현한다."""
+    배정 필드(담당자·확인자)는 여기 포함하지 않는다 — 작업(upsert/submit) 경로와 배정
+    경로를 분리하기 위해서다(supabase `_near_miss_improvement_work_body` 미러)."""
+    payload = dict(payload or {})
+    due = str(payload.get("due_date") or "").strip()
+    if due:
+        date.fromisoformat(due)  # 형식 오류 시 ValueError
+    return {
+        "action_body": str(payload.get("action_body") or ""),
+        "result_body": str(payload.get("result_body") or ""),
+        "due_date": due or None,
+    }
+
+
+def _nmi_sample_resolve_assignment(payload: dict) -> dict:
+    """배정 필드(담당자·확인자)를 **payload 에 실제로 존재하는 키만** 검증·정규화한다.
+
+    키 부재 = 배정 미변경(보존), 빈 값 = 해제. 권위 사번(DB 원본 표기)으로 정규화해 저장
+    한다(대소문자만 다른 입력이 자기확인 비교를 우회하지 못하게 — 비교도 casefold 로 이중
+    방어). supabase `_near_miss_improvement_assign_body(present_only=True)` 미러."""
     payload = dict(payload or {})
 
     def resolve(emp_key):
@@ -2261,21 +2308,13 @@ def _nmi_sample_body(payload: dict) -> dict:
         found = find_user_by_emp_no(emp)
         if found is None:
             raise ValueError(f"사용자 사번을 찾을 수 없습니다: {emp}")
-        # 담당자/확인자 참조는 권위 사번(DB 원본 표기)으로 정규화해 저장한다(Codex P2-4).
-        # supabase 경로가 user_id 로 해소하는 것과 같은 표준화 — 대소문자만 다른 입력이
-        # 자기확인 비교를 우회하지 못하게 한다(비교도 casefold 로 이중 방어).
         return str(found.get("emp_no") or emp).strip()
 
-    due = str(payload.get("due_date") or "").strip()
-    if due:
-        date.fromisoformat(due)  # 형식 오류 시 ValueError
-    return {
-        "assignee_emp_no": resolve("assignee_emp_no"),
-        "designated_confirmer_emp_no": resolve("designated_confirmer_emp_no"),
-        "action_body": str(payload.get("action_body") or ""),
-        "result_body": str(payload.get("result_body") or ""),
-        "due_date": due or None,
-    }
+    out: dict = {}
+    for emp_key in _NEAR_MISS_IMPROVEMENT_ASSIGN_FIELDS:
+        if emp_key in payload:
+            out[emp_key] = resolve(emp_key)
+    return out
 
 
 def _nmi_new_id(store: dict) -> int:
@@ -2299,75 +2338,148 @@ def _nmi_sample_reset_on_reopen(report_id) -> None:
     store[str(report_id)] = rec
 
 
-def get_near_miss_improvement(report_id) -> dict | None:
-    """보고서의 개선조치(자연키 dict) 또는 None."""
+def get_near_miss_improvement(report_id, *, current_user=None) -> dict | None:
+    """보고서의 개선조치(자연키 dict) 또는 None.
+
+    ``current_user`` 를 넘기면 **actor-aware 스코핑**을 적용한다: 인증 행위자가 이 개선조치의
+    저장된 담당자·지정 확인자·평가자·ADMIN 중 하나가 아니면 None 을 돌려준다(권한 없음 =
+    미노출). report_id 를 클라이언트가 넘겼다는 이유만으로 조회를 허용하지 않는다. 파사드
+    내부 인가 판정용 조회는 ``current_user`` 없이(스코핑 없이) 호출하고 각 파사드가 자체
+    인가를 별도로 강제한다 — 이중 조회를 피하고 판정 지점을 단일화한다."""
     if is_sample_mode():
         rec = _nmi_store().get(str(report_id))
-        return dict(rec) if rec else None
-    return supabase_repository.get_near_miss_improvement(report_id)
+        imp = dict(rec) if rec else None
+    else:
+        imp = supabase_repository.get_near_miss_improvement(report_id)
+    if imp is None or current_user is None:
+        return imp
+    from modules import auth  # 지연 import(순환 회피)
+    actor = _near_miss_actor(current_user, action="개선조치 조회")
+    return imp if auth.can_access_improvement(actor, imp) else None
+
+
+def list_near_miss_improvements(report_ids, *, current_user=None) -> dict:
+    """report_id 목록의 개선조치를 report_id(str)→자연키 dict 로 반환한다(큐 enrich 용).
+
+    ``current_user`` 를 넘기면 **actor-aware 큐 스코핑**: 권한자(평가자/ADMIN)는 전체를,
+    그 외 인증 사용자는 자신이 저장된 담당자이거나 지정 확인자인 개선조치만 본다. 미배정/
+    조회 None 은 결과에서 빠진다. ``current_user=None`` 은 스코핑 없이 전량(내부·집계용)."""
+    from modules import auth  # 지연 import(순환 회피)
+    actor = _near_miss_actor(current_user, action="개선조치 조회") if current_user is not None else None
+    out: dict = {}
+    for rid in (report_ids or []):
+        imp = get_near_miss_improvement(rid)  # 스코핑 없이 원본 조회
+        if imp is None:
+            continue
+        if actor is None or auth.can_access_improvement(actor, imp):
+            out[str(rid)] = imp
+    return out
 
 
 def upsert_near_miss_improvement(report_id, payload: dict, *, current_user) -> dict:
-    """개선조치를 DRAFT 로 저장한다(담당자/조치/결과/기한). 없으면 생성, 있으면 편집.
+    """개선조치를 DRAFT 로 저장한다. **배정 필드와 작업 필드를 인가로 분리**한다(CAPA 핵심).
 
     행위자 신원은 payload/위젯이 아니라 인증된 ``current_user``에서 서버측 확정한다
-    (무인증/비활성 차단). CAPA 저장은 평가 능력(auth.can_evaluate_near_miss:
-    ADMIN/MANAGER 또는 안전담당자)이 필수다 — 활성 일반 USER 가 facade 직접 호출로 CAPA
-    를 등록/편집하지 못하게 confirm/reject/close 와 동일하게 상단에서 fail-closed 로
-    차단한다. 편집은 항상 DRAFT/PENDING 으로 되돌리며, 이미 확인(CONFIRMED)된 개선조치는
-    편집할 수 없다(강등 방지). server-owned 필드(상태·확인/반려 행위자·시각·감사)는
-    payload 에서 제거되어 저장되지 않는다(report_id 포함 — 부모 결속 불변)."""
+    (무인증/비활성 차단). 인가는 행단위로 갈라진다:
+      - 평가자/ADMIN(auth.can_evaluate_near_miss=배정 권한): 담당자·확인자(배정 필드)를
+        payload 로 설정·변경할 수 있고(배정·재배정), 작업 필드도 함께 쓸 수 있다.
+      - 저장된 배정 담당자 본인 또는 ADMIN(auth.can_work_improvement): **작업 필드만**
+        수정한다 — 배정 필드(담당자·확인자)는 payload 로 와도 무시되어 재지정할 수 없다.
+      - 그 외(비담당자·비평가자): 저장·제출 불가(fail-closed).
+    미배정 개선조치를 담당자가 스스로 만들 수는 없다(배정 선행). 편집은 항상 DRAFT/PENDING
+    으로 되돌리며, 이미 확인(CONFIRMED)된 개선조치는 편집할 수 없다(강등 방지). server-owned
+    필드(상태·확인/반려 행위자·시각·감사·report_id)는 payload 에서 제거된다. 담당자 작업
+    경로는 조건부 UPDATE(WHERE 담당자=행위자)로 조회~쓰기 사이 재배정 경합을 차단한다."""
     actor = _near_miss_actor(current_user, action="개선조치 저장")
     from modules import auth  # 지연 import(순환 회피)
-    if not auth.can_evaluate_near_miss(actor):
-        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
     if get_near_miss_report(report_id) is None:
         raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
+    existing = get_near_miss_improvement(report_id)  # 스코핑 없이 원본(인가 판정용)
+    can_assign = auth.can_evaluate_near_miss(actor)      # 배정·재배정 권한(평가자/ADMIN)
+    can_work = auth.can_work_improvement(actor, existing)  # 작업 권한(저장된 담당자/ADMIN)
+    if not (can_assign or can_work):
+        raise ValueError(_NEAR_MISS_IMPROVEMENT_NOT_ASSIGNEE_MESSAGE)
+    if existing is not None and existing.get("confirm_status") == _NEAR_MISS_IMPROVEMENT_CONFIRMED:
+        raise ValueError("이미 확인(CONFIRMED)된 개선조치는 수정할 수 없습니다.")
+    if existing is None and not can_assign:
+        # 담당자(작업 권한)는 배정 전에 스스로 개선조치를 만들 수 없다(배정은 평가자/ADMIN).
+        raise ValueError(_NEAR_MISS_IMPROVEMENT_NOT_ASSIGNED_MESSAGE)
     safe = {k: v for k, v in dict(payload or {}).items()
             if k not in _NEAR_MISS_IMPROVEMENT_SERVER_FIELDS}
+    if not can_assign:
+        # 작업 경로: 배정 필드는 payload 로 와도 제거(담당자·확인자 재지정 차단).
+        for field in _NEAR_MISS_IMPROVEMENT_ASSIGN_FIELDS:
+            safe.pop(field, None)
     if is_sample_mode():
-        body = _nmi_sample_body(safe)
-        store = _nmi_store()
-        key = str(report_id)
-        now = datetime.now(timezone.utc).isoformat()
-        existing = store.get(key)
-        if existing is None:
-            record = {
-                "id": _nmi_new_id(store), "report_id": report_id, **body,
-                "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
-                "submit_status": "DRAFT", "confirm_status": "PENDING",
-                "submitted_at": None, "confirmed_at": None, "rejected_at": None,
-                "revision_note": None, "is_active": True,
-                "created_by": actor["emp_no"], "updated_by": actor["emp_no"],
-                "created_at": now, "updated_at": now,
-            }
-        else:
-            if existing.get("confirm_status") == _NEAR_MISS_IMPROVEMENT_CONFIRMED:
-                raise ValueError("이미 확인(CONFIRMED)된 개선조치는 수정할 수 없습니다.")
-            record = dict(existing)
-            record.update(body)
-            record.update({
-                "submit_status": "DRAFT", "confirm_status": "PENDING",
-                "submitted_at": None, "confirmed_at": None, "rejected_at": None,
-                "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
-                "updated_by": actor["emp_no"], "updated_at": now,
-            })
+        return _sample_upsert_improvement(
+            report_id, safe, actor=actor, can_assign=can_assign,
+        )
+    # 작업 경로(비평가자 담당자)는 조건부 UPDATE(담당자=행위자)로 재배정 경합을 막는다.
+    # ADMIN 은 전역 우회이므로 제한하지 않는다(can_assign True 인 평가자도 제한 없음).
+    restrict = (not can_assign) and (not auth.is_admin(actor))
+    return supabase_repository.upsert_near_miss_improvement(
+        report_id, safe, updated_by=actor["emp_no"], allow_assignment=can_assign,
+        restrict_to_assignee_emp_no=(actor["emp_no"] if restrict else None),
+    )
+
+
+def _sample_upsert_improvement(report_id, safe: dict, *, actor: dict, can_assign: bool) -> dict:
+    """sample 개선조치 upsert — supabase 배정/작업 분리·조건부 경합 차단을 파이썬으로 재현."""
+    from modules import auth  # 지연 import(순환 회피)
+    store = _nmi_store()
+    key = str(report_id)
+    now = datetime.now(timezone.utc).isoformat()
+    work = _nmi_sample_work_body(safe)
+    assignment = _nmi_sample_resolve_assignment(safe) if can_assign else {}
+    existing = store.get(key)
+    if existing is None:
+        record = {
+            "id": _nmi_new_id(store), "report_id": report_id,
+            "assignee_emp_no": assignment.get("assignee_emp_no", ""),
+            "designated_confirmer_emp_no": assignment.get("designated_confirmer_emp_no", ""),
+            **work,
+            "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
+            "submit_status": "DRAFT", "confirm_status": "PENDING",
+            "submitted_at": None, "confirmed_at": None, "rejected_at": None,
+            "revision_note": None, "is_active": True,
+            "created_by": actor["emp_no"], "updated_by": actor["emp_no"],
+            "created_at": now, "updated_at": now,
+        }
         store[key] = record
         return dict(record)
-    return supabase_repository.upsert_near_miss_improvement(
-        report_id, safe, updated_by=actor["emp_no"]
-    )
+    if existing.get("confirm_status") == _NEAR_MISS_IMPROVEMENT_CONFIRMED:
+        raise ValueError("이미 확인(CONFIRMED)된 개선조치는 수정할 수 없습니다.")
+    # 작업 경로(비평가자 담당자)의 재배정 경합 차단: 저장된 담당자가 여전히 행위자여야 한다
+    # (조건부 UPDATE WHERE 담당자=행위자 미러). ADMIN 은 전역 우회.
+    if not can_assign and not auth.is_admin(actor):
+        if not auth._emp_exact_match(actor["emp_no"], existing.get("assignee_emp_no")):
+            raise ValueError(_NEAR_MISS_IMPROVEMENT_REASSIGNED_MESSAGE)
+    record = dict(existing)
+    record.update(work)
+    record.update(assignment)  # 평가자만 채워짐(작업 경로는 빈 dict → 배정 보존)
+    record.update({
+        "submit_status": "DRAFT", "confirm_status": "PENDING",
+        "submitted_at": None, "confirmed_at": None, "rejected_at": None,
+        "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
+        "updated_by": actor["emp_no"], "updated_at": now,
+    })
+    store[key] = record
+    return dict(record)
 
 
 def submit_near_miss_improvement(report_id, *, current_user) -> dict:
     """DRAFT→SUBMITTED. 담당자·조치 결과가 있어야 제출할 수 있다(DB CHECK 미러).
 
-    제출도 평가 능력(auth.can_evaluate_near_miss)이 필수다 — 저장(upsert)과 동일하게
-    활성 일반 USER 의 facade 직접 제출을 상단에서 fail-closed 로 차단한다."""
+    제출은 **작업 권한**(auth.can_work_improvement: 저장된 배정 담당자 본인 또는 ADMIN)이
+    필수다 — 조치를 수행한 담당자가 제출한다. 평가자라도 담당자가 아니면 대리 제출할 수
+    없다(작업·검토 분리). 담당자 경로는 조건부 UPDATE(담당자=행위자)로 재배정 경합을 막는다."""
     actor = _near_miss_actor(current_user, action="개선조치 제출")
     from modules import auth  # 지연 import(순환 회피)
-    if not auth.can_evaluate_near_miss(actor):
-        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
+    existing = get_near_miss_improvement(report_id)  # 스코핑 없이 원본(인가 판정용)
+    if existing is None:
+        raise ValueError("제출할 개선조치가 없습니다.")
+    if not auth.can_work_improvement(actor, existing):
+        raise ValueError(_NEAR_MISS_IMPROVEMENT_NOT_ASSIGNEE_MESSAGE)
     if is_sample_mode():
         store = _nmi_store()
         rec = store.get(str(report_id))
@@ -2388,29 +2500,37 @@ def submit_near_miss_improvement(report_id, *, current_user) -> dict:
         })
         store[str(report_id)] = rec
         return dict(rec)
-    return supabase_repository.submit_near_miss_improvement(report_id, updated_by=actor["emp_no"])
+    restrict = not auth.is_admin(actor)  # 담당자 제출은 담당자=행위자 조건부(ADMIN 우회)
+    return supabase_repository.submit_near_miss_improvement(
+        report_id, updated_by=actor["emp_no"],
+        restrict_to_assignee_emp_no=(actor["emp_no"] if restrict else None),
+    )
 
 
 def confirm_near_miss_improvement(report_id, *, current_user) -> dict:
     """PENDING→CONFIRMED. 실제 확인 행위자=인증 actor(서버 귀속, select 값 아님).
 
-    확인은 평가 능력(auth.can_evaluate_near_miss)이 필수이며, 자기확인(담당자==확인자)은
-    차단한다(DB CHECK 이중). 이미 확인/반려됐거나 미제출이면 stale."""
+    확인은 **검토 권한**(auth.can_review_improvement: 지정 확인자 본인 또는 평가자 또는
+    ADMIN)이 필수이며, 자기확인(담당자==확인자)은 검토 권한과 별개로 추가 차단한다
+    (DB CHECK 이중). 이미 확인/반려됐거나 미제출이면 stale."""
     actor = _near_miss_actor(current_user, action="개선조치 확인")
     from modules import auth  # 지연 import(순환 회피)
-    if not auth.can_evaluate_near_miss(actor):
-        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
+    existing = get_near_miss_improvement(report_id)  # 스코핑 없이 원본(인가 판정용)
+    if existing is None:
+        raise ValueError("확인할 개선조치가 없습니다.")
+    if not auth.can_review_improvement(actor, existing):
+        raise ValueError(_NEAR_MISS_IMPROVEMENT_NOT_REVIEWER_MESSAGE)
+    # 자기확인 금지: 저장된 담당자 본인은 확인할 수 없다(검토 권한이 있어도). 비교는 로그인
+    # 사번 비교 관행과 동일하게 trim+casefold(대소문자 무시) — 담당자를 다른 case 로 지정해도
+    # 자기확인이 통과하지 않는다(Codex P2-4). DB CHECK 는 정확 비교이며 repo 가 이중 방어.
+    if (str(existing.get("assignee_emp_no") or "").strip().casefold()
+            == str(actor["emp_no"]).strip().casefold()):
+        raise ValueError("조치 담당자는 자신의 개선조치를 확인할 수 없습니다(자기확인 금지).")
     if is_sample_mode():
         store = _nmi_store()
         rec = store.get(str(report_id))
         if rec is None:
             raise ValueError("확인할 개선조치가 없습니다.")
-        # 자기확인 비교는 로그인 사번 비교 관행과 동일하게 trim+casefold(대소문자 무시)로
-        # 한다(Codex P2-4) — 담당자를 다른 case 로 지정해도 자기확인이 통과하지 않는다.
-        # DB CHECK 는 정확 비교라 live 는 이미 안전하나 sample parity 를 맞춘다.
-        if (str(rec.get("assignee_emp_no") or "").strip().casefold()
-                == str(actor["emp_no"]).strip().casefold()):
-            raise ValueError("조치 담당자는 자신의 개선조치를 확인할 수 없습니다(자기확인 금지).")
         if not (rec.get("submit_status") == "SUBMITTED" and rec.get("confirm_status") == "PENDING"):
             raise ValueError(_NEAR_MISS_STALE_MESSAGE)
         now = datetime.now(timezone.utc).isoformat()
@@ -2429,13 +2549,19 @@ def confirm_near_miss_improvement(report_id, *, current_user) -> dict:
 
 
 def reject_near_miss_improvement(report_id, note: str, *, current_user) -> dict:
-    """PENDING→REJECTED. 반려 사유 필수. 반려 능력은 확인과 동일(평가 능력)."""
+    """PENDING→REJECTED(재조치 요청). 반려 사유 필수.
+
+    반려 권한은 확인과 동일한 **검토 권한**(auth.can_review_improvement: 지정 확인자 또는
+    평가자 또는 ADMIN)이다."""
     actor = _near_miss_actor(current_user, action="개선조치 반려")
     from modules import auth  # 지연 import(순환 회피)
-    if not auth.can_evaluate_near_miss(actor):
-        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
     if not str(note or "").strip():
         raise ValueError("개선조치를 반려하려면 사유가 필요합니다.")
+    existing = get_near_miss_improvement(report_id)  # 스코핑 없이 원본(인가 판정용)
+    if existing is None:
+        raise ValueError("반려할 개선조치가 없습니다.")
+    if not auth.can_review_improvement(actor, existing):
+        raise ValueError(_NEAR_MISS_IMPROVEMENT_NOT_REVIEWER_MESSAGE)
     if is_sample_mode():
         store = _nmi_store()
         rec = store.get(str(report_id))
@@ -2463,15 +2589,17 @@ def close_near_miss_report(report_id, *, current_user) -> dict | None:
     """확인+종결 하드게이트: 확인된 활성 개선조치가 있어야 report 를 EVALUATED→CLOSED 로 종결한다.
 
     supabase 는 원자 RPC(close_near_miss_report)로, sample 은 동일 규칙을 파이썬으로 재현한다.
-    인가(평가 능력)·확인된 개선조치 존재·조건부 전이(EVALUATED 에서만, stale 차단)를 강제한다.
-    이 경로 밖의 일반 상태변경(update_near_miss_status)은 →CLOSED 를 거부한다."""
+    인가는 **검토 권한**(auth.can_review_improvement: 지정 확인자 또는 평가자 또는 ADMIN)이며,
+    확인된 개선조치 존재·조건부 전이(EVALUATED 에서만, stale 차단)를 강제한다. 이 경로 밖의
+    일반 상태변경(update_near_miss_status)은 →CLOSED 를 거부한다."""
     actor = _near_miss_actor(current_user, action="아차사고 종결")
     from modules import auth  # 지연 import(순환 회피)
-    if not auth.can_evaluate_near_miss(actor):
-        raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
+    existing = get_near_miss_improvement(report_id)  # 스코핑 없이 원본(지정 확인자 인가 판정용)
+    if not auth.can_review_improvement(actor, existing):
+        raise ValueError(_NEAR_MISS_IMPROVEMENT_NOT_REVIEWER_MESSAGE)
     if is_sample_mode():
         # (1) 확인된 활성 개선조치 존재 확인(없으면 종결 불가 — RPC/trigger 하드계약 미러).
-        rec = _nmi_store().get(str(report_id))
+        rec = existing
         if not (rec and bool(rec.get("is_active"))
                 and rec.get("confirm_status") == _NEAR_MISS_IMPROVEMENT_CONFIRMED):
             raise ValueError(_NEAR_MISS_IMPROVEMENT_NO_CAPA_MESSAGE)

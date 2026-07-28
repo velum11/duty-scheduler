@@ -506,10 +506,16 @@ for each row execute function public.near_miss_improvement_guard_closed_parent()
 
 -- =========================================================================
 -- 6) 확인+종결 하드게이트 원자 RPC — close_near_miss_report.
---    단일 트랜잭션에서 (1) 행위자 활성·능력 검증 (2) 확인된 활성 개선조치 존재 (3) 조건부
+--    단일 트랜잭션에서 (1) 행위자 활성·검토 권한 검증 (2) 확인된 활성 개선조치 존재 (3) 조건부
 --    CLOSED 전이(stale 차단)를 수행한다. 인자(actor 사번)는 facade 가 확정한 행위자 신원으로
---    신뢰하되, 그 사용자의 활성·능력은 users 에서 재조회해 검증한다(전달된 능력 주장은 신뢰
---    안 함). (4)의 트리거가 동일 상태 불변식을 이중 방어한다.
+--    신뢰하되, 그 사용자의 활성·권한은 users/개선조치에서 재조회해 검증한다(전달된 능력 주장은
+--    신뢰 안 함). (4)의 트리거가 동일 상태 불변식을 이중 방어한다.
+--
+--    CAPA 행단위 인가(의도 업무흐름 정합): 종결 주체는 **지정 확인자(designated_confirmer)
+--    또는 평가자(ADMIN/MANAGER/안전담당자)** 이다. 일반 USER 라도 이 개선조치의 지정 확인자면
+--    종결할 수 있고(폐루프 확인→종결의 자연 흐름), 그 밖의 일반 USER 는 종결할 수 없다. 자기
+--    확인 금지(담당자 본인 confirm 차단)는 confirm 단계 CHECK 가 이미 강제하므로, 확인된 활성
+--    개선조치의 존재만으로 담당자 자가종결은 발생하지 않는다.
 -- =========================================================================
 create or replace function public.close_near_miss_report(p_report_id bigint, p_actor_emp_no text)
 returns public.near_miss_reports
@@ -520,10 +526,12 @@ as $$
 declare
     v_actor public.users%rowtype;
     v_report public.near_miss_reports%rowtype;
+    v_can_evaluate boolean;
+    v_is_confirmer boolean;
 begin
-    -- (1) 행위자 능력 검증 — 인자 사번을 신원으로 신뢰하되 그 사용자의 활성 + 평가 능력
-    --     (ADMIN/MANAGER 또는 안전담당자)은 users 에서 재조회해 확인한다(전달된 능력 주장
-    --     불신). 사번 비교는 trim+대소문자 무시(원본은 변환하지 않고 저장값 그대로 사용).
+    -- (1) 행위자 권한 검증 — 인자 사번을 신원으로 신뢰하되 그 사용자의 활성 + 검토 권한은
+    --     users/개선조치에서 재조회해 확인한다(전달된 능력 주장 불신). 사번 비교는 trim+대소
+    --     문자 무시(원본은 변환하지 않고 저장값 그대로 사용).
     select * into v_actor
     from public.users
     where btrim(lower(emp_no)) = btrim(lower(coalesce(p_actor_emp_no, '')))
@@ -535,9 +543,16 @@ begin
     if not coalesce(v_actor.is_active, false) then
         raise exception '종결 권한이 없습니다: 비활성 사용자입니다(%).', p_actor_emp_no;
     end if;
-    if not (upper(coalesce(v_actor.role, '')) in ('ADMIN', 'MANAGER')
-            or coalesce(v_actor.is_safety_officer, false)) then
-        raise exception '아차사고 종결 권한이 없습니다(관리자·매니저·안전담당자만 가능): %', p_actor_emp_no;
+    -- 평가 능력(ADMIN/MANAGER 또는 안전담당자) 또는 이 개선조치의 지정 확인자면 종결 가능.
+    v_can_evaluate := (upper(coalesce(v_actor.role, '')) in ('ADMIN', 'MANAGER')
+                       or coalesce(v_actor.is_safety_officer, false));
+    v_is_confirmer := exists (
+        select 1 from public.near_miss_improvements
+        where report_id = p_report_id
+          and designated_confirmer_user_id = v_actor.id
+    );
+    if not (v_can_evaluate or v_is_confirmer) then
+        raise exception '아차사고 종결 권한이 없습니다(지정 확인자·관리자·매니저·안전담당자만 가능): %', p_actor_emp_no;
     end if;
 
     -- (2) 자식 개선조치 행을 먼저 잠근다(Codex P1-2 — 강등/삭제 트랜잭션과 직렬화). report 는
@@ -581,7 +596,7 @@ revoke execute on function public.close_near_miss_report(bigint, text) from auth
 grant execute on function public.close_near_miss_report(bigint, text) to service_role;
 
 comment on function public.close_near_miss_report(bigint, text) is
-    'Atomic near-miss closure hard-gate (SECURITY DEFINER). Trusts the passed emp_no as the actor identity (identity authN is the app-layer trust boundary) but re-derives that user''s is_active + evaluation capability from users (does not trust any passed role/capability claim), requires a CONFIRMED active improvement, and conditionally transitions the report EVALUATED->CLOSED (stale-safe). EXECUTE restricted to service_role.';
+    'Atomic near-miss closure hard-gate (SECURITY DEFINER). Trusts the passed emp_no as the actor identity (identity authN is the app-layer trust boundary) but re-derives that user''s is_active + review authority from users/improvement (does not trust any passed role/capability claim). Authorized closer = the improvement''s designated_confirmer OR an evaluator (ADMIN/MANAGER/safety officer); a plain USER who is the designated confirmer may close, other plain USERs may not. Requires a CONFIRMED active improvement, and conditionally transitions the report EVALUATED->CLOSED (stale-safe). EXECUTE restricted to service_role.';
 
 -- 검증용(선택, read-only): 확인된 활성 개선조치가 없는 CLOSED 보고서가 없어야 한다(계약 위반 탐지).
 --   select r.id from public.near_miss_reports r
