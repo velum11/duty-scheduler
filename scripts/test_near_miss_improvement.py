@@ -1518,12 +1518,15 @@ def test_noop_upsert_preserves_status_sample() -> None:
     check("no-op: submitted_at 보존", after["submitted_at"] is not None)
 
     # 담당자 본인이 기존과 동일한 값으로 저장(present-only 로 병합되나 값 무변경) → 값 비교로
-    # no-change 이므로 status·submitted_at 보존(P2 값비교). 예전엔 키 존재만으로 강등됐다.
+    # 전 무변경이므로 레코드·status·submitted_at·updated_at 모두 보존(no-op, 리포지토리 미호출
+    # 동형). 예전엔 키 존재만으로 강등되거나 감사시각이 갱신됐다.
+    before_ua = db._near_miss_improvement_raw(rid)["updated_at"]
     db.upsert_near_miss_improvement(
         rid, {"result_body": "조치 결과"}, current_user={"emp_no": assignee["emp_no"]})
     same = db._near_miss_improvement_raw(rid)
     check("동일값 저장(작업필드): submit_status 보존(SUBMITTED)", same["submit_status"] == "SUBMITTED")
     check("동일값 저장: submitted_at 보존", same["submitted_at"] is not None)
+    check("동일값 저장: updated_at 무변경(no-op·감사 미갱신)", same["updated_at"] == before_ua)
     # 평가자가 동일 담당자·확인자로 재배정(값 무변경) → status 보존(동일 재배정도 무변경).
     db.upsert_near_miss_improvement(rid, {
         "assignee_emp_no": assignee["emp_no"],
@@ -1555,12 +1558,15 @@ def test_noop_upsert_preserves_status_sample() -> None:
 # 무변경(no-op) upsert status 강등 방지(P2) — supabase 편집 UPDATE payload 검증(parity)
 # =========================================================================
 def test_noop_upsert_preserves_status_supabase() -> None:
-    print("supabase 편집 upsert: no-op 은 status 키 미포함(강등 방지) / 실변경은 DRAFT 초기화")
+    print("supabase 편집 upsert: 무변경 필드 UPDATE 제외·전무변경 no-op(미호출) / 실변경만 변경필드+상태초기화")
     existing = {
-        "report_id": 5, "assignee_user_id": 10, "submit_status": "SUBMITTED",
-        "confirm_status": "PENDING", "submitted_at": "2026-07-20T00:00:00Z",
-        "result_body": "기존결과",
+        "report_id": 5, "assignee_user_id": 10, "designated_confirmer_user_id": 20,
+        "submit_status": "SUBMITTED", "confirm_status": "PENDING",
+        "submitted_at": "2026-07-20T00:00:00Z",
+        "action_body": "기존조치", "result_body": "기존결과", "due_date": "2026-08-01",
+        "updated_by": "orig", "updated_at": "2026-07-20T00:00:00Z",
     }
+    calls: dict = {"update": 0}
     captured: dict = {"updates": None}
 
     class _Builder:
@@ -1573,7 +1579,9 @@ def test_noop_upsert_preserves_status_supabase() -> None:
             return type("R", (), {"data": [dict(existing, **captured["updates"])]})()
 
     class _Table:
-        def update(self, updates): return _Builder().update(updates)
+        def update(self, updates):
+            calls["update"] += 1  # repository UPDATE 실제 호출 횟수(무변경 no-op 은 0 이어야 함).
+            return _Builder().update(updates)
 
     orig_ready = sr.near_miss_improvement_extensions_ready
     orig_raw = sr._nmi_raw
@@ -1584,30 +1592,47 @@ def test_noop_upsert_preserves_status_supabase() -> None:
     sr._near_miss_improvement_natural = lambda rows: list(rows)  # _user_maps 회피(client 불필요)
     sr.client = lambda: type("C", (), {"table": lambda self, n: _Table()})()
     try:
-        # no-op: 빈 payload(비담당자 평가자 work-only 가 파사드에서 strip 된 상태 미러), 배정 미허용.
-        sr.upsert_near_miss_improvement(5, {}, updated_by="X", allow_assignment=False)
+        # (a) 전 무변경(빈 payload: 비담당자 평가자 work-only 가 파사드에서 strip 된 상태 미러) →
+        #     repository UPDATE 미호출·성공 no-op(updated_by/updated_at·상태 무변경).
+        out_empty = sr.upsert_near_miss_improvement(5, {}, updated_by="X", allow_assignment=False)
+        check("빈 payload: repository UPDATE 미호출(no-op)", calls["update"] == 0)
+        check("빈 payload: updated_by 무변경(감사 미갱신)", out_empty.get("updated_by") == "orig")
+        check("빈 payload: submit_status 보존(SUBMITTED)", out_empty.get("submit_status") == "SUBMITTED")
+        check("빈 payload: submitted_at 보존", out_empty.get("submitted_at") == existing["submitted_at"])
+
+        # (b) 동일값(present 이지만 저장값과 같음) → 값 비교로 전 무변경 → UPDATE 미호출·no-op.
+        out_same = sr.upsert_near_miss_improvement(
+            5, {"result_body": "기존결과", "action_body": "기존조치"},
+            updated_by="X", allow_assignment=False)
+        check("동일값 저장: repository UPDATE 미호출(0회)", calls["update"] == 0)
+        check("동일값 저장: updated_at 무변경(no-op)", out_same.get("updated_at") == existing["updated_at"])
+        check("동일값 저장: submit_status 보존(SUBMITTED)", out_same.get("submit_status") == "SUBMITTED")
+
+        # (c) 실변경(작업필드 1개만 변경, 나머지는 동일값 동봉) → UPDATE 1회, payload 에 변경 필드만
+        #     싣고 무변경 필드는 제외한다(phantom rewrite 방지).
+        captured["updates"] = None
+        sr.upsert_near_miss_improvement(
+            5, {"result_body": "새 결과", "action_body": "기존조치", "due_date": "2026-08-01"},
+            updated_by="X", allow_assignment=False)
+        check("실변경: repository UPDATE 1회 호출", calls["update"] == 1)
         upd = captured["updates"]
-        check("no-op: submit_status 미포함(강등 안 함)", "submit_status" not in upd)
-        check("no-op: confirm_status 미포함", "confirm_status" not in upd)
-        check("no-op: submitted_at 미포함(제출시각 보존)", "submitted_at" not in upd)
-        check("no-op: updated_by 는 갱신(감사)", upd.get("updated_by") == "X")
+        check("실변경: 변경 필드(result_body) UPDATE 포함", upd.get("result_body") == "새 결과")
+        check("실변경: 무변경 필드(action_body) UPDATE 제외", "action_body" not in upd)
+        check("실변경: 무변경 필드(due_date) UPDATE 제외", "due_date" not in upd)
+        check("실변경: submit_status=DRAFT 초기화", upd.get("submit_status") == "DRAFT")
+        check("실변경: confirm_status=PENDING 초기화", upd.get("confirm_status") == "PENDING")
+        check("실변경: submitted_at=None 해제", "submitted_at" in upd and upd["submitted_at"] is None)
+        check("실변경: updated_by 감사 갱신", upd.get("updated_by") == "X")
 
-        # 동일값(present 이지만 기존 저장값과 같은 값) → 값 비교로 no-change → status 키 미포함(P2).
-        captured["updates"] = None
-        sr.upsert_near_miss_improvement(5, {"result_body": "기존결과"}, updated_by="X", allow_assignment=False)
-        upd_same = captured["updates"]
-        check("동일값 저장: submit_status 미포함(강등 안 함)", "submit_status" not in upd_same)
-        check("동일값 저장: submitted_at 미포함(제출시각 보존)", "submitted_at" not in upd_same)
-        check("동일값 저장: result_body 는 present-only 병합", upd_same.get("result_body") == "기존결과")
-
-        # 실변경: 작업필드 present → 기존 정책대로 상태 초기화 유지.
-        captured["updates"] = None
-        sr.upsert_near_miss_improvement(5, {"result_body": "새 결과"}, updated_by="X", allow_assignment=False)
-        upd2 = captured["updates"]
-        check("실변경: submit_status=DRAFT 초기화", upd2.get("submit_status") == "DRAFT")
-        check("실변경: confirm_status=PENDING 초기화", upd2.get("confirm_status") == "PENDING")
-        check("실변경: submitted_at=None 해제", "submitted_at" in upd2 and upd2["submitted_at"] is None)
-        check("실변경: result_body 반영", upd2.get("result_body") == "새 결과")
+        # (d) CONFIRMED 상태변경 차단: 변경 필드가 있어도 상단 게이트가 예외(편집 불가), UPDATE 미호출.
+        confirmed = dict(existing, confirm_status="CONFIRMED")
+        sr._nmi_raw = lambda rid: dict(confirmed)
+        calls["update"] = 0
+        excc = raises(lambda: sr.upsert_near_miss_improvement(
+            5, {"result_body": "확인 후 변경"}, updated_by="X", allow_assignment=False),
+            sr.SupabaseDataError)
+        check("CONFIRMED 편집 차단(상단 게이트 예외)", excc is not None and "확인" in str(excc))
+        check("CONFIRMED 차단: UPDATE 미호출", calls["update"] == 0)
     finally:
         sr.near_miss_improvement_extensions_ready = orig_ready
         sr._nmi_raw = orig_raw

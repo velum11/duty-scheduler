@@ -2568,29 +2568,30 @@ def _sample_upsert_improvement(report_id, safe: dict, *, actor: dict, can_assign
     if not can_assign and not auth.is_admin(actor):
         if not auth._emp_exact_match(actor["emp_no"], existing.get("assignee_emp_no")):
             raise ValueError(_NEAR_MISS_IMPROVEMENT_REASSIGNED_MESSAGE)
-    record = dict(existing)
-    # 편집: 작업 필드는 present-only(payload 에 없으면 기존 조치·결과·기한 보존).
+    # 편집: 작업 필드는 present-only(payload 에 없으면 기존 조치·결과·기한 보존). 배정은
+    # 평가자만 채워짐(작업 경로는 빈 dict → 배정 보존).
     work_body = _nmi_sample_work_body(safe, present_only=True)
-    record.update(work_body)
-    record.update(assignment)  # 평가자만 채워짐(작업 경로는 빈 dict → 배정 보존)
-    record.update({"updated_by": actor["emp_no"], "updated_at": now})
-    # 값 무변경은 상태 보존(값 비교): 적용될 작업/배정 필드의 값이 기존 저장값과 하나라도
-    # 실제로 다를 때만 submit/confirm 상태를 초기화한다. present-only 병합이라 payload 에 키가
-    # 있어도(전량 strip 된 빈 update 포함) 값이 기존과 같으면 no-change 로 보고 status 를 보존
-    # 한다 — SUBMITTED/확정 상태에서 값 그대로 저장 눌러도 DRAFT/PENDING·submitted_at=NULL 로
-    # 강등되지 않게(P2). 동일 재배정도 status 보존. 명시적 ""/None 은 여전히 present-only 로
-    # 병합되며(계약 유지), 기존 값과 다르면 "실제 변경"으로 초기화 대상이다. 확인(CONFIRMED)
-    # 강등 차단은 상단 게이트가 별도로 강제한다.
-    changed = (
-        any(existing.get(field) != value for field, value in work_body.items())
-        or any(existing.get(field) != value for field, value in assignment.items())
-    )
-    if changed:
-        record.update({
-            "submit_status": "DRAFT", "confirm_status": "PENDING",
-            "submitted_at": None, "confirmed_at": None, "rejected_at": None,
-            "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
-        })
+    # 무변경 필드는 레코드에 다시 쓰지 않는다(값 비교): 저장값과 동일한 작업/배정 필드는 제외
+    # 하고, 전 필드 무변경이면 no-op 으로 처리한다 — supabase UPDATE 미호출과 동형으로 레코드·
+    # 제출/확인 상태·감사(updated_by/updated_at)를 모두 보존한다(SUBMITTED/확정 값 그대로 저장을
+    # 눌러도 강등·시각변경 없음, 동일 재배정도 보존). 명시적 ""/None 도 기존 값과 다르면 실변경.
+    changed_fields = {
+        field: value
+        for field, value in {**work_body, **assignment}.items()
+        if existing.get(field) != value
+    }
+    if not changed_fields:
+        return dict(existing)  # 전 무변경 no-op: 레코드·상태·감사 보존(리포지토리 미호출 동형).
+    # 실변경(하나 이상): 변경된 필드만 반영하고 감사·제출·확인 상태를 초기화한다(기존 규칙).
+    # 확인(CONFIRMED) 강등 차단은 상단 게이트가 별도로 강제한다.
+    record = dict(existing)
+    record.update(changed_fields)
+    record.update({
+        "updated_by": actor["emp_no"], "updated_at": now,
+        "submit_status": "DRAFT", "confirm_status": "PENDING",
+        "submitted_at": None, "confirmed_at": None, "rejected_at": None,
+        "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
+    })
     store[key] = record
     return dict(record)
 

@@ -2242,35 +2242,41 @@ def upsert_near_miss_improvement(
         return _near_miss_improvement_natural([saved])[0]
     if str(existing.get("confirm_status") or "") == "CONFIRMED":
         raise SupabaseDataError("이미 확인(CONFIRMED)된 개선조치는 수정할 수 없습니다.")
-    # 작업 필드는 present-only: payload 에 있는 키만 갱신(부재 키는 기존 조치·결과·기한 보존).
+    # 작업 필드는 present-only: payload 에 있는 키만 후보(부재 키는 기존 조치·결과·기한 보존).
     work_updates = _near_miss_improvement_work_body(payload, present_only=True)
-    # 평가자/ADMIN 만 배정 키를 present-only 로 갱신(부재 키는 보존). 비배정 경로는 빈 dict.
+    # 평가자/ADMIN 만 배정 키를 present-only 로 후보에 올린다(부재 키는 보존). 비배정 경로는 빈 dict.
     assign_updates = (
         _near_miss_improvement_assign_body(payload, present_only=True)
         if allow_assignment else {}
     )
-    updates = {**work_updates, **assign_updates, "updated_by": attribution}
-    # 값 무변경은 상태 보존(값 비교): 적용될 작업/배정 필드의 값이 기존 저장값과 하나라도
-    # 실제로 다를 때만 submit/confirm 상태를 초기화한다. present-only 병합이라 payload 에 키가
-    # 있어도(전량 strip 된 빈 update 포함) 값이 기존과 같으면 no-change 로 보고 status 를 보존
-    # 한다 — SUBMITTED/확정 상태에서 값 그대로 저장 눌러도 DRAFT/PENDING·submitted_at=NULL 로
-    # 강등되지 않게(P2). 동일 재배정도 status 보존. 명시적 ""/None 은 여전히 present-only 로
-    # 병합되며(계약 유지), 기존 값과 다르면 "실제 변경"으로 초기화 대상이다. 확인(CONFIRMED)
-    # 강등 차단은 위 상단 게이트가 별도로 강제한다.
-    changed = (
-        any(existing.get(field) != value for field, value in work_updates.items())
-        or any(existing.get(field) != value for field, value in assign_updates.items())
-    )
-    if changed:
-        updates.update({
-            "submit_status": "DRAFT",
-            "confirm_status": "PENDING",
-            "submitted_at": None,
-            "confirmed_by_user_id": None,
-            "confirmed_at": None,
-            "rejected_by_user_id": None,
-            "rejected_at": None,
-        })
+    # 무변경 필드는 UPDATE payload 에서 제외(값 비교): 저장값과 동일한 작업/배정 필드는 다시
+    # 쓰지 않는다(phantom rewrite 방지). present-only 병합이라 payload 에 키가 있어도 값이 기존과
+    # 같으면 후보에서 빠진다. 명시적 ""/None 도 기존 값과 다르면 실변경으로 남는다(계약 유지).
+    changed_fields = {
+        field: value
+        for field, value in {**work_updates, **assign_updates}.items()
+        if existing.get(field) != value
+    }
+    if not changed_fields:
+        # 필터링 후 실변경 필드 0 → UPDATE 미호출·성공 no-op: updated_by/updated_at·제출/확인
+        # 상태를 건드리지 않고 기존 저장 레코드를 그대로 반환한다(SUBMITTED/확정 값 그대로 저장을
+        # 눌러도 DRAFT/PENDING 강등·감사시각 변경 없음, 동일 재배정도 보존). 값비교~UPDATE 사이의
+        # 완전한 동시성 방지(updated_at CAS)는 이번 범위 밖이다(007 live 후속 — docs/BACKLOG.md).
+        return _near_miss_improvement_natural([existing])[0]
+    # 실변경(하나 이상): 변경된 필드만 payload 에 싣고(미변경 필드 제외) 감사·제출·확인 상태를
+    # 초기화한다(기존 규칙). 확인(CONFIRMED) 강등 차단은 위 상단 게이트와 아래 조건부
+    # UPDATE(confirm_status<>'CONFIRMED')가 이중으로 강제한다.
+    updates = {
+        **changed_fields,
+        "updated_by": attribution,
+        "submit_status": "DRAFT",
+        "confirm_status": "PENDING",
+        "submitted_at": None,
+        "confirmed_by_user_id": None,
+        "confirmed_at": None,
+        "rejected_by_user_id": None,
+        "rejected_at": None,
+    }
     query = (
         client().table(NEAR_MISS_IMPROVEMENT_TABLE).update(updates)
         .eq("report_id", report_id)
