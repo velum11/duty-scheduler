@@ -363,9 +363,11 @@ def test_reject_flow() -> None:
     check("반려 사유(revision_note) 기록", rec["revision_note"] == "조치 근거 미흡")
     check("확인 행위자 비어있음", str(rec["confirmed_by_emp_no"]) == "")
 
-    # 반려된 개선조치를 재편집(upsert)하면 DRAFT/PENDING 으로 되돌아간다.
-    redraft = db.upsert_near_miss_improvement(rid, {
-        "assignee_emp_no": reporter["emp_no"], "result_body": "보완결과"}, current_user=manager)
+    # 반려된 개선조치를 담당자가 실제로 재편집(값 변경: "결과"→"보완결과")하면 DRAFT/PENDING
+    # 으로 되돌아간다(값 비교 계약). 반려 후 재조치는 담당자(작업 권한) 본인의 실변경이 정상
+    # 경로다 — 평가자의 동일 재배정 같은 no-op 은 새 계약상 status 를 건드리지 않는다.
+    redraft = db.upsert_near_miss_improvement(
+        rid, {"result_body": "보완결과"}, current_user={"emp_no": reporter["emp_no"]})
     check("반려 후 재편집 DRAFT 복귀", redraft["submit_status"] == "DRAFT")
     check("반려 후 재편집 PENDING 복귀", redraft["confirm_status"] == "PENDING")
     check("재편집 시 반려행위자 초기화", str(redraft["rejected_by_emp_no"]) == "")
@@ -1469,6 +1471,27 @@ def test_has_improvement_access_supabase_query_contract() -> None:
 
 
 # =========================================================================
+# 접근 facade: actor 권위 조회 데이터소스 오류 → False(비크래시) (P2)
+# =========================================================================
+def test_access_facade_folds_actor_datasource_error() -> None:
+    print("has_near_miss_improvement_access: actor 권위 조회 데이터소스 오류 → False(비크래시, 예외 전파 안 함)")
+    _reset()
+    orig_lookup = db.find_user_by_emp_no
+
+    def _boom(emp_no, use_cache=True):
+        raise sr.SupabaseDataError("일시 데이터소스 오류(테스트)")
+
+    db.find_user_by_emp_no = _boom
+    try:
+        # nav/route 매 렌더 게이트: 권위 조회가 데이터소스 오류여도 예외를 올리지 않고 False.
+        result = db.has_near_miss_improvement_access({"emp_no": "1003"})
+        check("데이터소스 오류 시 False 반환", result is False)
+        check("예외를 전파하지 않음(비크래시)", isinstance(result, bool))
+    finally:
+        db.find_user_by_emp_no = orig_lookup
+
+
+# =========================================================================
 # 무변경(no-op) upsert status 강등 방지(P2) — sample: 빈 작업/배정 본문은 상태 보존
 # =========================================================================
 def test_noop_upsert_preserves_status_sample() -> None:
@@ -1493,6 +1516,21 @@ def test_noop_upsert_preserves_status_sample() -> None:
     check("no-op(비담당자 work-only): submit_status 보존(SUBMITTED)", after["submit_status"] == "SUBMITTED")
     check("no-op: 작업본문 불가침(보존)", after["result_body"] == "조치 결과")
     check("no-op: submitted_at 보존", after["submitted_at"] is not None)
+
+    # 담당자 본인이 기존과 동일한 값으로 저장(present-only 로 병합되나 값 무변경) → 값 비교로
+    # no-change 이므로 status·submitted_at 보존(P2 값비교). 예전엔 키 존재만으로 강등됐다.
+    db.upsert_near_miss_improvement(
+        rid, {"result_body": "조치 결과"}, current_user={"emp_no": assignee["emp_no"]})
+    same = db._near_miss_improvement_raw(rid)
+    check("동일값 저장(작업필드): submit_status 보존(SUBMITTED)", same["submit_status"] == "SUBMITTED")
+    check("동일값 저장: submitted_at 보존", same["submitted_at"] is not None)
+    # 평가자가 동일 담당자·확인자로 재배정(값 무변경) → status 보존(동일 재배정도 무변경).
+    db.upsert_near_miss_improvement(rid, {
+        "assignee_emp_no": assignee["emp_no"],
+        "designated_confirmer_emp_no": confirmer["emp_no"]}, current_user=manager)
+    same2 = db._near_miss_improvement_raw(rid)
+    check("동일 재배정: submit_status 보존(SUBMITTED)", same2["submit_status"] == "SUBMITTED")
+    check("동일 재배정: submitted_at 보존", same2["submitted_at"] is not None)
 
     # 담당자 본인의 실제 작업 변경 → 기존 정책대로 DRAFT/PENDING 초기화(문서화 불변식).
     db.upsert_near_miss_improvement(
@@ -1521,6 +1559,7 @@ def test_noop_upsert_preserves_status_supabase() -> None:
     existing = {
         "report_id": 5, "assignee_user_id": 10, "submit_status": "SUBMITTED",
         "confirm_status": "PENDING", "submitted_at": "2026-07-20T00:00:00Z",
+        "result_body": "기존결과",
     }
     captured: dict = {"updates": None}
 
@@ -1552,6 +1591,14 @@ def test_noop_upsert_preserves_status_supabase() -> None:
         check("no-op: confirm_status 미포함", "confirm_status" not in upd)
         check("no-op: submitted_at 미포함(제출시각 보존)", "submitted_at" not in upd)
         check("no-op: updated_by 는 갱신(감사)", upd.get("updated_by") == "X")
+
+        # 동일값(present 이지만 기존 저장값과 같은 값) → 값 비교로 no-change → status 키 미포함(P2).
+        captured["updates"] = None
+        sr.upsert_near_miss_improvement(5, {"result_body": "기존결과"}, updated_by="X", allow_assignment=False)
+        upd_same = captured["updates"]
+        check("동일값 저장: submit_status 미포함(강등 안 함)", "submit_status" not in upd_same)
+        check("동일값 저장: submitted_at 미포함(제출시각 보존)", "submitted_at" not in upd_same)
+        check("동일값 저장: result_body 는 present-only 병합", upd_same.get("result_body") == "기존결과")
 
         # 실변경: 작업필드 present → 기존 정책대로 상태 초기화 유지.
         captured["updates"] = None
@@ -1600,6 +1647,7 @@ def main() -> int:
         test_get_improvement_existence_oracle_sealed,
         test_has_improvement_access,
         test_has_improvement_access_supabase_query_contract,
+        test_access_facade_folds_actor_datasource_error,
         test_noop_upsert_preserves_status_sample,
         test_noop_upsert_preserves_status_supabase,
         test_work_path_conditional_reassignment_race,

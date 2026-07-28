@@ -2250,11 +2250,18 @@ def upsert_near_miss_improvement(
         if allow_assignment else {}
     )
     updates = {**work_updates, **assign_updates, "updated_by": attribution}
-    # no-op 은 상태 무변경: 적용될 작업/배정 필드가 하나도 없으면 submit/confirm 상태를 건드리지
-    # 않는다 — 빈/실패 액션(예: 비담당자 평가자 work-only payload 가 파사드에서 전량 strip 된
-    # 빈 update)이 SUBMITTED→DRAFT 로 강등시키지 못하게. 실제 작업/배정 변경 시에만 DRAFT/
-    # PENDING 초기화(문서화 불변식). 확인(CONFIRMED) 강등 차단은 위 상단 게이트가 별도로 강제.
-    if work_updates or assign_updates:
+    # 값 무변경은 상태 보존(값 비교): 적용될 작업/배정 필드의 값이 기존 저장값과 하나라도
+    # 실제로 다를 때만 submit/confirm 상태를 초기화한다. present-only 병합이라 payload 에 키가
+    # 있어도(전량 strip 된 빈 update 포함) 값이 기존과 같으면 no-change 로 보고 status 를 보존
+    # 한다 — SUBMITTED/확정 상태에서 값 그대로 저장 눌러도 DRAFT/PENDING·submitted_at=NULL 로
+    # 강등되지 않게(P2). 동일 재배정도 status 보존. 명시적 ""/None 은 여전히 present-only 로
+    # 병합되며(계약 유지), 기존 값과 다르면 "실제 변경"으로 초기화 대상이다. 확인(CONFIRMED)
+    # 강등 차단은 위 상단 게이트가 별도로 강제한다.
+    changed = (
+        any(existing.get(field) != value for field, value in work_updates.items())
+        or any(existing.get(field) != value for field, value in assign_updates.items())
+    )
+    if changed:
         updates.update({
             "submit_status": "DRAFT",
             "confirm_status": "PENDING",

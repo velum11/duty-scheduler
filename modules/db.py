@@ -2451,12 +2451,21 @@ def has_near_miss_improvement_access(current_user) -> bool:
     사이드바가 크래시한다. 평가자/ADMIN 은 probe 이전에 이미 True 라 일시 오류의 영향을 받지
     않고, 담당자는 장애 동안 메뉴가 잠깐 숨을 뿐 기능 손실이 없다(화면 진입 후 개별 조회의
     read_gate 가 여전히 오류를 배너로 표면화한다). 배정 존재 조회 자체가 실패해도 False 로
-    접어 nav 를 크래시시키지 않는다."""
+    접어 nav 를 크래시시키지 않는다. **actor 권위 조회(_near_miss_actor)의 일시 데이터소스
+    오류(DATA_SOURCE_ERRORS)도 여기서는 False 로 접는다** — 무인증(ValueError)만 잡던 과거
+    구현은 데이터소스 오류를 전파해 caps 계산·CAPA 무관 화면까지 크래시시켰다(P2)."""
     from modules import auth  # 지연 import(순환 회피)
     try:
         actor = _near_miss_actor(current_user, action="개선조치 접근 판정")
-    except ValueError:
-        return False  # 무인증/미상 사번/비활성 → fail-closed.
+    except (ValueError, *DATA_SOURCE_ERRORS):
+        # 무인증/미상 사번/비활성(ValueError)뿐 아니라 actor 권위 조회의 일시 데이터소스
+        # 오류(DATA_SOURCE_ERRORS)도 여기서는 False(비크래시)로 접는다. 이 함수는 매 렌더
+        # nav/route 게이트라 예외를 올리면 caps 계산이 크래시해 CAPA 무관 화면까지 렌더가
+        # 죽는다. nav 는 배너를 못 띄우는 boolean 게이트라 "오류≈미배정" 병합이 불가피하다:
+        # 개선조치 화면에 도달한 평가자에겐 개별 조회의 load_failed 배너가 여전히 오류를
+        # 표면화하고, 담당자는 장애 동안 메뉴만 잠깐 사라질 뿐 기능 손실은 없다(장애 해소 시
+        # 복귀). 이 트레이드오프(nav boolean 게이트의 오류-미배정 병합)는 BACKLOG 에 KNOWN.
+        return False
     if auth.can_evaluate_near_miss(actor):
         return True  # 평가자/ADMIN: 배정 조회 없이 단축.
     # 배정 기반은 007 READY 일 때만. NOT_READY·PROBE_ERROR 는 배정 부분 False(안전).
@@ -2565,12 +2574,18 @@ def _sample_upsert_improvement(report_id, safe: dict, *, actor: dict, can_assign
     record.update(work_body)
     record.update(assignment)  # 평가자만 채워짐(작업 경로는 빈 dict → 배정 보존)
     record.update({"updated_by": actor["emp_no"], "updated_at": now})
-    # no-op 은 상태 무변경: 실제로 적용될 작업/배정 필드가 하나도 없으면(present-only 결과
-    # 빈 본문) submit/confirm 상태를 건드리지 않는다 — 빈/실패 액션이 SUBMITTED→DRAFT 로
-    # 강등시키지 못하게(예: 비담당자 평가자 work-only payload 가 전량 strip 된 빈 update).
-    # 작업/배정 필드가 실제로 바뀌면 기존 정책대로 DRAFT/PENDING 초기화(문서화 불변식). 명시적
-    # ""/None 작업필드는 present-only 에 포함되므로 "실제 변경"으로 초기화 대상이다(키 부재만 no-op).
-    if work_body or assignment:
+    # 값 무변경은 상태 보존(값 비교): 적용될 작업/배정 필드의 값이 기존 저장값과 하나라도
+    # 실제로 다를 때만 submit/confirm 상태를 초기화한다. present-only 병합이라 payload 에 키가
+    # 있어도(전량 strip 된 빈 update 포함) 값이 기존과 같으면 no-change 로 보고 status 를 보존
+    # 한다 — SUBMITTED/확정 상태에서 값 그대로 저장 눌러도 DRAFT/PENDING·submitted_at=NULL 로
+    # 강등되지 않게(P2). 동일 재배정도 status 보존. 명시적 ""/None 은 여전히 present-only 로
+    # 병합되며(계약 유지), 기존 값과 다르면 "실제 변경"으로 초기화 대상이다. 확인(CONFIRMED)
+    # 강등 차단은 상단 게이트가 별도로 강제한다.
+    changed = (
+        any(existing.get(field) != value for field, value in work_body.items())
+        or any(existing.get(field) != value for field, value in assignment.items())
+    )
+    if changed:
         record.update({
             "submit_status": "DRAFT", "confirm_status": "PENDING",
             "submitted_at": None, "confirmed_at": None, "rejected_at": None,
