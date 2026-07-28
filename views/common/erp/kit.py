@@ -1,14 +1,16 @@
 """중립 구조 키트 구현 (KP-standard §0.2) — 레이아웃 전용, 도메인 lifecycle 미포함.
 
 영역 순서(§0.3): title → top actions(page) → conditions → primary → details → status.
-읽기 화면(READ_VIEW)에 필요한 subset 먼저 제공한다. 편집(EDIT/SELECT/MATRIX) 어댑터는
-후속. 그리드는 AgGrid 단일 렌더러를 쓰되 READ 는 편집 자산(action열·paste·editable·
-allow_unsafe_jscode)을 넣지 않는다(§0.5). 색은 cellClassRules 문자열식 + custom_css 로만.
+읽기(READ_VIEW)·단일 선택(MASTER_DETAIL) subset 을 제공한다 — ``read_grid``·``select_grid``
+출하됨. EDIT/MATRIX 편집 어댑터는 후속. 그리드는 AgGrid 단일 렌더러를 쓰되 READ/SELECT 는
+편집 자산(action열·paste·editable·unsafe jscode)을 넣지 않는다(§0.5). 색은 cellClassRules
+문자열식 + custom_css 로만.
 """
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field as dc_field
+from html import escape
 from typing import Any, Callable
 
 import pandas as pd
@@ -61,8 +63,8 @@ _KIT_CSS = f"""
 """
 
 
-def read_grid_height(nrows: int) -> int:
-    natural = _READ_HEADER_PX + max(int(nrows), 1) * _READ_ROW_PX + _READ_CHROME_PX
+def read_grid_height(nrows: int, *, row_px: int = _READ_ROW_PX) -> int:
+    natural = _READ_HEADER_PX + max(int(nrows), 1) * int(row_px) + _READ_CHROME_PX
     return max(_READ_MIN_PX, min(natural, _READ_MAX_PX))
 
 
@@ -282,38 +284,23 @@ def grid_shell(key: str, *, nrows: int, ncols: int, fingerprint, render,
         return render(prepared) if prepare is not None else render()
 
 
-# ============================================================ read_grid
+# ============================================================ read_grid / select_grid
 _READ_BASE_CSS = {
     ".ag-header-cell": {"font-weight": "600", "font-size": "12.5px"},
     ".ag-cell": {"font-size": "13px", "display": "flex", "align-items": "center"},
 }
+# 단일 선택 그리드(select_grid) 전용 — 네이티브 single-selection 의 선택행 이중부호화.
+# 배경 틴트(§4: 색만으로 상태 표시 금지)에 더해 첫 열 checkboxSelection 체크(네이티브 마커)가
+# 함께 걸린다(JsCode 불요). 색은 기준정보 selected-bg 토큰 재사용(새 색 없음).
+_SELECT_CSS = {
+    ".ag-row-selected .ag-cell": {"background-color": TOKENS["selected-bg"] + " !important"},
+    ".ag-row.ag-row-selected": {"box-shadow": "inset 3px 0 " + TOKENS["navy"]},
+    ".ag-cell .ag-selection-checkbox": {"margin-right": "8px"},
+}
 
 
-def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
-              color_rules: dict[str, dict[str, str]] | None = None,
-              col_config: dict[str, dict] | None = None,
-              row_rules: list[dict] | None = None,
-              hidden_fields: list[str] | None = None,
-              height: int | None = None,
-              skeleton: bool = True) -> None:
-    """AgGrid READ 어댑터(§0.5) — 편집 자산 없음. 색은 cellClassRules 문자열식.
-
-    ``color_rules``: ``{컬럼명: {값: hex색}}`` — 셀 값 일치 시 배경(13% alpha)+ink+600.
-      텍스트는 항상 유지(색은 보조 신호). 같은 색은 클래스 하나로 dedup 되어, 31일 매트릭스처럼
-      전 컬럼이 동일 매핑을 공유해도 custom_css/규칙이 폭증하지 않는다.
-    ``col_config``: ``{컬럼명: {width|flex|minWidth|maxWidth|cellClass ...}}`` — 폭·정렬 주입.
-      미지정 컬럼은 ``flex=1, minWidth=90`` 으로 컨테이너 폭을 채운다(AgGrid 200px 기본값이
-      다열에서 가로 오버플로를 만드는 문제 방지).
-    ``row_rules``: ``[{"when": <행-참조 문자열식>, "columns": [적용 컬럼], "bg": hex, "ink": hex}]``
-      — 셀 값이 아니라 **행 데이터**(``data['필드']``)에 따라 지정 컬럼군에만 배경을 입힌다
-      (예: 퇴직행 오버레이를 meta 컬럼에만). 색 컬럼과 오버레이 컬럼을 분리해 두 규칙이 같은
-      셀에 겹치지 않게 하는 것이 호출부 책임이다(상호배타를 우선순위가 아니라 구조로 보장).
-    ``hidden_fields``: 표시하지 않지만 데이터로 실려(``data['필드']`` 참조 가능) 행-규칙에 쓰는 컬럼.
-    ``row_rules``/``hidden_fields`` 모두 문자열식만 쓰므로 ``allow_unsafe_jscode`` 는 False 유지.
-    편집·paste·action열 없음.
-    """
-    cols = list(columns) if columns else list(df.columns)
-    hidden = [h for h in (hidden_fields or []) if h not in cols]
+def _prepare_read_frame(df: pd.DataFrame, cols: list[str], hidden: list[str]) -> pd.DataFrame:
+    """표시 컬럼은 빈문자 string 으로, 숨김 컬럼은 원형 그대로 보정한 프레임 사본."""
     frame = df.copy()
     for c in cols:
         if c not in frame.columns:
@@ -321,8 +308,19 @@ def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
         frame[c] = frame[c].fillna("").astype(str)
     for h in hidden:
         if h not in frame.columns:
-            frame[h] = None  # 행-규칙이 참조하는 플래그(불리언 등)는 원형 그대로 싣는다.
+            frame[h] = None  # 행-규칙/선택키가 참조하는 값(불리언·id 등)은 원형 그대로 싣는다.
+    return frame
 
+
+def _build_read_coldefs(cols: list[str], hidden: list[str],
+                        color_rules: dict[str, dict[str, str]] | None,
+                        col_config: dict[str, dict] | None,
+                        row_rules: list[dict] | None) -> tuple[list[dict], dict]:
+    """READ/SELECT 공통 colDef + custom_css 빌더(편집 자산 없음, 문자열식 cellClassRules 만).
+
+    read_grid 와 select_grid 가 동일 색/폭/행규칙 로직을 공유하되(§0.5 capability 는 분리),
+    편집 렌더러·action열·paste·unsafe jscode 는 어느 쪽에도 넣지 않는다.
+    """
     rules = color_rules or {}
     sizing = col_config or {}
     custom = dict(_READ_BASE_CSS)
@@ -360,7 +358,7 @@ def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
         _dup = _color_cols & _rcols
         if _dup:
             raise ValueError(
-                "read_grid: 컬럼이 color_rules 와 row_rules 에 동시에 지정됨(상호배타 위반): "
+                "read/select grid: 컬럼이 color_rules 와 row_rules 에 동시에 지정됨(상호배타 위반): "
                 f"{sorted(_dup)}"
             )
 
@@ -393,6 +391,36 @@ def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
         coldefs.append(cd)
     for h in hidden:
         coldefs.append({"field": h, "hide": True, "suppressColumnsToolPanel": True})
+    return coldefs, custom
+
+
+def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
+              color_rules: dict[str, dict[str, str]] | None = None,
+              col_config: dict[str, dict] | None = None,
+              row_rules: list[dict] | None = None,
+              hidden_fields: list[str] | None = None,
+              height: int | None = None,
+              skeleton: bool = True) -> None:
+    """AgGrid READ 어댑터(§0.5) — 편집 자산 없음. 색은 cellClassRules 문자열식.
+
+    ``color_rules``: ``{컬럼명: {값: hex색}}`` — 셀 값 일치 시 배경(13% alpha)+ink+600.
+      텍스트는 항상 유지(색은 보조 신호). 같은 색은 클래스 하나로 dedup 되어, 31일 매트릭스처럼
+      전 컬럼이 동일 매핑을 공유해도 custom_css/규칙이 폭증하지 않는다.
+    ``col_config``: ``{컬럼명: {width|flex|minWidth|maxWidth|cellClass ...}}`` — 폭·정렬 주입.
+      미지정 컬럼은 ``flex=1, minWidth=90`` 으로 컨테이너 폭을 채운다(AgGrid 200px 기본값이
+      다열에서 가로 오버플로를 만드는 문제 방지).
+    ``row_rules``: ``[{"when": <행-참조 문자열식>, "columns": [적용 컬럼], "bg": hex, "ink": hex}]``
+      — 셀 값이 아니라 **행 데이터**(``data['필드']``)에 따라 지정 컬럼군에만 배경을 입힌다
+      (예: 퇴직행 오버레이를 meta 컬럼에만). 색 컬럼과 오버레이 컬럼을 분리해 두 규칙이 같은
+      셀에 겹치지 않게 하는 것이 호출부 책임이다(상호배타를 우선순위가 아니라 구조로 보장).
+    ``hidden_fields``: 표시하지 않지만 데이터로 실려(``data['필드']`` 참조 가능) 행-규칙에 쓰는 컬럼.
+    ``row_rules``/``hidden_fields`` 모두 문자열식만 쓰므로 ``allow_unsafe_jscode`` 는 False 유지.
+    편집·paste·action열 없음.
+    """
+    cols = list(columns) if columns else list(df.columns)
+    hidden = [h for h in (hidden_fields or []) if h not in cols]
+    frame = _prepare_read_frame(df, cols, hidden)
+    coldefs, custom = _build_read_coldefs(cols, hidden, color_rules, col_config, row_rules)
 
     options = {
         "columnDefs": coldefs,
@@ -426,6 +454,175 @@ def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
     except Exception:
         fp = (len(view), tuple(cols))
     grid_shell(key, nrows=len(view), ncols=len(cols), fingerprint=fp, render=_mount, height=h)
+
+
+# select_grid 의 ``col_config`` 는 조회+행선택 전용 **표현 속성**만 허용한다(§0.5). 편집 자산
+# (editable·cellRenderer·cellEditor·valueSetter·paste 훅 등)을 col_config 로 주입할 수 없게
+# 화이트리스트로 구조적 차단한다 — SELECT 는 편집 capability 가 아니므로 편집 자산은 문구가
+# 아니라 구조로 불가해야 한다(위반 시 ValueError). 색/행규칙은 별도 인자(color_rules/row_rules).
+_SELECT_COL_CONFIG_ALLOWED = frozenset({
+    "width", "flex", "minWidth", "maxWidth", "cellClass", "cellStyle",
+    "headerName", "headerTooltip", "tooltipField", "hide", "type",
+})
+
+
+def _validate_select_col_config(col_config: dict[str, dict] | None) -> None:
+    """col_config 가 SELECT 허용 표현 속성만 담는지 검증(편집 자산 주입 차단)."""
+    if not col_config:
+        return
+    for col, cfg in col_config.items():
+        if not isinstance(cfg, dict):
+            raise ValueError(f"select_grid: col_config[{col!r}] 는 dict 여야 합니다")
+        bad = [k for k in cfg if k not in _SELECT_COL_CONFIG_ALLOWED]
+        if bad:
+            raise ValueError(
+                "select_grid: col_config 에 SELECT 밖 속성 주입 금지(조회+행선택 전용) — "
+                f"{col!r}: {sorted(bad)} (허용: {sorted(_SELECT_COL_CONFIG_ALLOWED)})"
+            )
+
+
+def _validate_select_key_field(df: pd.DataFrame, key_field: str, cols: list[str]) -> None:
+    """자연키 계약: 존재·비어있지않음·행간 유일·표시 컬럼 미포함(항상 hidden)."""
+    if key_field in cols:
+        raise ValueError(
+            f"select_grid: key_field {key_field!r} 는 표시 컬럼에 포함될 수 없습니다"
+            " — 자연키는 항상 hidden 입니다"
+        )
+    if key_field not in df.columns:
+        raise ValueError(f"select_grid: key_field {key_field!r} 컬럼이 데이터에 없습니다")
+    if df.empty:
+        return  # 빈 큐 — 행 값 검증은 공허(성립)
+    keys = df[key_field].apply(lambda v: "" if pd.isna(v) else str(v).strip())
+    if (keys == "").any():
+        raise ValueError(
+            f"select_grid: key_field {key_field!r} 에 빈 자연키 행이 있습니다(선택 반환 불가)"
+        )
+    dup = keys[keys.duplicated()].unique().tolist()
+    if dup:
+        raise ValueError(
+            f"select_grid: key_field {key_field!r} 자연키가 행 간 유일하지 않습니다: {sorted(dup)}"
+        )
+
+
+def _build_select_gridoptions(df: pd.DataFrame, *, key_field: str,
+                              columns: list[str] | None,
+                              selected_key: str | None,
+                              color_rules: dict[str, dict[str, str]] | None,
+                              col_config: dict[str, dict] | None,
+                              row_rules: list[dict] | None,
+                              hidden_fields: list[str] | None,
+                              row_height: int) -> tuple[pd.DataFrame, dict, dict]:
+    """SELECT 그리드의 view·gridOptions·custom_css 를 (AgGrid 호출 없이) 구성한다.
+
+    불변식 검증(col_config 화이트리스트·key_field 자연키 계약)을 여기서 먼저 강제하므로
+    위반은 AgGrid 마운트 전에 ValueError 로 실패한다(단위 테스트가 이 함수를 직접 고정한다).
+    """
+    cols = list(columns) if columns else [c for c in df.columns if c != key_field]
+    _validate_select_col_config(col_config)
+    _validate_select_key_field(df, key_field, cols)
+
+    hidden = [h for h in (hidden_fields or []) if h not in cols]
+    if key_field not in hidden:
+        hidden = hidden + [key_field]
+    frame = _prepare_read_frame(df, cols, hidden)
+    frame[key_field] = frame[key_field].fillna("").astype(str)
+    coldefs, custom = _build_read_coldefs(cols, hidden, color_rules, col_config, row_rules)
+    custom = {**custom, **_SELECT_CSS}
+    # 첫 표시 열에 네이티브 선택 체크박스(마커) — 사람이 읽는 식별자 왼쪽에 인라인.
+    if coldefs and cols:
+        coldefs[0]["checkboxSelection"] = True
+
+    view = frame[cols + hidden].reset_index(drop=True)
+    # 자연키 → 현재 표시 프레임의 iloc(위치). 정렬/필터 뒤에도 key_field 로 다시 찾으므로
+    # 위치 자체를 세션에 저장하지 않는다(위치 비의존 선택 계약).
+    pre_selected: list[int] = []
+    if selected_key is not None and key_field in view.columns:
+        keys = view[key_field].astype(str).tolist()
+        target = str(selected_key)
+        pre_selected = [i for i, v in enumerate(keys) if v == target][:1]
+
+    options = {
+        "columnDefs": coldefs,
+        "defaultColDef": {"resizable": True, "sortable": False, "filter": False},
+        "rowHeight": int(row_height), "headerHeight": _READ_HEADER_PX,
+        "suppressDragLeaveHidesColumns": True,
+        "overlayNoRowsTemplate": _NO_ROWS,
+        # 네이티브 single-selection(행 클릭으로 선택). 한 번 선택하면 유지(ctrl 해제 억제) —
+        # 미선택→선택은 클릭, 선택 해제는 화면 로직(stale/필터 이탈)이 담당한다.
+        "rowSelection": "single",
+        "suppressRowClickSelection": False,
+        "rowMultiSelectWithClick": False,
+        "suppressRowDeselection": True,
+    }
+    if pre_selected:
+        options["initialState"] = {"rowSelection": pre_selected}
+    return view, options, custom
+
+
+def _selected_key(selected, key_field: str) -> str | None:
+    """AgGrid 응답의 selected_rows 에서 선택행 자연키(문자열)를 뽑는다. 미선택 → None."""
+    if selected is None or getattr(selected, "empty", True):
+        return None
+    if key_field not in selected.columns:
+        return None
+    value = str(selected.iloc[0][key_field]).strip()
+    return value or None
+
+
+def select_grid(df: pd.DataFrame, *, key: str, key_field: str,
+                columns: list[str] | None = None,
+                selected_key: str | None = None,
+                color_rules: dict[str, dict[str, str]] | None = None,
+                col_config: dict[str, dict] | None = None,
+                row_rules: list[dict] | None = None,
+                hidden_fields: list[str] | None = None,
+                height: int | None = None,
+                row_height: int = _READ_ROW_PX) -> str | None:
+    """AgGrid 단일 선택 목록 어댑터(§0.5 — read_grid 와 별개 capability, 편집 자산 없음).
+
+    MASTER_DETAIL 목록(큐)에서 한 행을 선택해 그 **자연키**(``key_field`` 값)를 돌려준다.
+    편집 그리드(``render_master_grid``)의 ``_action`` 열·paste·hidden 편집메타·unsafe jscode 를
+    쓰지 않는다 — 색/폭 규칙은 read_grid 와 같은 문자열식 빌더(:func:`_build_read_coldefs`)를
+    공유하되 ``allow_unsafe_jscode=False`` 를 유지한다.
+
+    불변식(구조적 강제)
+    -------------------
+    - ``col_config`` 는 :data:`_SELECT_COL_CONFIG_ALLOWED` 표현 속성만 허용한다 — ``editable``·
+      ``cellRenderer``·``cellEditor`` 등 편집 자산을 주입하면 :class:`ValueError`(SELECT 는
+      편집 capability 가 아니다).
+    - ``key_field`` 는 존재·비어있지않음·행 간 유일·표시 컬럼 미포함을 만족해야 한다(위반 시
+      :class:`ValueError`). 항상 hidden 으로 실려 표시 컬럼을 오염시키지 않는다.
+
+    선택 계약
+    ---------
+    - AgGrid 네이티브 ``rowSelection="single"`` + 첫 열 checkboxSelection(마커) — JsCode 불요.
+      선택행은 배경 틴트(``selected-bg``)와 체크(네이티브)로 **이중부호화**(§4)한다.
+    - ``selected_key`` 가 주어지면 그 자연키에 해당하는 행을 pre-select 해 rerun 후에도 선택을
+      복원한다(위치 비의존 — 표시 데이터에서 key_field 로 iloc 을 되찾는다). 자연키가 현재
+      결과에서 사라졌으면 pre-select 대상이 없어 자동으로 미선택으로 떨어진다.
+    - ``update_on=["selectionChanged"]`` — 선택 변경 시에만 rerun. 반환은 선택행
+      ``selected_rows`` 의 ``key_field`` 문자열이며, 선택이 없으면 ``None``.
+    - **rerun 유발원이 곧 이 반환**이므로 호출부는 이 값을 상세 렌더 **전에** 소비해 추가
+      ``st.rerun`` 없이 상세를 그린다(선택 즉시 상세).
+
+    ``row_height``: 행 피치(§0.6). 기본 34(데스크톱 읽기). USER·터치 variant 는 44 를 준다
+    (32×32 히트영역 계약과 정합). 편집(M/A) variant 는 34 를 유지한다.
+    """
+    view, options, custom = _build_select_gridoptions(
+        df, key_field=key_field, columns=columns, selected_key=selected_key,
+        color_rules=color_rules, col_config=col_config, row_rules=row_rules,
+        hidden_fields=hidden_fields, row_height=row_height,
+    )
+    h = height if height is not None else read_grid_height(len(view), row_px=row_height)
+
+    response = AgGrid(
+        view, gridOptions=options, key=key, height=h,
+        update_on=["selectionChanged"],
+        data_return_mode=DataReturnMode.AS_INPUT,
+        allow_unsafe_jscode=False, theme="streamlit",
+        custom_css=custom, show_toolbar=False, show_search=False,
+    )
+    return _selected_key(response.selected_rows, key_field)
 
 
 # ============================================================ status_region
@@ -462,6 +659,46 @@ def detail_empty(title: str, body: str) -> None:
     st.markdown(
         f"<div class='erp-detail-empty'><div class='erp-detail-empty-t'>{title}</div>"
         f"<div class='erp-detail-empty-b'>{body}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ── 상세 순수 표시 primitive(§0.3 details·§2 토큰) ──
+# MASTER_DETAIL 상세 패널의 **순수 표시** 조각: 상태 badge·짧은 메타 2열·전폭 읽기 필드.
+# kit 은 도메인을 모른다 — status→색/라벨 매핑, 역할·인가·액션·facade 호출은 각 화면이 소유하고
+# 여기엔 계산된 label/color/value 만 넘어온다. 다른 MASTER_DETAIL 화면이 복제 없이 재사용한다.
+def status_badge_html(label: str, color: str) -> str:
+    """상태 배지 HTML(색+라벨 이중부호화, §2 badge 11/600). 색·라벨은 호출부가 도메인에서 계산."""
+    return (
+        f"<span style='display:inline-flex;align-items:center;padding:1px 8px;"
+        f"border-radius:5px;font-size:11px;font-weight:600;color:{color};"
+        f"border:1px solid {color};background:{color}14;'>{escape(label)}</span>"
+    )
+
+
+def meta_col_html(pairs: list[tuple[str, str]]) -> str:
+    """상세 메타 열 HTML(라벨 ``--ink-2`` + 값 ``--ink``, §2). 한 ``st.columns`` 셀 안에 쌓는다.
+
+    레이아웃(2열 split)은 호출부 소관 — 이 함수는 한 열의 라벨/값 스택 HTML 만 만든다.
+    """
+    return "".join(
+        f"<div style='margin:2px 0;line-height:1.5;'>"
+        f"<span style='color:{TOKENS['ink-2']};font-size:12.5px;'>{escape(label)}</span> "
+        f"<span style='color:{TOKENS['ink']};font-size:13px;font-weight:600;'>"
+        f"{escape(value or '-')}</span></div>"
+        for label, value in pairs
+    )
+
+
+def field_block(label: str, value: str) -> None:
+    """긴 서술 전폭 읽기 필드 렌더(라벨 ``--ink-2`` + 본문 ``--ink``, 줄바꿈 보존). 순수 표시."""
+    body = escape(value) if str(value or "").strip() else "-"
+    st.markdown(
+        f"<div style='margin:6px 0 0;'>"
+        f"<div style='color:{TOKENS['ink-2']};font-size:12.5px;font-weight:600;"
+        f"margin-bottom:1px;'>{escape(label)}</div>"
+        f"<div style='color:{TOKENS['ink']};font-size:13px;line-height:1.5;"
+        f"white-space:pre-wrap;'>{body}</div></div>",
         unsafe_allow_html=True,
     )
 
