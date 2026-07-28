@@ -19,7 +19,8 @@ store 로 실제 동작하며 스모크 검증용이다).
 
 파사드 호출(전부 ``modules/db.py`` 만 사용):
   - ``db.get_near_miss_reports({"status": "EVALUATED"})`` — 종결 대기 큐.
-  - ``db.get_near_miss_improvement(report_id)`` — 큐 enrich + 상세 폼 프리필.
+  - ``db.get_near_miss_improvement(report_id, current_user=)`` — 큐 enrich + 상세 폼 프리필
+    (actor-aware, current_user 필수 — fail-open 없음).
   - ``db.upsert_near_miss_improvement(rid, payload, current_user=)`` — 조치 저장(DRAFT).
   - ``db.submit_near_miss_improvement(rid, current_user=)`` — 제출(DRAFT→SUBMITTED).
   - ``db.confirm_near_miss_improvement(rid, current_user=)`` — 확인(자기확인은 facade 차단).
@@ -184,7 +185,7 @@ def _render_body(user: dict) -> None:
         st.error("종결 대기 목록을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    improvements = _improvements_for(reports)
+    improvements = _improvements_for(reports, user)
     errored = [rid for rid, imp in improvements.items() if imp is _LOAD_FAILED]
     if errored:
         # 조회 실패를 '미작성/0'으로 삼키지 않고 표면화한다(오류≠정상 부재).
@@ -217,19 +218,22 @@ def _load_queue() -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def _improvements_for(reports: pd.DataFrame) -> dict:
+def _improvements_for(reports: pd.DataFrame, user: dict) -> dict:
     """보고서별 개선조치(자연키 dict / None / _LOAD_FAILED).
 
     007 미준비면 facade 가 None 을 돌려주며(정상 부재 = '미작성'), 이는 readiness 배너로
     이미 안내된다. READY 이후의 실제 조회 오류는 None 으로 접지 않고 ``_LOAD_FAILED``
     sentinel 로 남겨, 개별 조회 실패로 큐 전체를 막지 않으면서도 오류를 '미작성'(정상
-    부재)으로 위장하지 않는다(해당 행은 '조회실패'로 구분 표시 + 상단 error 배너)."""
+    부재)으로 위장하지 않는다(해당 행은 '조회실패'로 구분 표시 + 상단 error 배너).
+
+    조회는 actor-aware(``current_user=user``) — 이 화면은 평가자/ADMIN 게이트라 스코핑은
+    사실상 전량 통과지만, fail-open 없는 계약(current_user 필수)을 지킨다."""
     out: dict = {}
     if reports is None or reports.empty:
         return out
     for rid in reports["id"].astype(str):
         try:
-            out[rid] = db.get_near_miss_improvement(rid)
+            out[rid] = db.get_near_miss_improvement(rid, current_user=user)
         except Exception:
             out[rid] = _LOAD_FAILED
     return out
@@ -367,7 +371,7 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     # (report 조회 실패 처리와 동일 관행). 007 미준비의 정상 None 은 여기 도달 전
     # facade 가 None 을 돌려주며 readiness 배너가 이미 안내한다.
     try:
-        imp = db.get_near_miss_improvement(selected_id)
+        imp = db.get_near_miss_improvement(selected_id, current_user=user)
     except db.DATA_SOURCE_ERRORS as exc:
         st.error(f"개선조치를 불러오지 못했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
         return

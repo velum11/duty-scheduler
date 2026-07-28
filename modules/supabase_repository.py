@@ -2079,23 +2079,29 @@ def _near_miss_improvement_natural(rows: list[dict]) -> list[dict]:
     return out
 
 
-def _near_miss_improvement_work_body(payload: dict) -> dict:
+def _near_miss_improvement_work_body(payload: dict, *, present_only: bool) -> dict:
     """개선조치 **작업 필드**(조치 내용/결과/기한)만 검증·정규화한다(신원/상태/배정 제외).
 
     배정 필드(담당자·확인자)는 여기 포함하지 않는다 — 작업(upsert/submit) 경로와 배정
     경로를 분리하기 위해서다. submit/confirm 상태·확인/반려 행위자·시각도 절대 포함하지
-    않는다(서버측 확정 대상)."""
-    due = _clean_text(payload.get("due_date"), nullable=True)
-    if due:
-        try:
-            date.fromisoformat(due)
-        except ValueError as exc:
-            raise SupabaseDataError(f"조치 기한 형식이 유효하지 않습니다: {due}") from exc
-    return {
-        "action_body": _clean_text(payload.get("action_body")),
-        "result_body": _clean_text(payload.get("result_body")),
-        "due_date": due or None,
-    }
+    않는다(서버측 확정 대상). ``present_only=True`` 면 payload 에 실제로 존재하는 키만
+    반환한다(키 부재=작업 미변경/보존). ``False`` 면 세 필드를 모두 기본값으로 반환한다
+    (생성 시 초기값). 부분 UPDATE 가 payload 에 없는 작업 필드를 빈값/NULL 로 덮어써 기존
+    조치·결과·기한을 지우지 않게 한다."""
+    out: dict = {}
+    if not present_only or "action_body" in payload:
+        out["action_body"] = _clean_text(payload.get("action_body"))
+    if not present_only or "result_body" in payload:
+        out["result_body"] = _clean_text(payload.get("result_body"))
+    if not present_only or "due_date" in payload:
+        due = _clean_text(payload.get("due_date"), nullable=True)
+        if due:
+            try:
+                date.fromisoformat(due)
+            except ValueError as exc:
+                raise SupabaseDataError(f"조치 기한 형식이 유효하지 않습니다: {due}") from exc
+        out["due_date"] = due or None
+    return out
 
 
 def _near_miss_improvement_assign_body(payload: dict, *, present_only: bool) -> dict:
@@ -2177,7 +2183,6 @@ def upsert_near_miss_improvement(
     개선조치는 편집할 수 없다(강등 방지, where confirm_status<>'CONFIRMED' 이중)."""
     if not near_miss_improvement_extensions_ready():
         raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
-    work = _near_miss_improvement_work_body(payload)
     existing = _nmi_raw(report_id)
     attribution = _clean_text(updated_by, nullable=True)
     restrict_assignee_id = _resolve_assignee_id_for_restrict(restrict_to_assignee_emp_no)
@@ -2191,7 +2196,7 @@ def upsert_near_miss_improvement(
         record = {
             "report_id": report_id,
             **assign,
-            **work,
+            **_near_miss_improvement_work_body(payload, present_only=False),
             "submit_status": "DRAFT",
             "confirm_status": "PENDING",
             "is_active": True,
@@ -2209,7 +2214,8 @@ def upsert_near_miss_improvement(
     if str(existing.get("confirm_status") or "") == "CONFIRMED":
         raise SupabaseDataError("이미 확인(CONFIRMED)된 개선조치는 수정할 수 없습니다.")
     updates = {
-        **work,
+        # 작업 필드는 present-only: payload 에 있는 키만 갱신(부재 키는 기존 조치·결과·기한 보존).
+        **_near_miss_improvement_work_body(payload, present_only=True),
         "submit_status": "DRAFT",
         "confirm_status": "PENDING",
         "submitted_at": None,

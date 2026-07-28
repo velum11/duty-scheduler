@@ -117,11 +117,18 @@ check("기한초과 타일 KPI 행에 추가", "기한초과" in kpi_src)
 check("overdue None → '—'(007 미준비 방어)", nms._overdue_label(None) == "—")
 check("overdue 0 → '0건'(실집계 0 은 표시)", nms._overdue_label(0) == "0건")
 check("overdue 4 → '4건'", nms._overdue_label(4) == "4건")
-overdue_src = inspect.getsource(nms._overdue_count)
+# 집계·권한 판정은 파사드 db.near_miss_overdue_count 가 소유한다(뷰 _overdue_count 제거).
+overdue_src = inspect.getsource(nms.db.near_miss_overdue_count)
 check("overdue 는 007 readiness 게이트(미준비 None)",
       "near_miss_improvement_schema_probe" in overdue_src and "READINESS_READY" in overdue_src)
 check("overdue 조건: 미확인(CONFIRMED 제외) + due_date 과거",
       "CONFIRMED" in overdue_src and "due" in overdue_src)
+check("overdue 는 평가자/ADMIN 역할 게이트(일반 USER 미노출)",
+      "can_evaluate_near_miss" in overdue_src)
+# 뷰는 파사드만 호출하고 개별 개선조치를 직접 순회하지 않는다(권한 게이트 우회 방지).
+stats_render_src = inspect.getsource(nms.render)
+check("stats 뷰는 overdue 를 파사드로 위임(near_miss_overdue_count)",
+      "near_miss_overdue_count" in stats_render_src)
 
 
 # ===== 5) 개선조치 관리(near_miss_improvement) MASTER_DETAIL 폐루프 =====

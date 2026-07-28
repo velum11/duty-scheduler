@@ -8,7 +8,8 @@
   1) near_miss_improvement._improvements_for  — 조회 실패는 None 아닌 _LOAD_FAILED sentinel
                                                 (행 라벨 '조회실패'), 정상 부재 None 은 '미작성'.
   2) near_miss_my._render_revision_banner     — 조회 실패는 danger 배너, 없음은 무배너.
-  3) near_miss_stats._overdue_count           — 개별 조회 실패는 축소 수치/가짜 0 아닌 None('—').
+  3) db.near_miss_overdue_count               — 평가자/ADMIN 전용, 개별 조회 실패는 축소 수치/
+                                                가짜 0 아닌 None('—'), 일반 USER 는 미노출(None).
 """
 from __future__ import annotations
 
@@ -67,16 +68,18 @@ _REPORTS = pd.DataFrame([{"id": "r1"}, {"id": "r2"}])
 # ===== 1) near_miss_improvement._improvements_for =====
 print("개선조치 큐 enrich — 조회 실패 vs 정상 부재 구분")
 
-with _swap(db, "get_near_miss_improvement", lambda rid: (_ for _ in ()).throw(_Boom("boom"))):
-    out = nmi._improvements_for(_REPORTS)
+_VIEWER = {"emp_no": "x"}  # _improvements_for 는 actor-aware(current_user 필수) — swap 은 무시.
+
+with _swap(db, "get_near_miss_improvement", lambda rid, **kw: (_ for _ in ()).throw(_Boom("boom"))):
+    out = nmi._improvements_for(_REPORTS, _VIEWER)
 check("조회 실패는 None 아닌 _LOAD_FAILED sentinel", out["r1"] is nmi._LOAD_FAILED)
 check("모든 실패 행이 sentinel(미작성으로 접히지 않음)",
       all(v is nmi._LOAD_FAILED for v in out.values()))
 check("sentinel 의 확인상태 라벨은 '조회실패'(미작성 아님)",
       nmi._confirm_state_of(nmi._LOAD_FAILED) == nmi._LOAD_FAILED_LABEL)
 
-with _swap(db, "get_near_miss_improvement", lambda rid: None):
-    out_absent = nmi._improvements_for(_REPORTS)
+with _swap(db, "get_near_miss_improvement", lambda rid, **kw: None):
+    out_absent = nmi._improvements_for(_REPORTS, _VIEWER)
 check("정상 부재(None)는 그대로 None — 미작성으로 정상 표시", out_absent["r1"] is None)
 check("정상 부재는 '미작성' 라벨(오류 표식과 구분)",
       nmi._confirm_state_of(None) == "미작성")
@@ -88,8 +91,8 @@ _QUEUE_REPORTS = pd.DataFrame([
     {"id": "r2", "report_no": "NM-2", "work_name": "작업B",
      "confirmed_grade": "C", "incident_date": "2026-07-02"},
 ])
-with _swap(db, "get_near_miss_improvement", lambda rid: (_ for _ in ()).throw(_Boom("boom"))):
-    rows = nmi._queue_rows(_QUEUE_REPORTS, nmi._improvements_for(_QUEUE_REPORTS))
+with _swap(db, "get_near_miss_improvement", lambda rid, **kw: (_ for _ in ()).throw(_Boom("boom"))):
+    rows = nmi._queue_rows(_QUEUE_REPORTS, nmi._improvements_for(_QUEUE_REPORTS, _VIEWER))
 check("그리드 행 확인상태='조회실패'", set(rows["확인상태"]) == {nmi._LOAD_FAILED_LABEL})
 check("그리드 행 담당자='조회실패'(미지정 위장 아님)",
       set(rows["담당자"]) == {nmi._LOAD_FAILED_LABEL})
@@ -129,31 +132,43 @@ with _swap(nmy, "banner", _rec_banner):
     check("보완요청 존재 → info 배너", _banners and _banners[0][0] == "info")
 
 
-# ===== 3) near_miss_stats._overdue_count =====
-print("아차사고 분석 기한초과 — 개별 조회 실패는 None('—'), 가짜 0/축소 금지")
+# ===== 3) db.near_miss_overdue_count (CAPA 기한초과 집계 파사드) =====
+print("CAPA 기한초과 집계 — 평가자/ADMIN 전용 + 개별 조회 실패는 None('—'), 가짜 0/축소 금지")
 
 _PAST_DUE = {"is_active": True, "confirm_status": "PENDING", "due_date": "2000-01-01"}
+_EVAL_ACTOR = {"emp_no": "eval", "role": "MANAGER", "is_safety_officer": False}
+_USER_ACTOR = {"emp_no": "u", "role": "USER", "is_safety_officer": False}
 
-with _swap(db, "near_miss_improvement_schema_probe", lambda **k: db.READINESS_READY), \
+# 집계는 명시적 privileged 경로 — 원본은 _near_miss_improvement_raw 를 순회한다(actor 게이트 통과 후).
+with _swap(db, "_near_miss_actor", lambda cu, **k: dict(_EVAL_ACTOR)), \
+        _swap(db, "near_miss_improvement_schema_probe", lambda **k: db.READINESS_READY), \
         _swap(db, "get_near_miss_reports", lambda f=None: _REPORTS):
     # 개별 개선조치 조회가 던지면 축소 수치/0 이 아니라 None(미상).
-    with _swap(db, "get_near_miss_improvement",
+    with _swap(db, "_near_miss_improvement_raw",
                lambda rid: (_ for _ in ()).throw(_Boom("boom"))):
-        overdue_err = nms._overdue_count()
+        overdue_err = db.near_miss_overdue_count(current_user=_EVAL_ACTOR)
     check("개별 조회 실패 → None(미상, 가짜 0/축소 금지)", overdue_err is None)
     check("None 은 KPI 에서 '—'로 표기", nms._overdue_label(overdue_err) == "—")
 
     # 대조군: 모두 기한초과면 실제 건수(축소 없음).
-    with _swap(db, "get_near_miss_improvement", lambda rid: dict(_PAST_DUE)):
-        overdue_all = nms._overdue_count()
+    with _swap(db, "_near_miss_improvement_raw", lambda rid: dict(_PAST_DUE)):
+        overdue_all = db.near_miss_overdue_count(current_user=_EVAL_ACTOR)
     check("정상 경로: 기한초과 실제 건수 집계", overdue_all == len(_REPORTS))
     check("정상 건수는 '{n}건'으로 표기", nms._overdue_label(overdue_all) == f"{len(_REPORTS)}건")
 
     # 대조군: 진짜 0(모두 확인됨)은 0 그대로(오류 아님).
-    with _swap(db, "get_near_miss_improvement",
+    with _swap(db, "_near_miss_improvement_raw",
                lambda rid: {"is_active": True, "confirm_status": "CONFIRMED", "due_date": "2000-01-01"}):
-        overdue_zero = nms._overdue_count()
+        overdue_zero = db.near_miss_overdue_count(current_user=_EVAL_ACTOR)
     check("진짜 0(모두 확인)은 0 유지 — 오류와 구분", overdue_zero == 0)
+
+# 역할 게이트: 일반 USER 는 CAPA 기한초과 집계를 못 본다(aggregate leak 방지 → None='—').
+with _swap(db, "_near_miss_actor", lambda cu, **k: dict(_USER_ACTOR)), \
+        _swap(db, "near_miss_improvement_schema_probe", lambda **k: db.READINESS_READY), \
+        _swap(db, "get_near_miss_reports", lambda f=None: _REPORTS), \
+        _swap(db, "_near_miss_improvement_raw", lambda rid: dict(_PAST_DUE)):
+    overdue_user = db.near_miss_overdue_count(current_user=_USER_ACTOR)
+check("일반 USER 는 CAPA 기한초과 미노출(None='—', 역할 게이트)", overdue_user is None)
 
 
 print()

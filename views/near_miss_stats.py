@@ -13,7 +13,6 @@ from __future__ import annotations
 # DESIGN.md §0 화면 유형 규약 — 대시보드형.
 SCREEN_ARCHETYPE = "DASHBOARD"
 
-from datetime import date
 from html import escape
 
 import streamlit as st
@@ -99,7 +98,9 @@ def render(user: dict) -> None:
         ui.empty_state("집계할 아차사고 보고서가 없습니다.", head="아차사고 집계")
         return
 
-    _kpi_cards(status_counts, total, _overdue_count())
+    # CAPA 기한초과는 신고 분포(전사 공개)와 달리 역할 기반 접근이다 — 파사드가 평가자/
+    # ADMIN 만 집계를 돌려주고 일반 USER 에게는 None('—')을 준다(집계 수치 leak 방지).
+    _kpi_cards(status_counts, total, db.near_miss_overdue_count(current_user=user))
     st.write("")
 
     col_a, col_b = st.columns(2)
@@ -150,41 +151,11 @@ def _kpi_cards(status_counts: dict, total: int, overdue: int | None) -> None:
 
 
 def _overdue_label(overdue: int | None) -> str:
-    """기한초과 지표 표시값. 007 미준비(None)면 '—'(가짜 0 금지)."""
+    """기한초과 지표 표시값. 007 미준비·비권한자·조회미상(None)이면 '—'(가짜 0 금지).
+
+    집계·권한 판정은 파사드 ``db.near_miss_overdue_count(current_user=)`` 가 소유한다 —
+    CAPA 는 역할 기반 접근이라 일반 USER 에게는 이 지표가 None('—')으로 게이트된다."""
     return "—" if overdue is None else f"{overdue}건"
-
-
-def _overdue_count() -> int | None:
-    """활성 개선조치(007) 중 기한초과 건수 = due_date < 오늘 AND confirm_status<>CONFIRMED.
-
-    007 미준비(NOT_READY/PROBE_ERROR)면 ``None`` 을 돌려 '—'로 방어한다(가짜 0 금지).
-    전용 집계 파사드가 없어 보고서를 순회하며 개별 개선조치를 조회한다. 개별 조회가
-    실패하면 축소된 수치(최악의 경우 0)를 내지 않고 ``None`` 을 돌려 '—'(미상)로 처리한다
-    — READY 이후의 실제 조회 오류를 잘못된 0/축소 수치로 위장하지 않는다(오류≠정상 0).
-    지표 하나가 미상이 되어도 다른 집계 패널은 정상 표시되므로 화면 전체를 막지는 않는다."""
-    if db.near_miss_improvement_schema_probe() != db.READINESS_READY:
-        return None
-    try:
-        reports = db.get_near_miss_reports({})
-    except Exception:
-        return None
-    if reports is None or reports.empty:
-        return 0
-    today = date.today().isoformat()
-    count = 0
-    for rid in reports["id"].astype(str):
-        try:
-            imp = db.get_near_miss_improvement(rid)
-        except Exception:
-            return None  # 축소 수치/가짜 0 금지 — 미상('—')으로 정직하게 표시.
-        if not imp or not bool(imp.get("is_active", True)):
-            continue
-        if str(imp.get("confirm_status") or "") == "CONFIRMED":
-            continue
-        due = str(imp.get("due_date") or "").strip()
-        if due and due < today:  # ISO YYYY-MM-DD 는 사전식 비교 == 시간순 비교.
-            count += 1
-    return count
 
 
 def _closure_rate_label(closed: int, evaluated: int) -> str:
