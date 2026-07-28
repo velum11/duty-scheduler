@@ -5,6 +5,14 @@ DESIGN.md §0 화면 유형: ``MASTER_DETAIL`` — 조회 전용 목록(종결 �
 (새로고침)만 두고, 유일한 쓰기(저장·제출·확인·재조치요청·종결)는 상세 패널의 scope
 액션(``erp.detail_actions``)이 담당한다 — 파사드 직접 호출, 그리드 저장 lifecycle 미사용.
 
+목록 그리드는 중립 키트의 **단일 선택 어댑터**(``erp.select_grid``)를 쓴다 — 편집
+렌더러(``render_master_grid``)의 ``_action`` 열·paste·hidden 편집메타·unsafe jscode 를
+쓰지 않고 AgGrid 네이티브 single-selection(체크 마커 + 배경 틴트 이중부호화)으로 케이스를
+고른다. 선택은 자연키(보고서 id)로 오가며(정렬·필터 후 위치 비의존), 상세 렌더 전에 소비해
+추가 rerun 없이 상세를 그린다(§0.5 capability 분리 정합). 상세는 6화면 중 최밀(폼+역할별
+버튼+2단계 종결)이라, 워크플로 클러스터(CAPA 폼 + scope 액션)를 상단 근처로 올리고 보고서
+참조 서술(작업명·대책·현장 설명·원인)은 기본 접힘 expander 로 내려 스크롤 깊이를 줄인다.
+
 007 개선조치(CAPA) 데이터층 배선
 --------------------------------
 평가 확정(EVALUATED)된 보고서에 대해 담당자/확인자/기한/조치를 기록하고, 제출→확인→
@@ -38,22 +46,17 @@ from html import escape
 
 import pandas as pd
 import streamlit as st
-from st_aggrid import JsCode
 
-from modules import auth, db, nav, ui
+from modules import auth, db
 from views.common import erp, scaffold
 from views.master import (
     TOKENS,
     DraftState,
-    MasterGridSpec,
     Readiness,
     ReadinessState,
     banner,
-    count_strip,
     empty_state,
     icon_toolbar_specs,
-    master_grid_height,
-    render_master_grid,
     sheet_head,
     show_flash,
 )
@@ -92,36 +95,22 @@ _PROBE_ERROR_MSG = (
 )
 _STALE_MARK = "이미 변경"  # db 원문 일부 — stale 충돌(다른 사용자 선처리)은 warning 로 분기.
 
-_QUEUE_COLS = ["보고번호", "작업명", "확정등급", "담당자", "확인상태", "발생일"]
-_QUEUE_ROW_COLS = ["_row_id", "_row_state", "_sel", *_QUEUE_COLS]
-_QUEUE_GRID_COLUMNS = {c: "text" for c in _QUEUE_COLS}
+# 큐 표시 열 + 숨김 자연키(_report_id). 선택은 자연키로 오간다(정렬·필터 후 위치 비의존).
+# 6화면 중 최밀 상세를 위해 목록은 CAPA 결정 열(식별·등급·담당·확인상태)만 남긴다 — 발생일은
+# 큐가 발생일 내림차순 정렬이라 이미 반영되고 상세에도 표기되므로, @1024 좁은 폭 가로 스크롤을
+# 없애기 위해 큐에서 뺀다(평가 파일럿이 제안등급을 뺀 것과 같은 밀도 결정).
+_QUEUE_COLS = ["보고번호", "작업명", "확정등급", "담당자", "확인상태"]
+_KEY_FIELD = "_report_id"  # 숨김 자연키 열(선택 반환값) — 표시 컬럼을 오염시키지 않는다.
+# 폭 합(min ≈ 424 + chrome)을 @1024 좁은 목록 컬럼에 맞춰 가로 스크롤 0 을 보장한다(고정폭
+# + 잔여는 flex 작업명/담당자가 흡수). @1366 넓은 폭에선 flex 두 열이 여유를 채운다.
 _QUEUE_COL_CONFIG = {
-    "보고번호": {"flex": 0, "width": 118, "minWidth": 100, "cellClass": "md-c-left", "editable": False},
-    "작업명": {"flex": 1.6, "minWidth": 130, "cellClass": "md-c-left", "editable": False},
-    "확정등급": {"flex": 0, "width": 80, "minWidth": 66, "maxWidth": 96,
-               "cellClass": "md-c-center", "editable": False},
-    "담당자": {"flex": 1.0, "minWidth": 110, "cellClass": "md-c-left", "editable": False},
-    "확인상태": {"flex": 0, "width": 92, "minWidth": 78, "maxWidth": 108,
-               "cellClass": "md-c-center", "editable": False},
-    "발생일": {"flex": 0, "width": 102, "minWidth": 90, "maxWidth": 122,
-              "cellClass": "md-c-center", "editable": False},
+    "보고번호": {"flex": 0, "width": 104, "minWidth": 88, "cellClass": "md-c-left"},
+    "작업명": {"flex": 1.5, "minWidth": 96, "cellClass": "md-c-left"},
+    "확정등급": {"flex": 0, "width": 60, "minWidth": 46, "maxWidth": 82, "cellClass": "md-c-center",
+               "headerName": "등급"},  # 좁은 폭 유지 위해 헤더만 축약(큐에 제안등급 없어 무모호).
+    "담당자": {"flex": 1.0, "minWidth": 92, "cellClass": "md-c-left"},
+    "확인상태": {"flex": 0, "width": 84, "minWidth": 70, "maxWidth": 100, "cellClass": "md-c-center"},
 }
-
-# 행 클릭 드릴다운 — near_miss_evaluate.py 의 _ROW_CLICK 과 동일 패턴.
-_ROW_CLICK = JsCode(
-    """
-    function(e) {
-      var d = (e.node && e.node.data) || {};
-      if (d._row_state !== 'existing') { return; }
-      if (d._linked === '1' || d._linked === 1) { return; }
-      e.api.forEachNode(function(node) {
-        var nd = node.data || {};
-        var want = (node === e.node) ? '1' : '';
-        if (String(nd._linked || '') !== want) { node.setDataValue('_linked', want); }
-      });
-    }
-    """
-)
 
 
 def render(user: dict) -> None:
@@ -199,19 +188,22 @@ def _render_body(user: dict) -> None:
         )
     scoped = _scope_reports(reports, improvements, is_reviewer, load_failed)
 
-    list_col, detail_col = erp.master_detail_frame(list_ratio=1.5, detail_ratio=1.1)
+    # 상세가 최밀(폼+역할별 버튼+2단계 종결)이라 상세 비율을 올려 세로 답답함을 줄인다. 목록은
+    # 6열이지만 첫 열(보고번호)·flex 작업명으로 식별성을 유지하고 고정폭으로 가로 스크롤 0 을 노린다.
+    list_col, detail_col = erp.master_detail_frame(list_ratio=1.5, detail_ratio=1.2)
+    selected_id = st.session_state.get(_SEL_KEY)
     with list_col:
-        grid_df = _render_queue(scoped, improvements, load_failed)
+        picked = _render_queue(scoped, improvements, load_failed, selected_id)
+    # 선택을 상세 렌더 **전에** 소비한다 — select_grid 의 selectionChanged rerun 이 이미
+    # 일어난 run 이므로 여기서 세션만 갱신하면 추가 st.rerun 없이 곧바로 상세를 그린다.
+    if picked is not None and picked != selected_id:
+        st.session_state[_SEL_KEY] = picked
+        st.session_state.pop(_CLOSE_CONFIRM_KEY, None)  # 케이스 전환 시 종결 확인 초기화.
+        selected_id = picked
     with detail_col:
         _render_detail(user, readiness)
 
     _render_summary(scoped, improvements, load_failed)
-
-    picked = _picked_report_id(grid_df)
-    if picked is not None and picked != st.session_state.get(_SEL_KEY):
-        st.session_state[_SEL_KEY] = picked
-        st.session_state.pop(_CLOSE_CONFIRM_KEY, None)  # 케이스 전환 시 종결 확인 초기화.
-        st.rerun()
 
 
 # ---------- 데이터 적재 ----------
@@ -273,20 +265,18 @@ def _user_label(emp_no) -> str:
     return f"{name}({emp_no})" if name else emp_no
 
 
-def _flag(cond) -> str:
-    return "1" if bool(cond) else ""
-
-
 def _confirm_state_of(imp) -> str:
     if not imp:
         return "미작성"
     return str(imp.get("confirm_status") or "").strip() or "미작성"
 
 
-# ---------- 큐 그리드 ----------
+# ---------- 큐 그리드(단일 선택) ----------
 def _queue_rows(reports: pd.DataFrame, improvements: dict, load_failed: bool) -> pd.DataFrame:
+    """큐 표시 프레임 — 숨김 자연키(_report_id) + 표시 6열."""
+    cols = [_KEY_FIELD, *_QUEUE_COLS]
     if reports is None or reports.empty:
-        return pd.DataFrame(columns=_QUEUE_ROW_COLS)
+        return pd.DataFrame(columns=cols)
     frame = reports.sort_values("incident_date", ascending=False, kind="stable").reset_index(drop=True)
     rows = []
     for _, r in frame.iterrows():
@@ -304,64 +294,41 @@ def _queue_rows(reports: pd.DataFrame, improvements: dict, load_failed: bool) ->
             assignee = "미지정"
             confirm_label = _CONFIRM_LABEL.get("미작성", "미작성")
         rows.append({
-            "_row_id": f"e:{rid}",
-            "_row_state": "existing",
-            "_sel": False,
+            _KEY_FIELD: rid,
             "보고번호": str(r.get("report_no") or "-"),
             "작업명": str(r.get("work_name") or "-"),
             "확정등급": str(r.get("confirmed_grade") or "-"),
             "담당자": assignee,
             "확인상태": confirm_label,
-            "발생일": str(r.get("incident_date") or "-"),
         })
-    return pd.DataFrame(rows, columns=_QUEUE_ROW_COLS)
+    return pd.DataFrame(rows, columns=cols)
 
 
-def _queue_display(rows: pd.DataFrame, selected_id) -> pd.DataFrame:
-    frame = rows.copy() if rows is not None else pd.DataFrame(columns=_QUEUE_ROW_COLS)
-    if frame.empty:
-        return frame
-    target = f"e:{selected_id}" if selected_id else None
-    frame["_linked"] = (
-        (frame["_row_id"].astype(str) == str(target)).map(_flag) if target else ""
-    )
-    return frame
+def _confirm_color_rules() -> dict:
+    """확인상태 셀 색 규칙(한글 라벨 → 색). 텍스트 라벨은 항상 유지(색은 보조 신호)."""
+    rules = {_CONFIRM_LABEL[s]: _CONFIRM_COLOR[s] for s in ("PENDING", "CONFIRMED", "REJECTED")}
+    rules["미작성"] = _CONFIRM_COLOR["미작성"]
+    return rules
 
 
-def _picked_report_id(grid_df: pd.DataFrame):
-    if grid_df is None or "_linked" not in grid_df.columns or "_row_id" not in grid_df.columns:
-        return None
-    linked = grid_df[
-        (grid_df["_row_state"].astype(str) == "existing")
-        & (grid_df["_linked"].astype(str).str.strip() == "1")
-    ]
-    if linked.empty:
-        return None
-    rid = str(linked.iloc[0]["_row_id"]).strip()
-    return rid[2:] if rid.startswith("e:") else rid
+def _render_queue(reports: pd.DataFrame, improvements: dict, load_failed: bool,
+                  selected_id) -> str | None:
+    """종결 대기 큐를 단일 선택 목록으로 렌더하고 선택된 보고서 자연키를 돌려준다.
 
-
-def _render_queue(reports: pd.DataFrame, improvements: dict, load_failed: bool) -> pd.DataFrame:
-    selected_id = st.session_state.get(_SEL_KEY)
+    편집 그리드가 아니라 ``erp.select_grid``(네이티브 single-selection) — 행 클릭으로
+    케이스를 고르면 체크 마커 + 배경 틴트로 이중부호화되고, 선택 자연키(_report_id)를
+    반환한다(정렬·필터 후 위치 비의존)."""
     rows = _queue_rows(reports, improvements, load_failed)
     sheet_head("종결 대기 큐", count=len(rows))
-
-    spec = MasterGridSpec(
-        page_id=_STATE.page_id, columns=_QUEUE_GRID_COLUMNS, order=_QUEUE_COLS,
-        col_config=_QUEUE_COL_CONFIG, select_all=False, include_linked_rows=True,
-        grid_options={"onCellClicked": _ROW_CLICK},
-        height=master_grid_height(len(rows)),
+    return erp.select_grid(
+        rows, key=f"{_PAGE_ID}_queue", key_field=_KEY_FIELD,
+        columns=_QUEUE_COLS, selected_key=selected_id,
+        col_config=_QUEUE_COL_CONFIG,
+        color_rules={"확인상태": _confirm_color_rules()},
     )
-    grid_df = render_master_grid(spec, _queue_display(rows, selected_id), key=_STATE.grid_key())
-    count_strip(len(rows), 0, 0, 0)
-    return grid_df
 
 
 # ---------- 상세 패널 ----------
-def _badge(label: str, color: str) -> str:
-    return ui.badge_html(escape(label), color)
-
-
 def _render_detail(user: dict, readiness: ReadinessState) -> None:
     selected_id = st.session_state.get(_SEL_KEY)
     if not selected_id:
@@ -388,8 +355,6 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         )
         return
 
-    _render_report_summary(report)
-
     # 개선조치 프리필 조회 실패를 None('미작성')으로 접으면, 기존 개선조치가 있는데도
     # 빈 폼처럼 보여 덮어쓰기 저장 위험이 있다 — 오류를 표면화하고 폼/액션을 열지 않는다
     # (report 조회 실패 처리와 동일 관행). 007 미준비의 정상 None 은 여기 도달 전
@@ -413,25 +378,77 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     can_review = auth.can_review_improvement(user, imp)
     can_assign = auth.can_evaluate_near_miss(user)
 
+    # ── 상단: 보고번호 + 워크플로 상태 배지(제출·확인, 색+라벨 이중부호화) ──
+    _render_detail_head(report, imp)
+    # ── 짧은 메타 2열 + 핵심 내용(사고 내용, 전폭) ──
+    _render_report_context(report)
+
+    # ── 워크플로 클러스터(CAPA 폼 + 역할별 scope 액션) — 핵심 내용 바로 뒤(fold 근처) ──
+    st.markdown(
+        f"<div style='border-top:1px solid {TOKENS['line']};margin:12px 0 2px;'></div>",
+        unsafe_allow_html=True,
+    )
     form = _render_capa_form(selected_id, imp, readiness, can_work=can_work, can_assign=can_assign)
     _render_actions(user, report, imp, form, readiness,
                     can_work=can_work, can_review=can_review, can_assign=can_assign)
 
+    # ── 부차 참조 서술(작업명·작업 내용·대책·현장 설명·원인) — 기본 접힘으로 상세 높이 bound. ──
+    _render_report_reference(report)
 
-def _render_report_summary(report: dict) -> None:
+
+def _render_detail_head(report: dict, imp) -> None:
+    """보고번호(제목 §2 20/700) + 제출·확인 워크플로 배지(색+라벨 이중부호화)."""
     report_no = escape(str(report.get("report_no") or "-"))
-    grade = escape(str(report.get("confirmed_grade") or "-"))
-    st.markdown(f"### {report_no} · 확정등급 {grade}")
-    st.caption(
-        f"신고자 {escape(_user_label(report.get('reporter_emp_no')))} · "
-        f"발생일 {escape(str(report.get('incident_date') or '-'))} · "
-        f"부서 {escape(str(report.get('dept_code') or '-'))}"
+    submit_status = str(imp.get("submit_status") or "") if imp else ""
+    confirm_status = _confirm_state_of(imp)
+    submit_badge = erp.status_badge_html(
+        _SUBMIT_LABEL.get(submit_status, "미작성"),
+        _SUBMIT_COLOR.get(submit_status, TOKENS["ink-3"]))
+    confirm_badge = erp.status_badge_html(
+        _CONFIRM_LABEL.get(confirm_status, confirm_status),
+        _CONFIRM_COLOR.get(confirm_status, TOKENS["ink-3"]))
+    lbl = f"color:{TOKENS['ink-2']};font-size:12px;"
+    st.markdown(
+        f"<div style='display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:2px 0 8px;'>"
+        f"<span style='font-size:20px;font-weight:700;color:{TOKENS['ink']};"
+        f"line-height:1.2;'>{report_no}</span>"
+        f"<span style='{lbl}'>제출</span>{submit_badge}"
+        f"<span style='{lbl}'>확인</span>{confirm_badge}</div>",
+        unsafe_allow_html=True,
     )
-    st.markdown(f"**작업명** {escape(str(report.get('work_name') or '-'))}")
-    st.text_area("사고 내용", value=str(report.get("incident_content") or ""),
-                 height=68, disabled=True, key=f"nm_impr_ic_{report.get('id')}")
-    st.text_area("대책", value=str(report.get("countermeasure") or ""),
-                 height=56, disabled=True, key=f"nm_impr_cm_{report.get('id')}")
+
+
+def _render_report_context(report: dict) -> None:
+    """짧은 메타 2열(신고자·발생일 / 부서·확정등급) + 핵심 내용(사고 내용, 전폭 읽기 필드)."""
+    left_pairs = [
+        ("신고자", _user_label(report.get("reporter_emp_no"))),
+        ("발생일", str(report.get("incident_date") or "-")),
+    ]
+    right_pairs = [
+        ("부서", str(report.get("dept_code") or "-")),
+        ("확정등급", str(report.get("confirmed_grade") or "-")),
+    ]
+    mc1, mc2 = st.columns(2)
+    mc1.markdown(erp.meta_col_html(left_pairs), unsafe_allow_html=True)
+    mc2.markdown(erp.meta_col_html(right_pairs), unsafe_allow_html=True)
+    erp.field_block("사고 내용", str(report.get("incident_content") or ""))
+
+
+def _render_report_reference(report: dict) -> None:
+    """참조성 긴 서술(작업명·작업 내용·대책·현장 설명·원인)을 기본 접힘 expander 로 내린다.
+
+    워크플로 클러스터가 이 위에 있으므로 장문 케이스에서도 주요 행동(저장·제출·확인·종결)이
+    긴 서술에 밀리지 않는다(§0.4 sticky/fixed 미사용, st.expander 네이티브 접기만)."""
+    with st.expander("보고서 상세 더 보기", expanded=False):
+        erp.field_block("작업명", str(report.get("work_name") or ""))
+        erp.field_block("작업 내용", str(report.get("work_content") or ""))
+        erp.field_block("대책", str(report.get("countermeasure") or ""))
+        erp.field_block("현장 설명", str(report.get("site_description") or ""))
+        cause = str(report.get("cause_code") or "")
+        cause_detail = str(report.get("cause_detail") or "")
+        cause_val = cause + (f" · {cause_detail}" if cause_detail else "")
+        if cause_val.strip():
+            erp.field_block("원인", cause_val)
 
 
 def _user_options() -> tuple[list[str], dict]:
@@ -462,23 +479,14 @@ def _select_index(options: list[str], value) -> int:
 
 def _render_capa_form(selected_id, imp, readiness: ReadinessState,
                       *, can_work: bool, can_assign: bool) -> dict:
-    """CAPA 입력 폼(담당자·확인자·기한·조치 내용/결과) + 상태 배지. 반환은 위젯 현재값.
+    """CAPA 입력 폼(담당자·확인자·기한·조치 내용/결과). 반환은 위젯 현재값.
 
     행단위 편집 경계: 배정 필드(담당자·확인자)는 can_assign(평가자/ADMIN)만, 작업 필드
     (기한·조치 내용/결과)는 can_work(배정 담당자 본인·ADMIN)만 편집 가능하고 그 외에는
     읽기전용(disabled)으로 표시한다 — facade 가 어차피 strip 하지만 화면도 경계를 드러내
-    혼동을 막는다. 읽기전용이라도 위젯은 저장된 값을 반환하므로 반환 dict 는 온전하다."""
-    submit_status = str(imp.get("submit_status") or "") if imp else ""
+    혼동을 막는다. 읽기전용이라도 위젯은 저장된 값을 반환하므로 반환 dict 는 온전하다.
+    (제출·확인 상태 배지는 상세 상단 헤더 _render_detail_head 로 이관했다.)"""
     confirm_status = _confirm_state_of(imp)
-    submit_badge = _badge(_SUBMIT_LABEL.get(submit_status, "미작성"),
-                          _SUBMIT_COLOR.get(submit_status, TOKENS["ink-3"]))
-    confirm_badge = _badge(_CONFIRM_LABEL.get(confirm_status, confirm_status),
-                          _CONFIRM_COLOR.get(confirm_status, TOKENS["ink-3"]))
-    st.markdown(
-        f"<div style='margin:6px 0 2px;'>제출상태 {submit_badge}"
-        f"&nbsp;&nbsp;확인상태 {confirm_badge}</div>",
-        unsafe_allow_html=True,
-    )
     if imp and confirm_status == "REJECTED" and str(imp.get("revision_note") or "").strip():
         banner("warn", f"재조치 요청 사유: {str(imp.get('revision_note')).strip()}")
 
