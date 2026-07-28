@@ -668,10 +668,16 @@ def detail_empty(title: str, body: str) -> None:
 # kit 은 도메인을 모른다 — status→색/라벨 매핑, 역할·인가·액션·facade 호출은 각 화면이 소유하고
 # 여기엔 계산된 label/color/value 만 넘어온다. 다른 MASTER_DETAIL 화면이 복제 없이 재사용한다.
 def status_badge_html(label: str, color: str) -> str:
-    """상태 배지 HTML(색+라벨 이중부호화, §2 badge 11/600). 색·라벨은 호출부가 도메인에서 계산."""
+    """상태 배지 HTML(색+라벨 이중부호화, §2 badge 11/600). 색·라벨은 호출부가 도메인에서 계산.
+
+    중립 배지(color=``--ink-3``)는 읽는 라벨 글자색만 ``--ink-2`` 로 clamp 한다
+    (DESIGN §159: 읽는 텍스트에 ``--ink-3`` 금지). 배경·테두리는 전달 색을 그대로 써
+    중립 상태의 낮은 시각 강도를 유지한다. 색 신호가 있는 상태는 전달 색을 그대로 쓴다.
+    """
+    text = TOKENS["ink-2"] if color == TOKENS["ink-3"] else color
     return (
         f"<span style='display:inline-flex;align-items:center;padding:1px 8px;"
-        f"border-radius:5px;font-size:11px;font-weight:600;color:{color};"
+        f"border-radius:5px;font-size:11px;font-weight:600;color:{text};"
         f"border:1px solid {color};background:{color}14;'>{escape(label)}</span>"
     )
 
