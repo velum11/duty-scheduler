@@ -76,7 +76,13 @@ _FORM_CSS = """
 .nm-sec { font-size:.82rem; font-weight:700; color:var(--ms-ink); letter-spacing:-.01em;
   margin:.9rem 0 .1rem; padding-top:.5rem; border-top:1px solid var(--ms-line); }
 .nm-sec:first-of-type { border-top:none; padding-top:0; }
+/* 필수 핵심 섹션 — 폼 위계 최상단(§2 위계 높임). 오버사이즈 타이포가 아니라 라벨 색/구분선
+   강조와 필수 표식으로만 상대 위계를 올린다(장식 금지). */
+.nm-sec-lead { display:flex; align-items:baseline; gap:.5rem; font-size:.88rem; font-weight:800;
+  color:var(--ms-ink); border-top:none; padding-top:.1rem; margin:.2rem 0 .1rem; }
+.nm-sec-lead .nm-req { font-size:.72rem; font-weight:700; color:var(--ms-danger); }
 .nm-note { font-size:.75rem; color:var(--ms-ink-2); margin:.15rem 0 .3rem; line-height:1.35; }
+.nm-note .nm-star { color:var(--ms-danger); font-weight:700; }
 </style>
 """
 
@@ -174,58 +180,83 @@ def render(user: dict) -> None:
 
     can_submit = _readiness_gate()
 
-    # ── 입력 폼 본문(라벨드 필드 + 첨부) ─────────────────────────────────────
+    # ── 입력 폼 본문(문서형 위계: 필수 상단·크게 → 선택 상세 접힘 → 첨부 접힘) ──────
+    # 폼 위계(리서치 §등록형: 초기 보고는 짧게, 필수 상단·선택 후순위). 필수 4항목
+    # (작업명·발생일·발생원인·사고내용 = _validate 계약)을 상단 한 섹션에 위계 높여 배치하고,
+    # 선택 상세·사진은 st.expander 로 기본 접어 시각 비중을 낮춘다. expander 내부 위젯도
+    # 폼 컨텍스트에 속하므로(접혀 있어도 값 유지) 제출 시 전 필드가 함께 전송된다 — 필드
+    # 제거·검증 완화 없음, 앵커([제안서 제출])는 긴 화면 하단에 유지(§0.4 sticky 미사용).
     with st.form("near_miss_submit_form", clear_on_submit=False):
         st.markdown("<div class='nm-sec'>신고자 정보</div>", unsafe_allow_html=True)
         _identity_row(user)
 
-        st.markdown("<div class='nm-sec'>작업·발생 개요</div>", unsafe_allow_html=True)
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            work_name = st.text_input("작업명", max_chars=120, key="nm_f_work_name",
-                                      placeholder="예: 3라인 컨베이어 벨트 점검")
-        with c2:
-            incident_date = st.date_input("발생일", value=date.today(),
-                                          format="YYYY-MM-DD", key="nm_f_incident_date")
-        c3, c4 = st.columns(2)
-        with c3:
-            grade_opts = [""] + list(db.NEAR_MISS_GRADES)
-            proposed_grade = st.selectbox(
-                "제안 등급", grade_opts, index=0, key="nm_f_proposed_grade",
-                format_func=lambda g: "— 선택 안 함 —" if g == "" else g,
-                help="신고자가 제안하는 위험 등급(S~D). 확정 등급은 평가 단계에서 부여됩니다.",
-            )
-        with c4:
-            cause_opts = [""] + list(db.NEAR_MISS_CAUSE_CODES)
-            cause_code = st.selectbox(
-                "발생원인", cause_opts, index=0, key="nm_f_cause_code",
-                format_func=lambda c: "— 선택 —" if c == "" else f"{_CAUSE_LABELS.get(c, c)} ({c})",
-            )
-        cause_detail = st.text_input("발생원인 상세", max_chars=200, key="nm_f_cause_detail",
-                                     placeholder="원인을 구체적으로 적어 주세요(선택)")
-
-        st.markdown("<div class='nm-sec'>세부 내용</div>", unsafe_allow_html=True)
-        work_content = st.text_area("작업내용", height=90, key="nm_f_work_content",
-                                    placeholder="어떤 작업을 하고 있었는지")
-        incident_content = st.text_area("사고내용", height=110, key="nm_f_incident_content",
-                                        placeholder="무슨 일이 있었는지(아차사고 상황)")
-        countermeasure = st.text_area("예방대책", height=90, key="nm_f_countermeasure",
-                                      placeholder="재발을 막기 위한 제안 대책")
-        site_description = st.text_area("작업현장 상황설명", height=90, key="nm_f_site_description",
-                                        placeholder="현장 상황·주변 환경(선택)")
-
-        st.markdown("<div class='nm-sec'>사진 첨부</div>", unsafe_allow_html=True)
+        # ── 필수 핵심(상단·위계 최상단) ──
         st.markdown(
-            "<div class='nm-note'>사진 업로드는 승인 후 활성화됩니다. 지금은 촬영·선택만 "
-            "가능하며 제출해도 사진은 저장되지 않습니다.</div>",
+            "<div class='nm-sec nm-sec-lead'>필수 입력<span class='nm-req'>* 4개 항목</span></div>",
             unsafe_allow_html=True,
         )
-        pc1, pc2 = st.columns(2)
-        with pc1:
-            camera_shot = st.camera_input("현장 촬영(모바일)", key="nm_f_camera")
-        with pc2:
-            uploaded = st.file_uploader("사진 선택(PC)", type=["png", "jpg", "jpeg"],
-                                        accept_multiple_files=True, key="nm_f_upload")
+        st.markdown(
+            "<div class='nm-note'>아차사고 접수에 필요한 최소 항목입니다"
+            "(<span class='nm-star'>*</span> 표시). 상세·사진은 아래 '추가 정보'에서 "
+            "선택 입력합니다.</div>",
+            unsafe_allow_html=True,
+        )
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            work_name = st.text_input("작업명 *", max_chars=120, key="nm_f_work_name",
+                                      placeholder="예: 3라인 컨베이어 벨트 점검")
+        with c2:
+            incident_date = st.date_input("발생일 *", value=date.today(),
+                                          format="YYYY-MM-DD", key="nm_f_incident_date")
+        cause_opts = [""] + list(db.NEAR_MISS_CAUSE_CODES)
+        cause_code = st.selectbox(
+            "발생원인 *", cause_opts, index=0, key="nm_f_cause_code",
+            format_func=lambda c: "— 선택 —" if c == "" else f"{_CAUSE_LABELS.get(c, c)} ({c})",
+        )
+        incident_content = st.text_area(
+            "사고내용 *", height=130, key="nm_f_incident_content",
+            placeholder="무슨 일이 있었는지(아차사고 상황)를 구체적으로 적어 주세요",
+        )
+
+        # ── 추가 정보(선택) — 후순위·기본 접힘 ──
+        with st.expander("추가 정보 (선택)", expanded=False):
+            st.markdown(
+                "<div class='nm-note'>있으면 함께 접수됩니다. 없어도 제출할 수 있습니다.</div>",
+                unsafe_allow_html=True,
+            )
+            c3, c4 = st.columns(2)
+            with c3:
+                grade_opts = [""] + list(db.NEAR_MISS_GRADES)
+                proposed_grade = st.selectbox(
+                    "제안 등급", grade_opts, index=0, key="nm_f_proposed_grade",
+                    format_func=lambda g: "— 선택 안 함 —" if g == "" else g,
+                    help="신고자가 제안하는 위험 등급(S~D). 확정 등급은 평가 단계에서 부여됩니다.",
+                )
+            with c4:
+                cause_detail = st.text_input("발생원인 상세", max_chars=200,
+                                             key="nm_f_cause_detail",
+                                             placeholder="원인을 구체적으로")
+            work_content = st.text_area("작업내용", height=80, key="nm_f_work_content",
+                                        placeholder="어떤 작업을 하고 있었는지")
+            countermeasure = st.text_area("예방대책", height=80, key="nm_f_countermeasure",
+                                          placeholder="재발을 막기 위한 제안 대책")
+            site_description = st.text_area("작업현장 상황설명", height=80,
+                                            key="nm_f_site_description",
+                                            placeholder="현장 상황·주변 환경")
+
+        # ── 사진 첨부(선택 · GATED) — 시각 비중 축소, 기본 접힘. 안내는 유지. ──
+        with st.expander("사진 첨부 (선택 · 저장 보류)", expanded=False):
+            st.markdown(
+                "<div class='nm-note'>사진 업로드는 승인 후 활성화됩니다. 지금은 촬영·선택만 "
+                "가능하며 제출해도 사진은 저장되지 않습니다.</div>",
+                unsafe_allow_html=True,
+            )
+            pc1, pc2 = st.columns(2)
+            with pc1:
+                camera_shot = st.camera_input("현장 촬영(모바일)", key="nm_f_camera")
+            with pc2:
+                uploaded = st.file_uploader("사진 선택(PC)", type=["png", "jpg", "jpeg"],
+                                            accept_multiple_files=True, key="nm_f_upload")
 
         submitted = erp.form_submit("제안서 제출", disabled=not can_submit)
 
