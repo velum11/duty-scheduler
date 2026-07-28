@@ -2413,6 +2413,61 @@ def list_near_miss_improvements(report_ids, *, current_user) -> dict:
     return out
 
 
+def _has_active_improvement_assignment(actor: dict) -> bool:
+    """행위자가 담당자 또는 지정 확인자인 **활성** 개선조치가 1건 이상인지(가벼운 존재확인).
+
+    sample 은 세션 store 를 순회하며 활성 레코드에 대해 ``auth.can_access_improvement``
+    (비평가 분기 = 담당자/지정 확인자 정확 일치)로 판정해 매칭 로직 중복을 피하고, supabase
+    는 리포지토리 경량 count 쿼리(``has_active_improvement_assignment``)에 위임한다. 평가자/
+    ADMIN 단축은 호출부(``has_near_miss_improvement_access``)에서 이미 처리하므로, 여기 도달
+    하는 actor 는 사실상 비평가 USER 다. 스코핑 없는 원본이 필요하나 행을 노출하지는 않는다."""
+    from modules import auth  # 지연 import(순환 회피)
+    if is_sample_mode():
+        for rec in _nmi_store().values():
+            if not auth._as_bool(rec.get("is_active", True)):
+                continue
+            if auth.can_access_improvement(actor, rec):
+                return True
+        return False
+    return supabase_repository.has_active_improvement_assignment(actor.get("emp_no"))
+
+
+def has_near_miss_improvement_access(current_user) -> bool:
+    """개선조치 화면 진입·nav 메뉴 노출 판정(접근 가능 여부만 반환, 행 노출 아님).
+
+    True 조건:
+      - ADMIN 또는 평가 능력자(``auth.can_evaluate_near_miss``), 또는
+      - 007(개선조치 스키마) READY 이고, 이 행위자가 저장된 담당자(assignee) 또는 지정
+        확인자(designated_confirmer)인 **활성** 개선조치가 1건 이상 존재.
+
+    신원은 ``_near_miss_actor`` 로 서버측 확정한다(세션 role 위조 무시, uncached 권위 읽기·
+    is_active 재확인). current_user 결여·미상 사번·비활성이면 False(fail-closed). 평가자/
+    ADMIN 은 배정 조회 없이 즉시 True(단축) — 매 렌더 nav 호출의 쿼리 비용을 없앤다.
+
+    007 준비 판정: NOT_READY(미적용)면 배정 기반 부분은 False — 미적용 환경에선 평가자/
+    ADMIN 만 True 로, 현재 nav capability 게이트(CAP_EVALUATE_NEAR_MISS)와 정합한다(개선조치
+    자체가 fail-closed 라 담당자에게 메뉴를 열어도 쓸 게 없다). **PROBE_ERROR(일시 확인 실패)도
+    여기서는 False(안전·비크래시)로 접는다** — 이 함수는 매 렌더 nav 게이트라 예외를 올리면
+    사이드바가 크래시한다. 평가자/ADMIN 은 probe 이전에 이미 True 라 일시 오류의 영향을 받지
+    않고, 담당자는 장애 동안 메뉴가 잠깐 숨을 뿐 기능 손실이 없다(화면 진입 후 개별 조회의
+    read_gate 가 여전히 오류를 배너로 표면화한다). 배정 존재 조회 자체가 실패해도 False 로
+    접어 nav 를 크래시시키지 않는다."""
+    from modules import auth  # 지연 import(순환 회피)
+    try:
+        actor = _near_miss_actor(current_user, action="개선조치 접근 판정")
+    except ValueError:
+        return False  # 무인증/미상 사번/비활성 → fail-closed.
+    if auth.can_evaluate_near_miss(actor):
+        return True  # 평가자/ADMIN: 배정 조회 없이 단축.
+    # 배정 기반은 007 READY 일 때만. NOT_READY·PROBE_ERROR 는 배정 부분 False(안전).
+    if near_miss_improvement_schema_probe() != READINESS_READY:
+        return False
+    try:
+        return _has_active_improvement_assignment(actor)
+    except Exception:
+        return False  # nav 게이트: 배정 조회 실패 시 안전(False)·비크래시.
+
+
 def upsert_near_miss_improvement(report_id, payload: dict, *, current_user) -> dict:
     """개선조치를 DRAFT 로 저장한다. **배정 필드와 작업 필드를 인가로 분리**한다(CAPA 핵심).
 

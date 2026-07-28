@@ -2155,6 +2155,35 @@ def _nmi_raw(report_id) -> dict | None:
     return rows[0] if rows else None
 
 
+def has_active_improvement_assignment(emp_no) -> bool:
+    """행위자가 담당자 또는 지정 확인자인 **활성** 개선조치가 1건 이상 있는지(경량 존재확인).
+
+    nav/화면 접근 판정(``db.has_near_miss_improvement_access``) 전용의 EXISTS 성격 조회다.
+    행 본문·enrich 없이 ``assignee_user_id`` 또는 ``designated_confirmer_user_id`` 가 이
+    사용자이고 ``is_active`` 인 행을 count=exact·limit 1 로만 센다(전량 순회 금지 — nav 가
+    매 렌더 호출). emp_no 를 user_id 로 해석하지 못하면 False(fail-closed). 007 미적용/probe
+    3-state 게이트는 호출부(파사드)가 미리 하므로 여기서는 조회만 하고, 조회 자체가 실패하면
+    예외를 올려 호출부가 안전(False)으로 접게 한다(오류 은폐 금지)."""
+    emp = _clean_text(emp_no)
+    if not emp:
+        return False
+    user_by_emp, _ = _user_maps([emp])
+    uid = user_by_emp.get(emp)
+    if uid is None:
+        return False  # 사번→user_id 해석 실패: 배정 없음으로 취급(fail-closed).
+    response = _execute(
+        client()
+        .table(NEAR_MISS_IMPROVEMENT_TABLE)
+        .select("id", count="exact")
+        .or_(f"assignee_user_id.eq.{uid},designated_confirmer_user_id.eq.{uid}")
+        .eq("is_active", True)
+        .limit(1),
+        "개선조치 배정 존재 확인",
+        NEAR_MISS_IMPROVEMENT_TABLE,
+    )
+    return int(response.count or 0) > 0
+
+
 def _resolve_assignee_id_for_restrict(restrict_to_assignee_emp_no):
     """작업 경로 조건부 UPDATE(WHERE 담당자=행위자)용 담당자 user_id 를 해석한다.
 

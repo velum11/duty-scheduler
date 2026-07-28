@@ -1332,6 +1332,143 @@ def test_get_improvement_existence_oracle_sealed() -> None:
 
 
 # =========================================================================
+# 개선조치 접근 판정 facade (Phase2 nav/화면 진입) — has_near_miss_improvement_access
+# =========================================================================
+def test_has_improvement_access() -> None:
+    print("has_near_miss_improvement_access: 평가자/ADMIN 즉시 True·배정 USER·fail-closed·007 게이트")
+    _reset()
+    assignee = _actor_of_role("USER")
+    confirmer = _actor_of_role("USER", exclude=(assignee["emp_no"],))
+    outsider = _actor_of_role("USER", exclude=(assignee["emp_no"], confirmer["emp_no"]))
+    manager = _actor_of_role("MANAGER")
+    admin = _actor_of_role("ADMIN")
+    inactive = _actor_of_role("USER", active=False)
+    rid = _evaluated_report(assignee, manager)
+    db.upsert_near_miss_improvement(rid, {
+        "assignee_emp_no": assignee["emp_no"],
+        "designated_confirmer_emp_no": confirmer["emp_no"]}, current_user=manager)
+
+    # 평가자/ADMIN 즉시 True.
+    check("ADMIN 접근 True", db.has_near_miss_improvement_access(admin) is True)
+    check("평가자(MANAGER) 접근 True", db.has_near_miss_improvement_access(manager) is True)
+
+    # 배정된 USER(담당자·지정 확인자)는 007 READY(sample 항상 READY)에서 True.
+    check("배정 담당자 USER 접근 True",
+          db.has_near_miss_improvement_access({"emp_no": assignee["emp_no"]}) is True)
+    check("지정 확인자 USER 접근 True",
+          db.has_near_miss_improvement_access({"emp_no": confirmer["emp_no"]}) is True)
+
+    # 미배정 USER 는 False(배정 없음).
+    check("미배정 USER 접근 False",
+          db.has_near_miss_improvement_access({"emp_no": outsider["emp_no"]}) is False)
+
+    # fail-closed: 무인증/미상 사번/비활성 사용자.
+    check("current_user=None 접근 False", db.has_near_miss_improvement_access(None) is False)
+    check("미상 사번 접근 False",
+          db.has_near_miss_improvement_access({"emp_no": "___no_such_emp___"}) is False)
+    check("비활성 사용자 접근 False", db.has_near_miss_improvement_access(inactive) is False)
+
+    # 비활성 개선조치는 배정 근거로 치지 않는다(활성 조건).
+    store = db._nmi_store()
+    saved = {k: dict(v) for k, v in store.items()}
+    try:
+        for rec in store.values():
+            rec["is_active"] = False
+        check("비활성 개선조치만 있으면 배정 USER 도 False",
+              db.has_near_miss_improvement_access({"emp_no": assignee["emp_no"]}) is False)
+        check("비활성이라도 평가자는 여전히 True(단축)",
+              db.has_near_miss_improvement_access(manager) is True)
+    finally:
+        store.clear()
+        store.update(saved)
+
+    # 007 미준비(NOT_READY): 배정 기반 부분은 False → 평가자/ADMIN 만 True.
+    orig_probe = db.near_miss_improvement_schema_probe
+    db.near_miss_improvement_schema_probe = lambda **kw: sr.READINESS_NOT_READY
+    try:
+        check("007 NOT_READY · 배정 USER 접근 False",
+              db.has_near_miss_improvement_access({"emp_no": assignee["emp_no"]}) is False)
+        check("007 NOT_READY · 평가자 접근 True(probe 이전 단축)",
+              db.has_near_miss_improvement_access(manager) is True)
+        check("007 NOT_READY · ADMIN 접근 True",
+              db.has_near_miss_improvement_access(admin) is True)
+        # PROBE_ERROR 도 배정 부분은 False(안전·비크래시).
+        db.near_miss_improvement_schema_probe = lambda **kw: sr.READINESS_PROBE_ERROR
+        check("007 PROBE_ERROR · 배정 USER 접근 False(안전)",
+              db.has_near_miss_improvement_access({"emp_no": assignee["emp_no"]}) is False)
+    finally:
+        db.near_miss_improvement_schema_probe = orig_probe
+
+    # 평가자/ADMIN 단축: 배정 조회를 절대 호출하지 않는다(예외를 심어도 True 유지).
+    orig_helper = db._has_active_improvement_assignment
+    def _boom(*a, **k):
+        raise AssertionError("평가자/ADMIN 은 배정 조회를 호출하면 안 된다(단축)")
+    db._has_active_improvement_assignment = _boom
+    try:
+        check("평가자 단축(배정 조회 미호출) True", db.has_near_miss_improvement_access(manager) is True)
+        check("ADMIN 단축(배정 조회 미호출) True", db.has_near_miss_improvement_access(admin) is True)
+    finally:
+        db._has_active_improvement_assignment = orig_helper
+
+
+def test_has_improvement_access_supabase_query_contract() -> None:
+    print("has_active_improvement_assignment(supabase): OR(담당자|확인자)+is_active count 경량 쿼리")
+    captured: dict = {}
+
+    class _Q:
+        def select(self, *a, **k):
+            captured["select_args"] = a
+            captured["select_kwargs"] = k
+            return self
+
+        def or_(self, expr):
+            captured["or_"] = expr
+            return self
+
+        def eq(self, col, val):
+            captured.setdefault("eq", []).append((col, val))
+            return self
+
+        def limit(self, n):
+            captured["limit"] = n
+            return self
+
+        def execute(self):
+            captured["executed"] = True
+            return type("R", (), {"count": 1, "data": []})()
+
+    orig_client = sr.client
+    orig_user_maps = sr._user_maps
+    sr.client = lambda: type("C", (), {"table": lambda self, n: (captured.__setitem__("table", n) or _Q())})()
+    sr._user_maps = lambda emp_nos=None: ({"1003": 42}, {"42": "1003"})
+    try:
+        res = sr.has_active_improvement_assignment("1003")
+    finally:
+        sr.client = orig_client
+        sr._user_maps = orig_user_maps
+
+    check("count>0 → True", res is True)
+    check("대상 테이블 = near_miss_improvements", captured.get("table") == sr.NEAR_MISS_IMPROVEMENT_TABLE)
+    check("count=exact select", captured.get("select_kwargs", {}).get("count") == "exact")
+    check("OR 필터에 담당자 user_id", "assignee_user_id.eq.42" in captured.get("or_", ""))
+    check("OR 필터에 지정 확인자 user_id", "designated_confirmer_user_id.eq.42" in captured.get("or_", ""))
+    check("is_active=True eq 결합", ("is_active", True) in captured.get("eq", []))
+    check("limit 1 경량 조회", captured.get("limit") == 1)
+
+    # 미상 사번(user_id 해석 실패)은 쿼리 없이 False(fail-closed).
+    captured.clear()
+    sr.client = lambda: type("C", (), {"table": lambda self, n: (captured.__setitem__("executed", True) or _Q())})()
+    sr._user_maps = lambda emp_nos=None: ({}, {})
+    try:
+        res2 = sr.has_active_improvement_assignment("___ghost___")
+    finally:
+        sr.client = orig_client
+        sr._user_maps = orig_user_maps
+    check("미상 사번 → False(fail-closed)", res2 is False)
+    check("미상 사번 → 쿼리 미실행", captured.get("executed") is None)
+
+
+# =========================================================================
 # 무변경(no-op) upsert status 강등 방지(P2) — sample: 빈 작업/배정 본문은 상태 보존
 # =========================================================================
 def test_noop_upsert_preserves_status_sample() -> None:
@@ -1461,6 +1598,8 @@ def main() -> int:
         test_designated_confirmer_user_can_confirm,
         test_actor_aware_access_and_queue_scoping,
         test_get_improvement_existence_oracle_sealed,
+        test_has_improvement_access,
+        test_has_improvement_access_supabase_query_contract,
         test_noop_upsert_preserves_status_sample,
         test_noop_upsert_preserves_status_supabase,
         test_work_path_conditional_reassignment_race,
