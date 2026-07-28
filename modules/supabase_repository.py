@@ -2213,21 +2213,28 @@ def upsert_near_miss_improvement(
         return _near_miss_improvement_natural([saved])[0]
     if str(existing.get("confirm_status") or "") == "CONFIRMED":
         raise SupabaseDataError("이미 확인(CONFIRMED)된 개선조치는 수정할 수 없습니다.")
-    updates = {
-        # 작업 필드는 present-only: payload 에 있는 키만 갱신(부재 키는 기존 조치·결과·기한 보존).
-        **_near_miss_improvement_work_body(payload, present_only=True),
-        "submit_status": "DRAFT",
-        "confirm_status": "PENDING",
-        "submitted_at": None,
-        "confirmed_by_user_id": None,
-        "confirmed_at": None,
-        "rejected_by_user_id": None,
-        "rejected_at": None,
-        "updated_by": attribution,
-    }
-    if allow_assignment:
-        # 평가자/ADMIN: payload 에 있는 배정 키만 갱신(부재 키는 보존).
-        updates.update(_near_miss_improvement_assign_body(payload, present_only=True))
+    # 작업 필드는 present-only: payload 에 있는 키만 갱신(부재 키는 기존 조치·결과·기한 보존).
+    work_updates = _near_miss_improvement_work_body(payload, present_only=True)
+    # 평가자/ADMIN 만 배정 키를 present-only 로 갱신(부재 키는 보존). 비배정 경로는 빈 dict.
+    assign_updates = (
+        _near_miss_improvement_assign_body(payload, present_only=True)
+        if allow_assignment else {}
+    )
+    updates = {**work_updates, **assign_updates, "updated_by": attribution}
+    # no-op 은 상태 무변경: 적용될 작업/배정 필드가 하나도 없으면 submit/confirm 상태를 건드리지
+    # 않는다 — 빈/실패 액션(예: 비담당자 평가자 work-only payload 가 파사드에서 전량 strip 된
+    # 빈 update)이 SUBMITTED→DRAFT 로 강등시키지 못하게. 실제 작업/배정 변경 시에만 DRAFT/
+    # PENDING 초기화(문서화 불변식). 확인(CONFIRMED) 강등 차단은 위 상단 게이트가 별도로 강제.
+    if work_updates or assign_updates:
+        updates.update({
+            "submit_status": "DRAFT",
+            "confirm_status": "PENDING",
+            "submitted_at": None,
+            "confirmed_by_user_id": None,
+            "confirmed_at": None,
+            "rejected_by_user_id": None,
+            "rejected_at": None,
+        })
     query = (
         client().table(NEAR_MISS_IMPROVEMENT_TABLE).update(updates)
         .eq("report_id", report_id)

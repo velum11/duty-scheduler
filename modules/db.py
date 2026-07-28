@@ -2372,12 +2372,25 @@ def get_near_miss_improvement(report_id, *, current_user) -> dict | None:
     None 을 돌려준다(권한 없음 = 미노출). report_id 를 클라이언트가 넘겼다는 이유만으로
     조회를 허용하지 않는다. ``current_user`` 는 필수다 — default None fail-open 을 제거해
     스코핑 없는 노출을 봉했다. 스코핑 없는 원본이 필요한 내부 판정·집계는 명시적으로
-    ``_near_miss_improvement_raw`` 를 쓴다(의도된 unscoped)."""
+    ``_near_miss_improvement_raw`` 를 쓴다(의도된 unscoped).
+
+    **존재 여부 oracle 봉함**: 행위자 확정(actor 확정)을 raw 조회보다 먼저 하고, 미인증/
+    미상/비활성 actor 는 개선조치의 존재 여부와 무관하게 None 을 돌려준다(예외 전파 금지).
+    이전에는 raw 조회를 먼저 해 부재는 None, 존재는 actor 확정 예외로 갈려 "CAPA 있음→예외/
+    없음→None" 존재 oracle 이 됐다. 이제 **authorized+present 만 행을 반환**하고, 그 외
+    (부재 OR 미인가)는 모두 None 이라 미인가 접근자가 존재 여부를 구분할 수 없다. actor
+    확정 실패(current_user 결여·미상 사번·비활성)는 예외 대신 None 으로 접는다 — 이 공개
+    getter 는 내부 인가·집계에 쓰이지 않으므로(그건 ``_near_miss_improvement_raw`` 전용)
+    미인가=None 이 내부 로직에 영향을 주지 않는다."""
+    from modules import auth  # 지연 import(순환 회피)
+    try:
+        actor = _near_miss_actor(current_user, action="개선조치 조회")
+    except ValueError:
+        # 미인증/미상/비활성 actor: 존재 여부를 누설하지 않도록 부재와 동일하게 None.
+        return None
     imp = _near_miss_improvement_raw(report_id)
     if imp is None:
         return None
-    from modules import auth  # 지연 import(순환 회피)
-    actor = _near_miss_actor(current_user, action="개선조치 조회")
     return imp if auth.can_access_improvement(actor, imp) else None
 
 
@@ -2493,14 +2506,21 @@ def _sample_upsert_improvement(report_id, safe: dict, *, actor: dict, can_assign
             raise ValueError(_NEAR_MISS_IMPROVEMENT_REASSIGNED_MESSAGE)
     record = dict(existing)
     # 편집: 작업 필드는 present-only(payload 에 없으면 기존 조치·결과·기한 보존).
-    record.update(_nmi_sample_work_body(safe, present_only=True))
+    work_body = _nmi_sample_work_body(safe, present_only=True)
+    record.update(work_body)
     record.update(assignment)  # 평가자만 채워짐(작업 경로는 빈 dict → 배정 보존)
-    record.update({
-        "submit_status": "DRAFT", "confirm_status": "PENDING",
-        "submitted_at": None, "confirmed_at": None, "rejected_at": None,
-        "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
-        "updated_by": actor["emp_no"], "updated_at": now,
-    })
+    record.update({"updated_by": actor["emp_no"], "updated_at": now})
+    # no-op 은 상태 무변경: 실제로 적용될 작업/배정 필드가 하나도 없으면(present-only 결과
+    # 빈 본문) submit/confirm 상태를 건드리지 않는다 — 빈/실패 액션이 SUBMITTED→DRAFT 로
+    # 강등시키지 못하게(예: 비담당자 평가자 work-only payload 가 전량 strip 된 빈 update).
+    # 작업/배정 필드가 실제로 바뀌면 기존 정책대로 DRAFT/PENDING 초기화(문서화 불변식). 명시적
+    # ""/None 작업필드는 present-only 에 포함되므로 "실제 변경"으로 초기화 대상이다(키 부재만 no-op).
+    if work_body or assignment:
+        record.update({
+            "submit_status": "DRAFT", "confirm_status": "PENDING",
+            "submitted_at": None, "confirmed_at": None, "rejected_at": None,
+            "confirmed_by_emp_no": "", "rejected_by_emp_no": "",
+        })
     store[key] = record
     return dict(record)
 

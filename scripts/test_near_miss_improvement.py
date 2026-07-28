@@ -1290,6 +1290,147 @@ def test_migration_007_sql_contract() -> None:
     check("테이블 drop 없음(재실행 안전)", "drop table" not in body_wo_rollback)
 
 
+# =========================================================================
+# 단건 조회 존재 oracle 봉함(P2) — 미인가/미상 actor 는 CAPA 유무와 무관하게 None
+# =========================================================================
+def test_get_improvement_existence_oracle_sealed() -> None:
+    print("단건 조회 존재 oracle 봉함: 미인증/미상/무권한 actor 는 CAPA 유무와 무관하게 None")
+    _reset()
+    assignee = _actor_of_role("USER")
+    manager = _actor_of_role("MANAGER")
+    rid_present = _evaluated_report(assignee, manager)
+    db.upsert_near_miss_improvement(
+        rid_present, {"assignee_emp_no": assignee["emp_no"]}, current_user=manager)
+    rid_absent = _evaluated_report(assignee, manager)  # 개선조치 미생성(부재)
+    check("전제: present rid 에 CAPA 존재", db._near_miss_improvement_raw(rid_present) is not None)
+    check("전제: absent rid 에 CAPA 부재", db._near_miss_improvement_raw(rid_absent) is None)
+
+    # current_user=None: 존재/부재가 동일하게 None — 예전엔 존재→actor 확정 예외/부재→None 으로
+    # 갈려 존재 oracle 이었다. 이제 예외로 존재를 누설하지 않는다.
+    check("None actor · CAPA 존재 → None(예외 아님)",
+          db.get_near_miss_improvement(rid_present, current_user=None) is None)
+    check("None actor · CAPA 부재 → None",
+          db.get_near_miss_improvement(rid_absent, current_user=None) is None)
+
+    # 미상 사번(존재하지 않는 사용자) actor: 존재/부재 동일하게 None(actor 확정 실패=None).
+    ghost = {"emp_no": "___no_such_emp___"}
+    check("미상 actor · CAPA 존재 → None",
+          db.get_near_miss_improvement(rid_present, current_user=ghost) is None)
+    check("미상 actor · CAPA 부재 → None",
+          db.get_near_miss_improvement(rid_absent, current_user=ghost) is None)
+
+    # 무권한 USER(유효 사번, 무관자): 존재/부재 동일하게 None(can_access False).
+    outsider = _actor_of_role("USER", exclude=(assignee["emp_no"],))
+    check("무권한 USER · CAPA 존재 → None",
+          db.get_near_miss_improvement(rid_present, current_user=outsider) is None)
+    check("무권한 USER · CAPA 부재 → None",
+          db.get_near_miss_improvement(rid_absent, current_user=outsider) is None)
+
+    # 대조(정상 경로 회귀): 담당자 본인은 존재 시 행을 반환한다(authorized+present 만 노출).
+    check("담당자 · CAPA 존재 → 행 반환",
+          db.get_near_miss_improvement(rid_present, current_user=assignee) is not None)
+
+
+# =========================================================================
+# 무변경(no-op) upsert status 강등 방지(P2) — sample: 빈 작업/배정 본문은 상태 보존
+# =========================================================================
+def test_noop_upsert_preserves_status_sample() -> None:
+    print("sample no-op upsert: 빈 작업/배정 본문은 status 보존 / 실변경은 DRAFT 초기화 (P2 무결성)")
+    _reset()
+    assignee = _actor_of_role("USER")
+    confirmer = _actor_of_role("USER", exclude=(assignee["emp_no"],))
+    manager = _actor_of_role("MANAGER")
+    rid = _evaluated_report(assignee, manager)
+    db.upsert_near_miss_improvement(rid, {
+        "assignee_emp_no": assignee["emp_no"],
+        "designated_confirmer_emp_no": confirmer["emp_no"]}, current_user=manager)
+    db.upsert_near_miss_improvement(
+        rid, {"result_body": "조치 결과"}, current_user={"emp_no": assignee["emp_no"]})
+    db.submit_near_miss_improvement(rid, current_user={"emp_no": assignee["emp_no"]})
+    check("전제: SUBMITTED", db._near_miss_improvement_raw(rid)["submit_status"] == "SUBMITTED")
+
+    # 비담당자 평가자(manager)의 work-only payload → 파사드가 작업필드 전량 strip → 빈 update.
+    # no-op 이므로 status 를 강등하지 않는다(예전엔 SUBMITTED→DRAFT 로 강등되던 결함).
+    db.upsert_near_miss_improvement(rid, {"result_body": "몰래 수정"}, current_user=manager)
+    after = db._near_miss_improvement_raw(rid)
+    check("no-op(비담당자 work-only): submit_status 보존(SUBMITTED)", after["submit_status"] == "SUBMITTED")
+    check("no-op: 작업본문 불가침(보존)", after["result_body"] == "조치 결과")
+    check("no-op: submitted_at 보존", after["submitted_at"] is not None)
+
+    # 담당자 본인의 실제 작업 변경 → 기존 정책대로 DRAFT/PENDING 초기화(문서화 불변식).
+    db.upsert_near_miss_improvement(
+        rid, {"result_body": "결과 보완"}, current_user={"emp_no": assignee["emp_no"]})
+    reset = db._near_miss_improvement_raw(rid)
+    check("실변경: submit_status DRAFT 초기화", reset["submit_status"] == "DRAFT")
+    check("실변경: confirm_status PENDING", reset["confirm_status"] == "PENDING")
+    check("실변경: submitted_at 해제(None)", reset["submitted_at"] is None)
+    check("실변경: result_body 반영", reset["result_body"] == "결과 보완")
+
+    # 확인(CONFIRMED) CAPA 강등 차단 회귀 유지: 재제출·확인 후 편집은 여전히 예외(강등 불가).
+    db.submit_near_miss_improvement(rid, current_user={"emp_no": assignee["emp_no"]})
+    db.confirm_near_miss_improvement(rid, current_user={"emp_no": confirmer["emp_no"]})
+    excc = raises(lambda: db.upsert_near_miss_improvement(
+        rid, {"result_body": "확인 후 수정"}, current_user={"emp_no": assignee["emp_no"]}), ValueError)
+    check("확인 CAPA 는 편집 불가(강등 차단 회귀)", excc is not None)
+    check("확인 CAPA status 보존(CONFIRMED)",
+          db._near_miss_improvement_raw(rid)["confirm_status"] == "CONFIRMED")
+
+
+# =========================================================================
+# 무변경(no-op) upsert status 강등 방지(P2) — supabase 편집 UPDATE payload 검증(parity)
+# =========================================================================
+def test_noop_upsert_preserves_status_supabase() -> None:
+    print("supabase 편집 upsert: no-op 은 status 키 미포함(강등 방지) / 실변경은 DRAFT 초기화")
+    existing = {
+        "report_id": 5, "assignee_user_id": 10, "submit_status": "SUBMITTED",
+        "confirm_status": "PENDING", "submitted_at": "2026-07-20T00:00:00Z",
+    }
+    captured: dict = {"updates": None}
+
+    class _Builder:
+        def update(self, updates):
+            captured["updates"] = dict(updates)
+            return self
+        def eq(self, *a, **k): return self
+        def neq(self, *a, **k): return self
+        def execute(self):
+            return type("R", (), {"data": [dict(existing, **captured["updates"])]})()
+
+    class _Table:
+        def update(self, updates): return _Builder().update(updates)
+
+    orig_ready = sr.near_miss_improvement_extensions_ready
+    orig_raw = sr._nmi_raw
+    orig_natural = sr._near_miss_improvement_natural
+    orig_client = sr.client
+    sr.near_miss_improvement_extensions_ready = lambda: True
+    sr._nmi_raw = lambda rid: dict(existing)
+    sr._near_miss_improvement_natural = lambda rows: list(rows)  # _user_maps 회피(client 불필요)
+    sr.client = lambda: type("C", (), {"table": lambda self, n: _Table()})()
+    try:
+        # no-op: 빈 payload(비담당자 평가자 work-only 가 파사드에서 strip 된 상태 미러), 배정 미허용.
+        sr.upsert_near_miss_improvement(5, {}, updated_by="X", allow_assignment=False)
+        upd = captured["updates"]
+        check("no-op: submit_status 미포함(강등 안 함)", "submit_status" not in upd)
+        check("no-op: confirm_status 미포함", "confirm_status" not in upd)
+        check("no-op: submitted_at 미포함(제출시각 보존)", "submitted_at" not in upd)
+        check("no-op: updated_by 는 갱신(감사)", upd.get("updated_by") == "X")
+
+        # 실변경: 작업필드 present → 기존 정책대로 상태 초기화 유지.
+        captured["updates"] = None
+        sr.upsert_near_miss_improvement(5, {"result_body": "새 결과"}, updated_by="X", allow_assignment=False)
+        upd2 = captured["updates"]
+        check("실변경: submit_status=DRAFT 초기화", upd2.get("submit_status") == "DRAFT")
+        check("실변경: confirm_status=PENDING 초기화", upd2.get("confirm_status") == "PENDING")
+        check("실변경: submitted_at=None 해제", "submitted_at" in upd2 and upd2["submitted_at"] is None)
+        check("실변경: result_body 반영", upd2.get("result_body") == "새 결과")
+    finally:
+        sr.near_miss_improvement_extensions_ready = orig_ready
+        sr._nmi_raw = orig_raw
+        sr._near_miss_improvement_natural = orig_natural
+        sr.client = orig_client
+
+
 def main() -> int:
     for test in (
         test_improvement_schema_probe_three_state,
@@ -1319,6 +1460,9 @@ def main() -> int:
         test_assign_work_branch_full_separation,
         test_designated_confirmer_user_can_confirm,
         test_actor_aware_access_and_queue_scoping,
+        test_get_improvement_existence_oracle_sealed,
+        test_noop_upsert_preserves_status_sample,
+        test_noop_upsert_preserves_status_supabase,
         test_work_path_conditional_reassignment_race,
         test_report_id_immutable_sample,
         test_migration_007_sql_contract,
