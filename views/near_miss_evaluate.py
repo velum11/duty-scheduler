@@ -1,4 +1,4 @@
-"""아차사고 평가 화면 — 대기 큐(그리드) + 케이스 상세 드릴다운.
+"""아차사고 평가 화면 — 대기 큐(단일 선택 목록) + 케이스 상세 드릴다운.
 
 DESIGN.md §0 화면 유형: ``MASTER_DETAIL``. 이 화면은 다건 인라인 편집·저장 그리드가
 아니라, 조회 전용 목록(큐)과 그 옆 상세/워크플로 패널로 구성된 읽기 목록 + 상세 화면이다
@@ -6,9 +6,11 @@ DESIGN.md §0 화면 유형: ``MASTER_DETAIL``. 이 화면은 다건 인라인 �
 page-scope 조회 액션(새로고침)만 두고, 유일한 쓰기(평가확정/반려)는 상세 패널의
 scope 액션(``erp.detail_actions``)이 담당한다 — 파사드 직접 호출, 그리드 저장 lifecycle
 미사용(이 화면은 다건 편집·저장이 아니라 단건 상태전이라 ``run_save`` 대상이 아니다).
-목록 그리드 자체는 ``views/master`` 의 ``render_master_grid``/``MasterGridSpec``(행 클릭
-선택 JsCode 포함)을 그대로 쓴다 — 중립 키트에는 아직 선택 가능한 read_grid 가 없어
-그 추출은 후속(BACKLOG)으로 미루고, 목록 렌더 로직 자체는 이전 그대로 유지한다.
+목록 그리드는 중립 키트의 **단일 선택 어댑터**(``erp.select_grid``)를 쓴다 — 편집
+렌더러(``render_master_grid``)의 ``_action`` 열·paste·hidden 편집메타·unsafe jscode 를
+쓰지 않고, AgGrid 네이티브 single-selection(체크 마커 + 배경 틴트 이중부호화)으로 케이스를
+고른다. 선택은 자연키(보고서 id)로 오가며(정렬·필터 후 위치 비의존), 상세 렌더 전에 소비해
+추가 rerun 없이 상세를 그린다(§0.5 capability 분리 정합).
 
 권한 게이트: ``auth.can_evaluate_near_miss(user)`` — ADMIN/MANAGER 또는 안전담당자만
 평가할 수 있다(``modules/auth.py``). 게이트를 통과하지 못하면 조회 전용 안내만 보여주고
@@ -51,20 +53,16 @@ from html import escape
 
 import pandas as pd
 import streamlit as st
-from st_aggrid import JsCode
 
 from modules import auth, db, nav
 from views.common import erp, scaffold
 from views.master import (
+    TOKENS,
     DraftState,
-    MasterGridSpec,
     Readiness,
     ReadinessState,
-    count_strip,
     empty_state,
     icon_toolbar_specs,
-    master_grid_height,
-    render_master_grid,
     sheet_head,
     show_flash,
 )
@@ -84,6 +82,15 @@ _STATUS_LABEL = {
     "REJECTED": "반려",
     "CLOSED": "종결",
 }
+# 상태 색(이중부호화 — 라벨 텍스트는 항상 함께 표시되므로 색은 보조 신호). 기준정보 색
+# 토큰(views/master/style.py TOKENS)을 재사용해 새 색을 만들지 않는다(near_miss_view 와 동일).
+_STATUS_COLOR = {
+    "SUBMITTED": TOKENS["info"],
+    "IN_REVIEW": TOKENS["gold"],
+    "EVALUATED": TOKENS["success"],
+    "REJECTED": TOKENS["danger"],
+    "CLOSED": TOKENS["ink-3"],
+}
 
 _NOT_READY_MSG = (
     "아차사고 스키마가 준비되지 않아 평가를 진행할 수 없습니다(조회만 가능). "
@@ -94,38 +101,22 @@ _PROBE_ERROR_MSG = (
 )
 _STALE_MARK = "이미 변경"  # db._NEAR_MISS_STALE_MESSAGE 원문 일부 — kind 분기용(warning vs error).
 
-_QUEUE_COLS = ["신고자", "작업명", "제안등급", "발생일", "상태"]
-_QUEUE_ROW_COLS = ["_row_id", "_row_state", "_sel", *_QUEUE_COLS]
-_QUEUE_GRID_COLUMNS = {c: "text" for c in _QUEUE_COLS}
+# 큐 표시 열 — 첫 열은 사람이 읽는 식별자(작업명), 상태는 색+한글 라벨. 상세에 이미 나오는
+# 제안등급은 큐에서 빼 @1024 좁은 목록 컬럼의 가로 스크롤을 없앤다(불필요 메타열 제거).
+_QUEUE_COLS = ["작업명", "신고자", "발생일", "상태"]
+_KEY_FIELD = "_report_id"  # 숨김 자연키 열(선택 반환값) — 표시 컬럼을 오염시키지 않는다.
+# 폭 합(첫 열 minWidth + 나머지 고정폭)을 좁은 목록 컬럼(@1024 ≈ 420px)에 맞춰 가로
+# 스크롤 0 을 보장한다: 128(min) + 104 + 94 + 84 = 410 ≤ 뷰포트. flex 작업명이 잔여를 흡수.
 _QUEUE_COL_CONFIG = {
-    "신고자": {"flex": 0, "width": 128, "minWidth": 100, "cellClass": "md-c-left", "editable": False},
-    "작업명": {"flex": 1.6, "minWidth": 140, "cellClass": "md-c-left", "editable": False},
-    "제안등급": {"flex": 0, "width": 80, "minWidth": 66, "maxWidth": 96,
-               "cellClass": "md-c-center", "editable": False},
-    "발생일": {"flex": 0, "width": 102, "minWidth": 90, "maxWidth": 122,
-              "cellClass": "md-c-center", "editable": False},
-    "상태": {"flex": 0, "width": 88, "minWidth": 76, "maxWidth": 108,
-            "cellClass": "md-c-center", "editable": False},
+    "작업명": {"flex": 1.7, "minWidth": 128, "cellClass": "md-c-left"},
+    "신고자": {"flex": 0, "width": 104, "minWidth": 82, "maxWidth": 148, "cellClass": "md-c-left"},
+    "발생일": {"flex": 0, "width": 94, "minWidth": 82, "maxWidth": 116,
+              "cellClass": "md-c-center"},
+    "상태": {"flex": 0, "width": 84, "minWidth": 74, "maxWidth": 108,
+            "cellClass": "md-c-center"},
 }
 
 _SEL_KEY = "nm_eval_selected_id"  # 상세 패널에 열린 보고서 id(문자열). 케이스 이탈 시 pop.
-
-# 행 클릭 드릴다운 — master_org.py 의 _DRILL_CLICK 패턴을 단순화(이 그리드는 전 컬럼
-# 비편집·다건 선택 없음이므로 _action 열 분기 없이 모든 컬럼 클릭을 단일 열림으로 다룬다).
-_ROW_CLICK = JsCode(
-    """
-    function(e) {
-      var d = (e.node && e.node.data) || {};
-      if (d._row_state !== 'existing') { return; }
-      if (d._linked === '1' || d._linked === 1) { return; }
-      e.api.forEachNode(function(node) {
-        var nd = node.data || {};
-        var want = (node === e.node) ? '1' : '';
-        if (String(nd._linked || '') !== want) { node.setDataValue('_linked', want); }
-      });
-    }
-    """
-)
 
 
 def render(user: dict) -> None:
@@ -192,16 +183,19 @@ def _render_body(user: dict) -> None:
         st.error("평가 대기 목록을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    list_col, detail_col = erp.master_detail_frame(list_ratio=1.5, detail_ratio=1.0)
+    # 넓은화면에서 상세가 세로로 답답하지 않도록 상세 비율을 올린다(434px 세로공백·목록
+    # 낭비 완화). 목록은 4열로 좁혀도 첫 열(작업명) flex 로 식별성을 유지한다.
+    list_col, detail_col = erp.master_detail_frame(list_ratio=1.35, detail_ratio=1.3)
+    selected_id = st.session_state.get(_SEL_KEY)
     with list_col:
-        grid_df = _render_queue(reports, readiness)
-    with detail_col:
-        _render_detail(user, readiness)
-
-    picked = _picked_report_id(grid_df)
-    if picked is not None and picked != st.session_state.get(_SEL_KEY):
+        picked = _render_queue(reports, selected_id)
+    # 선택을 상세 렌더 **전에** 소비한다 — select_grid 의 selectionChanged rerun 이 이미
+    # 일어난 run 이므로 여기서 세션만 갱신하면 추가 st.rerun 없이 곧바로 상세를 그린다.
+    if picked is not None and picked != selected_id:
         st.session_state[_SEL_KEY] = picked
-        st.rerun()
+        selected_id = picked
+    with detail_col:
+        _render_detail(user, readiness, selected_id)
 
 
 # ---------- 데이터 적재 ----------
@@ -228,78 +222,53 @@ def _reporter_label(emp_no) -> str:
     return f"{name}({emp_no})" if name else emp_no
 
 
-def _flag(cond) -> str:
-    return "1" if bool(cond) else ""
-
-
 def _queue_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """큐 표시 프레임 — 숨김 자연키(_report_id) + 표시 4열(작업명·신고자·발생일·상태)."""
+    cols = [_KEY_FIELD, *_QUEUE_COLS]
     if df is None or df.empty:
-        return pd.DataFrame(columns=_QUEUE_ROW_COLS)
+        return pd.DataFrame(columns=cols)
     frame = df.sort_values("incident_date", ascending=False, kind="stable").reset_index(drop=True)
     rows = pd.DataFrame({
-        "_row_id": "e:" + frame["id"].astype(str),
-        "_row_state": "existing",
-        "_sel": False,
-        "신고자": frame["reporter_emp_no"].map(_reporter_label),
+        _KEY_FIELD: frame["id"].astype(str),
         "작업명": frame["work_name"].fillna("").astype(str),
-        "제안등급": frame["proposed_grade"].fillna("").astype(str),
+        "신고자": frame["reporter_emp_no"].map(_reporter_label),
         "발생일": frame["incident_date"].fillna("").astype(str),
         "상태": frame["status"].astype(str).map(lambda s: _STATUS_LABEL.get(s, s)),
     })
-    return rows[_QUEUE_ROW_COLS].reset_index(drop=True)
+    return rows[cols].reset_index(drop=True)
 
 
-def _queue_display(rows: pd.DataFrame, selected_id) -> pd.DataFrame:
-    frame = rows.copy() if rows is not None else pd.DataFrame(columns=_QUEUE_ROW_COLS)
-    if frame.empty:
-        return frame
-    target = f"e:{selected_id}" if selected_id else None
-    frame["_linked"] = (
-        (frame["_row_id"].astype(str) == str(target)).map(_flag) if target else ""
-    )
-    return frame
+# ---------- 큐 그리드(단일 선택) ----------
+def _render_queue(reports: pd.DataFrame, selected_id) -> str | None:
+    """평가 대기 큐를 단일 선택 목록으로 렌더하고 선택된 보고서 자연키를 돌려준다.
 
-
-def _picked_report_id(grid_df: pd.DataFrame):
-    """클릭으로 열린(=_linked) 행의 보고서 id(문자열). 클릭·데이터 없으면 None."""
-    if grid_df is None or "_linked" not in grid_df.columns or "_row_id" not in grid_df.columns:
-        return None
-    linked = grid_df[
-        (grid_df["_row_state"].astype(str) == "existing")
-        & (grid_df["_linked"].astype(str).str.strip() == "1")
-    ]
-    if linked.empty:
-        return None
-    rid = str(linked.iloc[0]["_row_id"]).strip()
-    return rid[2:] if rid.startswith("e:") else rid
-
-
-# ---------- 큐 그리드 ----------
-def _render_queue(reports: pd.DataFrame, readiness: ReadinessState) -> pd.DataFrame:
-    selected_id = st.session_state.get(_SEL_KEY)
+    편집 그리드가 아니라 ``erp.select_grid``(네이티브 single-selection) — 행 클릭으로
+    케이스를 고르면 체크 마커 + 배경 틴트로 이중부호화되고, 선택 자연키(_report_id)를
+    반환한다(정렬·필터 후 위치 비의존)."""
     rows = _queue_rows(reports)
     sheet_head("평가 대기 큐", count=len(rows))
 
-    spec = MasterGridSpec(
-        page_id=_STATE.page_id, columns=_QUEUE_GRID_COLUMNS, order=_QUEUE_COLS,
-        col_config=_QUEUE_COL_CONFIG, select_all=False, include_linked_rows=True,
-        grid_options={"onCellClicked": _ROW_CLICK},  # 행 클릭 → 상세 패널 열기(드릴다운)
-        height=master_grid_height(len(rows)),
+    # 상태 색 규칙(대기 두 상태만) — 한글 라벨 → 색. 텍스트 라벨은 항상 유지(색은 보조).
+    status_rules = {_STATUS_LABEL[s]: _STATUS_COLOR[s] for s in _PENDING_STATUSES}
+    return erp.select_grid(
+        rows, key=f"{_PAGE_ID}_queue", key_field=_KEY_FIELD,
+        columns=_QUEUE_COLS, selected_key=selected_id,
+        col_config=_QUEUE_COL_CONFIG,
+        color_rules={"상태": status_rules},
     )
-    grid_df = render_master_grid(spec, _queue_display(rows, selected_id), key=_STATE.grid_key())
-
-    # 이 큐는 조회 전용이다 — 행 추가/삭제/저장은 이 화면의 책임이 아니다(평가/반려는
-    # 상세 패널 전용 버튼이 파사드를 직접 호출한다). page-scope 액션바(erp.top_action_bar)의
-    # 새로고침만이 유일한 이 화면 액션이며, 그리드 자체 action열/편집도 없다(전 컬럼
-    # editable=False) — 이 카운트 스트립은 "케이스를 클릭해 상세에서 평가"하라는 안내 없이도
-    # 목록 규모만 보이면 충분하다.
-    count_strip(len(rows), 0, 0, 0)
-    return grid_df
 
 
 # ---------- 상세 패널 ----------
-def _render_detail(user: dict, readiness: ReadinessState) -> None:
-    selected_id = st.session_state.get(_SEL_KEY)
+# 상태→색/라벨(도메인 매핑)은 이 화면이 소유하고, 배지·메타·전폭 필드의 **표시**는 중립 kit
+# 순수 primitive(erp.status_badge_html/meta_col_html/field_block)에 위임한다(§0.3, 복제 제거).
+def _status_badge_html(status: str) -> str:
+    """상태 배지 — 도메인 매핑(색+한글 라벨)을 kit 순수 표시 primitive 로 렌더(이중부호화)."""
+    label = _STATUS_LABEL.get(status, status)
+    color = _STATUS_COLOR.get(status, TOKENS["ink-2"])
+    return erp.status_badge_html(label, color)
+
+
+def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
     if not selected_id:
         erp.detail_empty("케이스를 선택하세요", "왼쪽 큐에서 행을 클릭하면 상세 내용이 여기에 표시됩니다.")
         return
@@ -314,7 +283,8 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         return
     status = str(report.get("status") or "") if report else ""
     if report is None or status not in _PENDING_STATUSES:
-        # 다른 평가자가 먼저 처리했거나(EVALUATED/REJECTED/CLOSED) 삭제됨 — stale 선택 해제.
+        # 다른 평가자가 먼저 처리했거나(EVALUATED/REJECTED/CLOSED) 삭제됨 — stale 선택 해제
+        # (상세와 _SEL_KEY 동시 해제, 큐도 자연키 불일치로 선택 마커가 함께 풀린다).
         st.session_state.pop(_SEL_KEY, None)
         erp.detail_empty(
             "이 케이스는 더 이상 대기 중이 아닙니다",
@@ -322,39 +292,42 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         )
         return
 
+    # ── 상단: 보고번호(제목 §2 20/700) + 상태 배지 ──
+    report_no = escape(str(report.get("report_no") or "-"))
     st.markdown(
-        f"### {escape(str(report.get('report_no') or ''))} · "
-        f"{escape(_STATUS_LABEL.get(status, status))}",
-    )
-    st.caption(
-        f"신고자 {escape(_reporter_label(report.get('reporter_emp_no')))} · "
-        f"발생일 {escape(str(report.get('incident_date') or '-'))} · "
-        f"부서 {escape(str(report.get('dept_code') or '-'))}"
+        f"<div style='display:flex;align-items:center;gap:10px;margin:2px 0 8px;'>"
+        f"<span style='font-size:20px;font-weight:700;color:{TOKENS['ink']};"
+        f"line-height:1.2;'>{report_no}</span>{_status_badge_html(status)}</div>",
+        unsafe_allow_html=True,
     )
 
-    st.markdown(f"**작업명** {escape(str(report.get('work_name') or '-'))}")
-    st.text_area("작업 내용", value=str(report.get("work_content") or ""),
-                 height=68, disabled=True, key=f"nm_wc_{selected_id}")
-    st.text_area("사고 내용", value=str(report.get("incident_content") or ""),
-                 height=88, disabled=True, key=f"nm_ic_{selected_id}")
-    st.text_area("대책", value=str(report.get("countermeasure") or ""),
-                 height=68, disabled=True, key=f"nm_cm_{selected_id}")
-    st.text_area("현장 설명", value=str(report.get("site_description") or ""),
-                 height=68, disabled=True, key=f"nm_sd_{selected_id}")
-
+    # ── 짧은 메타 2열(단일 st.columns(2), 중첩 1회) ──
+    proposed = str(report.get("proposed_grade") or "")
+    left_pairs = [
+        ("신고자", _reporter_label(report.get("reporter_emp_no"))),
+        ("발생일", str(report.get("incident_date") or "-")),
+    ]
     cause = str(report.get("cause_code") or "")
     cause_detail = str(report.get("cause_detail") or "")
-    st.caption(f"원인 코드 {escape(cause)}" + (f" · {escape(cause_detail)}" if cause_detail else ""))
+    cause_val = cause + (f" · {cause_detail}" if cause_detail else "")
+    right_pairs = [
+        ("부서", str(report.get("dept_code") or "-")),
+        ("제안등급", proposed or "없음"),
+    ]
+    mc1, mc2 = st.columns(2)
+    mc1.markdown(erp.meta_col_html(left_pairs), unsafe_allow_html=True)
+    mc2.markdown(erp.meta_col_html(right_pairs), unsafe_allow_html=True)
 
-    photos = report.get("photo_paths") or []
-    if photos:
-        st.caption(f"첨부 사진 {len(photos)}건 (뷰어 미구현 — 자리표시)")
-    else:
-        st.caption("첨부된 사진이 없습니다.")
+    # ── 핵심 내용: 평가에 꼭 필요한 서술만 노출(사고 내용). 참조성 긴 서술(작업명·작업
+    #    내용·대책·현장 설명·원인상세·첨부)은 아래 "상세 내용 더 보기" 접기로 내려 상세
+    #    높이를 bound 하고 주요 행동(평가 워크플로)을 fold 근처로 올린다(§0.4 scope 액션). ──
+    erp.field_block("사고 내용", str(report.get("incident_content") or ""))
 
-    proposed = str(report.get("proposed_grade") or "")
-    st.caption(f"제안 등급 {escape(proposed) if proposed else '없음'}")
-
+    # ── 평가 워크플로 클러스터(등급 select + 사유 + scope 액션) — 핵심 내용 바로 뒤 ──
+    st.markdown(
+        f"<div style='border-top:1px solid {TOKENS['line']};margin:12px 0 2px;'></div>",
+        unsafe_allow_html=True,
+    )
     grades = list(db.NEAR_MISS_GRADES)
     default_idx = grades.index(proposed) if proposed in grades else 0
     grade = st.selectbox("확정 등급", grades, index=default_idx, key=f"nm_grade_{selected_id}")
@@ -414,6 +387,22 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         ("보완요청", "default", revision_disabled, revision_help),
         ("반려", "default", reject_disabled, reject_help),
     ])
+
+    # ── 부차 상세(참조성 긴 서술·첨부) — 기본 접힘으로 상세 높이 bound. sticky/fixed 미사용
+    #    (DESIGN §0.4), st.expander 네이티브 접기만 사용. 평가 워크플로가 이 위에 있으므로
+    #    장문 케이스에서도 주요 행동이 긴 서술에 밀리지 않는다. ──
+    with st.expander("상세 내용 더 보기", expanded=False):
+        erp.field_block("작업명", str(report.get("work_name") or ""))
+        erp.field_block("작업 내용", str(report.get("work_content") or ""))
+        erp.field_block("대책", str(report.get("countermeasure") or ""))
+        erp.field_block("현장 설명", str(report.get("site_description") or ""))
+        if cause_val.strip():
+            erp.field_block("원인", cause_val)
+        photos = report.get("photo_paths") or []
+        if photos:
+            st.caption(f"첨부 사진 {len(photos)}건 (뷰어 미구현 — 자리표시)")
+        else:
+            st.caption("첨부된 사진이 없습니다.")
 
     if clicks.get("검토착수"):
         # 검토착수 후 케이스는 IN_REVIEW 로 여전히 큐(대기)에 남는다. _run_action 은 기존
