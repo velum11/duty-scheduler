@@ -15,7 +15,7 @@
 | 고아 빈 폴더 1개 | `.claude/worktrees/agent-a7f86db30e9513843` — 내용 없는 빈 폴더인데 타 프로세스 핸들 잠김으로 삭제 실패(07-25 정리 때 유일 잔존). 재부팅 후 또는 탐색기에서 수동 삭제 | 정리 |
 | worktree 물리 잔재 2개 | ORCA worktree 폐기 완료(git 등록·브랜치 3개 삭제)했으나 `worktype-improve`·`worktype-improve-2` 디렉터리가 프로세스 잠김으로 물리 삭제 실패 — 재부팅 후 또는 잠근 프로세스 종료 후 폴더 수동 삭제(`.claude/worktrees/agent-a7f8...` 빈 폴더와 동일 처리) | 정리 |
 | §0 규약 AST 집행 강건화 | 07-25 재감사 P3: `test_screen_scaffold.py`가 크롬 호출을 렌더 경로로 증명하지 않고(모듈 내 임의 위치 수집), `login`을 암묵 제외(my_schedule는 명시 allowlist), 화면 발견이 `views/`에 고정. false-negative 위주라 비차단이나 강건화 여지 | 코드 |
-| QA 셸 read-only 내재 한계 명문화 | 07-25 재감사(Codex P2→P3 재분류): `visual-qa`·`contract-qa`는 테스트·probe 실행에 셸이 필요해 소스 편집이 도구가 아닌 문구로만 차단(recon은 셸 없음=하드). "내재적 한계"로 정의 문서에 명문화 | 문서 |
+| QA 셸 read-only 내재 한계 명문화 | 07-25 재감사(Codex P2→P3 재분류): `visual-qa`·`contract-qa`는 테스트·probe 실행에 셸이 필요해 소스 편집이 도구가 아닌 문구로만 차단(recon은 셸 없음=하드). **07-29 추가: 신설 `ux-architect`도 동일 소프트 경계 대상**(셸=실화면 관찰 전용, 정의 문서로만 차단). "내재적 한계"로 정의 문서에 명문화 | 문서 |
 | 에이전트 tool id 검증 | 07-25 재감사 P3: 정의 파일 `tools:`의 `PowerShell`/`Skill`가 하네스 tool registry에 실제 등록되는지 확인(미등록이면 no-op, 셸은 `Bash`로 라이딩) | 확인 |
 | 아차사고 데이터 저심각 잔여 — probe/문서 detail | 07-26 Codex 3라운드 후 잔여 중 ①종말상태 반복전이 차단, ②audit(`updated_by`) 전수 점검은 **07-27 해소**(`docs/WORKLOG.md` 2026-07-27 항목, `modules/db.py::update_near_miss_status` 수정 + 신규 계약 테스트). ③probe/문서 detail만 잔존 | 코드 |
 | 아차사고 EVALUATED→CLOSED 종결 경로 부재 (Codex P3) | 07-27 상태전이 가드 변경(`251e572`)의 Codex 포커스 감사 **완료 — P1/P2 0(감사부채 해소)**: 허용표에 자기 전이 없어 정상 전이 유지·동일상태만 차단, 호출부 전수 `cur==target` 의존 없음, 인가/TOCTOU/영속화 회귀 없음. **잔여 P3(비차단)**: 평가관리 화면의 종결 버튼 제거 후 앱에 `EVALUATED→CLOSED` 호출 경로가 없어 보고서가 EVALUATED 에 고립됨(DB 계약은 CLOSED 진행을 여전히 규정). **아차사고 개선조치(CAPA) 실작동 구현 트랙에서 폐루프로 해소 예정** | 코드 |

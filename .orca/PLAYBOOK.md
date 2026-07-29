@@ -16,7 +16,11 @@
 
 ## 2. 에이전트 매핑
 
-집행 SoT는 이 저장소의 `.claude/agents/` **특화판 6종**이다(동명 글로벌 범용판보다 우선 적용): `recon`·`ui-feature`·`data-contract`·`visual-qa`·`contract-qa`·`integrator`. 각 정의의 `model: opus`와 `skills:`가 전문성을 강제한다. 반복 실패 진단은 새 Owner를 만들지 말고 기존 Owner의 증거를 유지한 채 Codex focused diagnosis 또는 조건부 Fable 승격으로 전환한다.
+집행 SoT는 이 저장소의 `.claude/agents/` **특화판 7종**이다(동명 글로벌 범용판보다 우선 적용): `recon`·`ui-feature`·`data-contract`·`visual-qa`·`contract-qa`·`integrator`·`ux-architect`. 각 정의의 `model: opus`와 `skills:`가 전문성을 강제한다.
+
+`ux-architect`는 UI_CENTRIC **구조 변경의 구현 전 설계·UX 자가검토 advisor**다. 발동(하나라도 해당하면 발동, 포함이 제외에 우선): 영역 순서·아키타입·목록-상세 분할·주요 과업 흐름·내비게이션/IA·공용 구조 키트·핵심 액션 위계 변경. 제외(`ui-feature` 단독 연속): 문구·메뉴명·권한 불변 순수 route 배선·§0.6 수치와 액션 위치를 바꾸지 않는 토큰 내 소보정·단일 컨트롤 정렬. 산출은 **대화/task 내 handoff 7항**(대상 과업/유지 계약/구조 결정/거부 대안/UX finding/미검증 runtime/acceptance — 하위 필드는 에이전트 정의가 고정)뿐이며 **파일 편집·구현 금지**. `ui-feature`가 처음부터 끝까지 화면 Owner이고 advisor 산출은 비구속 입력이다 — mockup 사용자 승인 이하 §7 흐름은 불변.
+
+반복 실패 진단은 새 Owner를 만들지 말고 기존 Owner의 증거를 유지한 채 Codex focused diagnosis 또는 조건부 Fable 승격으로 전환한다.
 
 ## 3. 프로젝트 고유 규칙
 

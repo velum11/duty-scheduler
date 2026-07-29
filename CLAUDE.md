@@ -75,7 +75,7 @@ git diff --stat
 
 ## ORCA 사용
 
-`/lee-mode`의 역할 분리, worker 상한, 중단 조건은 글로벌 `C:\Users\velum\.orca\lee-mode\PLAYBOOK.md`와 프로젝트 `.orca/PLAYBOOK.md`를 따릅니다. 전문 담당자 6종의 프로젝트 `.claude/agents/` 특화판이 동명 글로벌 정의보다 우선하며 `model: opus`와 역할별 `skills:`를 집행합니다. Coordinator는 Fable/high를 사용하고 기본 Owner 한 명에게 STANDARD 이상을 맡기며, DIRECT 작업과 짧은 지휘·상태 확인은 직접 끝낼 수 있습니다. 내장 Agent는 1단 위임이고 부장→과장은 독립 ORCA main 세션에서만 허용됩니다.
+`/lee-mode`의 역할 분리, worker 상한, 중단 조건은 글로벌 `C:\Users\velum\.orca\lee-mode\PLAYBOOK.md`와 프로젝트 `.orca/PLAYBOOK.md`를 따릅니다. 프로젝트 `.claude/agents/`의 특화 담당 7종(글로벌 baseline 6종의 동명 특화판 + 프로젝트 전용 `ux-architect`)이 동명 글로벌 정의보다 우선하며 `model: opus`와 역할별 `skills:`를 집행합니다. Coordinator는 Fable/high를 사용하고 기본 Owner 한 명에게 STANDARD 이상을 맡기며, DIRECT 작업과 짧은 지휘·상태 확인은 직접 끝낼 수 있습니다. 내장 Agent는 1단 위임이고 부장→과장은 독립 ORCA main 세션에서만 허용됩니다.
 
 같은 증상에서 10분 이상 진전이 없거나 가설이 두 번 틀리면 반복을 멈추고 증상, 성공 지점, 실패 지점, 실행한 확인을 정리해 독립 진단으로 전환합니다.
 

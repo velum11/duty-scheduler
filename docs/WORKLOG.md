@@ -2,6 +2,15 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-29 · ✅ 변곡점: UI/UX 담당 체계 신설 — ux-architect(7종째)·스킬 3종(MIT 이식)·룰 정합
+
+아차사고 재설계 혹평의 원인분석("설계 앞단 밀도·사용성 소유자 부재") 후속으로, 5갈래 조사 + Codex 3회 검증(1차 설계·2차 v2·3차 룰문구, 지적 전건 반영)을 거쳐 확정·적용:
+
+- **`ux-architect` 신설**(프로젝트 7종째, `.claude/agents/ux-architect.md`): UI_CENTRIC 구조 변경의 **구현 전 설계·UX 자가검토 advisor**. 산출=대화/task handoff 7항(파일 금지), 비구속 — `ui-feature`가 처음부터 끝까지 화면 Owner(mockup 승인 이하 §7 흐름 불변). 발동=영역순서·아키타입·분할·과업흐름·IA·키트·액션위계(포함이 제외에 우선).
+- **스킬**: `duty-ux`(Nielsen10+Krug4·심각도 0–4·폼 휴리스틱, wondelai+mastepanoski MIT 이식)·`duty-visual-critique`(jezweb 7축·H/M/L·squint test·반장식 교차원칙, visual-qa 장착 — 정성 갭 해소)·`duty-erp-ui` Stage 0 설계 절(interface-design MIT 절차 이식, 값은 DESIGN.md SoT). 저작권 고지=`THIRD_PARTY_NOTICES.md`. 서드파티 직설치 배제(보안·Windows·이중 SoT 근거).
+- **룰 정합(신규 규칙 우선)**: 글로벌 PLAYBOOK(§1.2 baseline 조항·§3 표·§7 앞단)·프로젝트 오버레이 §2(7종)·CLAUDE.md·DESIGN.md §0.9 설계 게이트+§8 역참조·lee-coordinator allowlist·lee-mode 커맨드·ui-feature 정의·메모리 3건. 척도 분리(UX 0–4 ≠ visual H/M/L), Codex=설계문서/코드/계약 검수·시각검수=visual-qa+사용자 sign-off.
+- 잔여: 인메모리 vision bytes 무저장 보장은 도구 실검증 후 사용(불가 시 DOM-only 강등 — 스킬에 조항).
+
 ## 2026-07-28-29 · [인계 대기] 아차사고 CAPA 기능 완결(적용·live검증) + 6화면 UI 재설계
 
 **한 줄 상태**: 아차사고(near-miss) CAPA 폐루프 **기능 구현·007 적용·live 검증까지 완료**(feature/near-miss-capa, push됨) + 아차사고 **6화면 UI/UX 전면 재설계 완료**(redesign/near-miss-ui, **미push**). 프리뷰 http://localhost:8501(supabase·실데이터 3건) 가동 중. **사용자 실브라우저 sign-off·push/병합/배포는 대기.**
