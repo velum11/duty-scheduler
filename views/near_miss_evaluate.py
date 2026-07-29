@@ -91,6 +91,19 @@ _STATUS_COLOR = {
     "REJECTED": TOKENS["danger"],
     "CLOSED": TOKENS["ink-3"],
 }
+# 등급 색·순서(§3.1 handoff: 등급=셰브런+색텍스트, pill 아님). level 이 높을수록 상위 위험
+# (S=최상위) — 형식은 kit(grade_mark_html)이, 매핑은 이 화면(도메인 owner)이 확정한다.
+# 색은 기준정보 TOKENS 재사용(신규 색 0개, near_miss_stats 와 동일 팔레트).
+_GRADE_COLOR = {
+    "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
+    "C": TOKENS["info"], "D": TOKENS["ink-3"],
+}
+_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
+# 발생원인 코드→한글 라벨(§3.1: 분류축=평문 — 색 없음, 읽기 향상). near_miss_stats 와 동일.
+_CAUSE_LABEL = {
+    "JAM": "협착", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
+    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "끼임", "ETC": "기타",
+}
 
 _NOT_READY_MSG = (
     "아차사고 스키마가 준비되지 않아 평가를 진행할 수 없습니다(조회만 가능). "
@@ -268,6 +281,16 @@ def _status_badge_html(status: str) -> str:
     return erp.status_badge_html(label, color)
 
 
+def _grade_mark_html(grade: str) -> str:
+    """등급 마크 — 셰브런(방향/개수)+색 텍스트(§3.1 handoff, pill 아님). 도메인 매핑(색·순서)을
+    kit grade_mark_html 로 렌더한다. 미확정(빈 값)은 중립 점 마커."""
+    g = str(grade or "").strip().upper()
+    if not g:
+        return erp.grade_mark_html("없음", TOKENS["ink-3"], level=None)
+    color = _GRADE_COLOR.get(g, TOKENS["ink-2"])
+    return erp.grade_mark_html(g, color, level=_GRADE_LEVEL.get(g))
+
+
 def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
     if not selected_id:
         erp.detail_empty("케이스를 선택하세요", "왼쪽 큐에서 행을 클릭하면 상세 내용이 여기에 표시됩니다.")
@@ -292,31 +315,29 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
         )
         return
 
-    # ── 상단: 보고번호(제목 §2 20/700) + 상태 배지 ──
+    # ── 상단: 보고번호(제목 §2 20/700) ──
     report_no = escape(str(report.get("report_no") or "-"))
     st.markdown(
-        f"<div style='display:flex;align-items:center;gap:10px;margin:2px 0 8px;'>"
-        f"<span style='font-size:20px;font-weight:700;color:{TOKENS['ink']};"
-        f"line-height:1.2;'>{report_no}</span>{_status_badge_html(status)}</div>",
+        f"<div style='font-size:20px;font-weight:700;color:{TOKENS['ink']};"
+        f"line-height:1.2;margin:2px 0 8px;'>{report_no}</div>",
         unsafe_allow_html=True,
     )
 
-    # ── 짧은 메타 2열(단일 st.columns(2), 중첩 1회) ──
+    # ── 읽기 메타 스트립(§3.2 handoff): 상태·발생일·신고자·부서·제안등급을 접지 않고
+    #    상시 노출한다(§0.6). 형식 분리(§3.1): 상태=lifecycle pill(1축) / 제안등급=grade_mark
+    #    (셰브런+색텍스트, pill 아님) / 나머지=평문. 4개 상세의 상단 메타 처리를 통일한다(F6). ──
     proposed = str(report.get("proposed_grade") or "")
-    left_pairs = [
-        ("신고자", _reporter_label(report.get("reporter_emp_no"))),
-        ("발생일", str(report.get("incident_date") or "-")),
-    ]
     cause = str(report.get("cause_code") or "")
     cause_detail = str(report.get("cause_detail") or "")
-    cause_val = cause + (f" · {cause_detail}" if cause_detail else "")
-    right_pairs = [
+    cause_label = _CAUSE_LABEL.get(cause, cause)
+    cause_val = cause_label + (f" · {cause_detail}" if cause_detail else "")
+    erp.metadata_strip([
+        ("상태", _status_badge_html(status), "html"),
+        ("발생일", str(report.get("incident_date") or "-")),
+        ("신고자", _reporter_label(report.get("reporter_emp_no"))),
         ("부서", str(report.get("dept_code") or "-")),
-        ("제안등급", proposed or "없음"),
-    ]
-    mc1, mc2 = st.columns(2)
-    mc1.markdown(erp.meta_col_html(left_pairs), unsafe_allow_html=True)
-    mc2.markdown(erp.meta_col_html(right_pairs), unsafe_allow_html=True)
+        ("제안등급", _grade_mark_html(proposed), "html"),
+    ])
 
     # ── 판단 컨텍스트(§0.6 강제: 접지 않고 노출) — 평가 결정에 필요한 핵심 서술을 상세에
     #    상시 노출한다. 작업명·사고 내용·작업 내용·대책·현장 설명·원인은 등급 확정/반려

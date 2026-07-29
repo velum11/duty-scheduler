@@ -51,7 +51,21 @@ _CAUSE_LABEL = {
     "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘·충돌",
     "SLIP": "미끄러짐·넘어짐", "BURN": "화상·고온", "PINCH": "협착", "ETC": "기타",
 }
+# 등급 색·순서(§3.1: 등급=셰브런+색텍스트, pill 아님). S=최상위 위험. TOKENS 재사용(신규 색 0).
+_GRADE_COLOR = {
+    "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
+    "C": TOKENS["info"], "D": TOKENS["ink-3"],
+}
+_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
 _EDITABLE_STATUS = "SUBMITTED"
+
+
+def _grade_mark(grade, empty: str = "없음") -> str:
+    """등급 마크(§3.1: 셰브런+색텍스트, pill 아님). 빈 값은 중립 점 마커(empty 라벨)."""
+    g = str(grade or "").strip().upper()
+    if not g:
+        return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
+    return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
 
 # 큐 표시 열 + 숨김 자연키(_report_id). 선택은 자연키로 오간다(정렬·필터 후 위치 비의존).
 # USER·모바일 세로 폭에서 가로 스크롤 0 을 보장하려고 목록은 식별에 필요한 4열만 남긴다
@@ -243,34 +257,32 @@ def _render_detail(user: dict, reports: pd.DataFrame) -> None:
 
 
 def _render_detail_head(report: dict, status: str) -> None:
-    """보고번호(제목 §2 20/700) + 상태 배지(색+라벨 이중부호화)."""
+    """보고번호(제목 §2 20/700). 상태는 아래 메타 스트립(§3.2)에서 pill 로 노출한다."""
     report_no = escape(_clean(report.get("report_no")) or "(번호 미상)")
-    badge = erp.status_badge_html(
-        _STATUS_LABEL.get(status, status or "-"),
-        _STATUS_COLOR.get(status, TOKENS["ink-3"]),
-    )
     st.markdown(
-        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 8px;'>"
-        f"<span style='font-size:20px;font-weight:700;color:{TOKENS['ink']};"
-        f"line-height:1.2;'>{report_no}</span>{badge}</div>",
+        f"<div style='font-size:20px;font-weight:700;color:{TOKENS['ink']};"
+        f"line-height:1.2;margin:2px 0 8px;'>{report_no}</div>",
         unsafe_allow_html=True,
     )
 
 
 def _render_report_context(report: dict) -> None:
-    """짧은 메타 2열(발생일·제안등급 / 확정등급·발생원인) + 핵심 내용(작업명·사고내용, 전폭)."""
+    """읽기 메타 스트립(§3.2: 상태·발생일·제안등급·확정등급·발생원인 상시 노출) + 핵심 내용.
+
+    형식 분리(§3.1): 상태=lifecycle pill / 등급=grade_mark(셰브런+색텍스트) / 발생원인=평문."""
     cause = _clean(report.get("cause_code"))
-    left = [
+    status = _clean(report.get("status"))
+    status_badge = erp.status_badge_html(
+        _STATUS_LABEL.get(status, status or "-"),
+        _STATUS_COLOR.get(status, TOKENS["ink-3"]),
+    )
+    erp.metadata_strip([
+        ("상태", status_badge, "html"),
         ("발생일", _clean(report.get("incident_date")) or "-"),
-        ("제안등급", _clean(report.get("proposed_grade")) or "없음"),
-    ]
-    right = [
-        ("확정등급", _clean(report.get("confirmed_grade")) or "미정"),
+        ("제안등급", _grade_mark(report.get("proposed_grade"), empty="없음"), "html"),
+        ("확정등급", _grade_mark(report.get("confirmed_grade"), empty="미정"), "html"),
         ("발생원인", _CAUSE_LABEL.get(cause, cause) or "-"),
-    ]
-    mc1, mc2 = st.columns(2)
-    mc1.markdown(erp.meta_col_html(left), unsafe_allow_html=True)
-    mc2.markdown(erp.meta_col_html(right), unsafe_allow_html=True)
+    ])
     erp.field_block("작업명", _clean(report.get("work_name")))
     erp.field_block("사고내용", _clean(report.get("incident_content")))
 

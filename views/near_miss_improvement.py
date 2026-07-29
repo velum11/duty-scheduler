@@ -78,6 +78,21 @@ _CONFIRM_COLOR = {
     "미작성": TOKENS["ink-3"],
 }
 _SUBMIT_COLOR = {"DRAFT": TOKENS["ink-3"], "SUBMITTED": TOKENS["info"]}
+# 확정등급 색·순서(§3.1: 등급=셰브런+색텍스트, pill 아님). S=최상위 위험. TOKENS 재사용.
+_GRADE_COLOR = {
+    "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
+    "C": TOKENS["info"], "D": TOKENS["ink-3"],
+}
+_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
+
+
+def _grade_mark(grade, empty: str = "-") -> str:
+    """등급 마크(§3.1: 셰브런+색텍스트, pill 아님). 빈 값은 중립 점 마커(empty 라벨)."""
+    g = str(grade or "").strip().upper()
+    if not g:
+        return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
+    return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
+
 
 _CONFIRMED = "CONFIRMED"
 
@@ -427,18 +442,16 @@ def _render_detail_head(report: dict, imp) -> None:
 
 
 def _render_report_context(report: dict) -> None:
-    """짧은 메타 2열(신고자·발생일 / 부서·확정등급) + 핵심 내용(사고 내용, 전폭 읽기 필드)."""
-    left_pairs = [
+    """읽기 메타 스트립(§3.2: 신고자·발생일·부서·확정등급 상시 노출) + 핵심 내용(사고 내용).
+
+    형식 분리(§3.1): 확정등급=grade_mark(셰브런+색텍스트, pill 아님) / 나머지=평문. 제출·확인
+    워크플로 상태는 상단 head 의 이중 배지(pill)가 소유한다(보고 lifecycle 과 별개 축)."""
+    erp.metadata_strip([
         ("신고자", _user_label(report.get("reporter_emp_no"))),
         ("발생일", str(report.get("incident_date") or "-")),
-    ]
-    right_pairs = [
         ("부서", str(report.get("dept_code") or "-")),
-        ("확정등급", str(report.get("confirmed_grade") or "-")),
-    ]
-    mc1, mc2 = st.columns(2)
-    mc1.markdown(erp.meta_col_html(left_pairs), unsafe_allow_html=True)
-    mc2.markdown(erp.meta_col_html(right_pairs), unsafe_allow_html=True)
+        ("확정등급", _grade_mark(report.get("confirmed_grade"), empty="-"), "html"),
+    ])
     erp.field_block("사고 내용", str(report.get("incident_content") or ""))
 
 

@@ -37,6 +37,8 @@ _GRADE_COLOR = {
     "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
     "C": TOKENS["info"], "D": TOKENS["ink-3"],
 }
+# 등급 순서(§3.1 handoff: 등급=셰브런+색텍스트). level 이 높을수록 상위 위험(S=최상위).
+_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
 _CAUSE_LABEL = {
     "JAM": "협착", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
     "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "끼임", "ETC": "기타",
@@ -103,7 +105,12 @@ def render(user: dict) -> None:
     # primary — KPI 지표(좌상단 우선). CAPA 기한초과는 신고 분포(전사 공개)와 달리 역할 기반
     # 접근이다 — 파사드가 평가자/ADMIN 만 집계를 돌려주고 일반 USER 에게는 None('—')을 준다
     # (집계 수치 leak 방지).
-    _kpi_cards(status_counts, total, db.near_miss_overdue_count(current_user=user))
+    overdue = db.near_miss_overdue_count(current_user=user)
+    _kpi_cards(status_counts, total, overdue)
+    # primary — 예외 큐 스트립(§3.5 handoff): 지금 처리할 예외를 KPI 바로 아래 형제 스트립으로.
+    # 실집계만 싣는다(허수 금지): 미평가(제출)·검토중·기한초과 CAPA. KPI(지표)와 달리 "지금
+    # 처리할 일"을 danger 틴트(값>0)로 강조한다. 박스 상한(§0.6): KPI+예외 = 2 ≤ 3.
+    _attention(status_counts, overdue)
     st.write("")
 
     # details — 분포(등급·상태·부서·원인·월·분기 6종을 컴팩트 테이블 2열로).
@@ -160,6 +167,20 @@ def _kpi_cards(status_counts: dict, total: int, overdue: int | None) -> None:
     ])
 
 
+def _attention(status_counts: dict, overdue: int | None) -> None:
+    """예외 큐 스트립(§3.5 handoff) — 지금 처리할 예외를 실집계로만 렌더한다.
+
+    미평가(SUBMITTED)·검토중(IN_REVIEW)·기한초과 CAPA(overdue). overdue 는 파사드가 권한·
+    007 준비로 게이트하며 None 이면 '—'(가짜 0 금지). 값>0 이면 danger 틴트로 강조."""
+    submitted = status_counts.get("SUBMITTED", 0)
+    in_review = status_counts.get("IN_REVIEW", 0)
+    erp.attention_strip([
+        ("미평가(제출)", f"{submitted}건", submitted > 0),
+        ("검토중", f"{in_review}건", in_review > 0),
+        ("기한초과 CAPA", _overdue_label(overdue), bool(overdue)),
+    ])
+
+
 def _overdue_label(overdue: int | None) -> str:
     """기한초과 지표 표시값. 007 미준비·비권한자·조회미상(None)이면 '—'(가짜 0 금지).
 
@@ -184,12 +205,27 @@ def _closure_rate_label(closed: int, evaluated: int) -> str:
 
 
 # ---------- 분포 패널(컴팩트 테이블) ----------
-def _panel(title: str, rows: list[tuple[str, int, str]], total: int) -> None:
+def _label_cell(label: str, color: str, kind: str) -> str:
+    """분포 행 라벨을 축 형식에 맞게 렌더(§3.1 handoff 형식 분리).
+
+    kind: ``pill``(lifecycle 상태 — 틴트 배지) / ``grade``(등급 — 셰브런+색텍스트, pill 아님) /
+    ``plain``(분류축: 부서·원인·기간 — 색 없는 평문). 한 패널은 한 축이므로 축별 단일 형식."""
+    if kind == "grade":
+        level = _GRADE_LEVEL.get(str(label).strip().upper())
+        return erp.grade_mark_html(label, color, level=level)
+    if kind == "plain":
+        return (f"<span style='font-size:12.5px;font-weight:600;color:{TOKENS['ink']};'>"
+                f"{escape(label)}</span>")
+    return ui.badge_html(escape(label), color)
+
+
+def _panel(title: str, rows: list[tuple[str, int, str]], total: int, *,
+           kind: str = "pill") -> None:
     """분포를 라벨·건수·비중 컴팩트 테이블로 렌더한다(카드 반복+수제 막대 지양).
 
-    카드마다 큰 막대를 반복하는 대신 밀도 높은 표 한 행에 라벨(색+텍스트 배지 이중부호화)·
-    건수·비중(%)을 싣고, 막대는 패널 내 최댓값 대비의 **보조 인라인** 신호로만 남긴다.
-    실데이터 집계만 표시하며 허수·장식 차트는 만들지 않는다(빈 분포는 방어 문구로 대체)."""
+    카드마다 큰 막대를 반복하는 대신 밀도 높은 표 한 행에 라벨(축 형식 분리·§3.1)·건수·
+    비중(%)을 싣고, 막대는 패널 내 최댓값 대비의 **보조 인라인** 신호로만 남긴다. 실데이터
+    집계만 표시하며 허수·장식 차트는 만들지 않는다(빈 분포는 방어 문구로 대체)."""
     max_count = max((c for _, c, _ in rows), default=0) or 1
     body = []
     for label, count, color in rows:
@@ -197,7 +233,7 @@ def _panel(title: str, rows: list[tuple[str, int, str]], total: int) -> None:
         share = round(count / total * 100) if total else 0         # 전체 대비 비중(수치 열)
         body.append(
             "<div class='nm-tr'>"
-            f"<div class='nm-td-l'>{ui.badge_html(escape(label), color)}</div>"
+            f"<div class='nm-td-l'>{_label_cell(label, color, kind)}</div>"
             "<div class='nm-td-bar'>"
             f"<div class='nm-td-fill' style='width:{bar}%;background:{color}'></div>"
             "</div>"
@@ -228,7 +264,7 @@ def _grade_panel(counts: dict, total: int) -> None:
         (grade, counts.get(grade, 0), _GRADE_COLOR.get(grade, TOKENS["ink-3"]))
         for grade in order
     ]
-    _panel("등급별 분포(제안·확정 미평가는 미확정)", rows, total)
+    _panel("등급별 분포(제안·확정 미평가는 미확정)", rows, total, kind="grade")
 
 
 def _status_panel(counts: dict, total: int) -> None:
@@ -245,7 +281,7 @@ def _dept_panel(counts: dict, total: int) -> None:
     for code, count in sorted(counts.items(), key=lambda kv: -kv[1]):
         label = code if code == "미지정" else _safe_dept_name(code)
         rows.append((label, count, _NEUTRAL))
-    _panel("부서·소속별 분포", rows, total)
+    _panel("부서·소속별 분포", rows, total, kind="plain")
 
 
 def _safe_dept_name(code: str) -> str:
@@ -261,7 +297,7 @@ def _cause_panel(counts: dict, total: int) -> None:
     for code, count in sorted(counts.items(), key=lambda kv: -kv[1]):
         label = _CAUSE_LABEL.get(code, code)
         rows.append((label, count, _NEUTRAL))
-    _panel("발생원인별 분포", rows, total)
+    _panel("발생원인별 분포", rows, total, kind="plain")
 
 
 def _period_panels(period_counts: dict, total: int) -> None:
@@ -281,9 +317,9 @@ def _period_panels(period_counts: dict, total: int) -> None:
 
     col_m, col_q = st.columns(2)
     with col_m:
-        _panel("월별 발생 추이", rows, total)
+        _panel("월별 발생 추이", rows, total, kind="plain")
     with col_q:
-        _panel("분기별 발생 추이", q_rows, total)
+        _panel("분기별 발생 추이", q_rows, total, kind="plain")
 
 
 def _quarter_of(month_key: str) -> str:
