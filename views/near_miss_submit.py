@@ -36,7 +36,7 @@ _DONE_KEY = "nm_submit_done"
 # 폼 위젯 세션 키(명시 key). clear_on_submit=False 라 값이 남으므로, '새 아차사고
 # 등록' 시 이 키들을 명시적으로 비워 폼을 초기화한다.
 _FORM_WIDGET_KEYS = [
-    "nm_f_work_name", "nm_f_incident_date", "nm_f_proposed_grade", "nm_f_cause_code",
+    "nm_f_work_name", "nm_f_incident_date", "nm_f_cause_code",
     "nm_f_cause_detail", "nm_f_work_content", "nm_f_incident_content",
     "nm_f_countermeasure", "nm_f_site_description", "nm_f_camera", "nm_f_upload",
 ]
@@ -190,15 +190,16 @@ def render(user: dict) -> None:
         st.markdown("<div class='nm-sec'>신고자 정보</div>", unsafe_allow_html=True)
         _identity_row(user)
 
-        # ── 필수 핵심(상단·위계 최상단) ──
+        # ── 필수 핵심(상단·위계 최상단) — 사용자 요구 변경(2026-07-29): 발생원인 상세·작업내용·
+        #    예방대책·작업현장 상황설명을 '추가 정보' 접기에서 꺼내 상시 노출·필수 승격한다.
+        #    선택으로 남는 것은 사진 첨부(GATED)뿐이다. ──
         st.markdown(
-            "<div class='nm-sec nm-sec-lead'>필수 입력<span class='nm-req'>* 4개 항목</span></div>",
+            "<div class='nm-sec nm-sec-lead'>필수 입력<span class='nm-req'>* 8개 항목</span></div>",
             unsafe_allow_html=True,
         )
         st.markdown(
-            "<div class='nm-note'>아차사고 접수에 필요한 최소 항목입니다"
-            "(<span class='nm-star'>*</span> 표시). 상세·사진은 아래 '추가 정보'에서 "
-            "선택 입력합니다.</div>",
+            "<div class='nm-note'>아차사고 접수에 필요한 항목입니다"
+            "(<span class='nm-star'>*</span> 표시, 모두 필수). 사진만 아래에서 선택 첨부합니다.</div>",
             unsafe_allow_html=True,
         )
         c1, c2 = st.columns([2, 1])
@@ -208,41 +209,30 @@ def render(user: dict) -> None:
         with c2:
             incident_date = st.date_input("발생일 *", value=date.today(),
                                           format="YYYY-MM-DD", key="nm_f_incident_date")
+        # 발생원인(코드 select)·발생원인 상세를 2열로 배치(§0.6 중첩 1회 내). 짧은 코드값
+        # select 는 내용 맞춤 폭(전폭 금지) — 종전 전폭 1141px 컨트롤을 ~200px 로 좁힌다.
         cause_opts = [""] + list(db.NEAR_MISS_CAUSE_CODES)
-        cause_code = st.selectbox(
-            "발생원인 *", cause_opts, index=0, key="nm_f_cause_code",
-            format_func=lambda c: "— 선택 —" if c == "" else f"{_CAUSE_LABELS.get(c, c)} ({c})",
-        )
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            cause_code = st.selectbox(
+                "발생원인 *", cause_opts, index=0, key="nm_f_cause_code", width=200,
+                format_func=lambda c: "— 선택 —" if c == "" else f"{_CAUSE_LABELS.get(c, c)} ({c})",
+            )
+        with cc2:
+            cause_detail = st.text_input("발생원인 상세 *", max_chars=200,
+                                         key="nm_f_cause_detail",
+                                         placeholder="원인을 구체적으로")
         incident_content = st.text_area(
-            "사고내용 *", height=130, key="nm_f_incident_content",
+            "사고내용 *", height=120, key="nm_f_incident_content",
             placeholder="무슨 일이 있었는지(아차사고 상황)를 구체적으로 적어 주세요",
         )
-
-        # ── 추가 정보(선택) — 후순위·기본 접힘 ──
-        with st.expander("추가 정보 (선택)", expanded=False):
-            st.markdown(
-                "<div class='nm-note'>있으면 함께 접수됩니다. 없어도 제출할 수 있습니다.</div>",
-                unsafe_allow_html=True,
-            )
-            c3, c4 = st.columns(2)
-            with c3:
-                grade_opts = [""] + list(db.NEAR_MISS_GRADES)
-                proposed_grade = st.selectbox(
-                    "제안 등급", grade_opts, index=0, key="nm_f_proposed_grade",
-                    format_func=lambda g: "— 선택 안 함 —" if g == "" else g,
-                    help="신고자가 제안하는 위험 등급(S~D). 확정 등급은 평가 단계에서 부여됩니다.",
-                )
-            with c4:
-                cause_detail = st.text_input("발생원인 상세", max_chars=200,
-                                             key="nm_f_cause_detail",
-                                             placeholder="원인을 구체적으로")
-            work_content = st.text_area("작업내용", height=80, key="nm_f_work_content",
-                                        placeholder="어떤 작업을 하고 있었는지")
-            countermeasure = st.text_area("예방대책", height=80, key="nm_f_countermeasure",
-                                          placeholder="재발을 막기 위한 제안 대책")
-            site_description = st.text_area("작업현장 상황설명", height=80,
-                                            key="nm_f_site_description",
-                                            placeholder="현장 상황·주변 환경")
+        work_content = st.text_area("작업내용 *", height=80, key="nm_f_work_content",
+                                    placeholder="어떤 작업을 하고 있었는지")
+        countermeasure = st.text_area("예방대책 *", height=80, key="nm_f_countermeasure",
+                                      placeholder="재발을 막기 위한 제안 대책")
+        site_description = st.text_area("작업현장 상황설명 *", height=80,
+                                        key="nm_f_site_description",
+                                        placeholder="현장 상황·주변 환경")
 
         # ── 사진 첨부(선택 · GATED) — 시각 비중 축소, 기본 접힘. 안내는 유지. ──
         with st.expander("사진 첨부 (선택 · 저장 보류)", expanded=False):
@@ -270,16 +260,21 @@ def render(user: dict) -> None:
     missing = _validate({
         "work_name": work_name,
         "cause_code": cause_code,
+        "cause_detail": cause_detail,
         "incident_content": incident_content,
         "incident_date": incident_date,
+        "work_content": work_content,
+        "countermeasure": countermeasure,
+        "site_description": site_description,
     })
     if missing:
         banner("danger", "필수 항목을 입력하세요: " + ", ".join(missing))
         return
 
+    # 제안 등급은 사용자 요구 변경(2026-07-29)으로 등록에서 제거했다 — payload 에 넣지 않는다.
+    # 파사드는 proposed_grade nullable 이라 미전송 시 None 으로 접수된다(확정 등급은 평가 단계 소관).
     payload = {
         "work_name": _clean(work_name),
-        "proposed_grade": proposed_grade or None,
         "cause_code": cause_code,
         "cause_detail": _clean(cause_detail),
         "incident_date": incident_date.isoformat(),
@@ -294,12 +289,19 @@ def render(user: dict) -> None:
 
 
 def _validate(fields: dict) -> list[str]:
-    """필수 항목 검증. 비어 있는 항목의 한글 라벨 목록을 반환한다."""
+    """필수 항목 검증. 비어 있는 항목의 한글 라벨 목록을 반환한다.
+
+    사용자 요구 변경(2026-07-29): 발생원인 상세·작업내용·예방대책·작업현장 상황설명을
+    선택→필수로 승격한다(빈값 시 제출 차단). 사진 첨부만 선택으로 남는다."""
     labels = {
         "work_name": "작업명",
         "cause_code": "발생원인",
+        "cause_detail": "발생원인 상세",
         "incident_content": "사고내용",
         "incident_date": "발생일",
+        "work_content": "작업내용",
+        "countermeasure": "예방대책",
+        "site_description": "작업현장 상황설명",
     }
     missing: list[str] = []
     for key, label in labels.items():

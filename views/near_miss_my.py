@@ -335,6 +335,8 @@ def _render_edit_form(user: dict, report: dict) -> None:
     rid = report.get("id")
     with st.form(f"nm_my_edit_{rid}", clear_on_submit=False):
         work_name = st.text_input("작업명", value=_clean(report.get("work_name")), max_chars=120)
+        # 제안 등급 입력은 사용자 요구 변경(2026-07-29)으로 제거했다 — 기존 저장값은 보존한다
+        # (수정으로 조용히 지워지지 않게). 발생일·발생원인을 2열로 배치(§0.6 중첩 1회 내).
         c1, c2 = st.columns(2)
         with c1:
             inc = _clean(report.get("incident_date"))
@@ -344,20 +346,13 @@ def _render_edit_form(user: dict, report: dict) -> None:
                 inc_val = date.today()
             incident_date = st.date_input("발생일", value=inc_val, format="YYYY-MM-DD")
         with c2:
-            grade_opts = [""] + list(db.NEAR_MISS_GRADES)
-            cur_grade = _clean(report.get("proposed_grade"))
-            g_idx = grade_opts.index(cur_grade) if cur_grade in grade_opts else 0
-            proposed_grade = st.selectbox(
-                "제안 등급", grade_opts, index=g_idx,
-                format_func=lambda g: "— 선택 안 함 —" if g == "" else g,
+            cause_opts = list(db.NEAR_MISS_CAUSE_CODES)
+            cur_cause = _clean(report.get("cause_code"))
+            c_idx = cause_opts.index(cur_cause) if cur_cause in cause_opts else 0
+            cause_code = st.selectbox(
+                "발생원인", cause_opts, index=c_idx, width=200,
+                format_func=lambda c: f"{_CAUSE_LABEL.get(c, c)} ({c})",
             )
-        cause_opts = list(db.NEAR_MISS_CAUSE_CODES)
-        cur_cause = _clean(report.get("cause_code"))
-        c_idx = cause_opts.index(cur_cause) if cur_cause in cause_opts else 0
-        cause_code = st.selectbox(
-            "발생원인", cause_opts, index=c_idx,
-            format_func=lambda c: f"{_CAUSE_LABEL.get(c, c)} ({c})",
-        )
         cause_detail = st.text_input("발생원인 상세", value=_clean(report.get("cause_detail")),
                                      max_chars=200)
         work_content = st.text_area("작업내용", value=_clean(report.get("work_content")), height=80)
@@ -374,7 +369,8 @@ def _render_edit_form(user: dict, report: dict) -> None:
 
     payload = {
         "work_name": work_name,
-        "proposed_grade": proposed_grade or None,
+        # 제안 등급은 폼에서 제거했으나 기존 저장값을 그대로 실어 보존한다(수정으로 미변경).
+        "proposed_grade": _clean(report.get("proposed_grade")) or None,
         "cause_code": cause_code,
         "cause_detail": cause_detail,
         "incident_date": incident_date.isoformat(),
