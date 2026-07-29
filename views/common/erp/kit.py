@@ -95,7 +95,8 @@ _KIT_CSS = f"""
   font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.2; }}
 .erp-grade .gm {{ font-size: 10px; letter-spacing: -1.5px; }}
 /* 예외 큐 스트립(§3.5 handoff): 지금 처리할 예외(미평가·검토중·기한초과 CAPA). 옅은
-   danger-bg 틴트(값>0) + 셰브런 어포던스. 각 항목 ≤72px, KPI 스트립과 형제(박스 상한 정합). */
+   danger-bg 틴트(값>0)로 예외 현황만 표시한다(순수 표시 스트립 — 클릭/이동 어포던스 없음;
+   이동은 각 화면 메뉴로 충분, 과배선 금지·거짓 어포던스 방지, V1 QA Medium#1). 각 항목 ≤72px. */
 .erp-attn {{ display: flex; align-items: stretch; flex-wrap: nowrap;
   border: 1px solid {TOKENS['line-strong']}; border-radius: {_CARD_RADIUS}; overflow: hidden; }}
 .erp-attn-i {{ flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 10px;
@@ -108,8 +109,6 @@ _KIT_CSS = f"""
 .erp-attn-i.on .erp-attn-v {{ color: {TOKENS['danger']}; }}
 .erp-attn-l {{ font-size: 11.5px; color: {TOKENS['ink-2']}; line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.erp-attn-c {{ margin-left: auto; color: {TOKENS['ink-3']}; font-size: 13px; flex: 0 0 auto; }}
-.erp-attn-i.on .erp-attn-c {{ color: {TOKENS['danger']}; }}
 /* 빈 상태 = 한 줄 안내(§0.6 강제): 대형 점선 placeholder 금지, 높이 ≤72px. */
 .erp-empty {{
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -812,10 +811,12 @@ def metadata_strip(cells: list[tuple]) -> None:
 
 
 def attention_strip(items: list[tuple]) -> None:
-    """예외 큐 스트립(§3.5 handoff) — 지금 처리할 예외(값>0 이면 danger-bg 틴트 + 셰브런).
+    """예외 현황 스트립(§3.5 handoff) — 지금 처리할 예외를 값>0 이면 danger-bg 틴트로 표시한다.
 
-    ``items``: ``[(label, value, urgent)]`` — ``urgent`` 이 참이면 옅은 danger 틴트로 강조,
-    거짓이면 중립. 값은 도메인(파사드)이 계산한 실집계만 싣는다(허수 금지). KPI 스트립과
+    **순수 표시 스트립**이다: 클릭/이동 어포던스(셰브런 등)를 두지 않는다 — 배선 없는 셰브런은
+    거짓 어포던스가 되고(V1 QA Medium#1), 실제 이동은 각 화면 메뉴로 충분하므로 과배선하지
+    않는다. ``items``: ``[(label, value, urgent)]`` — ``urgent`` 이 참이면 옅은 danger 틴트로
+    강조, 거짓이면 중립. 값은 도메인(파사드)이 계산한 실집계만 싣는다(허수 금지). KPI 스트립과
     형제 스트립이며 각 항목 ≤72px(§0.6 정합)."""
     if not items:
         return
@@ -825,8 +826,7 @@ def attention_strip(items: list[tuple]) -> None:
         parts.append(
             f"<div class='erp-attn-i{on}'>"
             f"<span class='erp-attn-tx'><span class='erp-attn-v'>{escape(str(value))}</span>"
-            f"<span class='erp-attn-l'>{escape(str(label))}</span></span>"
-            f"<span class='erp-attn-c'>›</span></div>"
+            f"<span class='erp-attn-l'>{escape(str(label))}</span></span></div>"
         )
     st.markdown(f"<div class='erp-attn'>{''.join(parts)}</div>", unsafe_allow_html=True)
 
