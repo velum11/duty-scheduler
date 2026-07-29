@@ -16,15 +16,18 @@ ReadinessState)은 ``views/master`` 가 계속 소유하며 이 키트는 **구�
 """
 from views.common.erp.kit import (
     Field,
+    attention_strip,
     condition_panel,
     detail_actions,
     detail_empty,
     field_block,
     form_submit,
+    grade_mark_html,
     grid_shell,
     grid_skeleton_html,
     master_detail_frame,
     meta_col_html,
+    metadata_strip,
     read_grid,
     screen_frame,
     select_grid,
@@ -50,4 +53,7 @@ __all__ = [
     "status_badge_html",
     "meta_col_html",
     "field_block",
+    "grade_mark_html",
+    "metadata_strip",
+    "attention_strip",
 ]

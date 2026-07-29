@@ -71,6 +71,45 @@ _KIT_CSS = f"""
 }}
 .erp-strip-l {{ font-size: 11.5px; color: {TOKENS['ink-2']}; line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+/* 상세 메타 스트립(§3.2 handoff): 라벨(작게·ink-2) 위 / 값(진하게·ink) 아래 —
+   4개 상세 상단을 일관된 읽기 메타 스트립으로 통일. 카드·그림자 없이 hairline 1개.
+   erp-strip 과 동일 지오메트리(≤72px: 7+7 padding + 라벨~14 + 값~17 ≈ 45px). */
+.erp-meta {{
+  display: flex; align-items: stretch; flex-wrap: nowrap;
+  border: 1px solid {TOKENS['line-strong']}; border-radius: {_CARD_RADIUS};
+  background: {TOKENS['surface']}; overflow: hidden;
+}}
+.erp-meta-i {{
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
+  justify-content: center; gap: 2px; padding: 7px 14px;
+  border-left: 1px solid {TOKENS['line']};
+}}
+.erp-meta-i:first-child {{ border-left: 0; }}
+.erp-meta-l {{ font-size: 11.5px; color: {TOKENS['ink-2']}; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.erp-meta-v {{ font-size: 13px; font-weight: 600; color: {TOKENS['ink']}; line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+/* 등급 마크(§3.1 handoff): 셰브런(방향/개수) + 색 텍스트, 배경 없음 — 색 + 방향
+   이중부호화(색약 안전). pill 아님(한 행 pill 형식 ≤1축 강제). */
+.erp-grade {{ display: inline-flex; align-items: center; gap: 4px; font-weight: 600;
+  font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.2; }}
+.erp-grade .gm {{ font-size: 10px; letter-spacing: -1.5px; }}
+/* 예외 큐 스트립(§3.5 handoff): 지금 처리할 예외(미평가·검토중·기한초과 CAPA). 옅은
+   danger-bg 틴트(값>0) + 셰브런 어포던스. 각 항목 ≤72px, KPI 스트립과 형제(박스 상한 정합). */
+.erp-attn {{ display: flex; align-items: stretch; flex-wrap: nowrap;
+  border: 1px solid {TOKENS['line-strong']}; border-radius: {_CARD_RADIUS}; overflow: hidden; }}
+.erp-attn-i {{ flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; border-left: 1px solid {TOKENS['line']}; background: {TOKENS['surface']}; }}
+.erp-attn-i:first-child {{ border-left: 0; }}
+.erp-attn-i.on {{ background: {TOKENS['danger-bg']}; }}
+.erp-attn-tx {{ display: flex; flex-direction: column; gap: 1px; min-width: 0; }}
+.erp-attn-v {{ font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums;
+  line-height: 1.15; color: {TOKENS['ink-2']}; }}
+.erp-attn-i.on .erp-attn-v {{ color: {TOKENS['danger']}; }}
+.erp-attn-l {{ font-size: 11.5px; color: {TOKENS['ink-2']}; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.erp-attn-c {{ margin-left: auto; color: {TOKENS['ink-3']}; font-size: 13px; flex: 0 0 auto; }}
+.erp-attn-i.on .erp-attn-c {{ color: {TOKENS['danger']}; }}
 /* 빈 상태 = 한 줄 안내(§0.6 강제): 대형 점선 placeholder 금지, 높이 ≤72px. */
 .erp-empty {{
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -721,11 +760,75 @@ def status_badge_html(label: str, color: str) -> str:
     중립 상태의 낮은 시각 강도를 유지한다. 색 신호가 있는 상태는 전달 색을 그대로 쓴다.
     """
     text = TOKENS["ink-2"] if color == TOKENS["ink-3"] else color
+    # §3.8/F2 handoff: 채도는 텍스트가 진다 — 배경은 매우 옅게(14≈8%), 테두리는 저채도
+    # (풀채도 1px 테두리가 색 픽셀을 과다하게 늘리던 것을 완화). 8자리 hex 알파(≈33%).
     return (
         f"<span style='display:inline-flex;align-items:center;padding:1px 8px;"
         f"border-radius:5px;font-size:11px;font-weight:600;color:{text};"
-        f"border:1px solid {color};background:{color}14;'>{escape(label)}</span>"
+        f"border:1px solid {color}55;background:{color}14;'>{escape(label)}</span>"
     )
+
+
+# 등급 마크 셰브런 사다리(§3.1 handoff) — level 이 높을수록 상위 위험. 형식만 규정하고
+# level→등급 매핑(S 가 최상위인지 등)은 도메인(화면) 소관이다. 색 + 방향/개수 이중부호화.
+_GRADE_GLYPH = {4: "▲▲", 3: "▲", 2: "▴", 1: "▸", 0: "▽"}
+
+
+def grade_mark_html(label: str, color: str, *, level: int | None = None) -> str:
+    """등급 마크 HTML(§3.1 handoff) — 셰브런(방향/개수) + 색 텍스트, 배경 없음.
+
+    pill 이 아니다(한 행/패널에 pill 형식 ≤1축 강제 — lifecycle 상태만 pill). 색약 안전을
+    위해 색 + 셰브런 방향/개수로 이중부호화한다. ``level`` 이 ``None`` 이면(미확정 등)
+    중립 점 마커로 렌더하고 글자색을 ``--ink-2`` 로 clamp 한다(읽는 텍스트 대비).
+    ``label``·``color``·``level`` 은 호출부(도메인 owner)가 계산해 넘긴다."""
+    glyph = "·" if level is None else _GRADE_GLYPH.get(int(level), "▸")
+    # 읽는 텍스트에 --ink-3 금지(DESIGN §159) — 가장 옅은 중립색은 ink-2 로 clamp.
+    text = TOKENS["ink-2"] if color == TOKENS["ink-3"] else color
+    return (
+        f"<span class='erp-grade' style='color:{text};'>"
+        f"<span class='gm'>{glyph}</span>{escape(str(label))}</span>"
+    )
+
+
+def metadata_strip(cells: list[tuple]) -> None:
+    """상세 상단 읽기 메타 스트립(§3.2 handoff) — 라벨(작게·ink-2) 위 / 값(진하게) 아래.
+
+    ``cells``: ``[(label, value)]`` (value 는 평문 — escape) 또는 ``[(label, value, "html")]``
+    (value 는 신뢰된 HTML — status_badge_html / grade_mark_html 결과 등). 핵심 컨텍스트를
+    접지 않고 상시 노출하며(§0.6), 카드·그림자 없이 hairline 1개로 본문과 분리한다."""
+    if not cells:
+        return
+    parts = []
+    for cell in cells:
+        label = cell[0]
+        value = cell[1]
+        is_html = len(cell) > 2 and cell[2] == "html"
+        v = value if is_html else escape(str(value if value not in (None, "") else "-"))
+        parts.append(
+            f"<div class='erp-meta-i'><span class='erp-meta-l'>{escape(str(label))}</span>"
+            f"<span class='erp-meta-v'>{v}</span></div>"
+        )
+    st.markdown(f"<div class='erp-meta'>{''.join(parts)}</div>", unsafe_allow_html=True)
+
+
+def attention_strip(items: list[tuple]) -> None:
+    """예외 큐 스트립(§3.5 handoff) — 지금 처리할 예외(값>0 이면 danger-bg 틴트 + 셰브런).
+
+    ``items``: ``[(label, value, urgent)]`` — ``urgent`` 이 참이면 옅은 danger 틴트로 강조,
+    거짓이면 중립. 값은 도메인(파사드)이 계산한 실집계만 싣는다(허수 금지). KPI 스트립과
+    형제 스트립이며 각 항목 ≤72px(§0.6 정합)."""
+    if not items:
+        return
+    parts = []
+    for label, value, urgent in items:
+        on = " on" if urgent else ""
+        parts.append(
+            f"<div class='erp-attn-i{on}'>"
+            f"<span class='erp-attn-tx'><span class='erp-attn-v'>{escape(str(value))}</span>"
+            f"<span class='erp-attn-l'>{escape(str(label))}</span></span>"
+            f"<span class='erp-attn-c'>›</span></div>"
+        )
+    st.markdown(f"<div class='erp-attn'>{''.join(parts)}</div>", unsafe_allow_html=True)
 
 
 def meta_col_html(pairs: list[tuple[str, str]]) -> str:
