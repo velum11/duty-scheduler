@@ -11,6 +11,10 @@
 | 항목 | 내용 | 유형 |
 |---|---|---|
 | 대시보드 P3 | 비차단 개선 잔여분 | 코드 |
+| master EDIT 그리드 밀도 §2 초과(선재) | 07-29 재구성 QA에서 확인: `views/master/grid.py` `_GRID_HEADER_PX=44/_GRID_ROW_PX=40`이 §2(편집 34/헤더 34–36) 초과 — near-miss 무관 선재 편차, master owner 별건 정합 검토 | 코드 |
+| near-miss 시각 Low 3종(비차단) | 07-29 V1 QA: ①빈 평가/개선 큐가 §0.6 "헤더+흰 본문" 대신 회색 블록(~190px, aggrid overlay/skeleton 확인) ②grade_mark 저레벨 글리프(·/▸) 변별력 소폭 상향 검토 ③improvement 빈 큐 내부 4px 스크롤 | 코드 |
+| E2E 관찰 2종(결함 아님) | 07-29 T1(22/22 PASS): ①편성에서 선택 조와 다른 소속 직원 행 추가 시 저장 후 현재 필터에서 행이 사라져 보이는 UX(선재 — 안내/필터 전환 검토) ②개선조치 제출 flash 1회 간헐 미표시(flaky, Streamlit rerun 타이밍) | 코드 |
+| pixel-qa DOM 셀렉터 갱신 | Streamlit 1.59에서 selectbox가 react-aria ComboBox로 변경되어 기존 pixel-qa/DOM QA 레시피의 셀렉터 일부 무효 — 레시피·스킬 갱신 필요(07-29 T1 발견) | 도구 |
 | 사용자 실브라우저 sign-off | 3화면 크롬 표준화(`14d5963`)·근무형태 배지 대비 보수(`cc5f6e4`)·퇴직자 과거근무 표시(§98 구현) — 8502에서 확인 대기 | 게이트 |
 | 고아 빈 폴더 1개 | `.claude/worktrees/agent-a7f86db30e9513843` — 내용 없는 빈 폴더인데 타 프로세스 핸들 잠김으로 삭제 실패(07-25 정리 때 유일 잔존). 재부팅 후 또는 탐색기에서 수동 삭제 | 정리 |
 | worktree 물리 잔재 2개 | ORCA worktree 폐기 완료(git 등록·브랜치 3개 삭제)했으나 `worktype-improve`·`worktype-improve-2` 디렉터리가 프로세스 잠김으로 물리 삭제 실패 — 재부팅 후 또는 잠근 프로세스 종료 후 폴더 수동 삭제(`.claude/worktrees/agent-a7f8...` 빈 폴더와 동일 처리) | 정리 |
