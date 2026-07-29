@@ -2,6 +2,28 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-30 · [인계] 세션 종료(Claude 업데이트) — 아차사고 시각 재구성 완료·사용자 sign-off 대기
+
+**한 줄 상태**: 아차사고 6화면 시각 재구성(B안)이 **구현·검증까지 전부 완료·push됨**. 남은 것은 사용자 실브라우저 최종 sign-off와 병합·배포 결정뿐.
+
+### 완료 (Orca orchestration 파이프라인 — 신설 UI/UX 체계 첫 실전)
+- 흐름: R1/R2 시각 레퍼런스 조사(63 refs, 표면 단차 1.03–1.12 실측 규칙) → **D1 `ux-architect` handoff**(신규 색 0·형식 분리·메타 스트립·예외 큐, 전역 결정 2건 에스컬레이션) → M1/M1b **A/B live 목업**(8531) → **사용자 B안 승인** → F1' 6화면 확산 → V1 visual-qa **PASS**(§8 게이트 전부 통과·High 0) → T1 E2E **22/22회 PASS·앱 결함 0**(근태 12회+아차사고 폐루프 10회, 반려·보완·재조치 분기·4계정 역할 전환) → F2 셰브런 보정.
+- B안 = 전역 토큰 완화: `--canvas #F5F3EF`(흰 표면 대비 1.108)·`--line #EBE8E1`(≈1.22)·`--content-bg` 동기 + **DESIGN §2 개정**(크림→near-white 웜뉴트럴, 2026-07-29 사용자 결정 명기). 시각 언어: lifecycle=pill / 등급=셰브런 마크 / 분류=평문(형식 분리), 상세 metadata_strip 통일, 분석 attention_strip(예외 큐), pill 테두리 저채도.
+- 커밋(전부 push, `redesign/near-miss-ui`=`374ad9f`=origin 동기): `c94188f`(kit primitive 3종) `dfb28e4`(B 토큰+DESIGN §2) `f439aae`(6화면 확산) `cc007d4`(셰브런 제거) `374ad9f`(BACKLOG). 배포브랜치 `feature/supabase-crud` **미병합·미배포**.
+- 산출물: `.orca/artifacts/near-miss-restyle/` — `refs/`+분석 2건·`design-handoff.md`·`mockup/`(A/B·final 스크린샷)·`qa/QA_REPORT.md`(측정 json 포함)·`e2e/E2E_REPORT.md`(회차표).
+
+### 실행 환경 (종료 시점)
+- **8501 = supabase 실데이터·최종 상태** 서빙 중(로그인 `ADMIN`). 재기동 명령: `DUTY_DATA_MODE=supabase PYTHONUTF8=1 .venv/Scripts/python.exe -m streamlit run app.py --server.port 8501 --server.headless true` — **재기동 전 기존 8501 리스너 전부 kill+`__pycache__` 제거**(07-29 stale 이중 리스너 사고 재발 방지).
+- 8531(sample 시연)·QA/E2E 서버들은 종료해도 무방. Orca 워커 터미널 `nm-*`는 idle — 닫아도 됨.
+
+### 재개 시 다음 단계
+1. **사용자 실브라우저 sign-off**(8501, 6화면) — 이것이 완료 확정 게이트.
+2. sign-off 후: push는 완료 상태이므로 **병합(`feature/supabase-crud`)·Cloud 배포 여부만 사용자 지시**로.
+3. BACKLOG 잔여(비차단): master EDIT 그리드 40/44px 선재 편차·near-miss 시각 Low 3종·E2E 관찰 2종·pixel-qa 셀렉터 갱신(Streamlit 1.59 ComboBox).
+
+### 이번 세션의 룰 변경(모두 적용·커밋됨 — 상세는 아래 변곡점들)
+워커 권한 바이패스(글로벌 PLAYBOOK §5.2)·DLP 산출물 해제·UI/UX 7종 체계(ux-architect+스킬 3종)·DESIGN §0.6 밀도 잠금·§2 near-white 개정.
+
 ## 2026-07-29 · ✅ 변곡점: DLP 로컬 산출물 생성 금지 해제 — 산출물 정책 개정
 
 사용자가 회사 DLP 로컬 쓰기 제한을 해제. `AGENTS.md` 안전경계의 "DLP 하드 경계" 절을 **로컬 산출물 정책**으로 교체(생성 허용·위치 규율 `.orca/artifacts/<작업>/`·temp·**비밀/개인정보/실데이터 덤프 포함 금지는 불변**·산출물 무권위). 파생 정합: CLAUDE.md 권위계층 1번(비밀·개인정보 보호로 재정의), 오버레이 §3, visual-qa(스크린샷 캡처·보관 허용), ux-architect(handoff 사본·설계 노트 artifacts 허용), duty-visual-critique(vision 스크린샷 전면 허용 — 인메모리 제약 삭제), duty-ux·duty-erp-ui(이미지 목업·산출 사본 허용), 메모리 local-artifact-prohibition(해제 기록). 글로벌 문서들의 "when forbidden" 조건문은 조건부라 무수정(프로젝트가 더 이상 금지하지 않으므로 자동 해제). 실행형 live mockup·DOM 수치 1차, commit/push·실DB 게이트, 사용자 sign-off는 불변.
