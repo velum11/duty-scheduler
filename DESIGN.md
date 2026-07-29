@@ -19,9 +19,11 @@
 | schedule_edit(편성) | M/A | app | MATRIX_EDIT | MATRIX | ✕ | 조회·새로고침 | 추가·삭제·저장(그리드) |
 | my_schedule(내 근무) | U/M/A | U=user, M/A=app | READ_VIEW | — | ✔(USER 중심) | 월이동·조회 | — |
 | near_miss_submit(신청) | U/M/A | U=user, M/A=app | FORM_ENTRY | — | ✔(USER) | **상단바 제외** | 제출(form) |
-| near_miss_view(조회) | M/A | app | READ_VIEW | READ | ✕ | 조회·새로고침 | — |
-| near_miss_evaluate(평가) | M/A | app | MASTER_DETAIL | READ+상세 | ✕ | 조회·새로고침 | 등급확정·반려·종결(상세) |
-| near_miss_stats(집계) | M/A | app | DASHBOARD | — | ✕ | 조회·새로고침 | — |
+| near_miss_my(내 아차사고) | U/M/A | U=user, M/A=app | MASTER_DETAIL | SELECT+상세 | ✔(USER) | 새로고침 | 본문 수정·재제출(상세, 소유자+SUBMITTED) |
+| near_miss_view(조회) | 전 사용자 | U=user, M/A=app | READ_VIEW | SELECT+상세(조회 전용) | U variant만 | 조회·새로고침 | — |
+| near_miss_evaluate(평가) | 평가자(cap) | app | MASTER_DETAIL | SELECT+상세 | ✕ | 조회·새로고침 | 검토착수·등급확정·보완요청·반려(상세) |
+| near_miss_improvement(개선조치) | 접근자(cap: 평가자·담당자·확인자) | U=user, M/A=app | MASTER_DETAIL | SELECT+상세 | ✕ | 조회·새로고침 | 조치저장·제출·확인·재조치요청·보고서종결(상세, 역할 variant) |
+| near_miss_stats(집계) | 전 사용자 | U=user, M/A=app | DASHBOARD | — | ✕ | 조회·새로고침 | — |
 | master_users | A | app | EDIT_GRID | EDIT | ✕ | 조회·새로고침 | 추가·삭제·저장 |
 | master_org | A | app | EDIT_GRID(3시트) | EDIT×3 | ✕ | 조회·새로고침만 | 시트별 추가·삭제·저장(3범위) |
 | master_work_types | A | app | EDIT_GRID | EDIT | ✕ | 조회·새로고침 | 추가·삭제·저장 |
@@ -30,7 +32,7 @@
 
 ### 0.2 공용 구조 어휘 (중립 키트 ↔ 도메인 lifecycle 분리)
 
-구조(레이아웃) 컴포넌트는 편집 lifecycle과 **분리된 중립 키트**(`views/common/erp/` — 신설)로 제공합니다. **목표 어휘**: `ScreenFrame · TopActionBar · ConditionPanel · DataGrid(READ/SELECT/EDIT/MATRIX) · DetailTabs · StatusRegion`. **현재 출하된 것은 READ subset뿐**입니다 — `screen_frame · top_action_bar · condition_panel · read_grid · status_region`(`views/common/erp/__init__.py` 실제 export). `DataGrid`의 SELECT/EDIT/MATRIX 어댑터와 `DetailTabs`(상세 탭)는 각 화면 이관 시점에 추가되는 미출하 목표입니다. 도메인 lifecycle(`DraftState·run_save·ReadinessState`)은 `views/master/`가 계속 소유하며 중립 키트를 **소비**합니다. `modules/ui.py`의 body helper(`page_title·card·summary_cards·panel_head·action_bar`)와 `views/workspace.py`의 독자 grid는 이 키트로 **흡수·폐기**하되, App Shell·logout·nav guard(dirty 이탈 방어)는 그대로 둡니다. `views/master`에 전부 흡수하지 않습니다 — 그건 편집 프레임워크지 중립 키트가 아니기 때문입니다.
+구조(레이아웃) 컴포넌트는 편집 lifecycle과 **분리된 중립 키트**(`views/common/erp/`)로 제공합니다. 현재 export는 `screen_frame · top_action_bar · form_submit · condition_panel · read_grid · grid_shell · status_region · master_detail_frame · detail_empty · detail_actions`입니다(`views/common/erp/__init__.py`가 코드 정본). `DataGrid`의 SELECT/EDIT/MATRIX 어댑터와 탭형 상세 어휘는 실제 화면 이관 시 필요가 입증될 때 추가합니다. 도메인 lifecycle(`DraftState·run_save·ReadinessState`)은 `views/master/`가 계속 소유하며 중립 키트를 **소비**합니다. `modules/ui.py`의 body helper와 화면별 독자 grid는 이 키트로 점진적으로 흡수하되, App Shell·logout·nav guard(dirty 이탈 방어)는 그대로 둡니다. `views/master`에 전부 흡수하지 않습니다 — 그건 편집 프레임워크지 중립 키트가 아니기 때문입니다.
 
 ### 0.3 영역 순서 (모든 화면 공통)
 
@@ -48,10 +50,18 @@
 
 AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `READ / SELECT / EDIT / MATRIX`. READ 그리드에는 action 메타열·paste JS·`allow_unsafe_jscode`를 넣지 않습니다. 한 GridSpec에 옵션 플래그를 누적하지 않습니다(→ 재조잡 방지).
 
-### 0.6 밀도·라벨 (§2 토큰)
+### 0.6 밀도·라벨 (§2 토큰) — 사내 ERP 실측 기준(2026-07-29 잠금)
+
+레퍼런스 수치는 사내 더존 웹 ERP 실측(2026-07-29): 조건패널 1행 ≈47px/2행 ≈78px·컨트롤 27px·그리드 행 31–32px·업무 버튼 26–27px·섹션 간 갭 4–15px·악센트 1색·카드/그림자/그라데이션 없음. 아래 규칙은 이 기준에서 도출한 **강제값**입니다.
 
 - **우측정렬 인라인 라벨**: 짝 컬럼(라벨 열 + widget 열) + widget은 실제 label + `label_visibility="collapsed"`. `col-N`은 중첩 columns가 아니라 한 행 라벨/widget 나열용 row builder로 구현.
 - **행 피치**: 읽기 32–34 / 편집 34(검증 후 축소) / 헤더 34–36 / **USER·터치 컨트롤 44 유지**. 32×32 히트영역 계약(§4)과 정합.
+- **조건패널(강제)**: 내용에 비례한 최소 높이 — 1366 기준 **최대 2행·총 높이 ≤96px**. 무거운 카드 박스가 아니라 얇은 필터 스트립(보더 최소). **비활성 필드가 자리를 상시 점유하지 않습니다**(예: 기간 미지정 시 날짜 입력은 렌더하지 않거나 접음). 조건이 3행 이상 필요하면 접기(우상단 셰브런)를 제공합니다.
+- **컨트롤 폭은 내용 맞춤(강제)**: 짧은 코드값(등급 S–D·상태 등) 선택에 전폭/과대 폭 컨트롤 금지. select·input 폭은 값 길이에 비례해 지정합니다.
+- **MASTER_DETAIL 분할(강제)**: 편집·워크플로형 상세는 **상세 폭 ≥600px(실입력 ≥560px)** 확보. 확보 불가 폭에서는 목록→상세 세로 스택. 목록 컬럼이 상세 높이에 끌려 큐 아래 대면적 공백을 만들지 않게 합니다. 상세에는 **판단에 필요한 핵심 컨텍스트를 접지 않고 노출**합니다(참조성 긴 서술만 접기).
+- **요약/KPI 표현(강제)**: 독립 카드 나열 금지 — **한 줄 요약 스트립(높이 ≤72px, hairline 구분)** 으로 표현합니다. `status_region`은 스트립형이 표준입니다. KPI 카드를 2행 이상 쌓지 않습니다.
+- **빈 상태(강제)**: 미선택/빈 결과 안내는 **한 줄(높이 ≤72px)** — 대형 점선 placeholder 금지. 빈 그리드는 헤더+흰 본문으로 둡니다.
+- **박스 상한(강제)**: above-fold에서 그리드를 제외한 독립 bordered 박스 **최대 3개**, bordered surface 중첩 깊이 1. 카드 radius·보더·padding은 **단일 토큰**으로 통일하며 컴포넌트별 임의 radius(8/5/4px 혼재)를 금지합니다.
 
 ### 0.7 반응형 (역할 variant 단위)
 
@@ -60,7 +70,7 @@ AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `RE
 
 ### 0.8 아키타입
 
-현재 코드(`views/common/scaffold.py::ARCHETYPES`)가 강제하는 유형은 **5종**입니다: `EDIT_GRID · READ_VIEW · MATRIX_EDIT · DASHBOARD · FORM_ENTRY`. `MASTER_DETAIL`(읽기 목록 + 상세/워크플로 — `near_miss_evaluate`의 `EDIT_GRID` 오분류 정정 대상)은 **계획 유형**이며, 아직 `ARCHETYPES`·계약 테스트·중립 키트의 상세 탭(DetailTabs) 어느 것에도 없습니다. **`near_miss_evaluate` 이관 시점에** `ARCHETYPES`+테스트 등록과 DetailTabs 신설을 함께 하며 도입합니다 — 그전까지 `MASTER_DETAIL`을 선언하면 `page_chrome`가 거부합니다. 유형 밖 레이아웃·새 유형은 **사용자 명시 승인 + 이 규약 개정**으로만.
+현재 코드(`views/common/scaffold.py::ARCHETYPES`)와 계약 테스트가 강제하는 유형은 **6종**입니다: `EDIT_GRID · READ_VIEW · MATRIX_EDIT · DASHBOARD · FORM_ENTRY · MASTER_DETAIL`. `MASTER_DETAIL`은 읽기 목록 + 상세/워크플로 구조이며 `near_miss_evaluate`가 `master_detail_frame`·`detail_actions`로 사용합니다. 유형 수와 허용값은 이 문장에 의존하지 않고 항상 `ARCHETYPES`와 매니페스트를 함께 확인합니다. 유형 밖 레이아웃·새 유형은 **사용자 명시 승인 + 이 규약 개정 + 코드·계약 테스트 동시 반영**으로만 추가합니다.
 
 ### 0.9 집행 (정적 심볼 → 실렌더 region 검증)
 
@@ -224,7 +234,7 @@ AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `RE
 
 ### 조직 스키마 readiness 3-state
 
-조직 스키마 capability(조직 그룹 — 도입 이력: migration 004) 준비 상태는 데이터 모드 배지와 **분리**하며 `READY | NOT_READY | PROBE_ERROR` 상호 배타로 표시합니다(`ReadinessState`). 조직 데이터와 무관한 화면에는 이 readiness를 요구하지 않습니다.
+조직 스키마 capability(조직 그룹 저장소와 부서 귀속 관계) 준비 상태는 데이터 모드 배지와 **분리**하며 `READY | NOT_READY | PROBE_ERROR` 상호 배타로 표시합니다(`ReadinessState`). 조직 데이터와 무관한 화면에는 이 readiness를 요구하지 않습니다. 도입 migration 이력은 UI 규약이 아니라 `docs/database.md`가 소유합니다.
 
 | 상태 | write control | 표시 |
 |---|---|---|
@@ -276,6 +286,7 @@ AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `RE
 - **1366×768을 필수 baseline**으로 하고 보조 매트릭스(1440×900·1280×800·1024×768·좁은 폭)에서 실제 렌더링을 확인합니다.
 - **대비율**을 측정합니다(전경 vs 배경 명도비, 본문 ≥ 4.5:1).
 - **텍스트/버튼 잘림**(scrollWidth/clientWidth), 겹침, 불필요한 전체 페이지 가로 스크롤이 없는지 확인합니다.
+- **밀도 정량 게이트(§0.6 잠금값, 1366 기준)**: 조건영역 ≤2행·≤96px / MASTER_DETAIL 편집 상세 ≥600px / 요약·KPI 스트립 한 행 ≤72px / 미선택 안내 ≤72px / above-fold 의미 없는 빈 surface ≤20%·핵심 작업영역 ≥70% / 카드·보더 겹침 0. 가능하면 사내 실 ERP의 동일 아키타입 화면과 조건높이·행피치·박스 수를 대조해 편차 ±15% 이내를 목표로 합니다.
 - 실제 폰트 적용·focus 가시성·아이콘 라벨을 확인합니다.
 - 인접 화면과의 일관성을 확인합니다.
 - 관련 UI 계약 테스트를 확인합니다.
