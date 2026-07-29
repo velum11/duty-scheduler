@@ -140,24 +140,20 @@ def _readiness() -> ReadinessState:
 
 # ---------- KPI 카드 ----------
 def _kpi_cards(status_counts: dict, total: int, overdue: int | None) -> None:
-    """6개 KPI 를 좌상단 우선 2행(우선/보조)으로 렌더한다(Codex: 한 행 6등분 지양).
+    """6개 KPI 를 단일 스트립 1행으로 렌더한다(§0.6 강제: 요약/KPI 한 줄 스트립 ≤72px,
+    2행 이상 쌓기 금지 — 종전 2행×3 카드가 행을 넘어 겹치던 문제를 근본 제거).
 
-    한 행 6등분 대신 우선 지표(총 건수·평가 대기·기한초과 — 규모·미처리 백로그·긴급
-    초과)를 상단 행에, 파생·완료 지표(평가완료·종결·반려·보고서 종결률)를 하단 행에 둔다.
-    좌상단이 실제 위계가 되도록 순서를 배치하되, 정확히 현재 6개 KPI 를 보존한다. 각 행은
-    공용 요약 카드 컴포넌트(erp.status_region)를 재사용한다(밴드 새 위젯 없음)."""
+    좌상단 우선 순서: 규모·백로그·긴급 초과(총 건수·평가 대기·기한초과)를 앞에, 파생·완료
+    지표(평가완료·종결·반려·보고서 종결률)를 뒤에 둔다. 정확히 현재 6개 KPI 를 보존하며
+    공용 스트립 컴포넌트(erp.status_region)를 재사용한다(밴드 새 위젯 없음)."""
     pending = status_counts.get("SUBMITTED", 0) + status_counts.get("IN_REVIEW", 0)
     evaluated = status_counts.get("EVALUATED", 0)
     closed = status_counts.get("CLOSED", 0)
     closed_or_rejected = closed + status_counts.get("REJECTED", 0)
-    # 우선 행(좌상단 우세) — 규모·백로그·긴급 초과.
     erp.status_region([
         ("총 건수", f"{total}건"),
         ("평가 대기", f"{pending}건"),
         ("기한초과", _overdue_label(overdue)),
-    ])
-    # 보조 행 — 완료·종결·비율.
-    erp.status_region([
         ("평가완료", f"{evaluated}건"),
         ("종결·반려", f"{closed_or_rejected}건"),
         ("보고서 종결률", _closure_rate_label(closed, evaluated)),
@@ -211,16 +207,19 @@ def _panel(title: str, rows: list[tuple[str, int, str]], total: int) -> None:
         )
     if not body:
         body.append("<div class='nm-tr nm-empty'><div>표시할 분포가 없습니다</div></div>")
-    with ui.card():
-        ui.panel_head(title, f"총 {total}건")
-        st.markdown(
-            "<div class='nm-tbl'>"
-            "<div class='nm-tr nm-th'><div class='nm-td-l'>항목</div>"
-            "<div class='nm-td-bar'></div><div class='nm-td-c'>건수</div>"
-            "<div class='nm-td-p'>비중</div></div>"
-            f"{''.join(body)}</div>",
-            unsafe_allow_html=True,
-        )
+    # §0.6 박스 상한: 분포마다 독립 bordered 카드를 나열하지 않는다(6개 카드 → 상한 3 초과).
+    # 사내 ERP 방식대로 굵은 소제목 라벨 + hairline 구획으로만 분포를 나눈다(카드/보더 없음).
+    st.markdown(
+        "<div class='nm-panel'>"
+        f"<div class='nm-panel-h'>{escape(title)}"
+        f"<span class='nm-panel-sub'>총 {total}건</span></div>"
+        "<div class='nm-tbl'>"
+        "<div class='nm-tr nm-th'><div class='nm-td-l'>항목</div>"
+        "<div class='nm-td-bar'></div><div class='nm-td-c'>건수</div>"
+        "<div class='nm-td-p'>비중</div></div>"
+        f"{''.join(body)}</div></div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _grade_panel(counts: dict, total: int) -> None:
@@ -303,6 +302,12 @@ def _inject_panel_style() -> None:
     st.markdown(
         f"""
 <style>
+/* 분포 패널(카드 아님) — 굵은 소제목 라벨 + hairline 구획만(§0.6 박스 상한, 사내 ERP 방식). */
+.nm-panel {{ padding:.1rem 0 .55rem; margin-bottom:.35rem; border-bottom:1px solid {TOKENS['line']}; }}
+.nm-panel-h {{ display:flex; align-items:baseline; justify-content:space-between;
+  font-size:.86rem; font-weight:700; color:{TOKENS['ink']}; margin:.15rem 0 .1rem; }}
+.nm-panel-sub {{ font-size:.72rem; font-weight:500; color:{TOKENS['ink-2']};
+  font-variant-numeric:tabular-nums; }}
 .nm-tbl {{ display:flex; flex-direction:column; margin-top:.25rem; }}
 .nm-tr {{ display:grid; grid-template-columns:minmax(84px,132px) 1fr 44px 46px;
   align-items:center; gap:.5rem; padding:2px 0;

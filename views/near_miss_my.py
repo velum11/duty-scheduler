@@ -120,8 +120,9 @@ def render(user: dict) -> None:
         return
 
     # 영역 순서(§0.3): primary(큐) + details(상세). USER·모바일 좁은 폭에서는 st.columns 가
-    # 세로로 접혀 목록→상세 스택이 된다(§0.7). 선택은 select_grid 행클릭이 담당한다.
-    list_col, detail_col = erp.master_detail_frame(list_ratio=1.5, detail_ratio=1.1)
+    # 세로로 접혀 목록→상세 스택이 된다(§0.7). 데스크톱(M/A)에서는 §0.6 강제(상세 폭 ≥600px)에
+    # 맞춰 목록 40%·상세 60%로 분할한다(SUBMITTED 자기수정 폼 확보). 선택은 select_grid 행클릭.
+    list_col, detail_col = erp.master_detail_frame(list_ratio=1.0, detail_ratio=1.5)
     selected_id = st.session_state.get(_SEL_KEY)
     with list_col:
         picked = _render_queue(reports, selected_id)

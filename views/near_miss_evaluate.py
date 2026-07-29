@@ -183,9 +183,9 @@ def _render_body(user: dict) -> None:
         st.error("평가 대기 목록을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # 넓은화면에서 상세가 세로로 답답하지 않도록 상세 비율을 올린다(434px 세로공백·목록
-    # 낭비 완화). 목록은 4열로 좁혀도 첫 열(작업명) flex 로 식별성을 유지한다.
-    list_col, detail_col = erp.master_detail_frame(list_ratio=1.35, detail_ratio=1.3)
+    # 상세는 판단 워크플로형이라 §0.6 강제(상세 폭 ≥600px)를 만족하도록 목록 40%·상세 60%로
+    # 분할한다(1366 기준 상세 ≈660px). 목록은 4열로 좁혀도 첫 열(작업명) flex 로 식별성을 유지한다.
+    list_col, detail_col = erp.master_detail_frame(list_ratio=1.0, detail_ratio=1.5)
     selected_id = st.session_state.get(_SEL_KEY)
     with list_col:
         picked = _render_queue(reports, selected_id)
@@ -318,19 +318,27 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
     mc1.markdown(erp.meta_col_html(left_pairs), unsafe_allow_html=True)
     mc2.markdown(erp.meta_col_html(right_pairs), unsafe_allow_html=True)
 
-    # ── 핵심 내용: 평가에 꼭 필요한 서술만 노출(사고 내용). 참조성 긴 서술(작업명·작업
-    #    내용·대책·현장 설명·원인상세·첨부)은 아래 "상세 내용 더 보기" 접기로 내려 상세
-    #    높이를 bound 하고 주요 행동(평가 워크플로)을 fold 근처로 올린다(§0.4 scope 액션). ──
+    # ── 판단 컨텍스트(§0.6 강제: 접지 않고 노출) — 평가 결정에 필요한 핵심 서술을 상세에
+    #    상시 노출한다. 작업명·사고 내용·작업 내용·대책·현장 설명·원인은 등급 확정/반려
+    #    판단의 근거이므로 expander 로 숨기지 않는다(참조성 첨부만 아래 접기 유지). ──
+    erp.field_block("작업명", str(report.get("work_name") or ""))
     erp.field_block("사고 내용", str(report.get("incident_content") or ""))
+    erp.field_block("작업 내용", str(report.get("work_content") or ""))
+    erp.field_block("대책", str(report.get("countermeasure") or ""))
+    erp.field_block("현장 설명", str(report.get("site_description") or ""))
+    if cause_val.strip():
+        erp.field_block("원인", cause_val)
 
-    # ── 평가 워크플로 클러스터(등급 select + 사유 + scope 액션) — 핵심 내용 바로 뒤 ──
+    # ── 평가 워크플로 클러스터(등급 select + 사유 + scope 액션) — 판단 컨텍스트 바로 뒤 ──
     st.markdown(
         f"<div style='border-top:1px solid {TOKENS['line']};margin:12px 0 2px;'></div>",
         unsafe_allow_html=True,
     )
     grades = list(db.NEAR_MISS_GRADES)
     default_idx = grades.index(proposed) if proposed in grades else 0
-    grade = st.selectbox("확정 등급", grades, index=default_idx, key=f"nm_grade_{selected_id}")
+    # 확정 등급은 짧은 코드값(S–D) — 내용 맞춤 폭(§0.6 강제: 전폭 컨트롤 금지).
+    grade = st.selectbox("확정 등급", grades, index=default_idx, key=f"nm_grade_{selected_id}",
+                         width=160)
 
     can_write = readiness.write_enabled
     reason = st.text_area(
@@ -388,17 +396,10 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
         ("반려", "default", reject_disabled, reject_help),
     ])
 
-    # ── 부차 상세(참조성 긴 서술·첨부) — 기본 접힘으로 상세 높이 bound. sticky/fixed 미사용
-    #    (DESIGN §0.4), st.expander 네이티브 접기만 사용. 평가 워크플로가 이 위에 있으므로
-    #    장문 케이스에서도 주요 행동이 긴 서술에 밀리지 않는다. ──
-    with st.expander("상세 내용 더 보기", expanded=False):
-        erp.field_block("작업명", str(report.get("work_name") or ""))
-        erp.field_block("작업 내용", str(report.get("work_content") or ""))
-        erp.field_block("대책", str(report.get("countermeasure") or ""))
-        erp.field_block("현장 설명", str(report.get("site_description") or ""))
-        if cause_val.strip():
-            erp.field_block("원인", cause_val)
-        photos = report.get("photo_paths") or []
+    # ── 참조성 첨부(사진)만 기본 접힘으로 남긴다 — 판단 컨텍스트(서술)는 위에 상시 노출했고,
+    #    첨부 뷰어는 미구현이라 자리표시만 접어 상세 높이를 절약한다(§0.4 st.expander 네이티브). ──
+    photos = report.get("photo_paths") or []
+    with st.expander(f"첨부 사진 ({len(photos)}건)", expanded=False):
         if photos:
             st.caption(f"첨부 사진 {len(photos)}건 (뷰어 미구현 — 자리표시)")
         else:

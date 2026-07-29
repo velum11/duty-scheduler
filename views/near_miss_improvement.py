@@ -188,10 +188,18 @@ def _render_body(user: dict) -> None:
         )
     scoped = _scope_reports(reports, improvements, is_reviewer, load_failed)
 
-    # 상세가 최밀(폼+역할별 버튼+2단계 종결)이라 상세 비율을 올려 세로 답답함을 줄인다. 목록은
-    # 6열이지만 첫 열(보고번호)·flex 작업명으로 식별성을 유지하고 고정폭으로 가로 스크롤 0 을 노린다.
-    list_col, detail_col = erp.master_detail_frame(list_ratio=1.5, detail_ratio=1.2)
+    # 큐가 정확히 1건이면 자동 선택한다(0건은 상세 한 줄 empty). 담당자/평가자가 단건 큐에서
+    # 굳이 클릭하지 않아도 상세·워크플로가 바로 열리게 해 상단 공백을 줄인다(§0.6 빈 surface 축소).
     selected_id = st.session_state.get(_SEL_KEY)
+    if (selected_id is None and scoped is not None and not scoped.empty
+            and len(scoped) == 1):
+        selected_id = str(scoped.iloc[0]["id"])
+        st.session_state[_SEL_KEY] = selected_id
+
+    # 상세는 최밀(폼+역할별 버튼+2단계 종결) 워크플로형이라 §0.6 강제(상세 폭 ≥600px)에 맞춰
+    # 목록 40%·상세 60%로 분할한다(1366 기준 상세 ≈660px). 목록은 첫 열(보고번호)·flex 작업명으로
+    # 식별성을 유지하고 고정폭으로 가로 스크롤 0 을 노린다.
+    list_col, detail_col = erp.master_detail_frame(list_ratio=1.0, detail_ratio=1.5)
     with list_col:
         picked = _render_queue(scoped, improvements, load_failed, selected_id)
     # 선택을 상세 렌더 **전에** 소비한다 — select_grid 의 selectionChanged rerun 이 이미
@@ -518,8 +526,9 @@ def _render_capa_form(selected_id, imp, readiness: ReadinessState,
         due_default = date.fromisoformat(due_raw) if due_raw else date.today()
     except ValueError:
         due_default = date.today()
+    # 조치 기한(단일 날짜)은 내용 맞춤 폭(§0.6 강제: 전폭 컨트롤 금지).
     due = st.date_input("조치 기한", value=due_default, format="YYYY-MM-DD",
-                        key=f"nm_impr_due_{selected_id}", disabled=not can_work)
+                        key=f"nm_impr_due_{selected_id}", disabled=not can_work, width=180)
 
     action_body = st.text_area(
         "조치 내용", value=str(imp.get("action_body") or "") if imp else "",

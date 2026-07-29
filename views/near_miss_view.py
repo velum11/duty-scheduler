@@ -333,33 +333,41 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
     if scope == "scoped":
         dept_field = erp.Field(
             key="dept", label="부서", kind="select",
-            options=[manager_dept], disabled=True,
+            options=[manager_dept], disabled=True, width=180,
             format_func=lambda c: dept_names.get(c, c),
         )
     else:
         dept_field = erp.Field(
             key="dept", label="부서", kind="select",
-            options=[workspace.ALL] + sorted(dept_names),
+            options=[workspace.ALL] + sorted(dept_names), width=180,
             format_func=lambda c: dept_names.get(c, c),
         )
 
-    fields = [
+    # 기간 지정 체크 시에만 날짜 2필드를 렌더한다(§0.6 강제: 비활성 필드가 자리를 상시 점유
+    # 하지 않음). 4열 배치로 조건은 ≤2행(미지정 5필드=2행 / 지정 7필드=2행)에 든다.
+    fields: list[erp.Field] = [
         erp.Field(key="period_on", label="기간 지정", kind="checkbox", value=False),
-        erp.Field(key="from", label="발생일(시작)", kind="date",
-                  value=date.today() - timedelta(days=90), disabled=not period_on),
-        erp.Field(key="to", label="발생일(종료)", kind="date",
-                  value=date.today(), disabled=not period_on),
+    ]
+    if period_on:
+        fields += [
+            erp.Field(key="from", label="발생일(시작)", kind="date",
+                      value=date.today() - timedelta(days=90), width=150),
+            erp.Field(key="to", label="발생일(종료)", kind="date",
+                      value=date.today(), width=150),
+        ]
+    fields += [
         dept_field,
-        erp.Field(key="grade", label="확정등급", kind="select",
+        # 짧은 코드값(등급 S–D·상태·원인) select 는 내용 맞춤 폭(§0.6 강제: 전폭 금지).
+        erp.Field(key="grade", label="확정등급", kind="select", width=140,
                   options=[workspace.ALL] + list(db.NEAR_MISS_GRADES)),
-        erp.Field(key="status", label="상태", kind="select",
+        erp.Field(key="status", label="상태", kind="select", width=140,
                   options=[workspace.ALL] + list(db.NEAR_MISS_STATUSES),
                   format_func=lambda v: _STATUS_LABEL.get(v, v) if v != workspace.ALL else v),
-        erp.Field(key="cause", label="원인", kind="select",
+        erp.Field(key="cause", label="원인", kind="select", width=140,
                   options=[workspace.ALL] + list(db.NEAR_MISS_CAUSE_CODES),
                   format_func=lambda v: _CAUSE_LABEL.get(v, v) if v != workspace.ALL else v),
     ]
-    v = erp.condition_panel(_PAGE_ID, fields, cols=3)
+    v = erp.condition_panel(_PAGE_ID, fields, cols=4)
 
     on = bool(v["period_on"])
     return {
@@ -368,8 +376,8 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
         "status": v["status"],
         "cause": v["cause"],
         "period_on": on,
-        "date_from": v["from"].isoformat() if on else "",
-        "date_to": v["to"].isoformat() if on else "",
+        "date_from": v["from"].isoformat() if on and "from" in v else "",
+        "date_to": v["to"].isoformat() if on and "to" in v else "",
     }
 
 
