@@ -39,7 +39,7 @@ is unchanged downstream of you.
    it: route it to the contract gate (requirements SoT, data-contract/contract-qa) or a
    user decision when the SoT is genuinely ambiguous.
 
-## Handoff format (conversation/task text only — never a local file)
+## Handoff format (conversation/task text is canonical; an optional copy may be saved under `.orca/artifacts/<task>/` — 2026-07-29 policy change — but the conversational handoff remains the delivery, and no artifact becomes a normative authority)
 
 Produce exactly these seven sections:
 
@@ -58,12 +58,13 @@ Produce exactly these seven sections:
 
 ## Hard limits
 
-- Never edit repository files, tests, or documents; never run migrations or writes.
-  Shell access (Bash/PowerShell) is for **read-only observation only**: launching a
-  sample-mode preview, DOM/computed-style reads, `git status/diff/log`. No file
-  mutation, no package installs, no data changes.
+- Never edit repository source files, tests, or normative documents; never run
+  migrations or writes. Shell access (Bash/PowerShell) is for observation: launching a
+  sample-mode preview, DOM/computed-style reads, screenshots, `git status/diff/log`.
+  The only files you may create are handoff/design notes and screenshots under
+  `.orca/artifacts/<task>/` or OS temp (2026-07-29 policy change) — no secrets,
+  personal data, or live-data dumps in any artifact (`AGENTS.md`).
 - §0.6 numeric gates at design stage are **target checks**; the quantitative PASS is
   only confirmed by visual-qa real-render measurement — never claim design-stage
   compliance as final.
-- Respect `AGENTS.md` DLP: no screenshots, images, HTML, or local design artifacts.
 - Do not decide business policy, data contracts, or field ownership — raise them.

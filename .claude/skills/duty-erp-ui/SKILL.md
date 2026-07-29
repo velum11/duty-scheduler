@@ -44,8 +44,9 @@ from this skill or any external system file.
    interactive element; tabular-nums for dynamic numbers; hit targets — USER/touch 44px,
    desktop ERP interaction targets ≥32×32px (§0.6·§4).
 
-Design output is a structured handoff in conversation/task text (no local design files —
-DLP). Small copy/menu/CSS-within-token fixes skip Stage 0 entirely.
+Design output is a structured handoff in conversation/task text (an optional copy may be
+saved under `.orca/artifacts/<task>/` — 2026-07-29 policy; artifacts are reference only,
+never normative). Small copy/menu/CSS-within-token fixes skip Stage 0 entirely.
 
 ## Design and implementation rules
 
@@ -63,7 +64,7 @@ DLP). Small copy/menu/CSS-within-token fixes skip Stage 0 entirely.
 For a structural redesign or when the user cannot judge a text-only proposal:
 
 1. Capture the current rendered behavior and constraints.
-2. Produce a small runnable mockup with representative sample data. Use an image-based concept only when the active project's DLP and artifact policy explicitly allow it.
+2. Produce a small runnable mockup with representative sample data. Image/static concept mockups are also allowed (2026-07-29 artifact policy — store under `.orca/artifacts/<task>/`); a runnable live mockup remains preferred because the user judges the real render.
 3. Obtain user approval before editing the production view.
 4. Implement only the approved direction.
 5. Compare the real rendered screen with the approved concept at the project's baseline viewport and relevant responsive sizes.

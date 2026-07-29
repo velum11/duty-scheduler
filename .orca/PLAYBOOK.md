@@ -25,7 +25,7 @@
 ## 3. 프로젝트 고유 규칙
 
 - 이 프로젝트는 업무용 ERP다 — 정보 밀도·탐색 속도·편집 안전·화면 간 일관성 우선, hero·장식 카드·불필요 애니메이션 금지. 세부 기준과 완료 게이트는 `DESIGN.md`.
-- **DLP가 적용되는 이유**: 회사 보안정책 환경이다(규칙 정본은 `AGENTS.md` 안전경계 — 여기서 재서술하지 않음). 그 제약 아래의 목업 실행 방법: 실제 Streamlit 코드의 sample/static 프로토타입 + 목표 viewport 실화면 확인. `.orca/artifacts/`의 정적 prototype은 DLP가 허용하는 환경에서만 사용한다.
+- **로컬 산출물(2026-07-29 개정)**: 종전 DLP 생성 금지가 해제되어 스크린샷·이미지·HTML·문서 산출물 생성이 가능하다(정본 규율은 `AGENTS.md` — 위치는 `.orca/artifacts/<작업명>/`·OS temp, 비밀·개인정보 포함 금지 불변). 목업은 실제 Streamlit sample/static 프로토타입을 기본으로 하되 이미지·정적 목업도 허용된다. 실렌더 검증·사용자 sign-off 게이트는 그대로다.
 - 목업 단계에서 Supabase 연결·저장·migration을 하지 않는 이유: 승인 전 실데이터 보호(정본은 `AGENTS.md`). 사용자 승인 전 merge·배포·완료 선언 금지.
 - **push에 별도 승인이 필요한 이유**: 이 저장소의 push는 Streamlit Cloud 배포로 이어진다(금지 규칙 정본은 `AGENTS.md`).
 - 실행: `$env:DUTY_DATA_MODE = "sample"; streamlit run app.py`. focused test는 `duty-test-selection` 스킬과 현재 테스트 목록에서 변경 범위에 맞게 선택하며, 작은 변경마다 전체 회귀를 돌리지 않는다.

@@ -2,6 +2,10 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-29 · ✅ 변곡점: DLP 로컬 산출물 생성 금지 해제 — 산출물 정책 개정
+
+사용자가 회사 DLP 로컬 쓰기 제한을 해제. `AGENTS.md` 안전경계의 "DLP 하드 경계" 절을 **로컬 산출물 정책**으로 교체(생성 허용·위치 규율 `.orca/artifacts/<작업>/`·temp·**비밀/개인정보/실데이터 덤프 포함 금지는 불변**·산출물 무권위). 파생 정합: CLAUDE.md 권위계층 1번(비밀·개인정보 보호로 재정의), 오버레이 §3, visual-qa(스크린샷 캡처·보관 허용), ux-architect(handoff 사본·설계 노트 artifacts 허용), duty-visual-critique(vision 스크린샷 전면 허용 — 인메모리 제약 삭제), duty-ux·duty-erp-ui(이미지 목업·산출 사본 허용), 메모리 local-artifact-prohibition(해제 기록). 글로벌 문서들의 "when forbidden" 조건문은 조건부라 무수정(프로젝트가 더 이상 금지하지 않으므로 자동 해제). 실행형 live mockup·DOM 수치 1차, commit/push·실DB 게이트, 사용자 sign-off는 불변.
+
 ## 2026-07-29 · ✅ 변곡점: UI/UX 담당 체계 신설 — ux-architect(7종째)·스킬 3종(MIT 이식)·룰 정합
 
 아차사고 재설계 혹평의 원인분석("설계 앞단 밀도·사용성 소유자 부재") 후속으로, 5갈래 조사 + Codex 3회 검증(1차 설계·2차 v2·3차 룰문구, 지적 전건 반영)을 거쳐 확정·적용:
