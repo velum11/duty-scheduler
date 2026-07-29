@@ -28,7 +28,7 @@ Claude Code가 이 저장소에서 작업할 때 사용하는 프로젝트 지�
 문서·지시·산출물이 충돌하면 다음 순서(높은 순)로 정합화합니다.
 
 1. **DLP(회사 보안정책)** — 최상위 하드 경계·불변. 규칙 본문은 `AGENTS.md` 안전경계(정본)에 있으며 여기서는 재서술하지 않습니다.
-2. **사용자의 최신 지시** — 단, `docs/requirements.md`의 명시적 불변계약(조직 그룹 SoT·전파 — `organization_groups` 테이블 기반, migration 004; 소프트 삭제)은 일반 지시로 묵시 폐기되지 않으며, 사용자가 해당 계약의 변경을 명시했을 때만 정합화합니다.
+2. **사용자의 최신 지시** — 단, `docs/requirements.md`의 명시적 데이터 불변계약(조직 그룹 관계·전파, 참조 무결성, 소프트 삭제 등)은 일반 지시로 묵시 폐기되지 않으며, 사용자가 해당 계약의 변경을 명시했을 때만 정합화합니다. migration 번호는 현재 구현 이력이지 영구 제품 요구사항이 아닙니다.
 3. **`requirements.md`(기능)·`DESIGN.md`(시각)·`docs/database.md` + live schema(DB)·`AGENTS.md`(안전경계 정본)** — 각 영역의 규범 기준입니다. 단 live schema는 규범이 아니라 "현재 적용 상태"의 최종 관찰 증거이며, 규범 문서와 다르면 어느 쪽이 갱신 대상인지 확인합니다.
 4. 프로젝트 `.orca/PLAYBOOK.md`
 5. 글로벌 lee-mode PLAYBOOK(`C:\Users\velum\.orca\lee-mode\PLAYBOOK.md`)
@@ -61,7 +61,7 @@ git diff --stat
 
 - 명시적인 디자인 변경이 아니면 기존 공용 UI와 주변 화면을 보존합니다.
 - 디자인 변경이면 `DESIGN.md`와 사용자의 현재 요구를 확인합니다.
-- 모든 신규·구조 변경 화면은 `DESIGN.md` §0 화면 구조 표준(KP-standard)을 강제로 따릅니다 — 화면×역할 매니페스트 등록, 공용 중립 구조 키트(`views/common/erp/`) 사용, 영역 순서, 6유형(`EDIT_GRID·READ_VIEW·MATRIX_EDIT·DASHBOARD·FORM_ENTRY·MASTER_DETAIL`). 유형 밖 레이아웃·새 유형은 사용자 명시 승인 + §0 개정 없이 만들지 않습니다.
+- 모든 신규·구조 변경 화면은 `DESIGN.md` §0 화면 구조 표준과 공용 중립 구조 키트(`views/common/erp/`)를 따릅니다. 허용 유형은 문서에 숫자로 복제하지 않고 현재 `views/common/scaffold.py::ARCHETYPES`와 DESIGN 매니페스트를 함께 확인합니다. 둘이 다르면 구현 전에 불일치를 보고하고 정합화 범위를 결정합니다.
 - 작은 문구·메뉴·route 수정에 별도 디자인 설계 단계를 자동 추가하지 않습니다.
 - 시각 결과가 완료 조건이면 실제 화면을 확인하고, 기능 결과가 완료 조건이면 관련 계약 테스트를 우선합니다.
 
@@ -71,23 +71,11 @@ git diff --stat
 
 ## 검증
 
-작업 범위에 맞는 스크립트를 먼저 실행합니다.
-
-```powershell
-python scripts/test_login_auth.py
-python scripts/test_sidebar_ui.py
-python scripts/test_master_org.py
-python scripts/test_schedule_contracts.py
-python scripts/test_screen_scaffold.py
-python -m compileall -q app.py modules views scripts
-git diff --check
-```
-
-모든 명령을 매 작업마다 실행하지 않습니다. 원격 CRUD 테스트는 전용 테스트 프로젝트와 명시적 승인 없이는 실행하지 않습니다.
+작업 범위와 실제 호출 경로에 맞는 focused test를 먼저 실행합니다. 테스트 선택은 프로젝트 `duty-test-selection` 스킬과 현재 `scripts/test_*.py` 목록을 기준으로 하며 이 문서에 고정 목록을 복제하지 않습니다. Python 변경은 관련 테스트·`compileall`·`git diff --check`를 기본으로 합니다. 전체 회귀는 공유 영향이나 실패 근거가 정당화할 때만 실행하고, 원격 CRUD 테스트는 전용 테스트 프로젝트와 명시적 승인 없이는 실행하지 않습니다.
 
 ## ORCA 사용
 
-`/lee-mode`의 역할 분리, worker 상한, 중단 조건은 글로벌 `C:\Users\velum\.orca\lee-mode\PLAYBOOK.md`와 프로젝트 `.orca/PLAYBOOK.md`를 따릅니다. 전문 서브에이전트(조사·화면·데이터계약·시각QA·계약QA·통합 6종)의 역할·도구 제한은 `.claude/agents/` 특화판이 집행 SoT이며, 글로벌 `~/.claude/agents` 범용판을 이 저장소에서 오버라이드합니다(모델은 임원이 dispatch마다 지정). supervised 작업의 Coordinator는 구현하지 않고 결과를 취합합니다. DIRECT 작업은 현재 Agent가 끝낼 수 있습니다.
+`/lee-mode`의 역할 분리, worker 상한, 중단 조건은 글로벌 `C:\Users\velum\.orca\lee-mode\PLAYBOOK.md`와 프로젝트 `.orca/PLAYBOOK.md`를 따릅니다. 전문 담당자 6종의 프로젝트 `.claude/agents/` 특화판이 동명 글로벌 정의보다 우선하며 `model: opus`와 역할별 `skills:`를 집행합니다. Coordinator는 Fable/high를 사용하고 기본 Owner 한 명에게 STANDARD 이상을 맡기며, DIRECT 작업과 짧은 지휘·상태 확인은 직접 끝낼 수 있습니다. 내장 Agent는 1단 위임이고 부장→과장은 독립 ORCA main 세션에서만 허용됩니다.
 
 같은 증상에서 10분 이상 진전이 없거나 가설이 두 번 틀리면 반복을 멈추고 증상, 성공 지점, 실패 지점, 실행한 확인을 정리해 독립 진단으로 전환합니다.
 

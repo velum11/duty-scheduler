@@ -2,6 +2,25 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-28-29 · [인계 대기] 아차사고 CAPA 기능 완결(적용·live검증) + 6화면 UI 재설계
+
+**한 줄 상태**: 아차사고(near-miss) CAPA 폐루프 **기능 구현·007 적용·live 검증까지 완료**(feature/near-miss-capa, push됨) + 아차사고 **6화면 UI/UX 전면 재설계 완료**(redesign/near-miss-ui, **미push**). 프리뷰 http://localhost:8501(supabase·실데이터 3건) 가동 중. **사용자 실브라우저 sign-off·push/병합/배포는 대기.**
+
+### 브랜치 상태 (전부 배포브랜치 `feature/supabase-crud`=`251e572`에 미병합·미배포)
+- **feature/near-miss-capa** (`deb1665`, **origin push됨**): P1-a 서버측 인증·인가 강제 → 007 CAPA 스키마/하드게이트 RPC·trigger → 개선조치 화면 기능화 → 행단위 권한 재설계(담당자/확인자/평가자/배정) → 각 단계 Codex 감사. 커밋 18개.
+- **redesign/near-miss-ui** (`6b2148f`, **미push**, base=deb1665): 6화면 UI 재설계 6커밋. 공통 `select_grid` SELECT 어댑터(불변식 whitelist·자연키·밀도 param·편집자산 구조차단·allow_unsafe_jscode=False)+표시 primitive(status_badge/meta_col/field_block)+단위테스트 47. 6화면(등록 폼위계/평가·개선 select_grid+상세 워크플로 상단·부차 접기/my 44px/조회 KPI중복제거/분석 §0.3 KPI-primary·컴팩트테이블). **기능/DB/상태/권한 불변**(계약계층 diff 0). FINAL_INTEGRATED Codex GO(NEW-01 ink-3→ink-2 수정 완료). 전체 테스트 26/26 GREEN.
+- **redesign/master-users** (`ed1a8f4`, push됨): 아이콘 밴드 히트영역 32px(별건).
+
+### 007 live (Supabase test_project `icvizwmqdffwsifmnwuk`)
+- **006·007 둘 다 적용됨**(007은 이 세션에 사용자가 SQL editor로 적용). live-ENGINE 검증 16 PASS(트리거/CHECK/RPC 실발화·자기확인·report_id 불변·CLOSED후 보호·reopen 원자·all-or-none). **기존 near_miss_reports 3건(id1 SUBMITTED·id2 EVALUATED(B)·id3 SUBMITTED) 세션 내내 불변**, near_miss_improvements 0. TEST 마커 데이터는 검증 후 전량 정리.
+
+### 재개 시 다음 후보 (사용자 결정)
+1. redesign/near-miss-ui **실브라우저 sign-off**(8501, 6화면 실데이터) → 이상 없으면 push / feature/near-miss-capa에 병합 여부.
+2. push·배포브랜치 병합·Cloud 배포는 **전부 미실행 — 지시 대기**.
+3. **미커밋 거버넌스 문서**(`.claude/agents/*`·`.orca/PLAYBOOK.md`·`CLAUDE.md`·`DESIGN.md`·`docs/requirements.md`+untracked `.claude/skills/`·`.mcp.json`)는 세션 시작 전부터 사용자 소유 미커밋 — 세션 내내 미접촉 보존. 처리 방침 미정.
+4. 남은 위험(BACKLOG): view @1024 9열 내부스크롤(기존)·stats overdue_count try밖 호출(기존)·CAPA CAS 동시성(UNVERIFIED_RUNTIME)·DESIGN §0.1 매니페스트 SELECT+상세 정합(DESIGN off-limits라 defer).
+- 상세 결정·계약은 `docs/BACKLOG.md` 정본, 메모리 `codex-review-lessons-20260728` 참조.
+
 ## 2026-07-27 · [재시작 대기] 상단바 통일 + 아차사고 계약수정 병렬 진행 중
 
 **중단 이유**: 이 세션 전체(Coordinator+서브에이전트)가 실제로는 의도한 Fable/Opus가 아니라 **Sonnet으로 실행 중**이었음을 사용자가 화면 라벨로 확인(원인 불명 — 프로젝트 `.claude/agents/*.md`의 `model: opus` frontmatter가 하네스에서 적용되지 않음). 사용자가 Claude Code 재시작으로 해결 예정(설정 화면 확인 결과 Fable 5는 Max 플랜에 이미 포함돼 있어 usage credit 불필요, 단순 재시작이 안내된 해결책). **작업은 끊지 않고 로그만 남기고 재시작.**
