@@ -85,7 +85,7 @@ AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `RE
 
 ### ADMIN / MANAGER
 
-라이트 KPtech ERP 클론 사이드바(밝은 메뉴 컬럼 + 각진 경계, 다크 아님)와 따뜻한 크림 종이색 본문(2026-07-26 사이드바 라이트 재설계 확정·사용자 sign-off). 구현 기준은 `modules/ui.py::_SHELL_CSS`·`app_shell`이며 색은 `:root`의 `--sb-*` 토큰 한 블록에서만 관리합니다(§2 참조). 폭 236px·각진(radius 0)·우측 0.8px 경계선, 그림자·그라데이션 없음.
+라이트 KPtech ERP 클론 사이드바(밝은 메뉴 컬럼 + 각진 경계, 다크 아님)와 **near-white 웜뉴트럴 본문**(2026-07-29 사용자 결정 B안 — 종전 따뜻한 크림에서 흰 표면 대비 1.23→1.10~1.12 로 완화, 구분선 1.32→1.22; 전역 토큰이라 기준정보·근무표 포함 전 화면 동일 적용). 구현 기준은 `modules/ui.py::_SHELL_CSS`·`app_shell`이며 색은 `:root`의 `--sb-*` 토큰 한 블록에서만 관리합니다(§2 참조). 폭 236px·각진(radius 0)·우측 0.8px 경계선, 그림자·그라데이션 없음.
 
 - **상단(흰 배경 50px)**: 로고 마크(`W`, 파랑 배경) + 앱명 `교대 근무표` + 접기(사이드바 숨김) 버튼.
 - **검색 상자(흰 배경, 돋보기 아이콘)**: 메뉴 라벨 부분일치로 트리를 필터하고 일치 항목이 있는 그룹을 강제로 펼칩니다. 결과 0이면 안내 문구.
@@ -134,9 +134,9 @@ AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `RE
 
 | 토큰 | 값 | 용도 |
 |---|---|---|
-| `--content-bg` | `#F1EEE9` | 본문 배경(크림) |
+| `--content-bg` | `#F5F3EF` | 본문 배경(near-white 웜뉴트럴 — 2026-07-29 B안) |
 | `--card` | `#FFFFFF` | 카드 배경 |
-| `--line` | `#E7E3DB` | 경계선 |
+| `--line` | `#EBE8E1` | 경계선(1.32→1.22 완화) |
 | `--gold` | `#C9A26B` | 본문 액센트(브레드크럼 포커스 등) |
 | 기본 네이비 | `#1E3A6E` | 본문 주요 색 정체성 |
 
@@ -149,11 +149,11 @@ AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `RE
 
 | 토큰 | 값 | 용도 |
 |---|---|---|
-| `--canvas` | `#EBE7DF` | 모듈 배경(L0) |
+| `--canvas` | `#F5F3EF` | 모듈 배경(L0 — near-white 웜뉴트럴, 2026-07-29 B안) |
 | `--surface` | `#FFFFFF` | 표·패널 표면(L1) |
 | `--surface-2` | `#F7F5F0` | 표 헤더·필터바·액션바·푸터(L2) |
 | `--surface-3` | `#F1EEE7` | zebra·비활성 영역 |
-| `--line` / `--line-strong` | `#E4E0D8` / `#D4CEC3` | hairline 구분선 / 외곽선 |
+| `--line` / `--line-strong` | `#EBE8E1` / `#E4E0D8` | hairline 구분선(1.22) / 외곽선(1.32) |
 | `--ink` / `--ink-2` / `--ink-3` | `#24262B` / `#5F5C55` / `#908C83` | 본문 / 보조 / 비활성·placeholder |
 | `--navy` / `--navy-hover` | `#1E3A6E` / `#17305C` | 주요 버튼(저장)·포커스 |
 | `--gold` / `--gold-soft` | `#B4813F` / `#EFE9DC` | 구조 표식 전용(조직 그룹 행) |
@@ -162,7 +162,7 @@ AgGrid **단일 렌더러·테마**를 쓰되 capability를 분리합니다: `RE
 | `--warn` / `--warn-bg` | `#8A6A1C` / `#FBF2D8` | 미저장·경고·migration 미적용 |
 | `--danger` / `--danger-bg` | `#9A3B2E` / `#FBEEEB` | 삭제·오류·저장 실패 |
 
-- **표면 3단**: L0 캔버스 → L1 표면(외곽선 `--line-strong`, radius 8px, 그림자 최소) → L2 subtle. 깊이는 색으로만 표현합니다.
+- **표면 3단**: L0 캔버스(near-white 웜뉴트럴, 2026-07-29 B안) → L1 표면(외곽선 `--line-strong`, radius 8px, 그림자 최소) → L2 subtle. 깊이는 색으로만 표현하며, 캔버스↔표면 단차는 near-white 로 완화됐으므로 hairline 경계가 표면 구분의 주 신호입니다. surface-2/surface-3 파생값은 새 캔버스와 정합 범위에서 유지(과도 변경 없음).
 - **타이포그래피**: 시스템 sans(`Malgun Gothic`/`Apple SD Gothic Neo` 등). 페이지 제목 20/700, 설명 13, 표 헤더 12.5/600, 셀 13, 배지 11/600, 버튼 13/600. 숫자·시간·건수 열은 `tabular-nums`.
 - **밀도(데스크톱 ADMIN/MANAGER)**: 읽기 그리드 행 32–34px, 편집 그리드 행 34px(체크박스·오류 마커·focus ring이 들어가는지 검증 후에만 32px로 축소), 헤더 34–36px. **USER·터치 컨트롤은 최소 44px**를 유지합니다. 값은 `views/master/grid.py` 등 그리드 상수를 단일 소스로 합니다.
 - **라벨 배치(데스크톱)**: 조건패널·상세폼은 **우측정렬 인라인 라벨**을 씁니다 — 짝 컬럼(라벨 열 + widget 열)에 widget은 비어 있지 않은 실제 label + `label_visibility="collapsed"`. 시각 라벨(`st.markdown`)과 widget label은 DOM상 직접 연결되지 않으므로 스크린리더 검증이 필요하며, `st.columns` 중첩은 1회를 넘기지 않습니다(§0.6).

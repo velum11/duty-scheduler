@@ -24,12 +24,15 @@ import streamlit as st
 # §2 색상 토큰 (semantic) — 배지/칩 HTML 생성 시 파이썬에서도 참조한다.
 # ---------------------------------------------------------------------------
 TOKENS: dict[str, str] = {
-    "canvas": "#EBE7DF",
+    # near-white 웜뉴트럴 캔버스(2026-07-29 사용자 결정 B안) — 흰 표면 대비 1.23→1.108(실측).
+    # 종전 크림 #EBE7DF 에서 near-white 로 완화. 파생 surface-2/3 는 정합 유지(canvas 보다
+    # 밝은 표면 계층)라 변경하지 않는다(과도 변경 금지). line 은 1.32→1.22 로 함께 완화.
+    "canvas": "#F5F3EF",
     "surface": "#FFFFFF",
     "surface-2": "#F7F5F0",
     "surface-3": "#F1EEE7",
-    "line": "#E4E0D8",
-    "line-strong": "#D4CEC3",
+    "line": "#EBE8E1",
+    "line-strong": "#E4E0D8",
     "ink": "#24262B",
     "ink-2": "#5F5C55",
     "ink-3": "#908C83",
@@ -162,8 +165,8 @@ _ICONBAR_MASK_CSS: str = _iconbar_mask_css()
 _PAGE_CSS = """
 <style>
 :root {
-  --ms-canvas:#EBE7DF; --ms-surface:#FFFFFF; --ms-surface-2:#F7F5F0; --ms-surface-3:#F1EEE7;
-  --ms-line:#E4E0D8; --ms-line-strong:#D4CEC3; --ms-ink:#24262B; --ms-ink-2:#5F5C55; --ms-ink-3:#908C83;
+  --ms-canvas:#F5F3EF; --ms-surface:#FFFFFF; --ms-surface-2:#F7F5F0; --ms-surface-3:#F1EEE7;
+  --ms-line:#EBE8E1; --ms-line-strong:#E4E0D8; --ms-ink:#24262B; --ms-ink-2:#5F5C55; --ms-ink-3:#908C83;
   --ms-navy:#1E3A6E; --ms-navy-hover:#17305C; --ms-gold:#B4813F; --ms-gold-soft:#EFE9DC;
   --ms-band:#0F6FCB; --ms-band-hover:#0C5CB8; /* KPtech 타이틀 밴드(파랑) — 흰 제목 대비 5.05:1 */
   --ms-info:#295D91; --ms-info-bg:#EAF1F8; --ms-success:#2F6B4F; --ms-success-bg:#E9F2EC;
