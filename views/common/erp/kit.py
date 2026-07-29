@@ -22,39 +22,72 @@ from views.master import style
 
 TOKENS = style.TOKENS
 
-# ── 밀도 토큰 (DESIGN.md §2 — 데스크톱 읽기 그리드) ──
-_READ_ROW_PX = 34
-_READ_HEADER_PX = 36
+# ── 밀도 토큰 (DESIGN.md §2·§0.6 — 데스크톱 읽기/선택 그리드) ──
+_READ_ROW_PX = 34          # read_grid 기본(§2 읽기 32–34) — schedule_view 등 무변경.
+_SELECT_ROW_PX = 32        # select_grid 기본(M/A 큐 밀도, §0.6 실측 31–32) — USER 는 44 variant.
+_READ_HEADER_PX = 36       # 헤더 34–36(§2) — 그리드 헤더 계약(test_erp_select_grid) 고정.
 _READ_CHROME_PX = 16
 _READ_MIN_PX = 120
 _READ_MAX_PX = 460
+
+# 카드 단일 토큰(§0.6 박스 상한: radius·보더·padding 단일화 — 8/5/4px 혼재 금지, §2 L1=8px).
+# kit 스코프 전용. kit 밖 전역(modules/ui.py 대시보드 카드 등)은 건드리지 않는다.
+_CARD_RADIUS = "8px"
 
 _NO_ROWS = (
     "<span style='color:%s;font-size:.82rem;'>표시할 데이터가 없습니다</span>"
     % TOKENS["ink-3"]
 )
 
-# 한 번만 주입하는 키트 CSS(우측 인라인 라벨·요약 메트릭). st-key 스코프 불필요한
-# 표현 요소만 담으며 사이드바·기존 화면 CSS를 건드리지 않는다.
+# 한 번만 주입하는 키트 CSS(우측 인라인 라벨·요약 스트립·빈상태·조건 스트립). st-key 스코프
+# 불필요한 표현 요소만 담으며 사이드바·기존 화면(modules/ui.py) 전역 CSS를 건드리지 않는다.
+# §0.6 실측 기준 잠금(2026-07-29): 카드 나열 금지 → 한 줄 요약 스트립·한 줄 빈상태·얇은
+# 조건 필터 스트립. 카드 radius/보더/padding 은 단일 토큰(_CARD_RADIUS = 8px)으로 통일한다.
 _KIT_CSS = f"""
 <style>
 .erp-lbl {{
-  text-align: right; color: {TOKENS['ink-2']}; font-size: 13px; font-weight: 600;
+  text-align: right; color: {TOKENS['ink-2']}; font-size: 12.5px; font-weight: 600;
   line-height: 1.2; padding-right: 2px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }}
-.erp-metric {{
-  border: 1px solid {TOKENS['line-strong']}; border-radius: 8px;
-  background: {TOKENS['surface']}; padding: 10px 12px;
+/* 요약/KPI = 한 줄 스트립(§0.6 강제): 독립 카드 나열이 아니라 hairline 구분 단일 박스.
+   높이 ≤72px(padding 8+8 + 값 ~20 + 라벨 ~14 ≈ 50px). 카드 겹침의 근본 해결 — 항목이
+   행을 넘지 않는다. */
+.erp-strip {{
+  display: flex; align-items: stretch; flex-wrap: nowrap;
+  border: 1px solid {TOKENS['line-strong']}; border-radius: {_CARD_RADIUS};
+  background: {TOKENS['surface']}; overflow: hidden;
 }}
-.erp-metric-v {{ font-size: 20px; font-weight: 700; color: {TOKENS['ink']}; font-variant-numeric: tabular-nums; }}
-.erp-metric-l {{ font-size: 12px; color: {TOKENS['ink-2']}; margin-top: 2px; }}
-.erp-detail-empty {{
-  border: 1px dashed {TOKENS['line-strong']}; border-radius: 8px;
-  background: {TOKENS['surface-2']}; padding: 20px 16px; text-align: center;
+.erp-strip-i {{
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
+  justify-content: center; gap: 1px; padding: 8px 14px;
+  border-left: 1px solid {TOKENS['line']};
 }}
-.erp-detail-empty-t {{ font-size: 14px; font-weight: 600; color: {TOKENS['ink-2']}; }}
-.erp-detail-empty-b {{ font-size: 12.5px; color: {TOKENS['ink-2']}; margin-top: 4px; line-height: 1.5; }}
+.erp-strip-i:first-child {{ border-left: 0; }}
+.erp-strip-v {{
+  font-size: 18px; font-weight: 700; color: {TOKENS['ink']};
+  font-variant-numeric: tabular-nums; line-height: 1.15;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}}
+.erp-strip-l {{ font-size: 11.5px; color: {TOKENS['ink-2']}; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+/* 빈 상태 = 한 줄 안내(§0.6 강제): 대형 점선 placeholder 금지, 높이 ≤72px. */
+.erp-empty {{
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  min-height: 42px; padding: 10px 13px;
+  border: 1px solid {TOKENS['line']}; border-radius: {_CARD_RADIUS};
+  background: {TOKENS['surface-2']};
+}}
+.erp-empty-t {{ font-size: 13px; font-weight: 600; color: {TOKENS['ink-2']}; }}
+.erp-empty-b {{ font-size: 12px; color: {TOKENS['ink-2']}; line-height: 1.4; }}
+/* 조건 필터 스트립(§0.6 강제): 무거운 카드 박스가 아니라 얇은 스트립 — st.container(border,
+   key=erpcond_*) 래퍼 padding/여백을 압축한다. 내용 비례 높이(1행 ≈47px). */
+[class*="st-key-erpcond_"] {{
+  border-color: {TOKENS['line']} !important; border-radius: {_CARD_RADIUS} !important;
+  background: {TOKENS['surface-2']}; padding: 5px 10px !important;
+}}
+[class*="st-key-erpcond_"] [data-testid="stVerticalBlock"] {{ gap: 4px !important; }}
+[class*="st-key-erpcond_"] [data-testid="stHorizontalBlock"] {{ gap: .5rem !important; }}
 /* help(툴팁) 래퍼가 씌워진 버튼도 앱 기본 버튼 크기를 따르게 — modules/ui.py 의 직계자식
    선택자(.stButton > button)가 툴팁 DOM 체인을 못 잡아 생기는 높이 불일치 보정(detail_actions
    처럼 help 유무가 섞인 버튼을 한 행에 둘 때 가시화). 크기만 맞추는 저위험 규칙. */
@@ -144,35 +177,41 @@ class Field:
     help: str | None = None
     widget_key: str | None = None
     placeholder: str | None = None
+    #: 컨트롤 폭 힌트(§0.6 강제 — 내용 맞춤). int 픽셀(짧은 코드값 select 는 ~140)이나
+    #: "stretch"/"content". None 이면 열 폭을 채운다(종전 동작 = "stretch").
+    width: int | str | None = None
 
 
 def _render_widget(page_id: str, f: Field):
     wkey = f.widget_key if f.widget_key else f"{page_id}_{f.key}"
+    w = f.width if f.width is not None else "stretch"  # §0.6 내용 맞춤 폭(없으면 종전=열 채움).
     if f.kind == "checkbox":
         return st.checkbox(f.label, value=bool(f.value), key=wkey,
                            label_visibility="collapsed", disabled=f.disabled, help=f.help)
     if f.kind == "date":
-        return st.date_input(f.label, value=f.value, key=wkey,
+        return st.date_input(f.label, value=f.value, key=wkey, width=w,
                              label_visibility="collapsed", disabled=f.disabled, help=f.help)
     if f.kind == "text":
-        return st.text_input(f.label, value=f.value or "", key=wkey,
+        return st.text_input(f.label, value=f.value or "", key=wkey, width=w,
                              label_visibility="collapsed", disabled=f.disabled,
                              help=f.help, placeholder=f.placeholder)
-    return st.selectbox(f.label, f.options, key=wkey,
+    return st.selectbox(f.label, f.options, key=wkey, width=w,
                         format_func=f.format_func or (lambda x: x),
                         label_visibility="collapsed", disabled=f.disabled,
                         help=f.help, placeholder=f.placeholder)
 
 
 def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3) -> dict:
-    """col-N 우측 인라인 라벨 조건 패널(§0.6). 반환 ``{field.key: value}``.
+    """col-N 우측 인라인 라벨 조건 패널 — 얇은 필터 스트립(§0.6 강제). 반환 ``{field.key: value}``.
 
     각 행은 ``[라벨,widget]`` 쌍을 cols 개 나열한 **단일** ``st.columns``(중첩 없음).
     라벨은 우측정렬 markdown, widget 은 실제 label + ``label_visibility='collapsed'``.
-    """
+    무거운 bordered 카드가 아니라 padding·행간을 압축한 스트립이며(키 스코프 CSS
+    ``st-key-erpcond_*``), 내용에 비례한 최소 높이(1366 기준 1행 ≈47px)를 만든다. 컨트롤
+    폭은 ``Field.width`` 로 내용 맞춤한다(짧은 코드값 select 는 과대 폭 금지)."""
     values: dict = {}
     ratios = [0.42, 1.0] * cols
-    with st.container(border=True):
+    with st.container(border=True, key=f"erpcond_{page_id}"):
         for start in range(0, len(fields), cols):
             row = fields[start:start + cols]
             slots = st.columns(ratios, vertical_alignment="center")
@@ -577,7 +616,7 @@ def select_grid(df: pd.DataFrame, *, key: str, key_field: str,
                 row_rules: list[dict] | None = None,
                 hidden_fields: list[str] | None = None,
                 height: int | None = None,
-                row_height: int = _READ_ROW_PX) -> str | None:
+                row_height: int = _SELECT_ROW_PX) -> str | None:
     """AgGrid 단일 선택 목록 어댑터(§0.5 — read_grid 와 별개 capability, 편집 자산 없음).
 
     MASTER_DETAIL 목록(큐)에서 한 행을 선택해 그 **자연키**(``key_field`` 값)를 돌려준다.
@@ -605,8 +644,8 @@ def select_grid(df: pd.DataFrame, *, key: str, key_field: str,
     - **rerun 유발원이 곧 이 반환**이므로 호출부는 이 값을 상세 렌더 **전에** 소비해 추가
       ``st.rerun`` 없이 상세를 그린다(선택 즉시 상세).
 
-    ``row_height``: 행 피치(§0.6). 기본 34(데스크톱 읽기). USER·터치 variant 는 44 를 준다
-    (32×32 히트영역 계약과 정합). 편집(M/A) variant 는 34 를 유지한다.
+    ``row_height``: 행 피치(§0.6 실측 잠금). 기본 32(데스크톱 M/A 큐 밀도). USER·터치
+    variant 는 44 를 준다(32×32 히트영역 계약과 정합).
     """
     view, options, custom = _build_select_gridoptions(
         df, key_field=key_field, columns=columns, selected_key=selected_key,
@@ -627,20 +666,20 @@ def select_grid(df: pd.DataFrame, *, key: str, key_field: str,
 
 # ============================================================ status_region
 def status_region(summary: list[tuple[str, str]]) -> None:
-    """요약 카드 행(§0.3 status 영역). ``summary``: ``[(label, value)]``.
+    """요약/KPI = 한 줄 스트립(§0.3 status·§0.6 강제). ``summary``: ``[(label, value)]``.
 
-    readiness 배너는 lifecycle 소관이라 여기서 렌더하지 않는다(호출부가 별도 처리).
-    """
+    독립 카드 나열(구 ``erp-metric`` × N)이 아니라 hairline 구분 **단일 박스** 한 행으로
+    렌더한다 — 카드가 행 높이를 넘어 겹치던 문제(4px)를 카드 자체를 없애 근본 해결한다.
+    높이 ≤72px, 2행 이상 쌓지 않는다. readiness 배너는 lifecycle 소관이라 여기서 렌더하지
+    않는다(호출부가 별도 처리)."""
     if not summary:
         return
-    cols = st.columns(len(summary))
-    for col, (label, value) in zip(cols, summary):
-        with col:
-            st.markdown(
-                f"<div class='erp-metric'><div class='erp-metric-v'>{value}</div>"
-                f"<div class='erp-metric-l'>{label}</div></div>",
-                unsafe_allow_html=True,
-            )
+    items = "".join(
+        f"<div class='erp-strip-i'><span class='erp-strip-v'>{escape(str(value))}</span>"
+        f"<span class='erp-strip-l'>{escape(str(label))}</span></div>"
+        for label, value in summary
+    )
+    st.markdown(f"<div class='erp-strip'>{items}</div>", unsafe_allow_html=True)
 
 
 # ============================================================ master-detail (MASTER_DETAIL)
@@ -655,10 +694,12 @@ def master_detail_frame(*, list_ratio: float = 1.5, detail_ratio: float = 1.0,
 
 
 def detail_empty(title: str, body: str) -> None:
-    """상세 영역 '선택 없음 / 선택 만료' 안내 — 모든 MASTER_DETAIL 화면이 같은 문구·시각을 쓰도록."""
+    """상세 영역 '선택 없음 / 선택 만료' 안내 — 한 줄 스트립(§0.6 강제, ≤72px, 점선 대형 박스 금지).
+
+    모든 MASTER_DETAIL 화면이 같은 문구·시각을 쓴다."""
     st.markdown(
-        f"<div class='erp-detail-empty'><div class='erp-detail-empty-t'>{title}</div>"
-        f"<div class='erp-detail-empty-b'>{body}</div></div>",
+        f"<div class='erp-empty'><span class='erp-empty-t'>{escape(title)}</span>"
+        f"<span class='erp-empty-b'>{escape(body)}</span></div>",
         unsafe_allow_html=True,
     )
 
