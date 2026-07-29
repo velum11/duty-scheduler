@@ -17,6 +17,36 @@ Before changing a screen:
 4. Load `developing-with-streamlit` for Streamlit implementation guidance.
 5. Load `frontend-design` only for explicit visual exploration or a substantial redesign, not for routine ERP maintenance.
 
+## Stage 0 — page-composition design (before implementing a structural change)
+
+For UI_CENTRIC structural work (area order, archetype, list-detail split, task flow,
+navigation, shared kit, primary-action hierarchy), design the page composition first.
+Procedure adapted from Dammyjay93/interface-design (MIT, Copyright (c) 2026 Damola
+Akinleye; full notice in repository-root `THIRD_PARTY_NOTICES.md`) — procedure only; all
+values come from `DESIGN.md` §0/§0.6 and `views/common/scaffold.py::ARCHETYPES`, never
+from this skill or any external system file.
+
+1. **Intent (3 questions)**: who is this specific user (role, situation)? what verb must
+   they accomplish here? what should it feel like, in words that mean something for a
+   dense work tool (not "clean and modern")?
+2. **One focal point per view**: name the single thing the user came to do; it must
+   dominate through size, position, or surrounding space (§0.3 area order).
+3. **Density declared up front**: pick the §0.6 locked values (condition panel ≤2 rows/
+   ≤96px, detail ≥600px, strip ≤72px, empty state one line, box cap) as design targets
+   before drawing anything. Content-fit control widths; no full-width controls for short
+   coded values.
+4. **Use what exists**: native Streamlit widgets and the neutral kit
+   (`views/common/erp/`) before any one-off widget or local CSS; if the kit lacks a
+   capability, propose the kit extension rather than a screen-local workaround.
+5. **Component checkpoint**: for each major component state why this component, how the
+   hierarchy wins, and which existing token/pattern it reuses.
+6. **States are not optional**: default/hover/active/focus/disabled for every
+   interactive element; tabular-nums for dynamic numbers; hit targets — USER/touch 44px,
+   desktop ERP interaction targets ≥32×32px (§0.6·§4).
+
+Design output is a structured handoff in conversation/task text (no local design files —
+DLP). Small copy/menu/CSS-within-token fixes skip Stage 0 entirely.
+
 ## Design and implementation rules
 
 - Optimize for information density, scanability, edit safety, selection clarity, keyboard and mouse predictability, and consistency across related screens.
