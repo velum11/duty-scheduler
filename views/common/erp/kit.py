@@ -594,7 +594,12 @@ def _build_select_gridoptions(df: pd.DataFrame, *, key_field: str,
         "suppressRowDeselection": True,
     }
     if pre_selected:
-        options["initialState"] = {"rowSelection": pre_selected}
+        # AG Grid setSelectionState 는 initialState.rowSelection 을 **node.id 문자열 집합**
+        # (Set(e).has(node.id))으로 매칭한다. getRowId 미지정이면 node.id 는 행 인덱스의
+        # 문자열("0","1",…)이므로 정수 인덱스를 그대로 넘기면 0 !== "0" 로 항상 불일치해
+        # pre-select 가 그리드에 시각 반영되지 않는다(틴트·체크 미표시 = §4 이중부호화 미적용).
+        # 자동선택(단건 큐)처럼 클릭 없이 세션으로만 선택되는 경로에서 특히 문제였다.
+        options["initialState"] = {"rowSelection": [str(i) for i in pre_selected]}
     return view, options, custom
 
 

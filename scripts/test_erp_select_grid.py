@@ -114,8 +114,10 @@ check("read_grid_height row_px 44 > 34(같은 행수)", h44 > h34)
 # ===== 3) pre-select(자연키 위치 비의존) =====
 print("pre-select")
 _, opts_sel, _ = build(sample_df(), selected_key="r2")
-check("selected_key='r2' → initialState rowSelection [1]",
-      opts_sel.get("initialState") == {"rowSelection": [1]})
+check("selected_key='r2' → initialState rowSelection ['1'](node.id 문자열 매칭)",
+      opts_sel.get("initialState") == {"rowSelection": ["1"]})
+check("pre-select 는 int 가 아니라 str 노드ID(AG Grid setSelectionState 매칭)",
+      all(isinstance(x, str) for x in opts_sel["initialState"]["rowSelection"]))
 _, opts_gone, _ = build(sample_df(), selected_key="zzz")
 check("결과에서 사라진 selected_key → initialState 없음(자동 미선택)",
       "initialState" not in opts_gone)
