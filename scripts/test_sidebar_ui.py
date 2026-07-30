@@ -280,13 +280,28 @@ check("상단 헤더 연결 pill 렌더", "_conn_pill_html" in hdr_src)
 check("연결 pill 데이터모드 신호(샘플/Supabase)",
       "샘플 데이터" in inspect.getsource(ui._conn_pill_html)
       and "Supabase 연결" in inspect.getsource(ui._conn_pill_html))
-check("헤더 실기능 아이콘(새로고침) — 전역 저장/삭제 아님",
-      'key="app_refresh"' in hdr_src and "__save" not in hdr_src and "__del" not in hdr_src)
+# 표준 아이콘 8종 상시 노출 + 음영(부속서 A-5, 사용자 지시) — 실기능(새로고침)만 활성,
+# 저장·삭제 등은 disabled(음영·클릭 무동작) 로 데이터 오조작 금지.
+check("헤더 표준 아이콘 8종 정의", len(ui._HEADER_ICONS) == 8)
+check("헤더 아이콘 순서(정보·언어·추가·새로고침·삭제·인쇄·저장·즐겨찾기)",
+      [lbl for lbl, _i, _a in ui._HEADER_ICONS]
+      == ["정보", "언어", "추가", "새로고침", "삭제", "인쇄", "저장", "즐겨찾기"])
+check("새로고침만 활성, 나머지 7종 음영",
+      [a for _l, _i, a in ui._HEADER_ICONS] == [False, False, False, True, False, False, False, False])
+check("새로고침 실기능 배선(st.rerun) + 음영 tooltip", "st.rerun()" in hdr_src
+      and "이 화면에서는 사용하지 않습니다" in hdr_src)
 check("헤더 바 52px + hover #f1eee8", ".st-key-app_header" in shell_css
       and "min-height: 52px" in shell_css and "#f1eee8" in shell_css)
-# 렌더: 상단 헤더에 새로고침 버튼(app_refresh) 존재
-check("렌더: 상단 헤더 새로고침 버튼(app_refresh)",
-      any(b.key == "app_refresh" for b in at.button))
+check("음영 아이콘 이중부호화(ink-3 반투명·not-allowed)",
+      "st-key-hdr_ic_off_" in shell_css and "not-allowed" in shell_css and "opacity: 0.45" in shell_css)
+# 렌더: 8종 버튼 존재 + 새로고침 활성·나머지 disabled
+hdr_btns = {b.key: b for b in at.button if str(b.key).startswith("app_hdr_")}
+check("렌더: 헤더 아이콘 8종 버튼(app_hdr_*)", len(hdr_btns) == 8)
+check("렌더: 새로고침(app_hdr_refresh) 활성", "app_hdr_refresh" in hdr_btns
+      and not hdr_btns["app_hdr_refresh"].disabled)
+check("렌더: 저장·삭제(app_hdr_save/delete) 음영(disabled)",
+      hdr_btns.get("app_hdr_save") is not None and hdr_btns["app_hdr_save"].disabled
+      and hdr_btns.get("app_hdr_delete") is not None and hdr_btns["app_hdr_delete"].disabled)
 
 
 print()

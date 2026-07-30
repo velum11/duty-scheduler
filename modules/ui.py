@@ -446,22 +446,29 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
 .cd-conn.on .dot { background: #2f6b45; }
 .cd-conn.samp { background: #f2f0ec; border-color: #e4e0d8; color: #5c564d; }
 .cd-conn.samp .dot { background: #8b857c; }
-/* 헤더 우측 실기능 아이콘 버튼 (새로고침 등) — 히트영역 32px, 시각 30px, hover #f1eee8 */
+/* 헤더 우측 표준 아이콘 8종 — 상시 노출. 히트영역 32px, hover #f1eee8. 활성/음영은
+   색+커서+tooltip 이중부호화(활성=ink-2·pointer / 음영=ink-3 반투명·not-allowed). */
 .st-key-app_header div.stButton { display: flex; justify-content: flex-end; }
-.st-key-app_header .st-key-hdr_refresh div.stButton button,
-.st-key-hdr_refresh div.stButton button {
+div[class*="st-key-hdr_ic_"] div.stButton button {
   width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center;
-  color: var(--ink-2) !important;
   background: transparent !important; border: 1px solid transparent !important; border-radius: 6px;
   box-shadow: none !important;
 }
-.st-key-hdr_refresh div.stButton button:hover {
+div[class*="st-key-hdr_ic_"] div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
+/* 활성(실기능) — ink-2, hover 옅은 배경, pointer */
+div[class*="st-key-hdr_ic_on_"] div.stButton button { color: var(--ink-2) !important; cursor: pointer; }
+div[class*="st-key-hdr_ic_on_"] div.stButton button:hover {
   color: var(--ink) !important; background: #f1eee8 !important;
 }
-.st-key-hdr_refresh div.stButton button:focus-visible {
+div[class*="st-key-hdr_ic_on_"] div.stButton button:focus-visible {
   outline: 2px solid var(--accent) !important; outline-offset: 1px;
 }
-.st-key-hdr_refresh div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
+/* 음영(비활성) — ink-3 반투명 톤, not-allowed, hover 무반응(무동작) */
+div[class*="st-key-hdr_ic_off_"] div.stButton button:disabled,
+div[class*="st-key-hdr_ic_off_"] div.stButton button[disabled] {
+  color: var(--ink-3) !important; opacity: 0.45 !important; cursor: not-allowed !important;
+  background: transparent !important;
+}
 </style>
 """
 
@@ -936,9 +943,26 @@ def _conn_pill_html() -> str:
             "<span class='dot'></span>Supabase 연결</span></div>")
 
 
+# 상단 52px 헤더 표준 아이콘 8종(DESIGN 부속서 A-5, 사용자 지시). 모든 M/A 화면에 상시
+# 노출하고, 그 화면에서 기능 없는 아이콘은 음영(disabled)으로 둔다 — 색+커서+tooltip 이중
+# 부호화. 실기능(새로고침)만 활성이며, 추가·삭제·저장·인쇄·언어·즐겨찾기·정보는 전역
+# 헤더 수준에서 안전한 실행 경로가 없으므로 음영(데이터 오조작 금지 — 불명확하면 음영).
+# (label, material icon, 활성 여부, tooltip)
+_HEADER_ICONS = [
+    ("정보", "info", False),
+    ("언어", "language", False),
+    ("추가", "add", False),
+    ("새로고침", "refresh", True),
+    ("삭제", "delete", False),
+    ("인쇄", "print", False),
+    ("저장", "save", False),
+    ("즐겨찾기", "star", False),
+]
+
+
 def _breadcrumb_header(user: dict, page: str) -> None:
     """본문 상단 52px 아이콘 헤더 — 좌측 MODULE / SCREEN 모노 브레드크럼,
-    우측 연결 상태 pill + 실기능 아이콘(새로고침).
+    우측 연결 상태 pill + 표준 아이콘 8종(실기능 활성·나머지 음영).
 
     사이드바는 항상 렌더된다(접힘=66px 레일, 완전 숨김 없음) — 헤더에 별도 '열기'
     버튼을 두지 않는다(펼치기는 레일 내부 토글이 소유)."""
@@ -956,15 +980,23 @@ def _breadcrumb_header(user: dict, page: str) -> None:
     conn_html = _conn_pill_html()
 
     with st.container(key="app_header"):
-        text, pill, refresh = st.columns(
-            [7.8, 2.6, 0.6], vertical_alignment="center")
-        text.markdown(crumb_html, unsafe_allow_html=True)
-        pill.markdown(conn_html, unsafe_allow_html=True)
-        with refresh:
-            with st.container(key="hdr_refresh"):
-                if st.button("", icon=":material/refresh:", key="app_refresh",
-                             type="tertiary", help="새로고침"):
-                    st.rerun()
+        cols = st.columns([5.6, 2.2] + [0.5] * len(_HEADER_ICONS),
+                          vertical_alignment="center")
+        cols[0].markdown(crumb_html, unsafe_allow_html=True)
+        cols[1].markdown(conn_html, unsafe_allow_html=True)
+        for i, (label, icon, active) in enumerate(_HEADER_ICONS):
+            with cols[2 + i]:
+                # 상시 노출 + 음영: 비활성 아이콘은 disabled(클릭 무동작)+음영 tooltip 로
+                # '이 화면에서는 사용하지 않음'을 이중부호화한다. 활성은 실기능 tooltip.
+                slot = "on" if active else "off"
+                with st.container(key=f"hdr_ic_{slot}_{icon}"):
+                    clicked = st.button(
+                        "", icon=f":material/{icon}:", key=f"app_hdr_{icon}",
+                        type="tertiary", disabled=not active,
+                        help=(f"{label}" if active else f"{label} — 이 화면에서는 사용하지 않습니다"),
+                    )
+                    if clicked and icon == "refresh":
+                        st.rerun()
 
 
 def user_app_shell(user: dict) -> str:
