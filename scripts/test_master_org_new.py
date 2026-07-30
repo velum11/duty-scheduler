@@ -223,8 +223,13 @@ check("선택 컨텍스트·계층 통합 브레드크럼 강조(.ms-ctx)", ".ms
 check("장식 제거(ERP) — 단계 배지 원형 1·2·3·시트 커넥터 없음(계층은 .ms-ctx 브레드크럼으로 충분)",
       "content:'1'" not in src and "content:'2'" not in src and "content:'3'" not in src
       and "\\203A" not in src)
-check("활성/잠김 상태 표시는 유지(활성 시트 네이비 액센트 + 잠긴 시트 디엠퍼시스)",
-      "border-top:2px solid var(--ms-navy)" in src and "opacity:.72" in src)
+# §1-E: 카드(네이비 카드-탑 액센트) 제거 → 세로 헤어라인 3열 + 잠긴 시트 디엠퍼시스로
+# 활성/잠김을 표현하고, 선택 경로는 DRILL 스트립(.ms-ctx 오렌지 틴트 칩)이 소유한다.
+check("§1-E 활성/잠김 표시(세로 헤어라인 3열 + 잠긴 디엠퍼시스, 네이비 카드-탑 제거)",
+      "opacity:.72" in src and "border-left:1px solid #cfc8bd" in src
+      and "border-top:2px solid var(--ms-navy)" not in src)
+check("§1-E DRILL 스트립 선택=오렌지 틴트(#b4451a)",
+      "#b4451a" in src and ".ms-ctx b.pin" in src)
 check("저장코드 읽기전용 어포던스(공통 .ms-cell-readonly 소비)",
       "ms-cell-readonly" in src and "_CODE_READONLY_RULES" in src)
 check("bool(사용) native 유지 — JsCode bool 렌더러 미사용(3.14 배포 회귀 방지)",

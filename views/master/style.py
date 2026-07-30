@@ -457,7 +457,9 @@ def inject_page_styles() -> None:
 # ---------------------------------------------------------------------------
 GRID_CSS: dict[str, dict] = {
     ".ag-root-wrapper": {"border": "1px solid " + TOKENS["line-strong"], "border-radius": "8px"},
-    ".ag-header": {"background": TOKENS["surface-2"], "border-bottom": "1px solid " + TOKENS["line-strong"]},
+    # §1-E: 표 헤더 배경 없음 + 하단 1px #cfc8bd(line-strong). 공용(3화면 공유) — 7단계에서
+    # 승인된 예외로 surface-2 배경을 제거해 헤더가 흰 표 본문과 자연스레 이어지게 한다.
+    ".ag-header": {"background": "transparent", "border-bottom": "1px solid " + TOKENS["line-strong"]},
     ".ag-header-cell": {"border-right": "1px solid rgba(0,0,0,.08)"},
     ".ag-header-cell-label": {"justify-content": "center", "font-size": "12.5px",
                               "font-weight": "600", "color": TOKENS["ink-2"]},

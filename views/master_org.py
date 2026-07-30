@@ -137,52 +137,42 @@ _EDIT_UNLESS_PROTECTED = JsCode(
 # 3시트 세로 스택(≤1100px)은 공통 style 의 `stHorizontalBlock:has([class*="__sheet"])` 규칙.
 _ORG_PAGE_CSS = """
 <style>
-/* 시트 액션바 버튼 — 좁은 3열 시트에서도 4버튼(행추가·삭제·저장·새로고침) 라벨이
-   전부 보이도록 줄바꿈 없이 맞춘다(overflow:visible·clip 금지 — DESIGN.md §8 텍스트/버튼
-   잘림 금지). 크기(패딩·높이·폰트)는 공통 밴드 툴 규격(style.py §8, 2026-07-26 통일)을
-   그대로 따르므로 여기서 별도 패딩/간격/아이콘 축소를 두지 않는다 — 과거 압축값
-   (padding .34rem)은 direct-child(`>`) 선택자라 disabled+help 시 Streamlit 이 끼워 넣는
-   stTooltipHoverTarget 래퍼에 끊겨 삭제/저장 버튼에는 적용되지 않고 행추가/새로고침에만
-   적용돼(선택 0건·미변경 상태에서만) 4버튼 폭이 들쭉날쭉해지는 결함이 있었다(2026-07-26
-   근본원인 확인). 후손 셀렉터(공백)로 바꿔 래퍼가 껴도 동일 규칙이 4버튼 모두에 안정
-   적용된다. 폭 확보는 org 전용 액션바 비율(_ORG_BAR_RATIOS)만으로 충분하다. 다른 화면
-   (사용자·근무형태)은 이 스코프(.st-key-org_*__sheet)를 쓰지 않으므로 영향받지 않는다. */
+/* 시트 액션바 버튼 nowrap(4버튼 라벨 유지) — 기능 규칙 보존(후손 셀렉터로 disabled 래퍼도 커버). */
 .st-key-org_group__sheet div.stButton button,
 .st-key-org_dept__sheet div.stButton button,
 .st-key-org_unit__sheet div.stButton button {
   white-space:nowrap; min-width:0; overflow:visible; text-overflow:clip; }
 
-/* ── (1) 선택 컨텍스트·계층 통합 브레드크럼 — 상단 .ms-ctx 를 스텝 경로로 강조 ── */
-.ms-ctx { padding:.5rem .8rem; font-size:.8rem; box-shadow:0 1px 0 rgba(0,0,0,.02); }
-.ms-ctx > span:first-child { font-weight:700; letter-spacing:.03em; text-transform:uppercase;
-  font-size:.66rem; color:var(--ms-ink-2); } /* ink-3→ink-2: 대비 (§2, WCAG) */
-.ms-ctx b { padding:.04rem .45rem; border-radius:5px; background:#E5EAF2; border:1px solid #C6D2E4;
-  color:var(--ms-navy); }
-.ms-ctx b.pin { background:var(--ms-navy); color:#FFF; border-color:var(--ms-navy); }
-.ms-ctx .arw { font-size:.92rem; color:var(--ms-line-strong); }
-.ms-ctx .none { font-style:normal; color:var(--ms-ink-2); } /* ink-3→ink-2: 대비 (§2, WCAG) */
+/* §1-E: 3시트 카드 박스 제거 → 세로 헤어라인으로 나눈 3열(카드 아님). 공용 [class*="__sheet"]
+   카드 스타일(배경·테두리·radius·그림자)을 로컬 오버라이드로 걷어낸다(shared 무수정, 소스
+   순서·특이도로 이김). 2·3열은 좌측 세로 헤어라인(#cfc8bd)으로만 구분한다. */
+.st-key-org_group__sheet, .st-key-org_dept__sheet, .st-key-org_unit__sheet {
+  background:transparent !important; border:none !important; border-radius:0 !important;
+  box-shadow:none !important; padding:.2rem .9rem .1rem !important; }
+.st-key-org_dept__sheet, .st-key-org_unit__sheet {
+  border-left:1px solid #cfc8bd !important; }
+/* 잠긴(상위 미선택) 하위 시트 — dashed 카드 제거, 세로 헤어라인만 유지 + 디엠퍼시스 */
+.st-key-org_dept__sheet.ms-sheet-locked, .st-key-org_unit__sheet.ms-sheet-locked {
+  background:transparent !important; border-style:none !important;
+  border-left:1px solid #cfc8bd !important; }
+.st-key-org_dept__sheet:has(.ms-locked), .st-key-org_unit__sheet:has(.ms-locked) { opacity:.72; }
 
-/* ── (2) 활성/잠김 상태 표시 — 지금 편집 가능한 시트를 즉시 식별(편집 안전성) ──
-   계층 순서(그룹›부서›조)는 상단 .ms-ctx 브레드크럼이 이미 표현하므로 단계 배지·시트
-   커넥터 같은 장식은 두지 않는다(ERP: 정보 중복·장식 배제). 여기서는 어느 시트가 활성
-   이고 어느 시트가 아직 잠겼는지만 상태로 알린다. */
-/* 활성 시트(잠기지 않음 = 상위 선택돼 열린 시트) — 상단 네이비 액센트 */
-.st-key-org_group__sheet:not(:has(.ms-locked)),
-.st-key-org_dept__sheet:not(:has(.ms-locked)),
-.st-key-org_unit__sheet:not(:has(.ms-locked)) { border-top:2px solid var(--ms-navy); }
-/* 비활성(잠긴) 하위 시트 — 디엠퍼시스로 아직 진행 전임을 표현 */
-.st-key-org_dept__sheet:has(.ms-locked),
-.st-key-org_unit__sheet:has(.ms-locked) { opacity:.72; }
+/* ── DRILL 스트립(§1-E): 그룹›부서›조 — 선택=오렌지 틴트 칩, 미선택=중립. 카드 아님(하단 헤어라인). ── */
+.ms-ctx { padding:.5rem .2rem .6rem; margin:.1rem 0 .5rem; background:transparent !important;
+  border:none !important; border-bottom:1px solid #e0dbd2 !important; border-radius:0 !important;
+  box-shadow:none !important; font-size:.8rem; }
+.ms-ctx > span:first-child { font-family:'IBM Plex Mono',monospace; font-weight:600;
+  letter-spacing:.12em; text-transform:uppercase; font-size:.62rem; color:#a09a90; }
+.ms-ctx b { padding:.14rem .55rem; border-radius:7px; background:#f2f0ec; border:1px solid #e4e0d8;
+  color:#5c564d; font-weight:600; }
+.ms-ctx b.pin, .ms-ctx b.sel { background:#fdf3ec; border-color:#f0dfd0; color:#b4451a; }
+.ms-ctx .arw { font-size:.92rem; color:#cfc8bd; }
+.ms-ctx .none { font-style:normal; color:#8b857c; }
 
-/* ── (3) 잠김 상태 밀도 완화 ──
-   ① 잠긴 하위 시트의 큰 빈 플레이스홀더를 슬림하게(높이·여백 축소),
-   ② 잠긴 시트의 비활성 액션바(저장 버튼을 품은 행)는 숨겨 헤더+슬림 안내만 남긴다 →
-      3개 시트 액션바 반복의 시각 소음을 줄이고 '아직 못 여는' 상태를 가볍게 표현한다.
-      버튼 위젯 자체는 DOM 에 남아(page-scoped 키·비활성 계약 보존) 접근성·회귀에 영향 없다. */
-.st-key-org_dept__sheet .ms-locked,
-.st-key-org_unit__sheet .ms-locked { min-height:118px; padding:1.25rem 1rem; gap:.35rem; }
-.st-key-org_dept__sheet .ms-locked .glyph,
-.st-key-org_unit__sheet .ms-locked .glyph { font-size:1.1rem; }
+/* 잠김 상태 밀도 완화(기능 보존) — 슬림 플레이스홀더 + 잠긴 시트 액션바 숨김. */
+.st-key-org_dept__sheet .ms-locked, .st-key-org_unit__sheet .ms-locked {
+  min-height:118px; padding:1.25rem 1rem; gap:.35rem; }
+.st-key-org_dept__sheet .ms-locked .glyph, .st-key-org_unit__sheet .ms-locked .glyph { font-size:1.1rem; }
 .st-key-org_dept__sheet:has(.ms-locked) div[data-testid="stHorizontalBlock"]:has(.st-key-org_dept__save),
 .st-key-org_unit__sheet:has(.ms-locked) div[data-testid="stHorizontalBlock"]:has(.st-key-org_unit__save) {
   display:none !important; }
@@ -226,28 +216,15 @@ _DRILL_CLICK = JsCode(
 
 def render(user: dict) -> None:
     _ORG_DESC = "그룹 → 부서 → 조(운영단위)를 가로 3단 시트로 관리합니다. 상위를 선택하면 하위가 열립니다."
-    # toolbar="icons": 상단 파랑 밴드를 타 화면과 동일한 KPtech 아이콘 툴바 포맷으로 통일한다
-    # (2026-07-27, 구 정적 장식 5아이콘 대체). 다만 이 화면의 추가·삭제·저장·새로고침은 3개
-    # 시트(그룹·부서·조)가 **각자의 인페이지 액션바**로 소유하므로(단일 소유자가 없어 상단
-    # 밴드로 승격할 대상이 아님), 밴드의 4개 액션 아이콘은 전부 shaded 로 두고 정보 아이콘만
-    # 활성으로 둔다 — 포맷만 통일하고 실제 액션 표면(시트별 액션바)은 보존한다.
-    band = erp.screen_frame(
+    # §1-E 표형(구조 교체) — 아이콘 밴드 제거(§0-3, 6단계와 동일). 추가·삭제·저장·새로고침은
+    # 각 시트(그룹·부서·조)가 자기 인페이지 액션바로 소유(3독립 저장 계약)하므로 밴드가 필요
+    # 없었다 — 밴드만 제거하고 시트별 액션바·저장 경로는 전부 보존.
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="조직 관리",
         desc=_ORG_DESC,
         breadcrumb="기준정보 › 조직 관리",
-        badges=_head_badges(),
-        toolbar="icons",
     )
-    if band is not None:
-        _na = "추가·삭제·저장·새로고침은 각 시트(그룹·부서·조)의 액션바에서 처리합니다"
-        band.render_icons(icon_toolbar_specs(
-            "org", info_content=_ORG_DESC,
-            add={"key": "org__add_na", "disabled": True, "help": _na},
-            refresh={"key": "org__refresh_na", "disabled": True, "help": _na},
-            delete={"key": "org__del_na", "disabled": True, "help": _na},
-            save={"key": "org__save_na", "disabled": True, "help": _na},
-        ))
     st.markdown(_ORG_PAGE_CSS, unsafe_allow_html=True)
 
     readiness = _readiness()
@@ -477,7 +454,8 @@ def _code_name_config() -> dict:
     return {
         "코드": {"flex": 0, "width": 54, "minWidth": 44, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
-        "코드명": {"flex": 1.4, "minWidth": 44, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
+        "코드명": {"flex": 1.4, "minWidth": 44, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED,
+                 "cellStyle": {"fontSize": "14.5px"}},  # §1-E 본문 14.5
         "순서": {"flex": 0, "width": 40, "minWidth": 34, "maxWidth": 72,
                 "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
         "비고": {"flex": 1.1, "minWidth": 38, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
@@ -491,7 +469,7 @@ _UNIT_COL_CONFIG = {
     "코드": {"flex": 0, "width": 46, "minWidth": 40, "cellClass": "md-c-left",
             "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
     "명칭": {"headerName": "코드명", "flex": 1.4, "minWidth": 42, "cellClass": "md-c-left",
-           "editable": _EDIT_UNLESS_PROTECTED},
+           "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},  # §1-E 본문 14.5
     "유형": {
         "headerName": "유형", "flex": 0, "width": 50, "minWidth": 44, "maxWidth": 96,
         "cellClass": "md-c-center", "cellEditor": "agSelectCellEditor",
