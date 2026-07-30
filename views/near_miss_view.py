@@ -21,14 +21,21 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import db, nav, ui
+from modules import db, ui
 from views import workspace
 from views.common import erp
-from views.common import scaffold
-from views.master import TOKENS, banner, icon_toolbar_specs, sheet_head
+from views.master import TOKENS, banner, sheet_head
 from views.master.lifecycle import Readiness, ReadinessState
 
 _PAGE_ID = "near_miss_view"
+
+# §1-E 필터 줄 아래 헤어라인(§2 섹션 헤어라인). 작은 의미 텍스트는 §A-2(≥#6b665d)를 따르며
+# 상세 메타·오버라인은 공용 erp 키트(ink-2/ink-3=#6b665d)가 이미 준수한다.
+_VIEW_CSS = """
+<style>
+.nmv-hr { border-top: 1px solid #e0dbd2; margin: 2px 0 10px; }
+</style>
+"""
 # 선택형 목록 자연키(항상 hidden) + 선택 상태 세션키. 선택은 자연키(id)로 오간다
 # (정렬·필터 후 위치 비의존). 필터/새로고침 시 _SEL_KEY 를 해제한다.
 _KEY_FIELD = "_report_id"
@@ -79,7 +86,8 @@ _DISPLAY_COLUMNS = [
 
 # 컬럼 폭(1366×768에서 9열이 가로 오버플로 없이 들어가도록 — 작업명·소속은 flex 로 잔여 폭 흡수).
 _COL_CONFIG = {
-    "보고번호": {"width": 108},
+    "보고번호": {"width": 112, "cellStyle": {"fontFamily": "'IBM Plex Mono', monospace",
+                                          "letterSpacing": "0.01em"}},
     "작업명": {"flex": 2, "minWidth": 160},
     "신고자": {"width": 92},
     "소속": {"flex": 1, "minWidth": 96},
@@ -95,29 +103,15 @@ def render(user: dict) -> None:
     # near_miss_view 는 nav.py 에 등록돼 있다(그룹 '아차사고' › '조회'). 제목/설명은 nav.py
     # 라벨과 정합되게 명시한다(desc 는 nav.py 와 동일 문구). page_chrome_for 로 nav 라벨을
     # 단일 출처에서 끌어오는 통일은 후속(통합 담당) — 현재는 screen_frame 명시 문자열로 충분.
-    band = erp.screen_frame(
+    # §1-E READ: 헤더 중립 프레임만(아이콘 밴드 제거 — 표준 아이콘 8종은 상단 52px 헤더가
+    # 소유·§A-5). 조회/새로고침은 필터 줄 우측 [조회] 버튼이 담당한다(아래).
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="아차사고 조회",
         desc="아차사고 보고서를 조건별로 조회합니다.",
         breadcrumb="아차사고 › 조회",
-        badges=scaffold.mode_badge(),
-        toolbar="icons",
     )
-    # 상단 파랑 밴드 아이콘 툴바(기준정보·근무표 편성과 동일 표준). 조회/새로고침(search
-    # 아이콘)만 활성 — 클릭은 on_click 플래그로 남겨 아래에서 소비한다(구 pill 의 조회·
-    # 새로고침 OR clicked 게이트와 동일). 추가·삭제·저장은 조회 전용이라 N/A(shaded).
-    if band is not None:
-        band.render_icons(icon_toolbar_specs(
-            _PAGE_ID, info_content=nav.page_desc(_PAGE_ID),
-            add={"key": f"{_PAGE_ID}__add_na", "disabled": True,
-                 "help": "이 화면에서는 사용하지 않습니다"},
-            refresh={"key": f"{_PAGE_ID}_go", "help": "조회/새로고침",
-                     "on_click": lambda: st.session_state.update({f"{_PAGE_ID}_go_req": True})},
-            delete={"key": f"{_PAGE_ID}__del_na", "disabled": True,
-                    "help": "이 화면에서는 사용하지 않습니다"},
-            save={"key": f"{_PAGE_ID}__save_na", "disabled": True,
-                  "help": "이 화면에서는 사용하지 않습니다"},
-        ))
+    st.markdown(_VIEW_CSS, unsafe_allow_html=True)
 
     # 접근 범위(제품 결정 — Coordinator): 아차사고 조회는 전 사용자에게 열려 있고
     # 회사 전체 범위이며, 신고자 이름·상세 내용을 숨기지 않는다. 과거 평가자 전용 게이트
@@ -135,14 +129,16 @@ def render(user: dict) -> None:
         st.error("조직 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # 영역 순서(§0.3): title(밴드 아이콘 툴바) → conditions → primary(선택형 목록) →
-    # details(선택 보고서 상세) → status(조회 결과 규모=건수만). 조회/새로고침 클릭 플래그를
-    # 소비한다(위 render_icons on_click 이 남긴 플래그).
-    clicked = bool(st.session_state.pop(f"{_PAGE_ID}_go_req", False))
-    if clicked:
-        # 필터/새로고침으로 결과 집합이 바뀌면 이전 선택을 해제한다(stale 상세 방지).
-        st.session_state.pop(_SEL_KEY, None)
+    # 영역 순서(§1-E): 필터 줄(조건 패널) + 우측 [조회] → 헤어라인 → 건수 행 → 표 →
+    # 상세 → 상태. [조회] 클릭이 조회 트리거(구 밴드 새로고침 대체).
     q = _collect_conditions("all", None, dept_names)
+    _lft, _rgt = st.columns([8.4, 1.4], vertical_alignment="center")
+    with _rgt:
+        clicked = st.button("조회", key=f"{_PAGE_ID}_go", type="primary", width="stretch")
+    st.markdown("<div class='nmv-hr'></div>", unsafe_allow_html=True)
+    if clicked:
+        # 필터/조회로 결과 집합이 바뀌면 이전 선택을 해제한다(stale 상세 방지).
+        st.session_state.pop(_SEL_KEY, None)
 
     saved = workspace.run_query(_PAGE_ID, clicked, q)
     if saved is None:
@@ -186,6 +182,7 @@ def render(user: dict) -> None:
         frame, key=f"{_PAGE_ID}_grid", key_field=_KEY_FIELD,
         columns=_DISPLAY_COLUMNS, selected_key=st.session_state.get(_SEL_KEY),
         col_config=_COL_CONFIG,
+        checkbox_marker=False,  # §0-1: 행 클릭이 곧 선택(상세 열기용 체크박스 금지)
         color_rules={
             "제안등급": _GRADE_COLOR,
             "확정등급": _GRADE_COLOR,
@@ -197,9 +194,11 @@ def render(user: dict) -> None:
     if picked is not None and picked != st.session_state.get(_SEL_KEY):
         st.session_state[_SEL_KEY] = picked
 
-    # details — 선택 보고서 상세(조회 전용). 신고자 이름·상세 내용을 숨기지 않는다.
-    st.write("")
-    _render_result_detail(df)
+    # details — 행 클릭으로 선택된 보고서만 아래 전체폭 상세로 렌더한다(§8-2: '선택하세요'
+    # 빈 안내 패널을 두지 않는다 — 선택 전에는 상세 영역 자체를 그리지 않는다).
+    if st.session_state.get(_SEL_KEY):
+        st.write("")
+        _render_result_detail(df)
 
     # status — 조회 결과 규모(건수만 슬림). 평가대기/평가완료/종결·반려 집계는 분석(stats)
     # 소관으로 이관했다(KPI 중복 제거 — 집계는 stats 소유).
@@ -226,15 +225,11 @@ def _render_result_detail(df: pd.DataFrame) -> None:
     이름·전체 내용을 숨기지 않는다(전사 공개 조회 계약)."""
     selected_id = st.session_state.get(_SEL_KEY)
     if not selected_id:
-        erp.detail_empty("보고서를 선택하세요",
-                         "위 목록에서 행을 클릭하면 신고자·상세 내용을 확인할 수 있습니다.")
-        return
+        return  # 호출부가 선택 시에만 부르지만 방어적으로 무렌더(§8-2: 빈 안내 패널 금지)
     match = df[df["id"].astype(str) == str(selected_id)]
     if match.empty:
-        # 목록에서 사라진 stale 선택 — 해제하고 미선택 상태로 되돌린다.
+        # 목록에서 사라진 stale 선택 — 해제하고 조용히 미선택으로 되돌린다(안내 패널 없음).
         st.session_state.pop(_SEL_KEY, None)
-        erp.detail_empty("보고서를 선택하세요",
-                         "선택한 보고서를 목록에서 찾을 수 없습니다. 목록에서 다시 선택하세요.")
         return
     report = match.iloc[0].to_dict()
 

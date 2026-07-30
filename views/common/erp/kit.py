@@ -362,13 +362,18 @@ def grid_shell(key: str, *, nrows: int, ncols: int, fingerprint, render,
 
 
 # ============================================================ read_grid / select_grid
+# §1-E 표형: 헤더 무배경 + 하단 1px 헤어라인, 행 구분 헤어라인, 본문 14.5px(DESIGN §3).
 _READ_BASE_CSS = {
+    ".ag-header": {"background-color": "transparent",
+                   "border-bottom": "1px solid " + TOKENS["line-strong"]},
     ".ag-header-cell": {"font-weight": "600", "font-size": "12.5px"},
-    ".ag-cell": {"font-size": "13px", "display": "flex", "align-items": "center"},
+    ".ag-cell": {"font-size": "14.5px", "display": "flex", "align-items": "center"},
+    ".ag-row": {"border-bottom": "1px solid " + TOKENS["line"]},
 }
 # 단일 선택 그리드(select_grid) 전용 — 네이티브 single-selection 의 선택행 이중부호화.
-# 배경 틴트(§4: 색만으로 상태 표시 금지)에 더해 첫 열 checkboxSelection 체크(네이티브 마커)가
-# 함께 걸린다(JsCode 불요). 색은 기준정보 selected-bg 토큰 재사용(새 색 없음).
+# 선택행 = 오렌지 좌측 바(§1-E 선택 명료) + selected-bg 배경 틴트(색만 아님, 형태+색 이중부호화).
+# 색은 기준정보 토큰 재사용(새 색 없음). 체크박스 마커는 호출부 선택(checkbox_marker) —
+# 행 클릭이 곧 선택인 §0-1 준수 화면은 마커를 끈다.
 _SELECT_CSS = {
     ".ag-row-selected .ag-cell": {"background-color": TOKENS["selected-bg"] + " !important"},
     ".ag-row.ag-row-selected": {"box-shadow": "inset 3px 0 " + TOKENS["navy"]},
@@ -588,7 +593,8 @@ def _build_select_gridoptions(df: pd.DataFrame, *, key_field: str,
                               col_config: dict[str, dict] | None,
                               row_rules: list[dict] | None,
                               hidden_fields: list[str] | None,
-                              row_height: int) -> tuple[pd.DataFrame, dict, dict]:
+                              row_height: int,
+                              checkbox_marker: bool = True) -> tuple[pd.DataFrame, dict, dict]:
     """SELECT 그리드의 view·gridOptions·custom_css 를 (AgGrid 호출 없이) 구성한다.
 
     불변식 검증(col_config 화이트리스트·key_field 자연키 계약)을 여기서 먼저 강제하므로
@@ -605,8 +611,10 @@ def _build_select_gridoptions(df: pd.DataFrame, *, key_field: str,
     frame[key_field] = frame[key_field].fillna("").astype(str)
     coldefs, custom = _build_read_coldefs(cols, hidden, color_rules, col_config, row_rules)
     custom = {**custom, **_SELECT_CSS}
-    # 첫 표시 열에 네이티브 선택 체크박스(마커) — 사람이 읽는 식별자 왼쪽에 인라인.
-    if coldefs and cols:
+    # 첫 표시 열에 네이티브 선택 체크박스(마커) — 기본 켬. 행 클릭이 곧 선택인(§0-1) 화면은
+    # checkbox_marker=False 로 끄고 선택행 오렌지 바+틴트로만 이중부호화한다(상세 열기용
+    # 체크박스 금지 준수 — 클릭 선택은 rowSelection=single 로 유지).
+    if coldefs and cols and checkbox_marker:
         coldefs[0]["checkboxSelection"] = True
 
     view = frame[cols + hidden].reset_index(drop=True)
@@ -659,7 +667,8 @@ def select_grid(df: pd.DataFrame, *, key: str, key_field: str,
                 row_rules: list[dict] | None = None,
                 hidden_fields: list[str] | None = None,
                 height: int | None = None,
-                row_height: int = _SELECT_ROW_PX) -> str | None:
+                row_height: int = _SELECT_ROW_PX,
+                checkbox_marker: bool = True) -> str | None:
     """AgGrid 단일 선택 목록 어댑터(§0.5 — read_grid 와 별개 capability, 편집 자산 없음).
 
     MASTER_DETAIL 목록(큐)에서 한 행을 선택해 그 **자연키**(``key_field`` 값)를 돌려준다.
@@ -694,6 +703,7 @@ def select_grid(df: pd.DataFrame, *, key: str, key_field: str,
         df, key_field=key_field, columns=columns, selected_key=selected_key,
         color_rules=color_rules, col_config=col_config, row_rules=row_rules,
         hidden_fields=hidden_fields, row_height=row_height,
+        checkbox_marker=checkbox_marker,
     )
     h = height if height is not None else read_grid_height(len(view), row_px=row_height)
 
