@@ -70,6 +70,10 @@ _MONO = "'IBM Plex Mono', monospace"
 
 _FORM_CSS = f"""
 <style>
+/* st.form 기본 테두리 박스 제거 — §0-5 카드 금지(폼 전체를 감싸는 border+radius 금지).
+   기능(폼 배치·제출 계약)은 불변, 시각 박스만 제거한다. */
+[data-testid="stForm"] {{ border:none !important; background:transparent !important;
+  padding:0 !important; }}
 /* 신고자 정보 — 카드 아님(헤어라인만). REPORTER 오버라인 + 읽기전용 신원. */
 .nm-reporter {{ display:flex; flex-wrap:wrap; align-items:baseline; gap:.4rem 1.4rem;
   padding:0 0 12px; border-bottom:1px solid {_LINE_SEC}; margin:2px 0 4px; }}
