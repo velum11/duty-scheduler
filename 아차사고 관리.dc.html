@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f4f2ee; }
+  * { box-sizing: border-box; }
+  a { color: #b4451a; text-decoration: none; }
+  a:hover { color: #8f3512; text-decoration: underline; }
+  textarea, input, select, button { font-family: inherit; }
+  ::placeholder { color: #a8a29a; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d8d3ca; border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+  svg { display: block; }
+</style>
+</helmet>
+<div style="display: flex; height: 100vh; min-height: 700px; overflow: hidden; font-family: 'IBM Plex Sans KR', system-ui, sans-serif; color: #1c1a17; background: #f4f2ee; -webkit-font-smoothing: antialiased;">
+
+  <aside style="{{ sidebarStyle }}">
+    <div style="{{ brandStyle }}">
+      <div style="width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px; background: #c2410c; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff;">W</div>
+      <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0;">
+          <span style="font-size: 13.5px; font-weight: 600; color: #f5f2ec; letter-spacing: -0.01em; white-space: nowrap;">현장 운영관리</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.1em; color: #7d766c;">SHIFT · SAFETY</span>
+        </div>
+      </sc-if>
+      <div onClick="{{ toggleSidebar }}" title="사이드바 접기·펼치기" style="width: 26px; height: 26px; flex: 0 0 26px; border-radius: 7px; display: grid; place-items: center; color: #8a8377; cursor: pointer;" style-hover="background: #26241f; color: #efe9e0;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2"></rect><line x1="6.4" y1="2.8" x2="6.4" y2="13.2"></line></svg>
+      </div>
+    </div>
+
+    <nav style="{{ navStyle }}">
+      <sc-for list="{{ navGroups }}" as="grp" hint-placeholder-count="4">
+        <div style="{{ grp.wrapStyle }}">
+          <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+            <div onClick="{{ grp.onToggle }}" style="{{ grp.headStyle }}" style-hover="background: #26241f;">
+              <span style="{{ grp.markStyle }}"></span>
+              <span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ grp.title }}</span>
+              <span style="{{ grp.caretStyle }}">›</span>
+            </div>
+          </sc-if>
+          <sc-for list="{{ grp.visibleItems }}" as="item" hint-placeholder-count="3">
+            <div onClick="{{ item.onSelect }}" title="{{ item.label }}" style="{{ item.style }}" style-hover="background: #26241f;">
+              <span style="{{ item.glyphStyle }}">{{ item.glyph }}</span>
+              <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+                <span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ item.label }}</span>
+              </sc-if>
+              <sc-if value="{{ item.badge }}">
+                <span style="{{ item.badgeStyle }}">{{ item.badge }}</span>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </nav>
+
+    <div style="{{ userBarStyle }}">
+      <div style="width: 30px; height: 30px; flex: 0 0 30px; border-radius: 50%; background: #33302a; display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #ddd6cb;">관</div>
+      <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+          <span style="font-size: 12.5px; color: #ece6dc; font-weight: 500;">관리자</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; color: #7d766c; letter-spacing: 0.08em;">ADMIN · PET</span>
+        </div>
+      </sc-if>
+      <div title="로그아웃" style="width: 28px; height: 28px; flex: 0 0 28px; border-radius: 7px; display: grid; place-items: center; color: #8a8377; cursor: pointer;" style-hover="background: #2f2c26; color: #e8a07a;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.6H3.6a1 1 0 0 0-1 1v8.8a1 1 0 0 0 1 1H6"></path><polyline points="10.4,4.8 13.4,8 10.4,11.2"></polyline><line x1="13.4" y1="8" x2="6.6" y2="8"></line></svg>
+      </div>
+    </div>
+  </aside>
+
+  <main style="flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;">
+
+    <header style="flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px 0 24px; height: 52px; background: #fbfaf8; border-bottom: 1px solid #e6e2da;">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: #8b857c; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden;">
+        <span>{{ crumbRoot }}</span><span style="color: #cfc9be;">/</span><span style="color: #33302a; font-weight: 500;">{{ crumb }}</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 2px;">
+        <sc-if value="{{ showEnvBadge }}" hint-placeholder-val="{{ true }}">
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; margin-right: 8px; border-radius: 999px; background: #f0f5f1; border: 1px solid #d3e2d7; font-size: 11px; color: #2f6b45; font-weight: 500; white-space: nowrap;">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #3f9160;"></span>Supabase
+          </span>
+        </sc-if>
+        <span title="화면 정보" style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #8b857c; cursor: pointer;" style-hover="background: #f1eee8; color: #23211d;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"></circle><line x1="8" y1="7.4" x2="8" y2="11.2"></line><circle cx="8" cy="5" r="0.75" fill="currentColor" stroke="none"></circle></svg>
+        </span>
+        <span title="언어" style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #8b857c; cursor: pointer;" style-hover="background: #f1eee8; color: #23211d;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"></circle><line x1="1.8" y1="8" x2="14.2" y2="8"></line><ellipse cx="8" cy="8" rx="3" ry="6.2"></ellipse></svg>
+        </span>
+        <span title="새 항목" style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #8b857c; cursor: pointer;" style-hover="background: #f1eee8; color: #23211d;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="3" x2="8" y2="13"></line><line x1="3" y1="8" x2="13" y2="8"></line></svg>
+        </span>
+        <span title="새로고침" style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #8b857c; cursor: pointer;" style-hover="background: #f1eee8; color: #23211d;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8a5.2 5.2 0 1 1-1.7-3.85"></path><polyline points="13.4,2.6 13.4,5.2 10.8,5.2"></polyline></svg>
+        </span>
+        <span title="삭제" style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #8b857c; cursor: pointer;" style-hover="background: #fbeeee; color: #9c3232;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2.6" y1="4.2" x2="13.4" y2="4.2"></line><path d="M4.2 4.2v8.2a1 1 0 0 0 1 1h5.6a1 1 0 0 0 1-1V4.2"></path><path d="M6.2 4.2V3a.8.8 0 0 1 .8-.8h2a.8.8 0 0 1 .8.8v1.2"></path></svg>
+        </span>
+        <span title="인쇄" style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #8b857c; cursor: pointer;" style-hover="background: #f1eee8; color: #23211d;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.4 6V2.8h7.2V6"></path><rect x="2.4" y="6" width="11.2" height="4.6" rx="1"></rect><rect x="4.4" y="9.4" width="7.2" height="3.8" rx="0.8"></rect></svg>
+        </span>
+        <span title="저장" style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #8b857c; cursor: pointer;" style-hover="background: #f1eee8; color: #23211d;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 3.8a1 1 0 0 1 1-1h6.7l2.7 2.7v6.7a1 1 0 0 1-1 1H3.8a1 1 0 0 1-1-1z"></path><path d="M5.4 2.8v3.4h5V2.8"></path><rect x="5.4" y="9" width="5.2" height="4.2"></rect></svg>
+        </span>
+        <span title="즐겨찾기" style="width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #c9932a; cursor: pointer;" style-hover="background: #fdf3e3;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2.2l1.75 3.7 3.95.53-2.9 2.78.73 4.02L8 11.32 4.47 13.23l.73-4.02-2.9-2.78 3.95-.53z"></path></svg>
+        </span>
+      </div>
+    </header>
+
+    <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 24px 24px 32px;">
+
+      <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; margin-bottom: 18px;">
+        <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+          <h1 style="margin: 0; font-size: 25px; font-weight: 600; letter-spacing: -0.025em; color: #14130f;">{{ pageTitle }}</h1>
+          <p style="margin: 0; font-size: 13.5px; color: #7c7669; max-width: 66ch; text-wrap: pretty;">{{ pageDesc }}</p>
+        </div>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.1em; color: #a09a90; white-space: nowrap;">2026-07-30 · PET생산부</span>
+      </div>
+
+      <sc-if value="{{ isRoster }}">
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <section style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-bottom: 12px; border-bottom: 1px solid #e0dbd2;">
+            <sc-for list="{{ rosterFilters }}" as="f" hint-placeholder-count="4">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <label style="font-size: 11.5px; color: #8b857c;">{{ f.label }}</label>
+                <select style="padding: 7px 9px; border: 1px solid #e2ddd4; border-radius: 7px; font-size: 13px; background: #fff; color: #1c1a17; outline: none;">
+                  <option>{{ f.value }}</option>
+                </select>
+              </div>
+            </sc-for>
+            <div style="margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px;">
+              <button style="padding: 8px 12px; border: 1px solid #e2ddd4; border-radius: 7px; background: #fff; font-size: 12.5px; color: #4a453d; cursor: pointer;" style-hover="border-color: #cfc8bd;">패턴 채우기</button>
+              <button style="padding: 8px 12px; border: 1px solid #e2ddd4; border-radius: 7px; background: #fff; font-size: 12.5px; color: #4a453d; cursor: pointer;" style-hover="border-color: #cfc8bd;">되돌리기</button>
+              <button style="padding: 8px 12px; border: 1px solid #e2ddd4; border-radius: 7px; background: #fff; font-size: 12.5px; color: #9c3232; cursor: pointer;" style-hover="border-color: #e0b9b9;">선택 비우기</button>
+              <button style="padding: 8px 18px; border: 0; border-radius: 7px; background: #c2410c; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;" style-hover="background: #a3350a;">저장</button>
+            </div>
+          </section>
+
+          <section style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 12.5px; color: #7c7669;">입력 단축키</span>
+              <sc-for list="{{ rosterKeys }}" as="k" hint-placeholder-count="4">
+                <span style="{{ k.style }}">{{ k.label }}</span>
+              </sc-for>
+            </div>
+          </section>
+
+          <section style="display: flex; flex-direction: column;">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 0 8px;">
+              <span style="font-size: 13px; font-weight: 600; color: #23211d;">2026-07 · PET생산부 · A조</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #8b857c;">{{ rosterStat }}</span>
+              <span style="margin-left: auto; font-size: 11.5px; color: #a09a90;">셀 클릭 = 근무 순환 · 방향키 이동 · Ctrl+D 위 셀 복사</span>
+            </div>
+            <div style="overflow: auto; max-height: 62vh; border: 1px solid #cfc8bd; border-radius: 8px; background: #fff;">
+              <table style="border-collapse: separate; border-spacing: 0; width: 100%;">
+                <thead>
+                  <tr>
+                    <sc-for list="{{ rosterIdCols }}" as="h" hint-placeholder-count="4">
+                      <th style="{{ h.style }}">{{ h.label }}</th>
+                    </sc-for>
+                    <sc-for list="{{ rosterDays }}" as="d" hint-placeholder-count="31">
+                      <th style="{{ d.headStyle }}">
+                        <span style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; font-weight: 600;">{{ d.num }}</span>
+                        <span style="display: block; font-size: 9.5px; font-weight: 400; opacity: .75;">{{ d.dow }}</span>
+                      </th>
+                    </sc-for>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ rosterRows }}" as="r" hint-placeholder-count="12">
+                    <tr>
+                      <td style="{{ r.noStyle }}">{{ r.no }}</td>
+                      <td style="{{ r.nameStyle }}">{{ r.name }}</td>
+                      <td style="{{ r.deptStyle }}">{{ r.dept }}</td>
+                      <td style="{{ r.teamStyle }}">{{ r.team }}</td>
+                      <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="31">
+                        <td onClick="{{ c.onCycle }}" style="{{ c.style }}">{{ c.label }}</td>
+                      </sc-for>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            <div style="padding: 10px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;">
+              <span style="font-size: 11.5px; color: #a09a90;">범례</span>
+              <sc-for list="{{ shiftLegend }}" as="l" hint-placeholder-count="4">
+                <span style="{{ l.style }}">{{ l.label }}</span>
+              </sc-for>
+              <span style="margin-left: auto; font-size: 11.5px; color: #a09a90;">미저장 변경 {{ rosterDirty }}건</span>
+            </div>
+          </section>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isMySched }}">
+        <div style="display: flex; flex-direction: column; gap: 14px; max-width: 1180px;">
+          <section style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding-bottom: 14px; border-bottom: 1px solid #e0dbd2;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button style="width: 30px; height: 30px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; color: #6b665d; font-size: 13px; cursor: pointer;" style-hover="border-color: #cfc8bd;">‹</button>
+              <span style="font-size: 16px; font-weight: 600; letter-spacing: -0.02em; min-width: 118px; text-align: center;">2026년 7월</span>
+              <button style="width: 30px; height: 30px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; color: #6b665d; font-size: 13px; cursor: pointer;" style-hover="border-color: #cfc8bd;">›</button>
+            </div>
+            <span style="font-size: 12.5px; color: #8b857c;">관리자 · PET생산부 · A조</span>
+            <div style="margin-left: auto; display: flex; flex-wrap: wrap; gap: 14px;">
+              <sc-for list="{{ myTotals }}" as="t" hint-placeholder-count="3">
+                <div style="display: flex; align-items: baseline; gap: 6px;">
+                  <span style="{{ t.dotStyle }}"></span>
+                  <span style="font-size: 12px; color: #6b665d;">{{ t.label }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; font-weight: 600; color: #23211d;">{{ t.value }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+
+          <section>
+            <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px;">
+              <sc-for list="{{ weekHeads }}" as="w" hint-placeholder-count="7">
+                <div style="{{ w.style }}">{{ w.label }}</div>
+              </sc-for>
+              <sc-for list="{{ calCells }}" as="c" hint-placeholder-count="35">
+                <div style="{{ c.cellStyle }}">
+                  <sc-if value="{{ c.num }}">
+                    <span style="{{ c.numStyle }}">{{ c.num }}</span>
+                    <span style="{{ c.chipStyle }}">{{ c.shift }}</span>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isUsers }}">
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <section style="display: flex; flex-wrap: wrap; gap: 12px 16px; padding-bottom: 16px; border-bottom: 1px solid #e0dbd2;">
+            <div style="flex: 1 1 150px; min-width: 0; display: flex; flex-direction: column; gap: 5px;">
+              <label style="font-size: 12.5px; font-weight: 500; color: #7c7669;">재직 여부</label>
+              <select style="width: 100%; padding: 9px 11px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 13.5px; background: #fff; outline: none;"><option>전체</option><option>재직</option><option>퇴직</option></select>
+            </div>
+            <div style="flex: 1 1 150px; min-width: 0; display: flex; flex-direction: column; gap: 5px;">
+              <label style="font-size: 12.5px; font-weight: 500; color: #7c7669;">부서</label>
+              <select style="width: 100%; padding: 9px 11px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 13.5px; background: #fff; outline: none;"><option>전체 부서</option><option>PET생산부</option><option>PET원료실</option></select>
+            </div>
+            <div style="flex: 1 1 150px; min-width: 0; display: flex; flex-direction: column; gap: 5px;">
+              <label style="font-size: 12.5px; font-weight: 500; color: #7c7669;">권한</label>
+              <select style="width: 100%; padding: 9px 11px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 13.5px; background: #fff; outline: none;"><option>전체 권한</option><option>관리자</option><option>조장</option><option>조원</option></select>
+            </div>
+            <div style="flex: 2 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 5px;">
+              <label style="font-size: 12.5px; font-weight: 500; color: #7c7669;">검색</label>
+              <input placeholder="사번 · 성명 검색" style="width: 100%; padding: 9px 11px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 13.5px; background: #fff; outline: none;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);" />
+            </div>
+          </section>
+
+          <section style="display: flex; flex-direction: column;">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 0 12px;">
+              <span style="font-size: 14px; font-weight: 600; color: #23211d;">사용자</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 2px 9px; border-radius: 999px; background: #f1eee8; color: #6b665d; font-weight: 600;">21</span>
+              <span style="font-size: 11.5px; color: #a09a90;">재직 20 · 퇴직 1</span>
+              <div style="margin-left: auto; display: flex; gap: 6px;">
+                <button style="display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; font-size: 12px; color: #4a453d; cursor: pointer;" style-hover="border-color: #cfc8bd;">
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="3" x2="8" y2="13"></line><line x1="3" y1="8" x2="13" y2="8"></line></svg>행 추가</button>
+                <button style="padding: 7px 16px; border: 0; border-radius: 8px; background: #c2410c; color: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer;" style-hover="background: #a3350a;">저장</button>
+              </div>
+            </div>
+            <div style="overflow-x: auto;">
+              <table style="border-collapse: collapse; width: 100%; min-width: 860px;">
+                <thead>
+                  <tr>
+                    <sc-for list="{{ userCols }}" as="c" hint-placeholder-count="8">
+                      <th style="{{ c.style }}">{{ c.label }}</th>
+                    </sc-for>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ userRows }}" as="u" hint-placeholder-count="9">
+                    <tr style="{{ u.rowStyle }}">
+                      <td style="padding: 14px 14px 14px 0; border-bottom: 1px solid #e6e2da; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; color: #4a453d;">{{ u.no }}</td>
+                      <td style="padding: 14px; border-bottom: 1px solid #e6e2da; font-size: 15px; font-weight: 500;">{{ u.name }}</td>
+                      <td style="padding: 14px; border-bottom: 1px solid #e6e2da; font-size: 14.5px; color: #4a453d;">{{ u.dept }}</td>
+                      <td style="padding: 14px; border-bottom: 1px solid #e6e2da; font-size: 14.5px; color: #4a453d;">{{ u.team }}</td>
+                      <td style="padding: 14px; border-bottom: 1px solid #e6e2da;"><span style="{{ u.roleStyle }}">{{ u.role }}</span></td>
+                      <td style="padding: 14px; border-bottom: 1px solid #e6e2da; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; color: #8b857c; text-align: right;">{{ u.order }}</td>
+                      <td style="padding: 14px 0 14px 14px; border-bottom: 1px solid #e6e2da;"><span style="{{ u.activeStyle }}">{{ u.active }}</span></td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            <div style="padding: 12px 0 0; font-size: 12.5px; color: #a09a90;">표시순서는 부서의 소속 그룹별로 정렬하며, 같은 그룹 안에서 중복되지 않는지 확인합니다.</div>
+          </section>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isOrg }}">
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <section style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-bottom: 14px; border-bottom: 1px solid #e0dbd2;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.12em; color: #a09a90;">DRILL</span>
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+              <span style="font-size: 12px; color: #8b857c;">그룹</span>
+              <span style="padding: 4px 10px; border-radius: 7px; background: #fdf3ec; color: #b4451a; font-size: 12.5px; font-weight: 600;">PET</span>
+              <span style="color: #cfc9be;">›</span>
+              <span style="font-size: 12px; color: #8b857c;">부서</span>
+              <span style="padding: 4px 10px; border-radius: 7px; background: #fdf3ec; color: #b4451a; font-size: 12.5px; font-weight: 600;">PET생산부</span>
+              <span style="color: #cfc9be;">›</span>
+              <span style="font-size: 12px; color: #8b857c;">조</span>
+              <span style="padding: 4px 10px; border-radius: 7px; background: #f4f2ee; color: #a09a90; font-size: 12.5px;">전체</span>
+            </div>
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+              <select style="padding: 8px 11px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 13px; background: #fff; outline: none;"><option>사용 중</option><option>전체</option></select>
+              <input placeholder="코드 · 명칭 검색" style="width: 200px; max-width: 46vw; padding: 8px 11px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 13px; background: #fff; outline: none;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);" />
+            </div>
+          </section>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;">
+            <sc-for list="{{ orgPanels }}" as="p" hint-placeholder-count="3">
+              <section style="{{ p.style }}">
+                <div style="display: flex; align-items: center; gap: 8px; padding: 0 0 10px;">
+                  <span style="font-size: 13px; font-weight: 600; color: #23211d;">{{ p.title }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; padding: 2px 7px; border-radius: 999px; background: #f1eee8; color: #6b665d; font-weight: 600;">{{ p.count }}</span>
+                  <sc-if value="{{ p.parent }}">
+                    <span style="margin-left: auto; font-size: 11.5px; color: #a09a90;">{{ p.parent }}</span>
+                  </sc-if>
+                </div>
+                <div style="display: flex; gap: 4px; padding: 0 0 10px;">
+                  <button title="행 추가" style="display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid #e2ddd4; border-radius: 7px; background: #fff; font-size: 11.5px; color: #4a453d; cursor: pointer;" style-hover="border-color: #cfc8bd;">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="8" y1="3" x2="8" y2="13"></line><line x1="3" y1="8" x2="13" y2="8"></line></svg>추가</button>
+                  <button title="삭제" style="display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid #e2ddd4; border-radius: 7px; background: #fff; font-size: 11.5px; color: #9c3232; cursor: pointer;" style-hover="border-color: #e0b9b9;">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="2.6" y1="4.2" x2="13.4" y2="4.2"></line><path d="M4.2 4.2v8.2a1 1 0 0 0 1 1h5.6a1 1 0 0 0 1-1V4.2"></path></svg>삭제</button>
+                  <button title="새로고침" style="display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid #e2ddd4; border-radius: 7px; background: #fff; font-size: 11.5px; color: #4a453d; cursor: pointer;" style-hover="border-color: #cfc8bd;">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8a5.2 5.2 0 1 1-1.7-3.85"></path><polyline points="13.4,2.6 13.4,5.2 10.8,5.2"></polyline></svg>새로고침</button>
+                  <button style="margin-left: auto; padding: 6px 14px; border: 0; border-radius: 7px; background: #c2410c; color: #fff; font-size: 11.5px; font-weight: 600; cursor: pointer;" style-hover="background: #a3350a;">저장</button>
+                </div>
+                <table style="border-collapse: collapse; width: 100%;">
+                  <thead>
+                    <tr>
+                      <th style="text-align: left; padding: 10px 8px 10px 0; font-size: 12.5px; font-weight: 600; color: #7c7669; border-bottom: 1px solid #cfc8bd;">코드</th>
+                      <th style="text-align: left; padding: 10px 8px; font-size: 12.5px; font-weight: 600; color: #7c7669; border-bottom: 1px solid #cfc8bd;">코드명</th>
+                      <th style="text-align: right; padding: 10px 8px; font-size: 12.5px; font-weight: 600; color: #7c7669; border-bottom: 1px solid #cfc8bd;">순서</th>
+                      <th style="text-align: right; padding: 10px 0 10px 8px; font-size: 12.5px; font-weight: 600; color: #7c7669; border-bottom: 1px solid #cfc8bd;">사용</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <sc-for list="{{ p.rows }}" as="r" hint-placeholder-count="4">
+                      <tr style="{{ r.rowStyle }}">
+                        <td style="padding: 11px 8px 11px 0; border-bottom: 1px solid #e6e2da; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #4a453d;">{{ r.code }}</td>
+                        <td style="padding: 11px 8px; border-bottom: 1px solid #e6e2da; font-size: 14.5px; font-weight: 500;">{{ r.name }}</td>
+                        <td style="padding: 11px 8px; border-bottom: 1px solid #e6e2da; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #8b857c; text-align: right;">{{ r.order }}</td>
+                        <td style="padding: 9px 0 9px 8px; border-bottom: 1px solid #e6e2da; text-align: right;"><span style="{{ r.useStyle }}">{{ r.use }}</span></td>
+                      </tr>
+                    </sc-for>
+                  </tbody>
+                </table>
+                <div style="padding: 10px 0 0; font-size: 11px; color: #a09a90;">{{ p.footer }}</div>
+              </section>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isShiftTypes }}">
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <section style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-bottom: 14px; border-bottom: 1px solid #e0dbd2;">
+            <span style="font-size: 12.5px; color: #8b857c;">사용 여부</span>
+            <select style="padding: 8px 11px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 13px; background: #fff; outline: none;"><option>사용 중</option><option>전체</option></select>
+            <input placeholder="코드 · 명칭 · 약칭 검색" style="flex: 1 1 220px; min-width: 0; padding: 8px 11px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 13px; background: #fff; outline: none;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);" />
+            <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+              <span style="font-size: 11.5px; color: #a09a90;">미리보기</span>
+              <div style="display: flex; gap: 5px;">
+                <sc-for list="{{ shiftLegend }}" as="l" hint-placeholder-count="4">
+                  <span style="{{ l.style }}">{{ l.label }}</span>
+                </sc-for>
+              </div>
+            </div>
+          </section>
+
+          <section style="display: flex; flex-direction: column;">
+            <div style="overflow-x: auto;">
+              <table style="border-collapse: collapse; width: 100%; min-width: 840px;">
+                <thead>
+                  <tr>
+                    <sc-for list="{{ typeCols }}" as="c" hint-placeholder-count="8">
+                      <th style="{{ c.style }}">{{ c.label }}</th>
+                    </sc-for>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ typeRows }}" as="t" hint-placeholder-count="6">
+                    <tr>
+                      <td style="padding: 14px 10px 14px 0; border-bottom: 1px solid #e6e2da; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; color: #4a453d;">{{ t.code }}</td>
+                      <td style="padding: 14px 10px; border-bottom: 1px solid #e6e2da; font-size: 15px; font-weight: 500;">{{ t.name }}</td>
+                      <td style="padding: 14px 10px; border-bottom: 1px solid #e6e2da;"><span style="{{ t.kindStyle }}">{{ t.kind }}</span></td>
+                      <td style="padding: 14px 10px; border-bottom: 1px solid #e6e2da;"><span style="{{ t.chipStyle }}">{{ t.abbr }}</span></td>
+                      <td style="padding: 14px 10px; border-bottom: 1px solid #e6e2da; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; color: #4a453d;">{{ t.time }}</td>
+                      <td style="padding: 14px 10px; border-bottom: 1px solid #e6e2da;">
+                        <div style="display: flex; align-items: center; gap: 7px;">
+                          <span style="{{ t.swatchStyle }}"></span>
+                          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #8b857c;">{{ t.hex }}</span>
+                        </div>
+                      </td>
+                      <td style="padding: 14px 10px; border-bottom: 1px solid #e6e2da;"><span style="{{ t.workStyle }}">{{ t.work }}</span></td>
+                      <td style="padding: 14px 10px; border-bottom: 1px solid #e6e2da; font-size: 14px; color: #6b665d;">{{ t.desc }}</td>
+                      <td style="padding: 14px 0 14px 10px; border-bottom: 1px solid #e6e2da; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; color: #8b857c; text-align: right;">{{ t.order }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            <div style="padding: 14px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+              <span style="font-size: 11.5px; color: #a09a90;">총 6건 · 근무표 셀에 그대로 반영됩니다.</span>
+              <button style="margin-left: auto; padding: 8px 16px; border: 0; border-radius: 8px; background: #c2410c; color: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer;" style-hover="background: #a3350a;">저장</button>
+            </div>
+          </section>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isCapa }}">
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+            <sc-for list="{{ capaKpis }}" as="k" hint-placeholder-count="4">
+              <div style="{{ k.style }}">
+                <span style="font-size: 12px; color: #8b857c;">{{ k.label }}</span>
+                <div style="display: flex; align-items: baseline; gap: 4px;">
+                  <span style="{{ k.valueStyle }}">{{ k.value }}</span>
+                  <span style="font-size: 11.5px; color: #a09a90;">{{ k.unit }}</span>
+                </div>
+                <span style="font-size: 11px; color: #a09a90; font-family: 'IBM Plex Mono', monospace;">{{ k.note }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <section style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid #e0dbd2;">
+            <div style="display: flex; align-items: center; gap: 8px; padding-right: 6px;">
+              <span style="font-size: 12.5px; font-weight: 600; color: #23211d; white-space: nowrap;">종결 대기 큐</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; padding: 2px 7px; border-radius: 999px; background: #fdf0e7; color: #b4451a; font-weight: 600;">2</span>
+            </div>
+            <sc-for list="{{ capaRows }}" as="row" hint-placeholder-count="2">
+              <div onClick="{{ row.onSelect }}" style="{{ row.chipStyle }}">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.05em; opacity: 0.7;">{{ row.shortId }}</span>
+                <span style="font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;">{{ row.title }}</span>
+                <span style="{{ row.gradeStyle }}">{{ row.grade }}</span>
+              </div>
+            </sc-for>
+          </section>
+
+          <section style="display: flex; flex-direction: column;">
+            <div style="padding: 4px 0 18px; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 14px 20px;">
+              <div style="display: flex; flex-direction: column; gap: 7px; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; color: #14130f;">{{ capa.id }}</span>
+                  <span style="{{ capa.pillStyle }}">{{ capa.status }}</span>
+                </div>
+                <span style="font-size: 17px; color: #23211d; font-weight: 600; letter-spacing: -0.02em;">{{ capa.title }}</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 12px 26px;">
+                <sc-for list="{{ capa.meta }}" as="m" hint-placeholder-count="4">
+                  <div style="display: flex; flex-direction: column; gap: 3px;">
+                    <span style="font-size: 10.5px; letter-spacing: 0.08em; color: #a09a90; font-family: 'IBM Plex Mono', monospace;">{{ m.label }}</span>
+                    <span style="{{ m.style }}">{{ m.value }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="padding: 22px 0 26px; border-top: 1px solid #e0dbd2; display: flex; flex-wrap: wrap; gap: 22px 32px;">
+              <sc-for list="{{ capa.sections }}" as="sec" hint-placeholder-count="4">
+                <div style="{{ sec.blockStyle }}">
+                  <span style="font-size: 11px; letter-spacing: 0.1em; color: #a09a90; font-family: 'IBM Plex Mono', monospace;">{{ sec.tag }}</span>
+                  <span style="font-size: 12.5px; font-weight: 600; color: #4a453d;">{{ sec.label }}</span>
+                  <p style="margin: 0; font-size: 14px; line-height: 1.7; color: #2b2823; text-wrap: pretty;">{{ sec.value }}</p>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="padding: 18px 0 4px; border-top: 1px solid #e0dbd2; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 24px;">
+              <div style="flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 7px;">
+                <label style="font-size: 12.5px; font-weight: 500; color: #4a453d;">조치 담당자</label>
+                <select style="width: 100%; padding: 10px 12px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14px; background: #fff; outline: none; color: #1c1a17;">
+                  <option>— 지정 —</option><option>고중수 (조장)</option><option>강태철 (조장)</option><option>관리자</option>
+                </select>
+              </div>
+              <div style="flex: 0 1 170px; min-width: 0; display: flex; flex-direction: column; gap: 7px;">
+                <label style="font-size: 12.5px; font-weight: 500; color: #4a453d;">조치 기한</label>
+                <input value="2026-08-14" style="width: 100%; padding: 10px 12px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14px; font-family: 'IBM Plex Mono', monospace; background: #fff; outline: none;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);" />
+              </div>
+              <div style="flex: 2 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 7px;">
+                <label style="font-size: 12.5px; font-weight: 500; color: #4a453d;">확인 의견</label>
+                <input placeholder="현장 확인 결과를 한 줄로" style="width: 100%; padding: 10px 12px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14px; background: #fff; outline: none; color: #2b2823;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);" />
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                <button style="padding: 10px 14px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; color: #4a453d; font-size: 12.5px; cursor: pointer;" style-hover="border-color: #cfc8bd;">조치 등록</button>
+                <button style="padding: 10px 14px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; color: #4a453d; font-size: 12.5px; cursor: pointer;" style-hover="border-color: #cfc8bd;">확인 완료</button>
+                <button style="padding: 10px 22px; border: 0; border-radius: 8px; background: #c2410c; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;" style-hover="background: #a3350a;">보고서 종결</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isEval }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <section style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid #e0dbd2;">
+            <div style="display: flex; align-items: center; gap: 8px; padding-right: 6px;">
+              <span style="font-size: 12.5px; font-weight: 600; color: #23211d; white-space: nowrap;">평가 대기 큐</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; padding: 2px 7px; border-radius: 999px; background: #fdf0e7; color: #b4451a; font-weight: 600;">3</span>
+            </div>
+            <sc-for list="{{ evalRows }}" as="row" hint-placeholder-count="3">
+              <div onClick="{{ row.onSelect }}" style="{{ row.chipStyle }}">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.05em; opacity: 0.7;">{{ row.shortId }}</span>
+                <span style="font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">{{ row.title }}</span>
+                <span style="{{ row.dotStyle }}"></span>
+              </div>
+            </sc-for>
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 11.5px; color: #a09a90; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;">{{ evalPos }}</span>
+              <div style="display: flex; gap: 4px;">
+                <button onClick="{{ evalPrev }}" style="width: 28px; height: 28px; border: 1px solid #e2ddd4; border-radius: 7px; background: #fff; color: #6b665d; font-size: 12px; cursor: pointer;" style-hover="border-color: #cfc8bd;">‹</button>
+                <button onClick="{{ evalNext }}" style="width: 28px; height: 28px; border: 1px solid #e2ddd4; border-radius: 7px; background: #fff; color: #6b665d; font-size: 12px; cursor: pointer;" style-hover="border-color: #cfc8bd;">›</button>
+              </div>
+            </div>
+          </section>
+
+          <section style="display: flex; flex-direction: column;">
+            <div style="padding: 4px 0 18px; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 14px 20px;">
+              <div style="display: flex; flex-direction: column; gap: 7px; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; color: #14130f;">{{ detail.id }}</span>
+                  <span style="{{ detail.pillStyle }}">{{ detail.status }}</span>
+                </div>
+                <span style="font-size: 17px; color: #23211d; font-weight: 600; letter-spacing: -0.02em;">{{ detail.title }}</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 12px 26px;">
+                <sc-for list="{{ detail.meta }}" as="m" hint-placeholder-count="4">
+                  <div style="display: flex; flex-direction: column; gap: 3px;">
+                    <span style="font-size: 10.5px; letter-spacing: 0.08em; color: #a09a90; font-family: 'IBM Plex Mono', monospace;">{{ m.label }}</span>
+                    <span style="{{ m.style }}">{{ m.value }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="padding: 22px 0 26px; border-top: 1px solid #e0dbd2; display: flex; flex-wrap: wrap; gap: 22px 32px;">
+              <sc-for list="{{ detail.sections }}" as="sec" hint-placeholder-count="5">
+                <div style="{{ sec.blockStyle }}">
+                  <span style="font-size: 11px; letter-spacing: 0.1em; color: #a09a90; font-family: 'IBM Plex Mono', monospace;">{{ sec.tag }}</span>
+                  <span style="font-size: 12.5px; font-weight: 600; color: #4a453d;">{{ sec.label }}</span>
+                  <p style="margin: 0; font-size: 14px; line-height: 1.7; color: #2b2823; text-wrap: pretty;">{{ sec.value }}</p>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="padding: 18px 0 4px; border-top: 1px solid #e0dbd2; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 24px;">
+              <div style="display: flex; flex-direction: column; gap: 7px;">
+                <label style="font-size: 12.5px; font-weight: 500; color: #4a453d;">확정 등급</label>
+                <div style="display: flex; gap: 5px;">
+                  <sc-for list="{{ gradeOptions }}" as="g" hint-placeholder-count="5">
+                    <div onClick="{{ g.onSelect }}" style="{{ g.style }}">{{ g.label }}</div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 7px;">
+                <label style="font-size: 12.5px; font-weight: 500; color: #4a453d;">평가 의견 <span style="color: #a09a90; font-weight: 400;">· 반려·보완요청 시 필수</span></label>
+                <input placeholder="검토 의견을 한 줄로" style="width: 100%; padding: 10px 12px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; font-size: 13.5px; color: #2b2823; outline: none;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);" />
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                <button style="padding: 10px 12px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; color: #4a453d; font-size: 12.5px; cursor: pointer;" style-hover="border-color: #cfc8bd;">검토착수</button>
+                <button style="padding: 10px 12px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; color: #4a453d; font-size: 12.5px; cursor: pointer;" style-hover="border-color: #cfc8bd;">보완요청</button>
+                <button style="padding: 10px 12px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; color: #9c3232; font-size: 12.5px; cursor: pointer;" style-hover="border-color: #e0b9b9;">반려</button>
+                <button style="padding: 10px 22px; border: 0; border-radius: 8px; background: #c2410c; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;" style-hover="background: #a3350a;">평가 확정</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isMine }}">
+        <div style="display: flex; flex-direction: column; max-width: 1100px; border-top: 1px solid #e0dbd2;">
+          <sc-for list="{{ myRows }}" as="row" hint-placeholder-count="2">
+            <section style="{{ row.cardStyle }}">
+              <div onClick="{{ row.onSelect }}" style="padding: 16px 12px 16px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; cursor: pointer;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.06em; color: #a09a90;">{{ row.id }}</span>
+                <span style="flex: 1 1 200px; min-width: 0; font-size: 14.5px; font-weight: 600; color: #1c1a17; letter-spacing: -0.015em;">{{ row.title }}</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: #6b665d;">{{ row.date }}</span>
+                <span style="font-size: 12.5px; color: #6b665d;">{{ row.cause }}</span>
+                <span style="display: flex; align-items: center; gap: 12px; margin-left: auto; flex: 0 0 auto;">
+                  <span style="{{ row.pillStyle }}">{{ row.status }}</span>
+                  <span style="{{ row.caretStyle }}">›</span>
+                </span>
+              </div>
+              <sc-if value="{{ row.open }}" hint-placeholder-val="{{ true }}">
+                <div style="padding: 0 12px 24px 14px; display: flex; flex-direction: column; gap: 18px;">
+                  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px;">
+                    <sc-for list="{{ row.steps }}" as="s" hint-placeholder-count="4">
+                      <div style="{{ s.style }}">
+                        <span style="{{ s.dotStyle }}"></span>
+                        <span>{{ s.label }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 20px 32px;">
+                    <sc-for list="{{ row.sections }}" as="sec" hint-placeholder-count="3">
+                      <div style="{{ sec.blockStyle }}">
+                        <span style="font-size: 11px; letter-spacing: 0.1em; color: #a09a90; font-family: 'IBM Plex Mono', monospace;">{{ sec.tag }}</span>
+                        <span style="font-size: 12.5px; font-weight: 600; color: #4a453d;">{{ sec.label }}</span>
+                        <p style="margin: 0; font-size: 14px; line-height: 1.7; color: #2b2823; text-wrap: pretty;">{{ sec.value }}</p>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 14px; border-top: 1px solid #f1eee8;">
+                    <button style="padding: 9px 16px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; font-size: 13px; color: #33302a; cursor: pointer;" style-hover="border-color: #cfc8bd;">내용 수정</button>
+                    <button style="padding: 9px 16px; border: 1px solid #eeeae3; border-radius: 8px; background: #f7f5f1; font-size: 13px; color: #b0aaa0; cursor: not-allowed;">제출 취소</button>
+                    <span style="font-size: 11.5px; color: #a09a90;">제출 취소는 후속 반영 예정입니다.</span>
+                  </div>
+                </div>
+              </sc-if>
+            </section>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isForm }}">
+        <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;">
+          <section style="flex: 4 1 460px; min-width: 0; display: flex; flex-direction: column;">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 0 0 14px; border-bottom: 1px solid #e0dbd2;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #a09a90;">REPORTER</span>
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; font-size: 13.5px;">
+                <span><span style="color: #8b857c;">신고자</span> <strong style="font-weight: 600;">관리자</strong></span>
+                <span><span style="color: #8b857c;">사번</span> <strong style="font-family: 'IBM Plex Mono', monospace; font-weight: 600;">ADMIN</strong></span>
+                <span><span style="color: #8b857c;">소속</span> <strong style="font-weight: 600;">PET생산부</strong></span>
+              </div>
+              <span style="margin-left: auto; font-size: 12px; color: #a09a90;">로그인 정보로 자동 지정</span>
+            </div>
+
+            <div style="padding: 22px 0 0; display: flex; flex-direction: column; gap: 26px;">
+              <div style="display: flex; flex-direction: column; gap: 14px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.14em; color: #b4451a; white-space: nowrap;">01 · 기본 정보</span>
+                  <span style="flex: 1; height: 1px; background: #eeeae3;"></span>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 14px;">
+                  <div style="flex: 2 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 13px; font-weight: 500; color: #4a453d;">작업명 <span style="color: #c2410c;">*</span></label>
+                    <input placeholder="예: 3라인 컨베이어 벨트 점검" style="width: 100%; padding: 11px 13px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14.5px; background: #fff; outline: none; color: #1c1a17;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);" />
+                  </div>
+                  <div style="flex: 1 1 150px; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 13px; font-weight: 500; color: #4a453d;">발생일 <span style="color: #c2410c;">*</span></label>
+                    <input value="2026-07-30" style="width: 100%; padding: 11px 13px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14.5px; font-family: 'IBM Plex Mono', monospace; background: #fff; outline: none; color: #1c1a17;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);" />
+                  </div>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 14px;">
+                  <div style="flex: 1 1 170px; min-width: 0; max-width: 240px; display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 13px; font-weight: 500; color: #4a453d;">발생원인 <span style="color: #c2410c;">*</span></label>
+                    <select style="width: 100%; padding: 11px 13px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14.5px; background: #fff; outline: none; color: #1c1a17;">
+                      <option>— 선택 —</option><option>미끄러짐</option><option>부딪힘·충돌</option><option>추락</option><option>화상</option>
+                    </select>
+                  </div>
+                  <div style="flex: 3 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 13px; font-weight: 500; color: #4a453d;">발생원인 상세 <span style="color: #c2410c;">*</span></label>
+                    <input placeholder="원인을 구체적으로" style="width: 100%; padding: 11px 13px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14.5px; background: #fff; outline: none;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);" />
+                  </div>
+                </div>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 14px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.14em; color: #b4451a; white-space: nowrap;">02 · 상황 기술</span>
+                  <span style="flex: 1; height: 1px; background: #eeeae3;"></span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <label style="font-size: 13px; font-weight: 500; color: #4a453d;">사고내용 <span style="color: #c2410c;">*</span></label>
+                  <textarea rows="3" placeholder="무슨 일이 있었는지(아차사고 상황)를 구체적으로 적어 주세요" style="width: 100%; resize: vertical; padding: 12px 13px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14.5px; line-height: 1.7; background: #fff; outline: none; color: #1c1a17;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);"></textarea>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 14px;">
+                  <div style="flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 13px; font-weight: 500; color: #4a453d;">작업내용 <span style="color: #c2410c;">*</span></label>
+                    <textarea rows="3" placeholder="어떤 작업을 하고 있었는지" style="width: 100%; resize: vertical; padding: 12px 13px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14.5px; line-height: 1.7; background: #fff; outline: none;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);"></textarea>
+                  </div>
+                  <div style="flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                    <label style="font-size: 13px; font-weight: 500; color: #4a453d;">작업현장 상황설명 <span style="color: #c2410c;">*</span></label>
+                    <textarea rows="3" placeholder="현장 상황 · 주변 환경" style="width: 100%; resize: vertical; padding: 12px 13px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14.5px; line-height: 1.7; background: #fff; outline: none;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);"></textarea>
+                  </div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <label style="font-size: 13px; font-weight: 500; color: #4a453d;">예방대책 <span style="color: #c2410c;">*</span></label>
+                  <textarea rows="3" placeholder="재발을 막기 위한 제안 대책" style="width: 100%; resize: vertical; padding: 12px 13px; border: 1px solid #e2ddd4; border-radius: 8px; font-size: 14.5px; line-height: 1.7; background: #fff; outline: none;" style-focus="border-color: #c2410c; box-shadow: 0 0 0 3px rgba(194,65,12,0.09);"></textarea>
+                </div>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 14px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.14em; color: #b4451a; white-space: nowrap;">03 · 사진 첨부</span>
+                  <span style="flex: 1; height: 1px; background: #eeeae3;"></span>
+                  <span style="font-size: 12px; color: #a09a90; white-space: nowrap;">선택</span>
+                </div>
+                <div style="border: 1px dashed #dcd6cc; border-radius: 10px; padding: 22px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; background: #fbfaf8;">
+                  <span style="font-size: 13.5px; color: #8b857c;">현장 사진을 끌어다 놓거나</span>
+                  <span style="font-size: 13.5px; color: #b4451a; font-weight: 500;">파일 선택</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; padding: 16px 0 0; border-top: 1px solid #e0dbd2;">
+              <span style="font-size: 12.5px; color: #8b857c;">제출 후 상태는 <strong style="color: #33302a; font-weight: 600;">제출됨(SUBMITTED)</strong>이 됩니다.</span>
+              <div style="display: flex; flex: 1 1 200px; justify-content: flex-end; gap: 8px;">
+                <button style="flex: 0 1 auto; padding: 11px 18px; border: 1px solid #e2ddd4; border-radius: 8px; background: #fff; font-size: 13.5px; color: #4a453d; cursor: pointer;" style-hover="border-color: #cfc8bd;">임시 저장</button>
+                <button style="flex: 0 1 auto; padding: 11px 24px; border: 0; border-radius: 8px; background: #c2410c; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;" style-hover="background: #a3350a;">제안서 제출</button>
+              </div>
+            </div>
+          </section>
+
+          <aside style="flex: 1 1 230px; min-width: 0; max-width: 300px; display: flex; flex-direction: column; gap: 12px; padding: 0 0 0 22px; border-left: 1px solid #e0dbd2;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: #a09a90;">CHECKLIST</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: #b4451a; font-weight: 600;">0 / 8</span>
+            </div>
+            <div style="height: 3px; border-radius: 999px; background: #f1eee8; overflow: hidden;">
+              <div style="width: 6%; height: 100%; background: #c2410c;"></div>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 9px 16px; margin-top: 4px;">
+              <sc-for list="{{ checklist }}" as="c" hint-placeholder-count="8">
+                <div style="flex: 1 1 130px; min-width: 0; display: flex; align-items: center; gap: 9px; font-size: 13px; color: #6b665d;">
+                  <span style="width: 14px; height: 14px; border-radius: 4px; border: 1px solid #dcd6cc; flex: 0 0 14px;"></span>
+                  <span>{{ c }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <p style="margin: 10px 0 0; padding-top: 12px; border-top: 1px solid #eeeae3; font-size: 12px; line-height: 1.6; color: #8b857c; text-wrap: pretty;">사진은 없어도 제출할 수 있지만, 첨부하면 평가 등급이 올라갈 확률이 높습니다.</p>
+          </aside>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isAnalytics }}">
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="6">
+              <div style="{{ k.style }}">
+                <span style="font-size: 12px; color: #8b857c;">{{ k.label }}</span>
+                <div style="display: flex; align-items: baseline; gap: 4px;">
+                  <span style="{{ k.valueStyle }}">{{ k.value }}</span>
+                  <span style="font-size: 11.5px; color: #a09a90;">{{ k.unit }}</span>
+                </div>
+                <span style="font-size: 11px; color: #a09a90; font-family: 'IBM Plex Mono', monospace;">{{ k.note }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 16px;">
+            <sc-for list="{{ charts }}" as="ch" hint-placeholder-count="4">
+              <section style="flex: 1 1 340px; min-width: 0; padding: 16px 0 6px; border-top: 1px solid #cfc8bd; display: flex; flex-direction: column; gap: 14px;">
+                <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                  <span style="font-size: 13.5px; font-weight: 600; color: #23211d;">{{ ch.title }}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.08em; color: #a09a90; white-space: nowrap;">{{ ch.meta }}</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                  <sc-for list="{{ ch.rows }}" as="r" hint-placeholder-count="4">
+                    <div style="display: grid; grid-template-columns: 76px minmax(0, 1fr) 52px; gap: 10px; align-items: center;">
+                      <span style="font-size: 12.5px; color: #4a453d; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ r.label }}</span>
+                      <div style="height: 8px; border-radius: 999px; background: #f4f2ee; overflow: hidden;">
+                        <div style="{{ r.barStyle }}"></div>
+                      </div>
+                      <div style="display: flex; align-items: baseline; gap: 5px; justify-content: flex-end;">
+                        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: #23211d;">{{ r.count }}</span>
+                        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #a09a90;">{{ r.pct }}</span>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </section>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <div style="margin-top: 22px; display: flex; align-items: center; gap: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.08em; color: #b4aea4;">
+        <span style="width: 5px; height: 5px; border-radius: 50%; background: #3f9160;"></span>
+        <span>SUPABASE DATA · LIVE</span>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showEnvBadge&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;표시&quot;},&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+const PILL = {
+  '제출됨': ['#fdf3e3', '#8a6212', '#f0dfbe'],
+  '검토중': ['#eef2fb', '#2f4d99', '#dbe3f4'],
+  '평가완료': ['#eef5f0', '#2f6b45', '#d8e6dd'],
+  '반려': ['#fbeeee', '#9c3232', '#f0d9d9'],
+  '종결': ['#f2f0ec', '#5c564d', '#e4e0d8'],
+};
+const pill = (s) => {
+  const [bg, fg, bd] = PILL[s] || PILL['종결'];
+  return `display:inline-flex;align-items:center;padding:2.5px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap;background:${bg};color:${fg};border:1px solid ${bd}`;
+};
+const DOT = { '제출됨': '#c9932a', '검토중': '#2f4d99', '평가완료': '#3f9160', '반려': '#9c3232', '종결': '#8b857c' };
+const TAGS = ['WHAT', 'TASK', 'SITE', 'CAUSE', 'ACTION', 'NOTE'];
+const WIDE = ['사고 내용', '발생 원인', '제안 대책', '평가 의견'];
+
+const SHIFT = {
+  '주': ['#eef2fb', '#2f4d99'],
+  '야': ['#fbeeee', '#9c3232'],
+  'OFF': ['#f4f2ee', '#8b857c'],
+  '연차': ['#eef5f0', '#2f6b45'],
+};
+const ORDER = ['주', '야', 'OFF', '연차'];
+const chip = (k, big) =>
+  `display:inline-flex;align-items:center;justify-content:center;min-width:${big ? '100%' : '34px'};padding:${big ? '5px 0' : '4px 6px'};border-radius:6px;font-size:${big ? '12.5px' : '11.5px'};font-weight:600;background:${SHIFT[k][0]};color:${SHIFT[k][1]}`;
+
+const EMP = [
+  ['2008082501', '황봉준'], ['2008110301', '고중수'], ['2009051001', '김복한'], ['2010041401', '김은복'],
+  ['2019010102', '서경민'], ['2019030104', '배철현'], ['2019100106', '강태철'], ['2019111101', '샤르마'],
+  ['2019120901', '딴신'], ['2023042801', '앙코'], ['2023070302', '한보아'], ['2023081601', '김영일'],
+];
+const CYCLE = ['주', '주', 'OFF', 'OFF', '야', '야', '야', '야', 'OFF', 'OFF', '주', '주', '주', '주', 'OFF', 'OFF', '야', '야', '야', '야', 'OFF'];
+const DOW = ['수', '목', '금', '토', '일', '월', '화'];
+
+class Component extends DCLogic {
+  state = {
+    screen: 'eval', evalId: '202607-0003', openId: '202607-0004', grade: 'D', collapsed: false,
+    openGroups: {}, dirty: 0, capaId: '202607-0005',
+    grid: EMP.map((_, r) => Array.from({ length: 31 }, (_, i) => CYCLE[(i + r * 3) % CYCLE.length])),
+  };
+
+  get evalData() {
+    return [
+      { id: '202607-0003', title: '생산계획서 부착 및 원료실 이동 동선', reporter: '김복한 (2009051001)', date: '2026-07-15', status: '제출됨', cause: '미끄러짐', dept: 'PET생산부', grade: 'D',
+        sections: [
+          { label: '사고 내용', value: 'PET 원료실 계획서 수정 중 바닥의 기름막에 미끄러짐. 넘어지진 않았으나 중심을 크게 잃었음.' },
+          { label: '작업 내용', value: 'PET 원료실 생산계획서 수정 및 부착 작업' },
+          { label: '현장 설명', value: '원료실 입구 통로. 지게차 동선과 작업자 동선이 겹치는 구간.' },
+          { label: '발생 원인', value: '바닥 누유·누수로 기름막이 생기고 지게차·작업자 이동으로 번짐. 걸레로 닦아도 재발.' },
+          { label: '제안 대책', value: '코일매트 등 먼지날림이 적은 발매트를 설치하고, 누유·누수 원인을 근본적으로 파악·제거.' },
+        ] },
+      { id: '202607-0002', title: '스태커를 이용한 제품 운반 작업', reporter: '황봉준 (2008082501)', date: '2026-07-20', status: '제출됨', cause: '부딪힘·충돌', dept: 'PET생산부', grade: 'C',
+        sections: [
+          { label: '사고 내용', value: '스태커 운반 중 적재물이 흔들려 통로 측 랙에 근접 접촉.' },
+          { label: '작업 내용', value: '완제품 파렛트 창고 이송' },
+          { label: '현장 설명', value: '통로 폭 1.4m, 적재 높이 1.8m 구간.' },
+          { label: '발생 원인', value: '적재 높이 과다 및 통로 협소.' },
+          { label: '제안 대책', value: '적재 높이 상한 표시선 부착, 통로 폭 확보를 위한 자재 재배치.' },
+        ] },
+      { id: '202607-0004', title: '지게차 상차 작업 중 후진 접근', reporter: '관리자 (ADMIN)', date: '2026-07-23', status: '제출됨', cause: '부딪힘·충돌', dept: 'PET생산부', grade: 'B',
+        sections: [
+          { label: '사고 내용', value: '상차장에서 지게차가 후진하던 중 뒤쪽에서 검수 작업을 하던 작업자와 약 1m 거리까지 접근함. 작업자가 뒤늦게 인지하고 급히 피했으며 지게차도 급정지하여 충돌은 발생하지 않음.' },
+          { label: '작업 내용', value: '상차장 완제품 검수 및 지게차 상차' },
+          { label: '현장 설명', value: '상차장 3번 도크. 후방 시야 사각 구간.' },
+          { label: '발생 원인', value: '후진 경보 미인지, 보행자 통로 미구획.' },
+          { label: '제안 대책', value: '보행 통로 라인 마킹 및 후진 시 유도자 배치 의무화.' },
+        ] },
+    ];
+  }
+
+  get myData() {
+    return [
+      { id: '202607-0005', title: '배관 보수 후 바닥 잔유로 미끄러짐', date: '2026-07-27', status: '평가완료', cause: '미끄러짐', step: 3,
+        sections: [
+          { label: '사고 내용', value: '배관 보수 작업 후 남은 잔유를 밟아 미끄러짐. 넘어지지 않음.' },
+          { label: '작업 내용', value: '유틸리티 배관 보수 후 정리' },
+          { label: '평가 의견', value: '개선 제안이 구체적이어서 B등급으로 확정. 개선조치 등록 완료.' },
+        ] },
+      { id: '202607-0004', title: '지게차 상차 작업 중 후진 접근', date: '2026-07-23', status: '제출됨', cause: '부딪힘·충돌', step: 1,
+        sections: [
+          { label: '사고 내용', value: '상차장에서 지게차가 후진하던 중 뒤쪽에서 검수 작업을 하던 작업자와 약 1m 거리까지 접근함. 작업자가 뒤늦게 인지하고 급히 피했으며 지게차도 급정지하여 충돌은 발생하지 않음.' },
+          { label: '작업 내용', value: '상차장 완제품 검수 및 지게차 상차' },
+          { label: '제안 대책', value: '보행 통로 라인 마킹 및 후진 시 유도자 배치 의무화.' },
+        ] },
+    ];
+  }
+
+  block(label, i) {
+    const wide = WIDE.includes(label);
+    return {
+      tag: TAGS[i] || 'INFO',
+      blockStyle: `flex:${wide ? '2 1 420px' : '1 1 260px'};min-width:0;display:flex;flex-direction:column;gap:5px;padding-left:14px;border-left:2px solid ${wide ? '#f0dccd' : '#eeeae3'}`,
+    };
+  }
+
+  renderVals() {
+    const s = this.state.screen;
+    const expanded = !this.state.collapsed;
+    const set = (k, v) => () => this.setState({ [k]: v });
+
+    const SCREENS = {
+      roster: { title: '근무표 편성', root: 'SCHEDULE', crumb: 'ROSTER', desc: '부서와 조를 선택해 월별 근무표를 편성합니다. 셀을 눌러 근무형태를 바꿉니다.' },
+      mysched: { title: '내 근무표', root: 'SCHEDULE', crumb: 'MY SHIFTS', desc: '내게 배정된 월별 근무를 달력으로 확인합니다.' },
+      form: { title: '아차사고 등록', root: 'NEAR-MISS', crumb: 'REPORT', desc: '현장에서 발견한 아차사고(near-miss)를 접수합니다. 제출 후 상태는 제출됨(SUBMITTED)이 됩니다.' },
+      mine: { title: '내 아차사고', root: 'NEAR-MISS', crumb: 'MY REPORTS', desc: '본인이 등록한 아차사고와 처리 상태를 확인합니다. 행을 눌러 상세를 펼칩니다.' },
+      eval: { title: '평가 관리', root: 'NEAR-MISS', crumb: 'EVALUATION', desc: '대기 큐에서 건을 골라 한 건씩 검토합니다. 등급을 확정하거나 반려하세요.' },
+      capa: { title: '개선조치 관리', root: 'NEAR-MISS', crumb: 'CAPA', desc: '평가 확정된 아차사고의 개선조치를 등록·확인하고 보고서를 종결합니다.' },
+      analytics: { title: '아차사고 분석', root: 'NEAR-MISS', crumb: 'ANALYTICS', desc: '등급 · 부서 · 기간 · 원인 · 상태별 분포를 분석합니다.' },
+      users: { title: '사용자 관리', root: 'MASTER', crumb: 'USERS', desc: '사번 · 소속 · 권한을 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.' },
+      org: { title: '조직 관리', root: 'MASTER', crumb: 'ORG', desc: '그룹 → 부서 → 조(운영단위)를 3단 드릴로 관리합니다. 상위를 선택하면 하위가 열립니다.' },
+      shifttypes: { title: '근무형태 관리', root: 'MASTER', crumb: 'SHIFT TYPES', desc: '근무형태(코드 · 명칭 · 약칭 · 색상)를 편집하면 근무표 셀에 그대로 반영됩니다.' },
+    };
+    const cur = SCREENS[s] || SCREENS.eval;
+
+    const groups = [
+      { title: '홈', items: [{ key: 'dash', label: '대시보드', glyph: '대시', muted: true }] },
+      { title: '근무표', items: [
+        { key: 'roster', label: '근무표 편성', glyph: '편성' },
+        { key: 'monthly', label: '월간 근무표', glyph: '월간', muted: true },
+        { key: 'mysched', label: '내 근무표', glyph: '내표' },
+      ] },
+      { title: '아차사고 관리', items: [
+        { key: 'form', label: '아차사고 등록', glyph: '등록' },
+        { key: 'mine', label: '내 아차사고', glyph: '내건', badge: 2 },
+        { key: 'eval', label: '평가 관리', glyph: '평가', badge: 3 },
+        { key: 'capa', label: '개선조치 관리', glyph: '개선', badge: 2 },
+        { key: 'search', label: '아차사고 조회', glyph: '조회', muted: true },
+        { key: 'analytics', label: '아차사고 분석', glyph: '분석' },
+      ] },
+      { title: '기준정보', items: [
+        { key: 'users', label: '사용자 관리', glyph: '사용' },
+        { key: 'org', label: '조직 관리', glyph: '조직' },
+        { key: 'shifttypes', label: '근무형태 관리', glyph: '형태' },
+      ] },
+    ];
+
+    const openGroups = this.state.openGroups;
+    const navGroups = groups.map((g) => {
+      const open = openGroups[g.title] !== false;
+      const active = g.items.some((it) => it.key === s);
+      return {
+      title: g.title,
+      onToggle: () => this.setState({ openGroups: { ...openGroups, [g.title]: !open } }),
+      wrapStyle: `display:flex;flex-direction:column;gap:2px;padding-bottom:${expanded ? 4 : 8}px;border-bottom:1px solid #23211e`,
+      headStyle: `display:flex;align-items:center;gap:9px;padding:8px 9px;margin-bottom:2px;border-radius:8px;font-size:12.5px;font-weight:600;letter-spacing:-0.01em;cursor:pointer;color:${active ? '#f5efe6' : '#8f887c'};background:transparent`,
+      markStyle: `flex:0 0 6px;width:6px;height:6px;border-radius:2px;background:${active ? '#c2410c' : '#4a453d'}`,
+      caretStyle: `font-size:14px;line-height:1;color:#6d665c;transform:rotate(${open ? '90deg' : '0deg'})`,
+      visibleItems: open || !expanded ? g.items.map((it) => {
+        const on = it.key === s;
+        return {
+          label: it.label,
+          glyph: it.glyph,
+          glyph: expanded ? '' : it.glyph,
+          badge: expanded ? it.badge : null,
+          onSelect: it.muted ? () => {} : set('screen', it.key),
+          style: `display:flex;width:100%;align-items:center;gap:${expanded ? 10 : 9}px;padding:${expanded ? '7px 10px' : '7px 0'};justify-content:${expanded ? 'flex-start' : 'center'};border-radius:8px;font-size:13.5px;cursor:${it.muted ? 'default' : 'pointer'};background:${on ? '#2f2c26' : 'transparent'};color:${on ? '#fdf3ec' : it.muted ? '#6f6961' : '#a49d92'};font-weight:${on ? 600 : 400};box-shadow:${on ? 'inset 2px 0 0 #c2410c' : 'none'}`,
+          glyphStyle: expanded
+            ? `flex:0 0 5px;width:5px;height:5px;border-radius:50%;background:${on ? '#c2410c' : it.muted ? '#3c3833' : '#4f4a43'}`
+            : `flex:0 0 26px;width:26px;height:26px;position:relative;display:grid;place-items:center;border-radius:7px;font-size:10.5px;font-weight:600;letter-spacing:-0.03em;background:${on ? '#c2410c' : '#26241f'};color:${on ? '#fff' : it.muted ? '#6f6961' : '#a49d92'};box-shadow:${it.badge ? '0 0 0 2px #1a1917, 5px -5px 0 -1px #c2410c' : 'none'}`,
+          badgeStyle: `font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;padding:1px 6px;border-radius:999px;background:${on ? 'rgba(194,65,12,.25)' : '#26241f'};color:${on ? '#f0a06e' : '#8a8377'}`,
+        };
+      }) : [],
+      };
+    });
+
+    const capaData = [
+      { id: '202607-0005', title: '배관 보수 후 바닥 잔유로 미끄러짐', grade: 'A', date: '2026-07-28', status: '평가완료', owner: '미지정', verify: '미작성',
+        sections: [
+          { label: '사고 내용', value: '배관 보수 작업 후 남은 잔유를 밟아 미끄러짐. 넘어지지는 않음.' },
+          { label: '제안 대족', value: '보수 작업 지시서에 바닥 잔유 제거 단계를 추가하고, 종료 전 2인 교차확인.' },
+          { label: '조치 내용', value: '아직 등록되지 안은 상태입니다. 담당자를 지정하고 조치 결과를 입력하세요.' },
+        ] },
+      { id: '202607-0002', title: '실러기 테이프 교재 리필', grade: 'B', date: '2026-07-25', status: '평가완료', owner: '미지정', verify: '미작성',
+        sections: [
+          { label: '사고 내용', value: '실러기 테이프 교체 중 가동 부위에 손이 근접함.' },
+          { label: '제안 대족', value: '교철 전 전원 차단 표식부착 및 LOTO 절차 적용.' },
+          { label: '조치 내용', value: '아직 등록되지 안은 상태입니다.' },
+        ] },
+    ];
+    const capaSel = capaData.find((r) => r.id === this.state.capaId) || capaData[0];
+
+    const ed = this.evalData;
+    const idx = Math.max(0, ed.findIndex((r) => r.id === this.state.evalId));
+    const evalSel = ed[idx];
+    const stepLabels = ['제출', '검토중', '평가완료', '종결'];
+
+    const ID_COLS = [['사번', 96, 0], ['성명', 82, 96], ['부서', 104, 178], ['조', 52, 282]];
+    const idCell = (i, w, left, mono) =>
+      `position:sticky;left:${left}px;z-index:1;width:${w}px;min-width:${w}px;padding:0 10px;height:30px;background:#fff;border-right:1px solid ${i === 3 ? '#cfc8bd' : '#efece6'};border-bottom:1px solid #efece6;font-size:${mono ? '11.5px' : '12.5px'};${mono ? "font-family:'IBM Plex Mono',monospace;" : ''}color:${mono ? '#8b857c' : '#1c1a17'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis`;
+
+    const rosterIdCols = ID_COLS.map(([label, w, left], i) => ({
+      label,
+      style: `position:sticky;top:0;left:${left}px;z-index:3;width:${w}px;min-width:${w}px;padding:0 10px;height:34px;text-align:left;background:#fbfaf8;border-right:1px solid ${i === 3 ? '#cfc8bd' : '#efece6'};border-bottom:1px solid #cfc8bd;font-size:11px;font-weight:600;color:#8b857c;white-space:nowrap`,
+    }));
+
+    const rosterDays = Array.from({ length: 31 }, (_, i) => {
+      const dow = DOW[i % 7];
+      const weekend = dow === '토' || dow === '일';
+      return {
+        num: i + 1, dow,
+        headStyle: `position:sticky;top:0;z-index:2;padding:3px 2px;min-width:34px;text-align:center;background:${weekend ? '#f4f2ee' : '#fbfaf8'};border-bottom:1px solid #cfc8bd;border-right:1px solid #efece6;color:${dow === '일' ? '#9c3232' : dow === '토' ? '#2f4d99' : '#8b857c'};font-weight:600`,
+      };
+    });
+
+    const grid = this.state.grid;
+    const TEAMS = ['A조', 'A조', 'A조', 'A조', 'A조', 'B조', 'B조', 'B조', 'C조', 'C조', 'C조', 'C조'];
+    const rosterRows = EMP.map(([no, name], r) => ({
+      no, name,
+      dept: r < 8 ? 'PET생산부' : 'PET원료실',
+      team: TEAMS[r],
+      noStyle: idCell(0, 96, 0, true),
+      nameStyle: idCell(1, 82, 96),
+      deptStyle: idCell(2, 104, 178),
+      teamStyle: idCell(3, 52, 282),
+      cells: grid[r].map((k, i) => ({
+        label: k,
+        onCycle: () => {
+          const next = grid.map((row, ri) => (ri === r ? row.map((v, ci) => (ci === i ? ORDER[(ORDER.indexOf(v) + 1) % ORDER.length] : v)) : row));
+          this.setState({ grid: next, dirty: this.state.dirty + 1 });
+        },
+        style: `padding:0;height:30px;min-width:34px;text-align:center;font-size:11.5px;font-weight:600;cursor:pointer;border-right:1px solid #efece6;border-bottom:1px solid #efece6;background:${SHIFT[k][0]};color:${SHIFT[k][1]}`,
+      })),
+    }));
+    const filled = grid.reduce((n, row) => n + row.filter(Boolean).length, 0);
+
+    const calCells = [];
+    for (let i = 0; i < 2; i++) calCells.push({ cellStyle: 'min-height:78px;border-radius:9px;background:transparent' });
+    for (let d = 1; d <= 31; d++) {
+      const dow = DOW[(d - 1) % 7];
+      const k = CYCLE[(d - 1) % CYCLE.length];
+      const today = d === 30;
+      calCells.push({
+        num: d, shift: k,
+        cellStyle: `min-height:78px;padding:8px;border-radius:9px;display:flex;flex-direction:column;gap:6px;border:1px solid ${today ? '#c2410c' : '#e0dbd2'};background:${today ? 'rgba(255,255,255,.75)' : 'transparent'}`,
+        numStyle: `font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;color:${dow === '일' ? '#9c3232' : dow === '토' ? '#2f4d99' : '#a09a90'}`,
+        chipStyle: chip(k, true),
+      });
+    }
+
+    const users = [
+      ['admin', '관리자', '관리자 · ADMIN', '—', '관리자', 0, false],
+      ['2008082501', '황봉준', 'PET생산부 · PET', 'A조', '조원', 1, true],
+      ['2008110301', '고중수', 'PET생산부 · PET', 'A조', '조장', 2, true],
+      ['2009051001', '김복한', 'PET생산부 · PET', 'A조', '조원', 3, true],
+      ['2010041401', '김은복', 'PET생산부 · PET', 'A조', '조원', 4, true],
+      ['2019010102', '서경민', 'PET생산부 · PET', 'A조', '조원', 5, true],
+      ['2019030104', '배철현', 'PET생산부 · PET', 'B조', '조원', 6, true],
+      ['2019100106', '강태철', 'PET생산부 · PET', 'B조', '조장', 7, true],
+      ['2019111101', '샤르마', 'PET원료실 · MTRL', 'C조', '조원', 8, true],
+      ['2019120901', '딴신', 'PET원료실 · MTRL', 'C조', '조원', 9, true],
+    ];
+    const ROLE = { '관리자': ['#fdf3ec', '#b4451a'], '조장': ['#eef2fb', '#2f4d99'], '조원': ['#f4f2ee', '#6b665d'] };
+
+    const th = (label, align, pad) => ({
+      label,
+      style: `text-align:${align};padding:12px ${pad}px 12px ${pad === 14 ? 0 : pad}px;font-size:12.5px;font-weight:600;color:#7c7669;border-bottom:1px solid #cfc8bd;white-space:nowrap`,
+    });
+
+    const orgData = [
+      { title: '그룹', count: 4, footer: '총 4건', flex: '1 1 300px', rows: [['PET', 'PET', 1, true, true], ['PVC', 'PVC', 2, true], ['DECO', 'DECO', 3, true], ['ADMIN', '관리', 999, true]] },
+      { title: '부서', count: 2, parent: 'PET', footer: '총 2건', flex: '1 1 300px', rows: [['PET', 'PET생산부', 1, true, true], ['MTRL', 'PET원료실', 4, true]] },
+      { title: '조', count: 3, parent: 'PET생산부', footer: '총 3건', flex: '1 1 300px', rows: [['A', 'A조', 1, true], ['B', 'B조', 2, true], ['C', 'C조', 3, true]] },
+    ];
+
+    const types = [
+      ['DAY', '주간', '주간', '주', '08:00 – 20:00', '#2f4d99', true, '주간 정규 근무', 10],
+      ['NIGHT', '야간', '야간', '야', '20:00 – 08:00', '#9c3232', true, '야간 정규 근무', 20],
+      ['OFF', 'OFF', 'OFF', 'OFF', '—', '#8b857c', false, '휴무', 30],
+      ['ANNUAL', '연차', '휴가', '연차', '—', '#2f6b45', false, '연차 휴가', 40],
+      ['MATERNITY', '출산휴가', '휴가', '출산', '—', '#8a5cb4', false, '출산휴가', 50],
+      ['TRAINING', '훈련', '교육', '훈련', '—', '#2f7b8a', false, '교육 및 훈련', 60],
+    ];
+
+    return {
+      navGroups, expanded,
+      toggleSidebar: () => this.setState({ collapsed: !this.state.collapsed }),
+      navStyle: `flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;padding:12px ${expanded ? 10 : 4}px 10px;display:flex;flex-direction:column;gap:${expanded ? 12 : 8}px`,
+      sidebarStyle: `width:${expanded ? '234px' : '66px'};flex:0 0 ${expanded ? '234px' : '66px'};display:flex;flex-direction:column;overflow:hidden;background:#1a1917;color:#cfc9be;transition:width .16s ease`,
+      brandStyle: `padding:${expanded ? '16px' : '14px 8px'};display:flex;flex-direction:${expanded ? 'row' : 'column'};align-items:center;gap:${expanded ? '10px' : '8px'};border-bottom:1px solid #2b2925`,
+      userBarStyle: `padding:${expanded ? '12px 14px' : '12px 8px'};border-top:1px solid #2b2925;display:flex;flex-direction:${expanded ? 'row' : 'column'};align-items:center;gap:${expanded ? '10px' : '8px'}`,
+
+      pageTitle: cur.title, pageDesc: cur.desc, crumb: cur.crumb, crumbRoot: cur.root,
+      showEnvBadge: this.props.showEnvBadge ?? true,
+      isEval: s === 'eval', isMine: s === 'mine', isForm: s === 'form', isAnalytics: s === 'analytics',
+      isRoster: s === 'roster', isMySched: s === 'mysched', isUsers: s === 'users', isOrg: s === 'org', isShiftTypes: s === 'shifttypes',
+      isCapa: s === 'capa',
+
+      capaKpis: [
+        { label: '종결 대기', value: 2, unit: '건', note: 'PENDING CLOSE', accent: true },
+        { label: '확인 완료', value: 0, unit: '건', note: 'VERIFIED' },
+        { label: '진행·미작성', value: 2, unit: '건', note: 'IN PROGRESS' },
+        { label: '기한초과', value: 0, unit: '건', note: 'OVERDUE' },
+      ].map((k) => ({
+        ...k,
+        style: `flex:1 1 150px;min-width:0;display:flex;flex-direction:column;gap:5px;padding:0 18px;border-left:2px solid ${k.accent ? '#c2410c' : '#e0dbd2'}`,
+        valueStyle: `font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;letter-spacing:-0.03em;color:${k.accent ? '#b4451a' : '#14130f'}`,
+      })),
+      capaRows: capaData.map((r) => {
+        const on = r.id === this.state.capaId;
+        return {
+          shortId: r.id.slice(-4), title: r.title, grade: r.grade,
+          onSelect: set('capaId', r.id),
+          chipStyle: `display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;cursor:pointer;border:1px solid ${on ? '#c2410c' : '#e6e2da'};background:${on ? '#c2410c' : 'rgba(255,255,255,.6)'};color:${on ? '#fff' : '#4a453d'}`,
+          gradeStyle: `font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px;background:${on ? 'rgba(255,255,255,.22)' : '#f1eee8'};color:${on ? '#fff' : '#8a6212'}`,
+        };
+      }),
+      capa: {
+        id: capaSel.id, title: capaSel.title, status: capaSel.status,
+        pillStyle: pill(capaSel.status),
+        meta: [
+          { label: '확정등급', value: capaSel.grade, style: 'font-size:13.5px;font-weight:600;color:#b4451a' },
+          { label: '평가일', value: capaSel.date, style: "font-size:13.5px;font-weight:500;font-family:'IBM Plex Mono',monospace" },
+          { label: '조치 담당자', value: capaSel.owner, style: `font-size:13.5px;font-weight:500;color:${capaSel.owner === '미지정' ? '#9c3232' : '#1c1a17'}` },
+          { label: '확인상태', value: capaSel.verify, style: 'font-size:13.5px;font-weight:500' },
+        ],
+        sections: capaSel.sections.map((sec, i) => ({ ...sec, ...this.block(sec.label, i) })),
+      },
+
+      rosterFilters: [
+        { label: '연도', value: '2026' }, { label: '월', value: '7월' },
+        { label: '부서', value: 'PET생산부' }, { label: '조', value: 'A조' },
+      ],
+      shiftLegend: ['주', '야', 'OFF', '연차'].map((k) => ({ label: k, style: chip(k) })),
+      rosterDays, rosterRows, rosterIdCols,
+      rosterStat: `인원 ${EMP.length} · 입력 ${filled} · 미입력 ${EMP.length * 31 - filled}`,
+      rosterDirty: this.state.dirty,
+      rosterKeys: [['1', '주'], ['2', '야'], ['3', 'OFF'], ['4', '연차']].map(([key, label]) => ({
+        label: `${key} ${label}`,
+        style: "display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,.6);border:1px solid #e2ddd4;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b665d",
+      })),
+
+      weekHeads: ['월', '화', '수', '목', '금', '토', '일'].map((w) => ({
+        label: w,
+        style: `text-align:center;padding:6px 0 10px;font-size:11.5px;font-weight:600;color:${w === '일' ? '#9c3232' : w === '토' ? '#2f4d99' : '#8b857c'}`,
+      })),
+      calCells,
+      myTotals: [
+        { label: '주간', value: '10일', color: '#2f4d99' },
+        { label: '야간', value: '11일', color: '#9c3232' },
+        { label: 'OFF', value: '10일', color: '#a8a29a' },
+      ].map((t) => ({ ...t, dotStyle: `width:8px;height:8px;border-radius:3px;background:${t.color}` })),
+
+      userCols: [th('사번', 'left', 14), th('성명', 'left', 14), th('부서', 'left', 14), th('조', 'left', 14), th('권한', 'left', 14), th('표시순서', 'right', 14), th('재직', 'left', 14)],
+      userRows: users.map(([no, name, dept, team, role, order, active]) => ({
+        no, name, dept, team, role, order: order || '—',
+        active: active ? '재직' : '보호',
+        rowStyle: `background:${no === 'admin' ? 'rgba(255,255,255,.55)' : 'transparent'}`,
+        roleStyle: `display:inline-flex;padding:3px 11px;border-radius:999px;font-size:12.5px;font-weight:600;background:${ROLE[role][0]};color:${ROLE[role][1]}`,
+        activeStyle: `display:inline-flex;padding:3px 11px;border-radius:999px;font-size:12.5px;font-weight:600;background:${active ? '#eef5f0' : '#f4f2ee'};color:${active ? '#2f6b45' : '#8b857c'}`,
+      })),
+
+      orgPanels: orgData.map((p, i) => ({
+        title: p.title, count: p.count, parent: p.parent, footer: p.footer,
+        style: `flex:${p.flex};min-width:0;display:flex;flex-direction:column;padding-left:${i ? 22 : 0}px;border-left:${i ? '1px solid #e0dbd2' : '0'}`,
+        rows: p.rows.map(([code, name, order, use, sel]) => ({
+          code, name, order, use: use ? '사용' : '중지',
+          rowStyle: `background:${sel ? 'rgba(194,65,12,.05)' : 'transparent'}`,
+          useStyle: `display:inline-flex;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;background:${use ? '#eef5f0' : '#f4f2ee'};color:${use ? '#2f6b45' : '#8b857c'}`,
+        })),
+      })),
+
+      typeCols: [th('코드', 'left', 14), th('명칭', 'left', 10), th('분류', 'left', 10), th('약칭', 'left', 10), th('시간', 'left', 10), th('색상', 'left', 10), th('실근무', 'left', 10), th('설명', 'left', 10), th('표시순서', 'right', 14)],
+      typeRows: types.map(([code, name, kind, abbr, time, hex, work, desc, order]) => ({
+        code, name, kind, abbr, time, hex, desc, order,
+        work: work ? '실근무' : '비근무',
+        kindStyle: 'display:inline-flex;padding:3px 10px;border-radius:6px;font-size:12.5px;font-weight:600;background:#f4f2ee;color:#6b665d',
+        chipStyle: chip(SHIFT[abbr] ? abbr : 'OFF'),
+        swatchStyle: `width:16px;height:16px;border-radius:4px;background:${hex}`,
+        workStyle: `display:inline-flex;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:600;background:${work ? '#eef2fb' : '#f4f2ee'};color:${work ? '#2f4d99' : '#8b857c'}`,
+      })),
+
+      evalRows: ed.map((r) => {
+        const on = r.id === this.state.evalId;
+        return {
+          shortId: r.id.slice(-4), title: r.title,
+          onSelect: set('evalId', r.id),
+          chipStyle: `display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;cursor:pointer;border:1px solid ${on ? '#c2410c' : '#e6e2da'};background:${on ? '#c2410c' : '#fbfaf8'};color:${on ? '#fff' : '#4a453d'}`,
+          dotStyle: `width:6px;height:6px;border-radius:50%;background:${on ? 'rgba(255,255,255,.7)' : DOT[r.status]}`,
+        };
+      }),
+      evalPos: `${idx + 1} / ${ed.length}`,
+      evalPrev: () => this.setState({ evalId: ed[(idx - 1 + ed.length) % ed.length].id }),
+      evalNext: () => this.setState({ evalId: ed[(idx + 1) % ed.length].id }),
+      detail: {
+        id: evalSel.id, title: evalSel.title, status: evalSel.status,
+        pillStyle: pill(evalSel.status),
+        meta: [
+          { label: '발생일', value: evalSel.date, style: "font-size:13.5px;font-weight:500;font-family:'IBM Plex Mono',monospace" },
+          { label: '신고자', value: evalSel.reporter, style: 'font-size:13.5px;font-weight:500' },
+          { label: '부서', value: evalSel.dept, style: 'font-size:13.5px;font-weight:500' },
+          { label: '제안등급', value: evalSel.grade, style: 'font-size:13.5px;font-weight:600;color:#b4451a' },
+        ],
+        sections: evalSel.sections.map((sec, i) => ({ ...sec, ...this.block(sec.label, i) })),
+      },
+      gradeOptions: ['S', 'A', 'B', 'C', 'D'].map((g) => ({
+        label: g,
+        onSelect: set('grade', g),
+        style: `width:46px;text-align:center;padding:9px 0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid ${g === this.state.grade ? '#c2410c' : '#e2ddd4'};background:${g === this.state.grade ? '#c2410c' : '#fff'};color:${g === this.state.grade ? '#fff' : '#6b665d'}`,
+      })),
+
+      myRows: this.myData.map((r) => {
+        const open = r.id === this.state.openId;
+        return {
+          ...r, open,
+          pillStyle: pill(r.status),
+          onSelect: () => this.setState({ openId: open ? null : r.id }),
+          cardStyle: `border-bottom:1px solid #e0dbd2;box-shadow:${open ? 'inset 3px 0 0 #c2410c' : 'none'};background:${open ? 'rgba(255,255,255,.5)' : 'transparent'}`,
+          caretStyle: `font-size:16px;color:#b4aea4;transform:rotate(${open ? '90deg' : '0deg'})`,
+          sections: r.sections.map((sec, i) => ({ ...sec, ...this.block(sec.label, i) })),
+          steps: stepLabels.map((l, i) => ({
+            label: l,
+            style: `display:flex;align-items:center;gap:7px;font-size:12px;padding:6px 14px 6px 12px;border-radius:999px;background:${i < r.step ? '#fdf3ec' : '#f7f5f1'};color:${i < r.step ? '#b4451a' : '#a8a29a'};font-weight:${i < r.step ? 600 : 400}`,
+            dotStyle: `width:6px;height:6px;border-radius:50%;background:${i < r.step ? '#c2410c' : '#d5cfc5'}`,
+          })),
+        };
+      }),
+
+      checklist: ['작업명', '발생일', '발생원인', '발생원인 상세', '사고내용', '작업내용', '예방대책', '작업현장 상황설명'],
+
+      kpis: [
+        { label: '총 건수', value: 5, unit: '건', note: 'ALL' },
+        { label: '평가 대기', value: 3, unit: '건', note: 'PENDING', accent: true },
+        { label: '검토중', value: 0, unit: '건', note: 'IN REVIEW' },
+        { label: '평가완료', value: 2, unit: '건', note: 'DONE' },
+        { label: '기한초과', value: 0, unit: '건', note: 'OVERDUE' },
+        { label: '보고서 종결률', value: '0', unit: '%', note: 'CLOSED' },
+      ].map((k) => ({
+        ...k,
+        style: `flex:1 1 130px;min-width:0;display:flex;flex-direction:column;gap:5px;padding:0 18px;border-left:2px solid ${k.accent ? '#c2410c' : '#e0dbd2'}`,
+        valueStyle: `font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;letter-spacing:-0.03em;color:${k.accent ? '#b4451a' : '#14130f'}`,
+      })),
+
+      charts: [
+        { title: '등급별 분포', meta: '총 5건', rows: [['S', 0, 0], ['A', 1, 20], ['B', 1, 20], ['C', 0, 0], ['D', 0, 0], ['미확정', 3, 60]], color: '#c2410c' },
+        { title: '상태별 분포', meta: '총 5건', rows: [['제출됨', 3, 60], ['검토중', 0, 0], ['평가완료', 2, 40], ['종결', 0, 0], ['반려', 0, 0]], color: '#2f6b45' },
+        { title: '발생원인별 분포', meta: '총 5건', rows: [['미끄러짐', 2, 40], ['화상', 1, 20], ['추락', 1, 20], ['충돌', 1, 20]], color: '#8a6212' },
+        { title: '월별 발생 추이', meta: '2026-Q3', rows: [['2026-05', 0, 0], ['2026-06', 0, 0], ['2026-07', 5, 100]], color: '#2f4d99' },
+      ].map((c) => ({
+        title: c.title, meta: c.meta,
+        rows: c.rows.map(([label, count, pct]) => ({ label, count, pct: pct + '%', barStyle: `width:${pct}%;height:100%;border-radius:999px;background:${c.color}` })),
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>
