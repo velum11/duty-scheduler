@@ -18,9 +18,25 @@ from st_aggrid import AgGrid, DataReturnMode, GridOptionsBuilder, JsCode
 
 from modules import db, nav, ui
 from views.common import erp
-from views.master import icon_toolbar_specs  # KPtech 아이콘 툴바 스펙 빌더(공통 계약)
 
 ALL = "(전체)"
+
+# §1-C 읽기 변형(월간 근무표) 전용 CSS — 조건 줄 헤어라인·컨텍스트 라인(모노 수치)·
+# 표 흰 컨테이너(1px #cfc8bd·radius 8·내부 스크롤). 작은 의미 텍스트 ≥#6b665d(A-2), §2 팔레트.
+_SV_CSS = """
+<style>
+.sv-hr { border-top:1px solid #e0dbd2; margin:2px 0 10px; }
+.sv-ctx { display:flex; flex-wrap:wrap; align-items:center; gap:4px 14px; margin:2px 0 10px;
+  font-size:12.5px; color:#4a453d; }
+.sv-ctx .loc { font-weight:600; color:#1c1a17; }
+.sv-ctx .num { font-family:'IBM Plex Mono',monospace; font-weight:600; color:#1c1a17; }
+.sv-ctx .sep { color:#a09a90; margin:0 2px; }
+.st-key-sv_gridwrap [data-testid="stCustomComponentV1"],
+.st-key-sv_gridwrap div[data-testid="stAgGrid"] {
+  border:1px solid #cfc8bd; border-radius:8px; overflow:hidden; background:#ffffff;
+}
+</style>
+"""
 RETIRED_LABEL = "(퇴직)"
 # 퇴직 행 배경/글자색 — master_users.py 의 .ms-row-inactive 와 동일 토큰
 # (surface-3 / ink-2, views/master/style.py TOKENS) 로 화면 간 시각 일관성을 맞춘다.
@@ -838,33 +854,11 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
     manager_locked = user["role"] == "MANAGER" and user.get("dept_code")
 
-    # 영역 순서(§0.3): title(screen_frame, 호출부 소관 — 밴드 아이콘 툴바 포함) → conditions.
-    # 조회/새로고침은 상단 파랑 밴드의 search 아이콘 하나로 통합했다(인페이지 pill 제거).
-    # 클릭은 on_click 플래그({page_id}_go_req)로 남겨(위젯 렌더 순서·경합과 무관하게 유실
-    # 없음) 여기서 소비한다 — 구 pill 의 clicked 게이트와 동일 의미. 추가·삭제·저장은 조회
-    # 전용 화면이라 N/A(shaded).
-    clicked = bool(st.session_state.pop(f"{page_id}_go_req", False))
-
-    # 화면 레벨 스켈레톤 표출 트리거 — 데이터 정체성(조회조건 q) 기준으로 전환을 판정한다.
-    # 통합 아이콘은 조회+새로고침을 겸하므로 클릭 시 세대값을 올려 강제 재조회(콜드 스켈레톤)
-    # 표출 대상에 포함한다(구 새로고침 pill 동작 보존 — 조회 결과 자체는 동일).
+    st.markdown(_SV_CSS, unsafe_allow_html=True)
+    # 영역 순서(§1-C 읽기): 조건 줄(condition_panel) + 우측 [조회] → 헤어라인 → 컨텍스트 라인
+    # → 표 → 범례. 조회/새로고침은 [조회] 버튼(구 밴드 search 아이콘 대체). 클릭 세대값을
+    # 올려 콜드 스켈레톤 표출 대상에 포함한다(구 새로고침 동작 보존 — 조회 결과 동일).
     _rg_key = f"{page_id}_refreshgen"
-    if clicked:
-        st.session_state[_rg_key] = st.session_state.get(_rg_key, 0) + 1
-    refresh_gen = st.session_state.get(_rg_key, 0)
-
-    if band is not None:
-        band.render_icons(icon_toolbar_specs(
-            page_id, info_content=nav.page_desc(page_id),
-            add={"key": f"{page_id}__add_na", "disabled": True,
-                 "help": "이 화면에서는 사용하지 않습니다"},
-            refresh={"key": f"{page_id}_go", "help": "조회/새로고침",
-                     "on_click": lambda: st.session_state.update({f"{page_id}_go_req": True})},
-            delete={"key": f"{page_id}__del_na", "disabled": True,
-                    "help": "이 화면에서는 사용하지 않습니다"},
-            save={"key": f"{page_id}__save_na", "disabled": True,
-                  "help": "이 화면에서는 사용하지 않습니다"},
-        ))
 
     # condition_panel 의 select Field 는 index/value 인자를 받지 않고 항상 위젯 key 의
     # 세션 상태에 의존한다 — 최초 렌더(키 미존재)에서 기존 selectbox(index=...) 와 같은
@@ -911,6 +905,15 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         erp.Field(key="kw", label="사번 또는 성명", kind="text"),
     ]
     v = erp.condition_panel(page_id, fields, cols=3)
+
+    # 조건 줄 우측 [조회] 버튼(§1-E 필터 스타일) → 헤어라인. 클릭이 조회/새로고침 트리거.
+    _lft, _rgt = st.columns([8.4, 1.4], vertical_alignment="center")
+    with _rgt:
+        clicked = st.button("조회", key=f"{page_id}_go", type="primary", width="stretch")
+    st.markdown("<div class='sv-hr'></div>", unsafe_allow_html=True)
+    if clicked:
+        st.session_state[_rg_key] = st.session_state.get(_rg_key, 0) + 1
+    refresh_gen = st.session_state.get(_rg_key, 0)
 
     q = run_query(
         page_id,
@@ -972,21 +975,17 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
             ui.empty_state("조회 조건에 해당하는 직원이 없습니다.", head="월별 근무표")
             return
 
-        # status — 요약(§0.3 영역 순서상 primary 뒤가 정본이나, 값 자체는 원 계약과 동일).
+        # §1-C 컨텍스트 라인 — YYYY-MM · 부서 · 조 · 인원·근무·실근무·휴무(모노 수치).
         wt = _work_types_map_from_df(wt_df)
         n_work = sum(1 for c in month_rows["work_type_code"] if wt.get(c, {}).get("is_work"))
-        erp.status_region([
-            ("대상 인원", f"{len(grid)}명"),
-            ("근무 데이터", f"{len(month_rows)}건"),
-            ("실근무", f"{n_work}건"),
-            ("휴무·휴가", f"{len(month_rows) - n_work}건"),
-        ])
-        st.write("")
+        st.markdown(
+            _view_context_html(q, dept_names, team_names, len(grid), len(month_rows), n_work),
+            unsafe_allow_html=True,
+        )
 
         # primary — 월간 근무표(근무 약칭 + 지정 색상, 읽기 전용).
         day_cols = [c for c in grid.columns if c[0].isdigit()]
         meta_cols = [c for c in grid.columns if c not in day_cols]
-        ui.panel_head("월간 근무표", f"조회 결과 {len(grid)}건")
 
         # 퇴직 플래그는 read_grid 의 row_rules 가 참조하는 hidden field 로만 싣는다 —
         # _build_month_grid(불변) 출력을 그대로 복사해 표시용으로만 부가하며, 다운로드용
@@ -1007,25 +1006,30 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         # 원래 st.dataframe(width="stretch") 의 자동 폭보다 좁아 "PET생산부(본동)" 같은
         # 긴 부서명이 잘렸다(scrollWidth>clientWidth 실측). 데이터·색은 그대로 두고
         # meta 컬럼만 넉넉한 폭으로 지정해 원 화면과 동등한 잘림 없는 표시를 보존한다.
+        # 신원 4열은 sticky left(pinned) — §1-C 편성표와 동일한 고정 신원 열. 폭은 pixel QA
+        # 실측값 유지(긴 부서명 잘림 방지). read_grid col_config 는 colDef 로 그대로 전달돼
+        # pinned 도 지원한다(jscode 불요).
         meta_col_config = {
-            "사번": {"width": 84},
-            "성명": {"minWidth": 108, "width": 108},
-            "부서": {"minWidth": 150, "width": 150},
-            "조": {"minWidth": 100, "width": 100},
+            "사번": {"width": 84, "pinned": "left"},
+            "성명": {"minWidth": 108, "width": 108, "pinned": "left"},
+            "부서": {"minWidth": 150, "width": 150, "pinned": "left"},
+            "조": {"minWidth": 100, "width": 100, "pinned": "left"},
         }
-        # skeleton=False: 콜드 로드 표출은 상위 grid_shell(prepare) 가 담당하므로 read_grid
-        # 내부 shell 은 끈다(이중 shell 방지). AgGrid 계약·key 는 그대로.
-        erp.read_grid(
-            grid_ui, columns=meta_cols + day_cols, key=f"{page_id}_grid",
-            color_rules=color_rules,
-            col_config={c: meta_col_config[c] for c in meta_cols if c in meta_col_config},
-            row_rules=[{
-                "when": "data['_retired'] === true",
-                "columns": meta_cols, "bg": retired_bg, "ink": retired_ink,
-            }],
-            hidden_fields=["_retired"],
-            skeleton=False,
-        )
+        # §1-C 표: 흰 컨테이너(1px #cfc8bd·radius 8·내부 스크롤) — 편성표와 동일 시각. 컨테이너
+        # 스타일은 iframe 바깥 래퍼(_SV_CSS 의 .st-key-sv_gridwrap)가 소유한다.
+        # skeleton=False: 콜드 로드 표출은 상위 grid_shell(prepare) 가 담당(이중 shell 방지).
+        with st.container(key="sv_gridwrap"):
+            erp.read_grid(
+                grid_ui, columns=meta_cols + day_cols, key=f"{page_id}_grid",
+                color_rules=color_rules,
+                col_config={c: meta_col_config[c] for c in meta_cols if c in meta_col_config},
+                row_rules=[{
+                    "when": "data['_retired'] === true",
+                    "columns": meta_cols, "bg": retired_bg, "ink": retired_ink,
+                }],
+                hidden_fields=["_retired"],
+                skeleton=False,
+            )
         st.markdown(_label_legend_html(display_of, color_of), unsafe_allow_html=True)
 
         # 사용자별 집계 (전체 근무표 조회)
@@ -1241,6 +1245,27 @@ def _retired_row_style(row: pd.Series) -> list[str]:
     is_retired = str(row.get("성명", "")).strip().endswith(RETIRED_LABEL)
     css = _RETIRED_ROW_CSS if is_retired else ""
     return [css] * len(row)
+
+
+def _view_context_html(q: dict, dept_names: dict, team_names: dict,
+                       n_people: int, n_rows: int, n_work: int) -> str:
+    """§1-C 컨텍스트 라인 — YYYY-MM · 부서 · 조 · 인원·근무·실근무·휴무(모노 수치)."""
+    ym = f"{int(q['year'])}-{int(q['month']):02d}"
+    dept = "전체 부서" if q.get("dept") == ALL else (dept_names.get(q.get("dept"), q.get("dept")) or "전체 부서")
+    team = "전체 조" if q.get("team") == ALL else (team_names.get(q.get("team"), q.get("team")) or "전체 조")
+    n_off = n_rows - n_work
+    return (
+        "<div class='sv-ctx'>"
+        f"<span class='num'>{escape(ym)}</span><span class='sep'>·</span>"
+        f"<span class='loc'>{escape(str(dept))}</span><span class='sep'>·</span>"
+        f"<span class='loc'>{escape(str(team))}</span>"
+        "<span class='sep'>|</span>"
+        f"<span>인원 <span class='num'>{n_people}</span>명</span>"
+        f"<span>근무 <span class='num'>{n_rows}</span>건</span>"
+        f"<span>실근무 <span class='num'>{n_work}</span>건</span>"
+        f"<span>휴무·휴가 <span class='num'>{n_off}</span>건</span>"
+        "</div>"
+    )
 
 
 def _label_legend_html(display_of: dict, color_of: dict) -> str:

@@ -9,19 +9,16 @@ SCREEN_ARCHETYPE = "READ_VIEW"
 
 from views import workspace
 from views.common import erp
-from views.common import scaffold
 
 
 def render(user: dict) -> None:
-    # toolbar="icons": 상단 파랑 밴드에 KPtech 아이콘 전용 툴바(근무표 편성·사용자 관리와
-    # 동일 표준). 밴드 핸들을 schedule_screen 으로 넘겨 조회/새로고침을 아이콘으로 채운다
-    # (인페이지 pill 제거). 조회조건·run_query 게이트·스켈레톤 로직은 schedule_screen 소관.
-    band = erp.screen_frame(
+    # §1-C 읽기 변형: 아이콘 밴드 제거(표준 아이콘 8종은 상단 52px 헤더가 소유 §A-5).
+    # 조회/새로고침은 조건 줄 우측 [조회] 버튼(schedule_screen 내부)이 담당한다. 조회조건·
+    # run_query 게이트·스코프·스냅샷·스켈레톤 로직은 schedule_screen 소관(데이터 경로 불변).
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="월간 근무표",
         desc="부서와 조를 선택하여 월별 근무표를 조회합니다.",
         breadcrumb="근무표 › 월간 근무표",
-        badges=scaffold.mode_badge(),
-        toolbar="icons",
     )
-    workspace.schedule_screen(user, "schedule_view", band=band)
+    workspace.schedule_screen(user, "schedule_view")
