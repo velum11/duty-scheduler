@@ -307,8 +307,11 @@ def test_editable_gate():
     check("성명 읽기전용 규칙(보호행)", "ms-cell-readonly" in cc["성명"]["cellClassRules"]
           and "_protected" in cc["성명"]["cellClassRules"]["ms-cell-readonly"])
     check("재직 읽기전용 규칙(보호행)", "ms-cell-readonly" in cc["재직"]["cellClassRules"])
-    # 재직 bool 은 native(cellDataType) — 화면에서 JsCode cellRenderer 를 지정하지 않는다.
-    check("재직 화면 JsCode 렌더러 미지정(native bool)", "cellRenderer" not in cc["재직"])
+    # §1-E: 재직은 pill 렌더러(재직/퇴직, §2 팔레트) — 편집은 불리언 체크박스(더블클릭). 값·저장
+    # 경로 불변(pill display-only). 권한도 pill 렌더러 + select 편집.
+    check("재직 §1-E pill 렌더러 지정(편집 계약 보존)", "cellRenderer" in cc["재직"])
+    check("권한 §1-E pill 렌더러 + select 편집 유지",
+          "cellRenderer" in cc["권한"] and cc["권한"].get("cellEditor") == "agSelectCellEditor")
 
     # 셀 오류/변경 마커는 읽기전용과 병존한다(약화 금지).
     check("사번 오류·변경 마커 병존", "ms-cell-error" in cc["사번"]["cellClassRules"]
@@ -439,8 +442,13 @@ def test_head_badges_compose():
 
 def test_readiness_gate_wired():
     src = inspect.getsource(mu.render)
-    check("헤더가 readiness 배지 조합(_head_badges) 사용", "_head_badges(readiness)" in src)
-    check("readiness 배너/재프로브 노출", "readiness.banner()" in src and "reset_org_schema_cache" in src)
+    # §1-E: 아이콘 밴드 제거로 헤더 배지 조합(_head_badges)은 더 이상 헤더에 붙지 않는다 —
+    # readiness 는 배너로, 데이터 연결 pill 은 상단 52px 셸 헤더가 소유(P1). 액션은 건수 행으로.
+    check("readiness 배너로 표면화(헤더 배지 조합 제거)",
+          "readiness.banner()" in src and "_head_badges(readiness)" not in src)
+    check("§1-E 액션 건수 행 이전(page_action_specs + action_requester)",
+          "page_action_specs(" in src and "action_requester(" in src and "toolbar=\"icons\"" not in src)
+    check("readiness 재프로브 노출", "reset_org_schema_cache" in src)
     check("저장 게이트가 readiness.write_enabled 로 통일", "ready = readiness.write_enabled" in src)
 
 

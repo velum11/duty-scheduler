@@ -108,6 +108,17 @@ _PROBE_ERROR_MSG = (
     "스키마 상태를 확인하지 못했습니다(권한·네트워크). '스키마 재확인' 후 다시 시도하세요."
 )
 
+# §1-E 건수 행 CSS(사용자 제목 + 건수 pill + 재직/퇴직 분해). §2 팔레트 리터럴.
+_MU_CSS = """
+<style>
+.mu-crow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.mu-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
+.mu-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
+  padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
+.mu-crow .dist { font-size:11.5px; color:#a09a90; white-space:nowrap; }
+</style>
+"""
+
 
 # ---------------------------------------------------------------------------
 # 표시↔코드 변환 도메인 헬퍼 (이 화면 소유 — 조직/근무형태와 공유되는 계약 아님)
@@ -460,6 +471,56 @@ _NAME_STATUS_RENDERER = JsCode(
 
 
 # ---------------------------------------------------------------------------
+# §1-E pill 셀 렌더러 (권한·재직) — §2 배지 팔레트(bg/text/border, radius 999, 12.5/600).
+# 렌더러는 표시만(편집은 각 컬럼의 cellEditor: 권한=select, 재직=checkbox 더블클릭). 저장값은
+# 그대로 반환되므로 저장/검증/삭제 경로 불변(pill 은 display-only).
+# ---------------------------------------------------------------------------
+_ROLE_PILL_RENDERER = JsCode(
+    """
+    (class {
+      init(p){
+        var pal = {'관리자':['#fdf3ec','#b4451a','#f0dfd0'],
+                   '조장':['#eef2fb','#2f4d99','#dbe3f4'],
+                   '조원':['#f2f0ec','#5c564d','#e4e0d8']};
+        var v = (p.value == null) ? '' : String(p.value).trim();
+        var e = document.createElement('span');
+        if(v && pal[v]){
+          var c = pal[v];
+          e.style.cssText = 'display:inline-flex;align-items:center;padding:3px 11px;'
+            + 'border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;'
+            + 'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';white-space:nowrap';
+          e.textContent = v;
+        } else { e.textContent = v; }
+        this.eGui = e;
+      }
+      getGui(){ return this.eGui; }
+      refresh(){ return false; }
+    })
+    """
+)
+
+_ACTIVE_PILL_RENDERER = JsCode(
+    """
+    (class {
+      init(p){
+        var on = (p.value === true || p.value === 1 || p.value === '1'
+                  || p.value === 'true' || p.value === 'Y' || p.value === '재직');
+        var c = on ? ['#eef5f0','#2f6b45','#d8e6dd'] : ['#f2f0ec','#5c564d','#e4e0d8'];
+        var e = document.createElement('span');
+        e.style.cssText = 'display:inline-flex;align-items:center;padding:3px 11px;'
+          + 'border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;'
+          + 'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';white-space:nowrap';
+        e.textContent = on ? '재직' : '퇴직';
+        this.eGui = e;
+      }
+      getGui(){ return this.eGui; }
+      refresh(){ return false; }
+    })
+    """
+)
+
+
+# ---------------------------------------------------------------------------
 # 세션 오류/결과 메타 (실패 시 draft 보존 + 셀/배너 표시 — 재적재 없이 메타만 갱신 §25)
 # ---------------------------------------------------------------------------
 def _store_errors(state: DraftState, messages: list, cell_errors: dict) -> None:
@@ -764,16 +825,14 @@ def render(user: dict) -> None:
     teams_json = json.dumps(_dept_team_options(teams, dept_labels), ensure_ascii=False)
 
     readiness = _readiness()
-    # toolbar="icons": 헤더 파랑 밴드에 KPtech 아이콘 전용 툴바(정보·globe·추가·조회·삭제·
-    # 인쇄·저장·즐겨찾기) 슬롯을 만들고 핸들을 받는다. 아이콘은 그리드 뒤 건수 계산 후
-    # band.render_icons 로 채운다(dirty/선택 정확). 파일럿(사용자 관리·근무표 편성) 전용.
-    band = erp.screen_frame(
+    st.markdown(_MU_CSS, unsafe_allow_html=True)
+    # §1-E 표형(구조 교체) — 아이콘 밴드 제거(§0-3). 실기능 액션(행 추가·삭제·저장·새로고침)은
+    # 건수 행 우측으로 이전하고, 그리드 저장/dirty/2단계 삭제 계약은 전부 보존(표현 계층만).
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="사용자 관리",
         desc="사번·소속·권한을 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
         breadcrumb="기준정보 › 사용자 관리",
-        badges=_head_badges(readiness),
-        toolbar="icons",
     )
     # readiness 배너(NOT_READY/PROBE_ERROR 만) + 확인 실패 시 재프로브 — 조직 화면과 동일 UX(§25).
     readiness.banner()
@@ -807,8 +866,11 @@ def render(user: dict) -> None:
             erp.Field(key="search", label="검색", kind="text",
                      widget_key=_F_SEARCH, placeholder="사번·성명 검색"),
         ],
-        cols=2,
+        cols=4,  # §1-E 4열 필터(재직/부서/권한/검색)
     )
+    # §1-E: 필터 줄 → 헤어라인 → (건수 행 + 표)
+    st.markdown("<div style='border-top:1px solid #e0dbd2;margin:2px 0 8px;'></div>",
+                unsafe_allow_html=True)
     params = {
         "active": cond["active"], "dept": cond["dept"], "role": cond["role"],
         "search": str(cond["search"]).strip(),
@@ -821,13 +883,14 @@ def render(user: dict) -> None:
         _load_editor(state, params, dept_names, team_display)
     # CONFIRM/KEEP: 현재 draft 유지(재적재 안 함).
 
-    # 요약 칩(읽기 전용): 로드된 결과의 재직/퇴직 분포.
     rows = state.get_rows()
     if rows is None:
         _load_editor(state, params, dept_names, team_display)
         rows = state.get_rows()
-    _render_summary_chips(rows, params, dept_names)
 
+    # §1-E 건수 행(제목 + 건수 pill + 재직/퇴직 + 우측 액션) — sel/dirty 는 그리드 뒤 확정이라
+    # 슬롯만 잡고 나중에 채운다(icon band 와 동일한 deferred 패턴 + 동일 액션 flag 계약).
+    count_row_slot = st.container()
     banner_slot = st.container()   # 배너(삭제 확인/폐기 확인/원장/오류/flash 중 1)
 
     # ---- 그리드 표시 프레임(권위 rows + 상태 view-model) ----
@@ -867,33 +930,48 @@ def render(user: dict) -> None:
 
     state.set_dirty(total_dirty > 0)
 
-    # ---- 아이콘 툴바 채움(상단 파랑 밴드 슬롯에 지연 채움) ----
-    # 활성/비활성·툴팁 사유는 인페이지 규칙(page_action_specs)을 그대로 계산해 쓰고, 클릭은
-    # 인페이지와 동일한 state.action_requester(role) on_click 플래그 + {page_id}__{role} 키로
-    # 남긴다(저장/삭제/추가/새로고침 경로·2단계 삭제 확인 무변경 — 렌더만 아이콘으로 이전).
+    # ---- §1-E 건수 행 채움(deferred) — 좌: 사용자 + 건수 pill + 재직/퇴직, 우: 행 추가·삭제·
+    #      저장·새로고침. 활성/사유/라벨은 page_action_specs(인페이지 규칙 그대로), 클릭은 동일
+    #      on_click 플래그(state.action_requester) + {page_id}__{role} 키(저장/삭제/추가/새로고침
+    #      경로·2단계 삭제 확인 무변경 — 렌더 위치만 §1-E 건수 행으로 이전). §8 색 규칙은 role-key
+    #      class([class*="__save"] 등)로 자동 적용(저장=오렌지 primary·삭제=위험 outline).
     can_save = ready or not has_order
-    if band is not None:
-        specs = page_action_specs(
-            sel_count=sel_count, dirty_total=total_dirty, can_save=can_save,
-            save_disabled_reason=(
-                None if can_save else "표시순서 기능이 준비되면 저장할 수 있습니다 — 시스템 관리자에게 문의하세요"
-            ),
-        )
-        by_role = {s["role"]: s for s in specs}
+    specs = page_action_specs(
+        sel_count=sel_count, dirty_total=total_dirty, can_save=can_save,
+        save_disabled_reason=(
+            None if can_save else "표시순서 기능이 준비되면 저장할 수 있습니다 — 시스템 관리자에게 문의하세요"
+        ),
+    )
+    by_role = {s["role"]: s for s in specs}
+    active_ct = int(existing["재직"].map(grid_bool).sum()) if not existing.empty else 0
+    retired_ct = len(existing) - active_ct
+    with count_row_slot:
+        ci, ca, cd, cs, cr = st.columns([4.8, 1.15, 1.05, 1.35, 1.15],
+                                        vertical_alignment="center")
+        with ci:
+            dist = (f"<span class='dist'>재직 {active_ct} · 퇴직 {retired_ct}</span>"
+                    if not existing.empty else "")
+            st.markdown(
+                f"<div class='mu-crow'><span class='t'>사용자</span>"
+                f"<span class='pill'>{len(existing)}</span>{dist}</div>",
+                unsafe_allow_html=True,
+            )
 
-        def _icon_action(role: str, name: str) -> dict:
-            # 아이콘 전용 tooltip: 활성=기능명(발견성) / 비활성=사유(page_action_specs).
+        def _act(colobj, role: str, name: str, primary: bool = False) -> None:
             s = by_role[role]
-            return {"key": f"{PAGE_ID}__{role}", "on_click": state.action_requester(role),
-                    "disabled": s["disabled"], "help": (s["help"] or name) if s["disabled"] else name}
+            colobj.button(
+                s["label"] if role in (SAVE,) else name,
+                key=f"{PAGE_ID}__{role}", width="stretch",
+                type="primary" if primary else "secondary",
+                icon=s.get("icon"), disabled=s["disabled"],
+                help=(s["help"] or name) if s["disabled"] else None,
+                on_click=state.action_requester(role),
+            )
 
-        band.render_icons(icon_toolbar_specs(
-            PAGE_ID, info_content=nav.page_desc("master_users"),
-            add=_icon_action(ADD, "행 추가"),
-            refresh=_icon_action(REFRESH, "조회/새로고침"),
-            delete=_icon_action(DELETE, "삭제"),
-            save=_icon_action(SAVE, "저장"),
-        ))
+        _act(ca, ADD, "행 추가")
+        _act(cd, DELETE, "삭제")
+        _act(cs, SAVE, "저장", primary=True)
+        _act(cr, REFRESH, "새로고침")
 
     # ---- 배너(우선순위: 삭제 확인 > 폐기 확인 > 결과 원장 > 오류 > flash) ----
     with banner_slot:
@@ -944,34 +1022,45 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str) -> MasterGrid
         "사번": {"width": 128, "minWidth": 104, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY,
                 "cellClassRules": _cell_rules("사번", readonly=_IS_PROTECTED_JS)},
+        # §1-E 본문 14.5~15px — 읽기 컬럼에 cellStyle fontSize 지정(공용 GRID_CSS 13px 오버라이드,
+        # inline > class). 사번/표시순서는 모노 ID라 13.5px 유지.
         "성명": {"width": 132, "minWidth": 100, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED,
+                "cellStyle": {"fontSize": "14.5px"},
                 "cellRenderer": _NAME_STATUS_RENDERER,
                 "cellClassRules": _cell_rules("성명", readonly=_IS_PROTECTED_JS)},
         "부서": {"flex": 1, "minWidth": 168, "cellClass": "md-c-left ms-cell-select",
                 "editable": _EDIT_UNLESS_PROTECTED,
+                "cellStyle": {"fontSize": "14.5px"},
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": _dept_option_values(state)},
                 "cellRenderer": _dept_renderer(hint_json),
                 "cellClassRules": _cell_rules("부서", readonly=_IS_PROTECTED_JS)},
         "조": {"width": 130, "minWidth": 96, "cellClass": "md-c-left ms-cell-select",
               "editable": _EDIT_UNLESS_PROTECTED,
+              "cellStyle": {"fontSize": "14.5px"},
               "cellEditor": "agSelectCellEditor",
               "cellEditorParams": _team_editor_params(teams_json),
               "cellClassRules": _cell_rules("조", readonly=_IS_PROTECTED_JS)},
         "직급": {"width": 96, "minWidth": 72, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED,
+                "cellStyle": {"fontSize": "14.5px"},
                 "cellClassRules": _cell_rules("직급", readonly=_IS_PROTECTED_JS)},
-        "권한": {"width": 100, "minWidth": 80, "cellClass": "md-c-center ms-cell-select",
+        # 권한 = §1-E pill 렌더러(관리자/조장/조원, §2 팔레트) + select 편집(더블클릭). 편집 계약 보존.
+        "권한": {"width": 104, "minWidth": 84, "cellClass": "md-c-center ms-cell-select",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": list(_LABEL_TO_ROLE)},
+                "cellRenderer": _ROLE_PILL_RENDERER,
                 "cellClassRules": _cell_rules("권한", readonly=_IS_PROTECTED_JS)},
         "표시순서": {"width": 92, "minWidth": 72, "maxWidth": 120, "cellClass": "md-c-center ms-num",
                  "editable": _EDIT_UNLESS_PROTECTED,
                  "cellClassRules": _cell_rules("표시순서", readonly=_IS_PROTECTED_JS)},
-        "재직": {"width": 74, "minWidth": 64, "cellClass": "md-c-center",
+        # 재직 = §1-E pill 렌더러(재직/퇴직, §2 팔레트) + 불리언 체크박스 편집(더블클릭). 값은 그대로
+        # 반환되어 is_active 저장·2단계 삭제(퇴직) 경로 불변(pill 은 display-only).
+        "재직": {"width": 82, "minWidth": 68, "cellClass": "md-c-center",
                 "editable": _EDIT_UNLESS_PROTECTED,
+                "cellRenderer": _ACTIVE_PILL_RENDERER,
                 "cellClassRules": _cell_rules("재직", readonly=_IS_PROTECTED_JS)},
     }
     nrows = len(state.get_rows()) if state.get_rows() is not None else 0
@@ -980,6 +1069,7 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str) -> MasterGrid
     return MasterGridSpec(
         page_id=PAGE_ID, columns=_GRID_COLUMNS, order=_USER_COLS, col_config=col_config,
         select_all=True, height=master_grid_height(nrows), row_class_rules=row_rules,
+        grid_options={"rowHeight": 42},  # §1-E 행 높이 비례 확대(14.5px 본문)
     )
 
 
