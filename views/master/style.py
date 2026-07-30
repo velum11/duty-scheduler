@@ -330,12 +330,10 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 .st-key-ms_iconbar div.stButton button:disabled [data-testid="stIconMaterial"] {
   color:var(--ms-ink-3) !important; opacity:.45 !important; }
 .st-key-ms_iconbar div.stButton button:focus-visible { outline:2px solid var(--ms-accent) !important; outline-offset:1px; }
-/* 밴드 위 브레드크럼(.ms-crumb) 전역 제거 — 파랑 밴드가 최상단 콘텐츠가 되도록(사용자
-   요청 2026-07-27). 위치 정보는 밴드 제목 + 사이드바 활성 상태로 충분. crumb 전용 ms-head
-   (툴바 밴드: 밴드는 별도 컨테이너)는 통째로 접어 빈 공간을 없애고, 정적 밴드(toolbar=False,
-   ms-head 안에 .ms-band 포함)는 crumb 만 숨겨 밴드·설명은 유지한다. */
+/* 본문 브레드크럼(.ms-crumb)은 상단 52px 헤더가 소유하므로 숨긴다(항목4). 파랑 밴드
+   제거로 ms-head 는 이제 25px 제목 크롬 컨테이너이며, 종전의 '밴드 없는 ms-head 접기'
+   규칙(.ms-head:not(:has(.ms-band)))은 제목까지 숨겨 제거한다. */
 .ms-crumb { display:none !important; }
-.ms-head:not(:has(.ms-band)) { display:none !important; margin:0 !important; }
 .st-key-ms_band_live .ms-band-main { min-width:0; }
 .st-key-ms_band_live .ms-band-tools { justify-content:flex-end; }
 /* 콤팩트 액션 툴(밴드 표준) — 아이콘+짧은 라벨의 낮은 툴 버튼. 라벨 폭에 맞춰

@@ -49,10 +49,19 @@ _CSS = """
 }
 
 /* ===== 기본 ===== */
+/* 텍스트/위젯에만 IBM Plex 를 적용한다. Material Symbols 아이콘 폰트(stIconMaterial)는
+   절대 덮지 않는다 — 넓은 [class*=" st-"] 선택자는 아이콘 span 의 폰트까지 바꿔 글리프가
+   리터럴 텍스트("refresh" 등)로 깨지므로 쓰지 않는다. */
 html, body, .stApp,
+.stApp [data-testid="stMarkdownContainer"],
+.stApp [data-testid="stMarkdownContainer"] *,
 .stApp button, .stApp input, .stApp select, .stApp textarea,
-[class^="st-"], [class*=" st-"] {
+.stApp [data-baseweb="select"], .stApp [data-baseweb="input"] {
   font-family: var(--cd-sans);
+}
+/* 아이콘 글리프 폰트 보존(위 규칙이 상속으로 새어도 재확정) */
+.stApp span[data-testid="stIconMaterial"] {
+  font-family: 'Material Symbols Rounded' !important;
 }
 html, body, .stApp { font-size: 14px; }
 .stApp { background: var(--cd-canvas); color: var(--cd-ink); }
