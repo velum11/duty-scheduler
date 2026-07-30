@@ -89,6 +89,7 @@ from views.master.lifecycle import (
 from views.master.state import CONFIRM, KEEP, RELOAD, DraftState
 from views.master.style import (
     GRID_CSS,
+    LIFECYCLE_BADGE,
     SELECT_CELL_RULE,
     TOKENS,
     TOOLBAR_GLYPHS,
@@ -97,6 +98,7 @@ from views.master.style import (
     cell_dirty_rule,
     cell_error_rule,
     chip_html,
+    lifecycle_badge_html,
     drilldown_context,
     drilldown_context_html,
     empty_state,
@@ -299,79 +301,50 @@ def master_screen_head(
     뒤 건수 계산 후 ``head.render(state, specs)`` 로 버튼을 채운다(사용자 관리 파일럿).
     """
     inject_page_styles()
-    crumb = f"<div class='ms-crumb'>{escape(breadcrumb)}</div>" if breadcrumb else ""
+    # 파랑 밴드 제거(ADOPTION_SPEC 항목5) — 제목 크롬은 25px/600 + 13.5 설명뿐. 브레드크럼은
+    # 상단 52px 헤더(modules/ui.py)가, 연결 pill(=mode_badge 상당)도 상단 헤더가 소유하므로
+    # 본문 크롬에서는 렌더하지 않는다(중복 표기 금지). breadcrumb/mode_badge 파라미터는
+    # 호출부 호환을 위해 시그니처에 남기되 본문 표기에는 쓰지 않는다.
+    _ = breadcrumb, mode_badge
     desc_html = f"<div class='ms-desc'>{escape(desc)}</div>" if desc else ""
-    badge = mode_badge or ""
+    title_chrome = (
+        f"<div class='ms-head'><div class='ms-title'>{escape(title)}</div>{desc_html}</div>"
+    )
 
     if not toolbar:
-        st.markdown(
-            f"<div class='ms-head'>{crumb}"
-            "<div class='ms-band'>"
-            f"<div class='ms-band-main'><span class='ms-band-ico'>{_ICO_LEAD}</span>"
-            f"<span class='ms-title'>{escape(title)}</span></div>"
-            f"<div class='ms-band-tools'>{badge}{_toolbar_html()}</div>"
-            f"</div>{desc_html}</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown(title_chrome, unsafe_allow_html=True)
         return None
 
-    # 라이브 밴드: 브레드크럼 → 파랑 컨테이너[…] → 설명. ms-head/ms-title/ms-mode 클래스는
-    # 계약상 그대로 노출한다.
-    if crumb:
-        st.markdown(f"<div class='ms-head'>{crumb}</div>", unsafe_allow_html=True)
+    # 제목 크롬을 먼저 렌더하고, 그 아래에 '얇은 중립 액션 스트립'을 둔다(제목 중복 없음).
+    st.markdown(title_chrome, unsafe_allow_html=True)
 
-    # ── toolbar="icons": KPtech 아이콘 전용 툴바(파일럿: 사용자 관리·근무표 편성) ──
-    # 좌: 리딩 아이콘 + 제목 + 모드 배지 / 우: 8개 정사각 아이콘 슬롯(정보·globe·추가·조회·
-    # 삭제·인쇄·저장·즐겨찾기). 라벨 없이 아이콘만, 각 아이콘은 tooltip(help)로 기능명을
-    # 노출한다. 지연 채움용 슬롯을 int(0..7) 키로 만들어 :meth:`BandToolbar.render_icons`
-    # 로 채운다. 컨테이너 key 를 pill 밴드(ms_band_live)와 분리(ms_iconband/ms_iconbar)해,
-    # pill 버튼 CSS 와 아이콘 버튼 CSS 가 서로 간섭하지 않는다(work_types 는 pill 유지).
+    # ── toolbar="icons": 중립 액션 스트립 우측에 8개 정사각 아이콘 슬롯(정보·globe·추가·
+    # 조회·삭제·인쇄·저장·즐겨찾기). 라벨 없이 아이콘만, tooltip(help)로 기능명 노출. 지연
+    # 채움 슬롯을 int(0..7) 키로 만들어 :meth:`BandToolbar.render_icons` 로 채운다.
+    # NOTE(P1 이연): add/save/delete 의 '범위 소유 섹션' 재배치는 각 화면 스킨 페이즈(P2/P3)
+    # 에서 처리한다(코디네이터 B-reskin-defer 결정). P1 은 파랑→중립 스킨 + 제목 분리만.
     if toolbar == "icons":
         band = st.container(key="ms_iconband")
         with band:
-            # [제목(가변) | 모드배지(우측 통일) | 아이콘 툴바]. 배지를 좌측 제목 옆이 아니라
-            # 우측 아이콘 클러스터 왼쪽에 두어 pill/static 변종과 위치를 통일한다(2026-07-27).
-            left, mid, right = st.columns([2.5, 1.0, 1.0], vertical_alignment="center")
-            left.markdown(
-                f"<div class='ms-band-main'><span class='ms-band-ico'>{_ICO_LEAD}</span>"
-                f"<span class='ms-title'>{escape(title)}</span></div>",
-                unsafe_allow_html=True,
-            )
-            if badge:
-                mid.markdown(f"<div class='ms-band-badge'>{badge}</div>",
-                             unsafe_allow_html=True)
+            left, right = st.columns([5.0, 3.0], vertical_alignment="center")
+            left.markdown("<div class='ms-band-main'></div>", unsafe_allow_html=True)
             with right:
                 with st.container(key="ms_iconbar"):
                     icols = st.columns([1] * 8, vertical_alignment="center")
                     slots = {i: icols[i].container() for i in range(8)}
-        if desc_html:
-            st.markdown(desc_html, unsafe_allow_html=True)
         return BandToolbar(slots)
 
-    # toolbar=True(legacy pill 밴드): [제목 | 배지+장식 | 추가 | 삭제 | 저장 | 새로고침].
+    # toolbar=True(legacy 액션 스트립): 우측에 콤팩트 액션 툴(추가·삭제·저장·새로고침).
     band = st.container(key="ms_band_live")
     with band:
-        # 제목이 폭을 지배하고, 우측에 콤팩트 액션 툴 4개를 오밀조밀 클러스터한다.
-        # 액션 컬럼은 좁게 잡고 버튼은 width="content"(라벨 크기) 로 렌더해 '큰 버튼'이
-        # 아니라 아이콘+짧은 라벨 툴로 보이게 한다(밴드 CSS 는 style.py 가 소유).
-        cols = st.columns([6.6, 2.2, 1.05, 1.05, 1.25, 1.35], vertical_alignment="center")
-        cols[0].markdown(
-            f"<div class='ms-band-main'><span class='ms-band-ico'>{_ICO_LEAD}</span>"
-            f"<span class='ms-title'>{escape(title)}</span></div>",
-            unsafe_allow_html=True,
-        )
-        cols[1].markdown(
-            f"<div class='ms-band-tools'>{badge}{_toolbar_html(_DECOR_TOOLBAR)}</div>",
-            unsafe_allow_html=True,
-        )
+        cols = st.columns([6.6, 1.05, 1.05, 1.25, 1.35], vertical_alignment="center")
+        cols[0].markdown("<div class='ms-band-main'></div>", unsafe_allow_html=True)
         slots = {
-            ADD: cols[2].container(),
-            DELETE: cols[3].container(),
-            SAVE: cols[4].container(),
-            REFRESH: cols[5].container(),
+            ADD: cols[1].container(),
+            DELETE: cols[2].container(),
+            SAVE: cols[3].container(),
+            REFRESH: cols[4].container(),
         }
-    if desc_html:
-        st.markdown(desc_html, unsafe_allow_html=True)
     return BandToolbar(slots)
 
 
@@ -404,6 +377,7 @@ __all__ = [
     # style
     "inject_page_styles", "master_screen_head", "show_flash",
     "banner", "banner_html", "chip_html", "mode_badge_html", "readiness_badge_html",
+    "lifecycle_badge_html", "LIFECYCLE_BADGE",
     "master_row_class_rules", "cell_error_rule", "cell_dirty_rule",
     "SELECT_CELL_RULE", "GRID_CSS", "TOKENS", "token",
     # 조직 3시트 공유 컴포넌트 (Wave2a)

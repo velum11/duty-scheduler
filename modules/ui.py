@@ -32,168 +32,195 @@ _WEEKDAY = ["월", "화", "수", "목", "금", "토", "일"]
 # 권한 표시명 (CLAUDE.md §6)
 _ROLE_LABEL = {"ADMIN": "관리자", "MANAGER": "조장", "USER": "조원"}
 
-_CSS = f"""
+_CSS = """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap');
+
+/* ===== Claude Design 전역 토큰 (P1, ADOPTION_SPEC 정본) ===== */
+:root {
+  --cd-canvas:#f4f2ee; --cd-headbar:#fbfaf8; --cd-surface:#ffffff;
+  --cd-ink:#1c1a17; --cd-ink-2:#4a453d; --cd-ink-3:#6b665d;
+  --cd-ink-dim:#8b857c; --cd-ink-faint:#a09a90;
+  --cd-line:#e6e2da; --cd-line-strong:#cfc8bd; --cd-line-section:#e0dbd2;
+  --cd-accent:#c2410c; --cd-accent-hover:#a3350a; --cd-accent-text:#b4451a; --cd-accent-tint:#fdf3ec;
+  --cd-sans:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",-apple-system,
+            BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+  --cd-mono:"IBM Plex Mono","Consolas","Menlo",monospace;
+}
+
 /* ===== 기본 ===== */
-html, body, .stApp {{
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic",
-               "Apple SD Gothic Neo", Arial, sans-serif;
-  font-size: 14px;
-}}
-.stApp {{ background: #F7F8FA; }}
+html, body, .stApp,
+.stApp button, .stApp input, .stApp select, .stApp textarea,
+[class^="st-"], [class*=" st-"] {
+  font-family: var(--cd-sans);
+}
+html, body, .stApp { font-size: 14px; }
+.stApp { background: var(--cd-canvas); color: var(--cd-ink); }
+/* 모노: 사번·보고번호·시간·건수·브레드크럼(코드/숫자 계열) */
+.cd-mono, .crumb { font-family: var(--cd-mono); font-feature-settings:"tnum" 1; }
 
 /* Streamlit 기본 장식 숨김 — stToolbar 는 사이드바 펼침 버튼을 포함하므로 숨기지 않는다 */
 #MainMenu, footer, .stAppDeployButton,
 div[data-testid="stDecoration"],
-div[data-testid="stStatusWidget"] {{ display: none !important; }}
+div[data-testid="stStatusWidget"] { display: none !important; }
 
-section[data-testid="stMain"] .block-container {{
+section[data-testid="stMain"] .block-container {
   padding: 0 1.25rem 2rem; max-width: 100%;
-}}
+}
 /* 메인 영역 블록 간격을 좁혀 업무 화면 정보 밀도를 높인다 */
-section[data-testid="stMain"] div[data-testid="stVerticalBlock"] {{ gap: 0.65rem; }}
-section[data-testid="stMain"] div[data-testid="stHorizontalBlock"] {{ gap: 0.6rem; }}
+section[data-testid="stMain"] div[data-testid="stVerticalBlock"] { gap: 0.65rem; }
+section[data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: 0.6rem; }
 
-/* ===== 페이지 제목 ===== */
-.page-title {{ font-size: 1.28rem; font-weight: 700; color: #26282B; margin: 0.15rem 0 0.05rem; letter-spacing: -0.01em; }}
-.page-desc {{ font-size: 0.82rem; color: #6B7280; margin: 0 0 0.7rem; }}
+/* ===== 페이지 제목 (25px/600, -0.025em; 설명 13.5px) ===== */
+.page-title { font-size: 25px; font-weight: 600; color: var(--cd-ink); margin: 0.1rem 0 0.1rem; letter-spacing: -0.025em; line-height: 1.2; }
+.page-desc { font-size: 13.5px; color: var(--cd-ink-2); margin: 0 0 0.7rem; text-wrap: pretty; }
 
-/* ===== 카드 (조회 조건/콘텐츠) ===== */
-div[data-testid="stVerticalBlockBorderWrapper"] {{
-  background: #FFFFFF; border-radius: 5px;
-}}
-/* 테두리 div 의 padding 을 직접 줄여 조회 조건/카드 영역을 컴팩트하게 */
-div[data-testid="stVerticalBlockBorderWrapper"] > div {{
-  border-color: #D3DAE3 !important; border-radius: 5px;
+/* ===== 카드 (조회 조건/콘텐츠) — 흰 표면 + 헤어라인 ===== */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+  background: var(--cd-surface); border-radius: 8px;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] > div {
+  border-color: var(--cd-line) !important; border-radius: 8px;
   padding: 0.75rem 0.9rem !important;
-}}
+}
 
 /* 패널 헤더 (카드 안 섹션 제목) */
-.panel-head {{
+.panel-head {
   display: flex; justify-content: space-between; align-items: baseline;
-  font-size: 0.88rem; font-weight: 700; color: #26282B;
+  font-size: 14px; font-weight: 600; color: var(--cd-ink);
   padding-bottom: 0.45rem; margin: 0 0 0.55rem;
-  border-bottom: 1px solid #EAEDF1;
-}}
+  border-bottom: 1px solid var(--cd-line);
+}
 
-/* 요약 카드 — ERP KPI 타일 */
-.sum-card {{
-  background: #FFFFFF; border: 1px solid #D3DAE3; border-left: 3px solid #1E3A6E;
-  border-radius: 4px; padding: 0.6rem 0.9rem 0.55rem;
-}}
-.sum-value {{ font-size: 1.35rem; font-weight: 700; color: #1E3A6E; line-height: 1.2; }}
-.sum-label {{ font-size: 0.72rem; color: #6B7280; margin-top: 0.15rem; letter-spacing: 0.02em; }}
+/* 요약 카드 — 좌측 액센트 보더 + 모노 숫자 */
+.sum-card {
+  background: var(--cd-surface); border: 1px solid var(--cd-line); border-left: 2px solid var(--cd-accent);
+  border-radius: 6px; padding: 0.6rem 0.9rem 0.55rem;
+}
+.sum-value { font-family: var(--cd-mono); font-size: 1.35rem; font-weight: 600; color: var(--cd-ink); line-height: 1.2; }
+.sum-label { font-size: 0.72rem; color: var(--cd-ink-2); margin-top: 0.15rem; letter-spacing: 0.02em; }
 
 /* 데이터 그리드 영역 빈 상태 — 큰 빈 박스 대신 목록/그리드 프레임으로 표시 */
-.empty-state {{
-  background: #FFFFFF; border: 1px solid #D3DAE3; border-radius: 5px; overflow: hidden;
-}}
-.empty-state .es-head {{
-  height: 32px; background: #F1F4F8; border-bottom: 1px solid #D3DAE3;
+.empty-state {
+  background: var(--cd-surface); border: 1px solid var(--cd-line); border-radius: 8px; overflow: hidden;
+}
+.empty-state .es-head {
+  height: 32px; background: var(--cd-canvas); border-bottom: 1px solid var(--cd-line);
   display: flex; align-items: center; padding: 0 0.85rem;
-  font-size: 0.75rem; font-weight: 600; color: #5F5C55; letter-spacing: 0.03em;
-}}
-.empty-state .es-body {{
-  padding: 2.1rem 1rem; text-align: center; color: #6B7280; font-size: 0.85rem;
-}}
+  font-size: 0.75rem; font-weight: 600; color: var(--cd-ink-2); letter-spacing: 0.03em;
+}
+.empty-state .es-body {
+  padding: 2.1rem 1rem; text-align: center; color: var(--cd-ink-2); font-size: 0.85rem;
+}
 
 /* ===== 폼 위젯 (Streamlit 기본 느낌 완화) ===== */
 section[data-testid="stMain"] div[data-testid="stSelectbox"] label,
 section[data-testid="stMain"] div[data-testid="stTextInput"] label,
 section[data-testid="stMain"] div[data-testid="stDateInput"] label,
-section[data-testid="stMain"] div[data-testid="stNumberInput"] label {{
-  font-size: 0.72rem; font-weight: 600; color: #6B7280;
+section[data-testid="stMain"] div[data-testid="stNumberInput"] label {
+  font-size: 13px; font-weight: 500; color: var(--cd-ink-2);
   margin-bottom: 0.15rem; padding: 0;
-}}
+}
 section[data-testid="stMain"] div[data-baseweb="select"] > div,
 section[data-testid="stMain"] div[data-testid="stTextInput"] input,
-section[data-testid="stMain"] div[data-testid="stNumberInput"] input {{
-  min-height: 2.15rem; border-radius: 4px; border-color: #C9D2DE;
-  background: #FFFFFF; font-size: 0.83rem;
-}}
-section[data-testid="stMain"] div[data-baseweb="select"] div[data-baseweb="select"] {{ font-size: 0.83rem; }}
+section[data-testid="stMain"] div[data-testid="stNumberInput"] input {
+  min-height: 2.15rem; border-radius: 6px; border-color: var(--cd-line-strong);
+  background: var(--cd-surface); font-size: 14.5px;
+}
+section[data-testid="stMain"] div[data-baseweb="select"] div[data-baseweb="select"] { font-size: 14.5px; }
+/* focus 링 — 오렌지 액센트 (입력 식별 보조, WCAG 1.4.11) */
+section[data-testid="stMain"] div[data-testid="stTextInput"] input:focus,
+section[data-testid="stMain"] div[data-testid="stNumberInput"] input:focus {
+  border-color: var(--cd-accent) !important;
+  box-shadow: 0 0 0 3px rgba(194,65,12,.09) !important;
+}
 
-/* ===== 버튼 (메인 영역) ===== */
+/* ===== 버튼 (메인 영역) — 오렌지 단일 액센트 ===== */
 section[data-testid="stMain"] .stButton > button,
 section[data-testid="stMain"] .stDownloadButton > button,
-section[data-testid="stMain"] .stFormSubmitButton > button {{
-  min-height: 2.15rem; font-size: 0.83rem; font-weight: 600; border-radius: 4px;
-}}
+section[data-testid="stMain"] .stFormSubmitButton > button {
+  min-height: 2.15rem; font-size: 0.85rem; font-weight: 600; border-radius: 6px;
+}
 section[data-testid="stMain"] .stButton > button[kind="primary"],
-section[data-testid="stMain"] .stFormSubmitButton > button[kind="primary"] {{
-  background: #1E3A6E; border: 1px solid #1E3A6E; color: #FFFFFF;
-}}
-section[data-testid="stMain"] .stButton > button[kind="primary"]:hover {{
-  background: #16294F; border-color: #16294F;
-}}
+section[data-testid="stMain"] .stFormSubmitButton > button[kind="primary"] {
+  background: var(--cd-accent); border: 1px solid var(--cd-accent); color: #FFFFFF;
+}
+section[data-testid="stMain"] .stButton > button[kind="primary"]:hover,
+section[data-testid="stMain"] .stFormSubmitButton > button[kind="primary"]:hover {
+  background: var(--cd-accent-hover); border-color: var(--cd-accent-hover);
+}
 section[data-testid="stMain"] .stButton > button[kind="secondary"],
-section[data-testid="stMain"] .stDownloadButton > button {{
-  background: #FFFFFF; border: 1px solid #C9D2DE; color: #26282B;
-}}
+section[data-testid="stMain"] .stDownloadButton > button {
+  background: var(--cd-surface); border: 1px solid var(--cd-line-strong); color: var(--cd-ink);
+}
 
 /* ===== 데이터 그리드 (읽기 전용 표) ===== */
-div[data-testid="stDataFrame"] {{
-  border: 1px solid #D3DAE3; border-radius: 4px;
-}}
-div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {{ border: none; }}
+div[data-testid="stDataFrame"] {
+  border: 1px solid var(--cd-line-strong); border-radius: 6px;
+}
+div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] { border: none; }
 
-/* ===== 근무코드 색상 뱃지 ===== */
-.duty-badge {{
+/* ===== 근무코드 색상 뱃지 (색은 기준정보 DB SoT — 하드코딩 금지) ===== */
+.duty-badge {
   display: inline-block; min-width: 34px; text-align: center;
-  padding: 2px 10px; border-radius: 11px;
+  padding: 2px 10px; border-radius: 999px;
   color: #fff; font-size: 0.8rem; font-weight: 600; line-height: 1.6;
-}}
-.duty-name {{ color: #6B7280; font-size: 0.85rem; margin-left: 6px; }}
-.duty-legend {{ margin-top: 0.55rem; }}
-.duty-legend .duty-badge {{ margin-right: 6px; margin-bottom: 4px; }}
+}
+.duty-name { color: var(--cd-ink-2); font-size: 0.85rem; margin-left: 6px; }
+.duty-legend { margin-top: 0.55rem; }
+.duty-legend .duty-badge { margin-right: 6px; margin-bottom: 4px; }
 
 /* 데이터 모드 안내 (하단, 눈에 띄지 않게) */
-.data-mode-note {{ color: #5F5C55; font-size: 0.78rem; text-align: right; margin-top: 0.6rem; }}
+.data-mode-note { color: var(--cd-ink-2); font-size: 0.78rem; text-align: right; margin-top: 0.6rem; }
 </style>
 """
 
-# ADMIN/MANAGER App Shell 전용 CSS — KPtech ERP 라이트 메뉴트리 클론(사이드바 한정).
+# ADMIN/MANAGER App Shell 전용 CSS — Claude Design 다크 사이드바 + 52px 아이콘 헤더.
 # app_shell 에서만 주입하므로 USER 화면/로그인 화면에는 영향이 없다.
-# 사이드바 색은 아래 :root 의 --sb-* 토큰 한 블록에서만 관리한다.
-# 다크/시스템 테마는 이 토큰 블록만 오버라이드(지금은 라이트 전용, 테마 준비만).
-# KPtech 실측값 이식: 메뉴 컬럼 #F5F5F5 / 트리 #F2F4FA / 경계 0.8px #D2D2D2 / 각진(radius 0),
-# 그룹 28px·14px, 리프 22px·13px, 활성=파랑-굵게 글자(대비 보정 #1466C4)·배경 강조 없음.
+# 사이드바 색은 아래 :root 의 --sb-* 토큰 한 블록에서만 관리한다(ADOPTION_SPEC 정본).
+# 현행 트리 구조·검색·접힘(완전 숨김)·nav guard 는 그대로 — 66px 레일·모듈 클릭 접힘은 P4.
+# 보조 텍스트 --sb-text-dim(#9a9284)은 #1a1917 위 5.70:1(≥4.5 실측). 브랜드 마크 오렌지 배경 W.
 _SHELL_CSS = """
 <style>
 :root {
-  /* ===== 사이드바 토큰 (KPtech 라이트 실측 — 다크/시스템 테마는 이 토큰 블록만 오버라이드) ===== */
+  /* ===== 사이드바 토큰 (Claude Design 다크 — 다크/시스템 테마는 이 토큰 블록만 오버라이드) ===== */
   --sb-w: 236px;             /* 사이드바 폭 */
-  --sb-col-bg: #F5F5F5;      /* 메뉴 컬럼 배경 */
-  --sb-tree-bg: #F2F4FA;     /* 트리 영역 배경 */
-  --sb-brand-bg: #FFFFFF;    /* 브랜드/검색 흰 배경 */
-  --sb-border: #D2D2D2;      /* 0.8px 각진 경계선 */
-  --sb-text: #000000;        /* 기본 글자 (검정) — 트리 위 19:1 */
-  --sb-text-dim: #6E6E6E;    /* 사번 등 보조 글자 (col 위 4.68:1, 대비 통과) */
-  --sb-placeholder: #8D8D8D; /* 검색 placeholder 전용 (본문 텍스트 아님) */
-  --sb-icon: #7A7F8A;        /* 폴더/chevron 아이콘색(그룹 마커) */
-  --sb-guide: #C7CBD6;       /* 리프 좌측 가이드(연결)선 — 하위임을 명확히 */
-  --sb-hover: #ECEEF3;       /* row hover (트리보다 한 단계 진하게) */
-  --sb-accent: #1466C4;      /* 활성 강조 파랑 (트리 위 5.12:1 — KPtech #1C90FB 의 대비 보정) */
-  --sb-focus: #1C90FB;       /* 포커스 아웃라인 (원 KPtech 블루) */
-  --sb-radius: 0px;          /* 각진 (radius 0) */
+  --sb-col-bg: #1a1917;      /* 사이드바 배경(다크) */
+  --sb-tree-bg: #1a1917;     /* 트리 영역 배경(동일) */
+  --sb-brand-bg: #1a1917;    /* 브랜드/검색 배경(동일) */
+  --sb-border: #2b2925;      /* 구분선 */
+  --sb-text: #a49d92;        /* 기본 글자 — 다크 위 6.54:1 */
+  --sb-text-dim: #9a9284;    /* 사번 등 보조 글자 — 다크 위 5.70:1(≥4.5) */
+  --sb-placeholder: #8b857c; /* 검색 placeholder 전용 (본문 텍스트 아님) */
+  --sb-icon: #a49d92;        /* 폴더/chevron 아이콘색(그룹 마커) */
+  --sb-guide: #2f2c26;       /* 리프 좌측 가이드(연결)선 — 하위임을 명확히 */
+  --sb-hover: #24221e;       /* row hover (배경보다 한 단계 밝게) */
+  --sb-sel-bg: #2f2c26;      /* 선택 행 배경 */
+  --sb-sel-text: #fdf3ec;    /* 선택 항목 밝은 텍스트 */
+  --sb-accent: #c2410c;      /* 브랜드/액센트 오렌지 */
+  --sb-focus: #c2410c;       /* 포커스 아웃라인 */
+  --sb-radius: 6px;
 
-  /* ===== 본문 토큰 (이번 사이드바 패스 범위 밖 — 브레드크럼/본문) ===== */
-  --gold: #C9A26B;           /* 본문 액센트 (브레드크럼 포커스 등) */
-  --content-bg: #F5F3EF;     /* 본문 배경 (near-white 웜뉴트럴 — 2026-07-29 B안, 크림 완화) */
-  --card: #FFFFFF;           /* 카드 배경 */
-  --line: #EBE8E1;           /* 경계선 (1.32→1.22 완화) */
+  /* ===== 본문 토큰 (브레드크럼/헤더) ===== */
+  --content-bg: #f4f2ee;     /* 본문 캔버스 */
+  --headbar-bg: #fbfaf8;     /* 상단 52px 헤더 바 */
+  --line: #e6e2da;           /* 헤어라인 */
+  --line-strong: #cfc8bd;    /* 강조 헤어라인 */
+  --ink: #1c1a17; --ink-2: #4a453d; --ink-3: #6b665d;
+  --accent: #c2410c; --accent-hover: #a3350a; --accent-tint: #fdf3ec;
+  --mono: "IBM Plex Mono","Consolas","Menlo",monospace;
 }
 
-/* 본문 배경 — ADMIN/MANAGER 화면만 크림으로 (전역 CSS 의 #F7F8FA 를 덮어쓴다) */
+/* 본문 배경 — ADMIN/MANAGER 화면 캔버스 */
 .stApp { background: var(--content-bg); }
 
-/* ===== 사이드바 골격 (라이트 컬럼 + 0.8px 우측 경계, 그림자 없음, 각진) ===== */
+/* ===== 사이드바 골격 (다크 + 우측 구분선, 그림자 없음) ===== */
 section[data-testid="stSidebar"] {
   width: var(--sb-w) !important; min-width: var(--sb-w) !important;
   max-width: var(--sb-w) !important;
   background: var(--sb-col-bg);
-  border-right: 0.8px solid var(--sb-border); box-shadow: none;
-  font-family: "Malgun Gothic", "Apple SD Gothic Neo", -apple-system, sans-serif;
+  border-right: 1px solid var(--sb-border); box-shadow: none;
+  font-family: "IBM Plex Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", -apple-system, sans-serif;
   transition: width 0.28s ease;
 }
 section[data-testid="stSidebar"] > div:first-child { width: var(--sb-w) !important; }
@@ -221,7 +248,7 @@ section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] {
 section[data-testid="stSidebar"] div[data-testid="stColumn"] { min-width: 0 !important; }
 section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
 
-/* ===== 사이드바 버튼 공통 (라이트: 투명 배경 + 검정 글자 + 옅은 hover) ===== */
+/* ===== 사이드바 버튼 공통 (다크: 투명 배경 + 밝은 회색 글자 + 옅은 hover) ===== */
 section[data-testid="stSidebar"] div.stButton > button {
   width: 100%; border: none !important; box-shadow: none !important;
   border-radius: var(--sb-radius); justify-content: flex-start; text-align: left;
@@ -240,34 +267,33 @@ section[data-testid="stSidebar"] div.stButton > button:focus-visible {
   outline: 2px solid var(--sb-focus) !important; outline-offset: -2px;
 }
 section[data-testid="stSidebar"] div.stButton > button:hover {
-  background: var(--sb-hover) !important; color: var(--sb-text) !important;
+  background: var(--sb-hover) !important; color: var(--sb-sel-text) !important;
 }
 
-/* ===== 사이드바 헤더 (흰 배경 50px: 로고 마크 + 앱명 + 접기 버튼) ===== */
+/* ===== 사이드바 헤더 (50px: 오렌지 로고 마크 + 앱명 + 접기 버튼) ===== */
 .st-key-sb_head {
-  background: var(--sb-brand-bg); border-bottom: 0.8px solid var(--sb-border);
+  background: var(--sb-brand-bg); border-bottom: 1px solid var(--sb-border);
   height: 50px; padding: 0 8px 0 14px; display: flex; align-items: center;
 }
 .st-key-sb_head div[data-testid="stHorizontalBlock"] { width: 100%; }
 .sb-brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .sb-logo {
-  flex: 0 0 auto; width: 26px; height: 26px; border-radius: 2px;
+  flex: 0 0 auto; width: 26px; height: 26px; border-radius: 5px;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--sb-accent); color: #FFFFFF; font-size: 14px; font-weight: 800;
 }
 .sb-title { display: flex; flex-direction: column; min-width: 0; }
 .sb-title-ko {
-  color: var(--sb-text); font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap;
+  color: var(--sb-sel-text); font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap;
 }
-/* 접기 버튼 — 라이트용 심플 아이콘 전용. 기본 투명·무테두리, hover 때만 옅은 배경.
-   help 툴팁 래퍼 때문에 descendant 셀렉터 사용. */
+/* 접기 버튼 — 심플 아이콘 전용. 기본 투명·무테두리, hover 때만 옅은 배경. */
 .st-key-sb_hide div.stButton button {
-  width: 30px; min-height: 30px; height: 30px; padding: 0; justify-content: center;
-  color: #5A5A5A !important;
-  background: transparent !important; border: 1px solid transparent !important; border-radius: 4px;
+  width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center;
+  color: var(--sb-text) !important;
+  background: transparent !important; border: 1px solid transparent !important; border-radius: 6px;
 }
 .st-key-sb_hide div.stButton button:hover {
-  color: var(--sb-text) !important; background: var(--sb-hover) !important;
+  color: var(--sb-sel-text) !important; background: var(--sb-hover) !important;
 }
 .st-key-sb_hide div.stButton button:focus-visible {
   outline: 2px solid var(--sb-focus) !important; outline-offset: 1px;
@@ -280,19 +306,19 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
   justify-content: center; text-align: center;
 }
 
-/* ===== 검색 상자 (흰 배경 위, 각진 0.8px 테두리 + 돋보기 아이콘) ===== */
+/* ===== 검색 상자 (다크 위, 6px 테두리 + 돋보기 아이콘) ===== */
 .st-key-sb_search {
-  background: var(--sb-brand-bg); border-bottom: 0.8px solid var(--sb-border);
+  background: var(--sb-brand-bg); border-bottom: 1px solid var(--sb-border);
   padding: 7px 10px;
 }
 .st-key-sb_search div[data-testid="stTextInput"] > div { border: none !important; }
 .st-key-sb_search div[data-baseweb="input"],
 .st-key-sb_search div[data-baseweb="base-input"] { background: transparent !important; }
 .st-key-sb_search div[data-testid="stTextInput"] input {
-  height: 30px; min-height: 30px; border-radius: var(--sb-radius);
-  border: 0.8px solid var(--sb-border) !important; background: #FFFFFF !important;
-  color: var(--sb-text) !important; font-size: 12px; padding: 0 8px 0 28px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%238D8D8D' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") !important;
+  height: 32px; min-height: 32px; border-radius: var(--sb-radius);
+  border: 1px solid var(--sb-border) !important; background: #24221e !important;
+  color: var(--sb-sel-text) !important; font-size: 12.5px; padding: 0 8px 0 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%238b857c' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") !important;
   background-repeat: no-repeat !important; background-position: 8px center !important;
 }
 .st-key-sb_search div[data-testid="stTextInput"] input::placeholder { color: var(--sb-placeholder); }
@@ -300,24 +326,21 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
   border-color: var(--sb-accent) !important; box-shadow: none !important;
 }
 
-/* ===== 메뉴 트리 (KPtech: 폴더 그룹 vs 들여쓴 페이지 리프 — 계층을 한눈에 명확히) =====
-   KPtech 실측(SFCORL00300, 1680×1050): 그룹=nav-folder(폴더 아이콘, step-1 x56/h28),
-   리프=nav-page(페이지 아이콘, step-3 x74/h22) — 폰트는 14/400 동일, 구분은 [들여쓰기 깊이 +
-   행높이 + 폴더/페이지 아이콘]으로만 한다. 좁은 폭 보정: 그룹은 세미볼드까지 얹어 대비를 키운다. */
+/* ===== 메뉴 트리 (폴더 그룹 vs 들여쓴 페이지 리프 — 계층을 한눈에 명확히) ===== */
 .st-key-sb_nav { background: var(--sb-tree-bg); padding: 6px 0 10px; }
 .sb-empty { padding: 12px 20px; font-size: 12px; color: var(--sb-text-dim); }
 
 /* 최상위 항목: 그룹 헤더(sbg_) + 단독 항목(sbs_) 공통 30px·14px */
 div[class*="st-key-sbg_"] div.stButton > button,
 div[class*="st-key-sbs_"] div.stButton > button {
-  height: 30px; min-height: 30px; padding: 0 12px 0 10px;
+  height: 32px; min-height: 32px; padding: 0 12px 0 10px;
   font-size: 14px; color: var(--sb-text) !important; gap: 6px;
 }
-/* 그룹 헤더 = 폴더: 좌측 폴더 아이콘 + 세미볼드 + 우측 chevron → '부모/섹션'으로 명확히 읽힘 */
+/* 그룹 헤더 = 폴더: 좌측 폴더 아이콘 + 세미볼드 + 우측 chevron */
 div[class*="st-key-sbg_"] div.stButton > button { font-weight: 600; }
 div[class*="st-key-sbg_"] div.stButton > button::before {
   content: ""; flex: 0 0 auto; width: 15px; height: 15px;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%237A7F8A' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/%3E%3C/svg%3E") no-repeat center / 15px 15px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%23a49d92' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/%3E%3C/svg%3E") no-repeat center / 15px 15px;
 }
 /* 그룹 헤더 우측 chevron (닫힘 ▸ / 열림 ▾) — flush right. 라벨 div(flex:1)가 밀어낸다 */
 div[class*="st-key-sbg_"] div.stButton > button::after {
@@ -325,92 +348,121 @@ div[class*="st-key-sbg_"] div.stButton > button::after {
   font-size: 10px; color: var(--sb-icon); line-height: 1;
 }
 div[class*="_grpopen"] div.stButton > button::after { content: "\\25BE"; }
-/* 활성 경로 그룹(현재 페이지의 부모) = 더 굵게(검정, 배경 강조 없음) */
+/* 활성 경로 그룹(현재 페이지의 부모) = 밝은 텍스트 + 굵게 */
 div[class*="st-key-sbg_"] div.stButton > button[kind="primary"] {
-  font-weight: 700; color: var(--sb-text) !important; background: transparent !important;
+  font-weight: 700; color: var(--sb-sel-text) !important; background: transparent !important;
 }
-/* 단독 최상위 항목(대시보드) = 폴더 아님(홈 아이콘, chevron 없음). 활성 시 파랑+굵게 */
+/* 단독 최상위 항목(대시보드) = 폴더 아님(홈 아이콘, chevron 없음). 활성 시 밝은 텍스트+굵게 */
 div[class*="st-key-sbs_"] div.stButton > button { font-weight: 500; }
 div[class*="st-key-sbs_"] div.stButton > button::before {
   content: ""; flex: 0 0 auto; width: 15px; height: 15px;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%237A7F8A' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 11l9-7 9 7'/%3E%3Cpath d='M5 10v9h14v-9'/%3E%3C/svg%3E") no-repeat center / 15px 15px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%23a49d92' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 11l9-7 9 7'/%3E%3Cpath d='M5 10v9h14v-9'/%3E%3C/svg%3E") no-repeat center / 15px 15px;
 }
 div[class*="st-key-sbs_"] div.stButton > button[kind="primary"] {
-  color: var(--sb-accent) !important; font-weight: 700; background: transparent !important;
+  color: var(--sb-sel-text) !important; font-weight: 700; background: var(--sb-sel-bg) !important;
 }
 
-/* 리프(페이지, sbi_) — 24px·13px, 더 깊은 들여쓰기 + 좌측 세로 가이드선(연결선) → '하위'로 명확히.
-   가이드선은 align-self:stretch 한 ::before 의 border-left 로, 행이 쌓이면 연속 연결선이 된다. */
+/* 리프(페이지, sbi_) — 26px·13px, 더 깊은 들여쓰기 + 좌측 세로 가이드선(연결선). */
 div[class*="st-key-sbi_"] div.stButton > button {
-  height: 24px; min-height: 24px; padding: 0 12px 0 18px;
+  height: 28px; min-height: 28px; padding: 0 12px 0 18px;
   font-size: 13px; font-weight: 400; color: var(--sb-text) !important;
 }
 div[class*="st-key-sbi_"] div.stButton > button::before {
   content: ""; flex: 0 0 auto; align-self: stretch; width: 14px; margin-right: 10px;
   border-left: 1px solid var(--sb-guide);
 }
-/* 활성 리프(현재 페이지) = 파랑 글자 + 굵게, 배경 강조 없음(KPtech). 가이드선도 강조색으로 */
+/* 활성 리프(현재 페이지) = 밝은 텍스트 + 굵게 + 선택 배경 강조 */
 div[class*="st-key-sbi_"] div.stButton > button[kind="primary"] {
-  color: var(--sb-accent) !important; font-weight: 700; background: transparent !important;
+  color: var(--sb-sel-text) !important; font-weight: 700; background: var(--sb-sel-bg) !important;
 }
 div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
   border-left-color: var(--sb-accent);
 }
 
-/* ===== 하단 사용자 카드 (라이트, 맨 아래 고정: 좌측 정보 + 우측 로그아웃 아이콘) ===== */
+/* ===== 하단 사용자 카드 (다크, 맨 아래 고정: 좌측 정보 + 우측 로그아웃 아이콘) ===== */
 .st-key-sb_user {
   margin-top: auto; padding: 8px 10px;
-  background: var(--sb-col-bg); border-top: 0.8px solid var(--sb-border);
+  background: var(--sb-col-bg); border-top: 1px solid var(--sb-border);
 }
 .sb-uline { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .sb-ava {
-  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 2px;
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 5px;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--sb-accent); color: #FFFFFF; font-size: 12.5px; font-weight: 700;
 }
 .sb-uinfo { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sb-uname {
-  color: var(--sb-text); font-size: 12.5px; font-weight: 600; line-height: 1.2;
+  color: var(--sb-sel-text); font-size: 12.5px; font-weight: 600; line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.sb-urole { color: var(--sb-text-dim); font-size: 11px; letter-spacing: 0.02em; line-height: 1.2; }
-/* 로그아웃 — 카드 우측 작은 아이콘 전용. 기본 투명, hover 때만 옅은 배경.
-   help 툴팁 래퍼 때문에 descendant 셀렉터 사용. */
+.sb-urole { font-family: var(--mono); color: var(--sb-text-dim); font-size: 11px; letter-spacing: 0.02em; line-height: 1.2; }
+/* 로그아웃 — 카드 우측 작은 아이콘 전용. 기본 투명, hover 때만 옅은 배경. */
 .st-key-sb_user div.stButton { display: flex; justify-content: flex-end; }
 .st-key-sb_user div.stButton button {
-  width: 30px; min-height: 30px; height: 30px; padding: 0; justify-content: center;
-  color: #5A5A5A !important;
-  background: transparent !important; border: 1px solid transparent !important; border-radius: 4px;
+  width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center;
+  color: var(--sb-text) !important;
+  background: transparent !important; border: 1px solid transparent !important; border-radius: 6px;
 }
 .st-key-sb_user div.stButton button:hover {
-  color: var(--sb-text) !important; background: var(--sb-hover) !important;
+  color: var(--sb-sel-text) !important; background: var(--sb-hover) !important;
 }
 .st-key-sb_user div.stButton button:focus-visible {
   outline: 2px solid var(--sb-focus) !important; outline-offset: 1px;
 }
 .st-key-sb_user div.stButton button [data-testid="stIconMaterial"] { font-size: 17px; }
 
-/* ===== 본문 상단 (브레드크럼, 52px) ===== */
+/* ===== 본문 상단 52px 아이콘 헤더 (MODULE / SCREEN 모노 브레드크럼 + 연결 pill + 실기능 아이콘) ===== */
 .st-key-app_header {
-  min-height: 52px; display: flex; flex-direction: column; justify-content: center;
+  min-height: 52px; background: var(--headbar-bg); border-bottom: 1px solid var(--line);
+  margin: 0 -1.25rem 0.6rem; padding: 0 1.25rem;
+  display: flex; flex-direction: column; justify-content: center;
 }
-.st-key-app_header div[data-testid="stHorizontalBlock"] { align-items: center; }
-.crumb { font-size: 11px; font-weight: 600; color: #9A968C; letter-spacing: 0.06em; }
-.crumb .crumb-sep { margin: 0 6px; color: #C9C3B8; font-weight: 400; }
-/* 접힘(숨김) 상태에서 브레드크럼 좌측에 표시되는 사이드바 열기(펼치기) 버튼 —
-   접기 버튼과 같은 심플 아이콘 언어. 기본 투명·무테두리, hover 때만 옅은 배경.
-   밝은 본문에서 아이콘 대비만 확보(중간 회색). */
+.st-key-app_header div[data-testid="stHorizontalBlock"] { align-items: center; flex-wrap: nowrap; }
+.st-key-app_header div[data-testid="stColumn"] { min-width: 0 !important; }
+/* MODULE / SCREEN 모노 브레드크럼 (11.5px) */
+.crumb { font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--ink-3);
+  letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crumb .crumb-mod { color: var(--ink-2); }
+.crumb .crumb-sep { margin: 0 7px; color: var(--line-strong); }
+.crumb .crumb-scr { color: var(--ink); font-weight: 600; }
+/* 연결 상태 pill (Supabase 초록 / 샘플 중립) */
+.cd-conn-wrap { display: flex; justify-content: flex-end; }
+.cd-conn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.22rem 0.6rem;
+  border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  border: 1px solid var(--line-strong); background: var(--cd-surface, #fff); color: var(--ink-2); }
+.cd-conn .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex: 0 0 auto; }
+.cd-conn.on { background: #eef5f0; border-color: #d8e6dd; color: #2f6b45; }
+.cd-conn.on .dot { background: #2f6b45; }
+.cd-conn.samp { background: #f2f0ec; border-color: #e4e0d8; color: #5c564d; }
+.cd-conn.samp .dot { background: #8b857c; }
+/* 헤더 우측 실기능 아이콘 버튼 (새로고침 등) — 히트영역 32px, 시각 30px, hover #f1eee8 */
+.st-key-app_header div.stButton { display: flex; justify-content: flex-end; }
+.st-key-app_header .st-key-hdr_refresh div.stButton button,
+.st-key-hdr_refresh div.stButton button {
+  width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center;
+  color: var(--ink-2) !important;
+  background: transparent !important; border: 1px solid transparent !important; border-radius: 6px;
+  box-shadow: none !important;
+}
+.st-key-hdr_refresh div.stButton button:hover {
+  color: var(--ink) !important; background: #f1eee8 !important;
+}
+.st-key-hdr_refresh div.stButton button:focus-visible {
+  outline: 2px solid var(--accent) !important; outline-offset: 1px;
+}
+.st-key-hdr_refresh div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
+/* 사이드바 열기(펼치기) 버튼 — 접힘 상태에서 헤더 좌측. 심플 아이콘. */
 .st-key-sb_show div.stButton button {
   width: 34px; min-height: 34px; height: 34px; padding: 0; justify-content: center;
-  color: #6B6660 !important;
+  color: var(--ink-2) !important;
   background: transparent !important; border: 1px solid transparent !important; border-radius: 7px;
   box-shadow: none !important;
 }
 .st-key-sb_show div.stButton button:hover {
-  color: #26282B !important; background: rgba(27, 27, 29, 0.06) !important;
+  color: var(--ink) !important; background: #f1eee8 !important;
 }
 .st-key-sb_show div.stButton button:focus-visible {
-  outline: 2px solid var(--gold) !important; outline-offset: 1px;
+  outline: 2px solid var(--accent) !important; outline-offset: 1px;
 }
 .st-key-sb_show div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
 </style>
@@ -730,26 +782,52 @@ def _sidebar_user_card(user: dict) -> None:
                 request_nav({"type": "logout"})
 
 
+def _conn_pill_html() -> str:
+    """상단 헤더 우측 연결 상태 pill — 데이터 모드(persistence 연결) 전용 신호.
+
+    Supabase 연결이면 초록, 샘플이면 중립. 저장/삭제/전역 액션과 섞지 않는다(§0.4)."""
+    if db.is_sample_mode():
+        return ("<div class='cd-conn-wrap'><span class='cd-conn samp' "
+                "title='저장은 이 세션에만 유지됩니다'><span class='dot'></span>샘플 데이터</span></div>")
+    return ("<div class='cd-conn-wrap'><span class='cd-conn on'>"
+            "<span class='dot'></span>Supabase 연결</span></div>")
+
+
 def _breadcrumb_header(user: dict, page: str) -> None:
-    """본문 상단 브레드크럼(그룹명). 사이드바 숨김 시 열기(▤) 버튼 표시."""
-    cur_group = (
-        {"label": "기준정보"}
-        if page == "master_org"
-        else nav.group_of(page, user["role"])
+    """본문 상단 52px 아이콘 헤더 — 좌측 MODULE / SCREEN 모노 브레드크럼,
+    우측 연결 상태 pill + 실기능 아이콘(새로고침). 사이드바 숨김 시 좌측에 열기 버튼."""
+    if page == "master_org":
+        module_label, screen_label = "기준정보", "조직 관리"
+    else:
+        grp = nav.group_of(page, user["role"])
+        module_label = grp["label"]
+        screen_label = nav.page_label(page)
+    crumb_html = (
+        f"<span class='crumb'><span class='crumb-mod'>{escape(module_label)}</span>"
+        f"<span class='crumb-sep'>/</span>"
+        f"<span class='crumb-scr'>{escape(screen_label)}</span></span>"
     )
-    crumb_html = f"<span class='crumb'>{escape(cur_group['label'])}</span>"
+    conn_html = _conn_pill_html()
 
     with st.container(key="app_header"):
         if st.session_state.get("sb_hidden"):
-            btn, text = st.columns([0.45, 11], vertical_alignment="center")
+            btn, text, pill, refresh = st.columns(
+                [0.5, 7.3, 2.6, 0.6], vertical_alignment="center")
             with btn:
                 if st.button("", icon=":material/view_sidebar:", key="sb_show",
                              type="tertiary", help="사이드바 열기"):
                     st.session_state.sb_hidden = False
                     st.rerun()
-            text.markdown(crumb_html, unsafe_allow_html=True)
         else:
-            st.markdown(crumb_html, unsafe_allow_html=True)
+            text, pill, refresh = st.columns(
+                [7.8, 2.6, 0.6], vertical_alignment="center")
+        text.markdown(crumb_html, unsafe_allow_html=True)
+        pill.markdown(conn_html, unsafe_allow_html=True)
+        with refresh:
+            with st.container(key="hdr_refresh"):
+                if st.button("", icon=":material/refresh:", key="app_refresh",
+                             type="tertiary", help="새로고침"):
+                    st.rerun()
 
 
 def user_app_shell(user: dict) -> str:

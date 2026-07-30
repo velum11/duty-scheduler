@@ -759,12 +759,13 @@ def status_badge_html(label: str, color: str) -> str:
     중립 상태의 낮은 시각 강도를 유지한다. 색 신호가 있는 상태는 전달 색을 그대로 쓴다.
     """
     text = TOKENS["ink-2"] if color == TOKENS["ink-3"] else color
-    # §3.8/F2 handoff: 채도는 텍스트가 진다 — 배경은 매우 옅게(14≈8%), 테두리는 저채도
-    # (풀채도 1px 테두리가 색 픽셀을 과다하게 늘리던 것을 완화). 8자리 hex 알파(≈33%).
+    # Claude Design 배지(ADOPTION_SPEC 항목6): pill 형태 radius 999 · 12.5px/600 · padding 3×11.
+    # 색은 도메인이 넘긴 status 색을 배경 옅은 틴트(≈8%)+저채도 테두리(≈33%)로 파생한다
+    # (라이프사이클 5종 정확 팔레트는 style.LIFECYCLE_BADGE — P3 도메인 배선에서 채택).
     return (
-        f"<span style='display:inline-flex;align-items:center;padding:1px 8px;"
-        f"border-radius:5px;font-size:11px;font-weight:600;color:{text};"
-        f"border:1px solid {color}55;background:{color}14;'>{escape(label)}</span>"
+        f"<span style='display:inline-flex;align-items:center;padding:3px 11px;"
+        f"border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;color:{text};"
+        f"border:1px solid {color}55;background:{color}14;white-space:nowrap;'>{escape(label)}</span>"
     )
 
 

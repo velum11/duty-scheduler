@@ -92,7 +92,10 @@ check("조 시트 제목", "<span class='t'>조</span>" in body)
 check("공통 헤더 크롬(ms-head/ms-title)", "ms-head" in body and "ms-title" in body)
 check("공통 시트 헤더(ms-sheet-head) 3개 이상", body.count("ms-sheet-head") >= 3)
 check("드릴다운 컨텍스트 스트립(ms-ctx)", "ms-ctx" in body)
-check("모드 배지(데이터 연결) 표시", "ms-mode" in body and "샘플 데이터" in body)
+# 연결 상태 pill 은 상단 52px 셸 헤더(modules/ui.py)가 소유(ADOPTION_SPEC 항목4·§0.4).
+# 본문 크롬은 제목/설명만 — 본문에서 연결 pill 을 중복 렌더하지 않는다.
+check("본문에 연결 pill 렌더 없음(상단 헤더 소유)",
+      "샘플 데이터" not in body and "Supabase 연결" not in body)
 check("상태 스트립(ms-count)", "ms-count" in body)
 keys = {b.key for b in at.button}
 for k in ("org_group__save", "org_group__add", "org_group__delete", "org_group__refresh",
@@ -166,7 +169,10 @@ try:
     check("NOT_READY 렌더 예외 없음", not at_nr.exception)
     nr_body = " ".join(str(m.value) for m in at_nr.markdown)
     check("NOT_READY 조회 전용 경고 배너", "조직 스키마" in nr_body and "조회만 가능" in nr_body)
-    check("NOT_READY 스키마 배지(모드 배지와 분리)", "스키마 미준비" in nr_body)
+    # readiness(스키마 준비) 신호는 배너(readiness.banner())로 표면화한다 — 연결 pill(상단
+    # 셸 헤더)과 의미·위치가 분리된다. P1 에서 헤더 배지 슬롯은 제거됐고 배너가 정본 신호다.
+    check("NOT_READY 스키마 신호는 배너로 표면화(연결 pill 과 분리)",
+          "조직 스키마" in nr_body and "조회만 가능" in nr_body)
     check("NOT_READY 세 시트 모든 write 버튼 비활성", _all_disabled(at_nr, _WRITE_KEYS))
     check("NOT_READY 에도 새로고침(조회)은 활성",
           not _all_disabled(at_nr, ("org_group__refresh",)))

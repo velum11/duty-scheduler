@@ -215,7 +215,10 @@ for label, (fn, title, keys) in _RENDERS.items():
     check(f"{label}: 페이지 제목 표시", title in body)
     # 공통 크롬 4요소가 모두 있어야 화면 간 일관 — 색만으로 구분하지 않는 프레임.
     check(f"{label}: 공통 헤더 크롬(ms-head/ms-title)", "ms-head" in body and "ms-title" in body)
-    check(f"{label}: 모드 배지(ms-mode + 샘플 데이터)", "ms-mode" in body and "샘플 데이터" in body)
+    # 연결 상태 pill(=ms-mode 상당)은 상단 52px 셸 헤더(modules/ui.py)가 소유한다
+    # (ADOPTION_SPEC 항목4·§0.4) — 본문 크롬은 제목/설명만. 본문에서 중복 렌더하지 않는다.
+    check(f"{label}: 본문 크롬에 연결 pill 렌더 없음(상단 헤더 소유)",
+          "샘플 데이터" not in body and "Supabase 연결" not in body)
     check(f"{label}: 상태 스트립(ms-count)", "ms-count" in body)
     btn_keys = {b.key for b in at.button}
     for k in keys:
@@ -229,7 +232,8 @@ for label, (fn, title, keys) in _RENDERS.items():
         check(f"{label}: 저장 버튼 존재(비활성 속성 미노출)", save_btn is not None)
 
 # 크로스스크린 일관성 — 세 화면이 정확히 같은 크롬 클래스 집합을 렌더한다.
-_CHROME = ("ms-head", "ms-title", "ms-mode", "ms-count")
+# (ms-mode 연결 pill 은 상단 셸 헤더로 이전 — 본문 공통 크롬에서 제외)
+_CHROME = ("ms-head", "ms-title", "ms-count")
 for cls in _CHROME:
     present = [label for label, body in _bodies.items() if cls in body]
     check(f"크롬 '{cls}' 를 세 화면 모두 렌더", len(present) == 3)

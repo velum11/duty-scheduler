@@ -167,25 +167,29 @@ check("렌더: btn_logout 라벨 비어 있음(아이콘 전용, 툴팁은 유�
       logout_btn is not None and (logout_btn.label or "") == "")
 
 
-# ===== 8) KPtech 라이트 메뉴트리 재구축 (실측 토큰·활성 파랑·접이식·검색·즐겨찾기 제외) =====
-print("KPtech 라이트 메뉴트리 계약")
+# ===== 8) Claude Design 다크 메뉴트리 (다크 토큰·활성 밝은텍스트+선택배경·접이식·검색) =====
+# 계약 의도 보존: 트리 구조·검색·접이식·활성 표기·즐겨찾기 제외는 그대로, 팔레트만
+# KPtech 라이트 → Claude Design 다크(ADOPTION_SPEC 정본)로 갱신. 보조 텍스트 대비 ≥4.5:1.
+print("Claude Design 다크 메뉴트리 계약")
 shell_css = ui._SHELL_CSS
-# 실측 토큰(라이트) — 다크 팔레트 제거
-check("메뉴 컬럼 토큰 #F5F5F5", "--sb-col-bg: #F5F5F5" in shell_css)
-check("트리 영역 토큰 #F2F4FA", "--sb-tree-bg: #F2F4FA" in shell_css)
-check("경계 0.8px #D2D2D2", "--sb-border: #D2D2D2" in shell_css and "0.8px solid var(--sb-border)" in shell_css)
-check("각진(radius 0) 토큰", "--sb-radius: 0px" in shell_css)
-check("활성 강조 파랑 #1466C4(대비 보정)", "--sb-accent: #1466C4" in shell_css)
-check("사번 dim #6E6E6E(4.68:1)", "--sb-text-dim: #6E6E6E" in shell_css)
-check("검색 placeholder 전용 #8D8D8D", "--sb-placeholder: #8D8D8D" in shell_css)
-check("다크 사이드바 배경(#1B1B1D) 제거", "#1B1B1D" not in shell_css)
+# 다크 팔레트 토큰(ADOPTION_SPEC) — 라이트 KPtech 토큰 제거
+check("사이드바 배경 다크 #1a1917", "--sb-col-bg: #1a1917" in shell_css)
+check("구분선 #2b2925", "--sb-border: #2b2925" in shell_css)
+check("선택 배경 #2f2c26", "--sb-sel-bg: #2f2c26" in shell_css)
+check("기본 텍스트 #a49d92(6.54:1)", "--sb-text: #a49d92" in shell_css)
+check("보조 dim #9a9284(≥4.5:1 실측 5.70)", "--sb-text-dim: #9a9284" in shell_css)
+check("선택 텍스트 #fdf3ec", "--sb-sel-text: #fdf3ec" in shell_css)
+check("액센트 오렌지 #c2410c", "--sb-accent: #c2410c" in shell_css)
+check("검색 placeholder 전용 #8b857c", "--sb-placeholder: #8b857c" in shell_css)
+check("라이트 KPtech 컬럼(#F5F5F5) 제거", "#F5F5F5" not in shell_css)
+check("파랑 활성색(#1466C4) 제거", "#1466C4" not in shell_css)
 check("골드 로고 그라데이션 제거", "linear-gradient(135deg, #D5B27C" not in shell_css)
 check("테마 준비 토큰 주석", "이 토큰 블록만 오버라이드" in shell_css)
-# 활성 = 파랑 글자 + 굵게, 배경 강조 없음(KPtech 방식)
-check("활성 리프 파랑+굵게",
+# 활성 리프 = 밝은 텍스트 + 굵게 + 선택 배경 강조
+check("활성 리프 밝은텍스트+굵게+선택배경",
       'div[class*="st-key-sbi_"] div.stButton > button[kind="primary"] {' in shell_css
-      and "color: var(--sb-accent) !important; font-weight: 700" in shell_css)
-# FIX1 — 그룹 vs 리프 계층 명확화(KPtech: 폴더 아이콘 + 들여쓰기 + 가이드선)
+      and "color: var(--sb-sel-text) !important; font-weight: 700; background: var(--sb-sel-bg)" in shell_css)
+# 그룹 vs 리프 계층 명확화(폴더 아이콘 + 들여쓰기 + 가이드선) — 구조 보존
 check("그룹 헤더 폴더 아이콘(::before)",
       'st-key-sbg_"] div.stButton > button::before' in shell_css and "M3 7a2 2 0 0 1 2-2" in shell_css)
 check("그룹 헤더 세미볼드(600)로 대비 강화",
@@ -197,7 +201,7 @@ check("리프 들여쓰기 그룹보다 깊음(pad-left 18 vs 그룹 10)",
       "padding: 0 12px 0 18px" in shell_css and "padding: 0 12px 0 10px" in shell_css)
 check("가이드선 토큰(--sb-guide)·아이콘 토큰(--sb-icon)",
       "--sb-guide:" in shell_css and "--sb-icon:" in shell_css)
-check("활성 리프 가이드선 강조색(파랑)",
+check("활성 리프 가이드선 강조색(액센트)",
       "border-left-color: var(--sb-accent)" in shell_css)
 # 접이식 그룹 chevron(닫힘 ▸ / 열림 ▾)
 check("그룹 chevron ▸(닫힘)", "\\25B8" in shell_css)
@@ -229,20 +233,37 @@ skeys = {b.key for b in ats.button}
 check("검색 '조직': 조직 관리 리프 표시", "sbi_master_org" in skeys)
 check("검색 '조직': 비매칭 단독항목(대시보드) 숨김", "sbs_dashboard" not in skeys)
 
-# ===== 9) 상단 타이틀 밴드(KPtech) — 계약 클래스 유지 + 흰 제목 밴드 =====
-print("상단 타이틀 밴드 계약")
+# ===== 9) 상단 52px 아이콘 헤더 + 페이지 타이틀 크롬 (파랑 밴드 제거) =====
+# 계약 의도 보존: 헤더 크롬 클래스(ms-head/ms-title)는 유지하되, 파랑 타이틀 밴드는 제거하고
+# 25px 제목 크롬으로 통일(항목5). 브레드크럼·연결 pill 은 상단 52px 헤더가 소유(항목4).
+print("상단 52px 헤더 + 타이틀 크롬 계약")
 from views import master as _master  # noqa: E402
 head_src = inspect.getsource(_master.master_screen_head)
 mstyle = _master.style._PAGE_CSS
-check("헤더 계약 클래스 유지(ms-head/ms-title/ms-mode)",
+check("헤더 계약 클래스 유지(ms-head/ms-title)",
       "ms-head" in head_src and "ms-title" in head_src)
-check("파랑 밴드 클래스(ms-band)", "ms-band" in head_src and ".ms-band {" in mstyle)
-check("밴드 파랑 토큰 #0F6FCB(흰 제목 5.05:1)", "--ms-band:#0F6FCB" in mstyle)
-check("제목 흰색·18px", "color:#FFFFFF" in mstyle and "font-size:18px" in mstyle)
-check("우측 툴바 아이콘 클러스터(ms-tool)",
-      "ms-tool" in inspect.getsource(_master._toolbar_html) and ".ms-tool {" in mstyle)
-check("툴바를 밴드에 주입(_toolbar_html 호출)", "_toolbar_html()" in head_src)
-check("모드 배지 밴드 내 유지", "badge" in head_src and "ms-band-tools" in head_src)
+check("파랑 밴드 토큰(#0F6FCB) 제거", "#0F6FCB" not in mstyle)
+check("제목 25px/600(-0.025em) 다크 잉크",
+      "font-size:25px; font-weight:600" in mstyle and "color:var(--ms-ink)" in mstyle
+      and "letter-spacing:-.025em" in mstyle)
+check("설명 13.5px 크롬", "font-size:13.5px" in mstyle)
+check("본문 브레드크럼(.ms-crumb) 숨김(상단 헤더가 소유)", ".ms-crumb { display:none;" in mstyle)
+check("중립 액션 스트립 토큰(파랑 아님)", "--ms-band:#fbfaf8" in mstyle)
+# 상단 52px 헤더(modules/ui.py) — MODULE / SCREEN 모노 브레드크럼 + 연결 pill
+hdr_src = inspect.getsource(ui._breadcrumb_header)
+check("상단 헤더 모노 브레드크럼(crumb-mod/crumb-scr)",
+      "crumb-mod" in hdr_src and "crumb-scr" in hdr_src)
+check("상단 헤더 연결 pill 렌더", "_conn_pill_html" in hdr_src)
+check("연결 pill 데이터모드 신호(샘플/Supabase)",
+      "샘플 데이터" in inspect.getsource(ui._conn_pill_html)
+      and "Supabase 연결" in inspect.getsource(ui._conn_pill_html))
+check("헤더 실기능 아이콘(새로고침) — 전역 저장/삭제 아님",
+      'key="app_refresh"' in hdr_src and "__save" not in hdr_src and "__del" not in hdr_src)
+check("헤더 바 52px + hover #f1eee8", ".st-key-app_header" in shell_css
+      and "min-height: 52px" in shell_css and "#f1eee8" in shell_css)
+# 렌더: 상단 헤더에 새로고침 버튼(app_refresh) 존재
+check("렌더: 상단 헤더 새로고침 버튼(app_refresh)",
+      any(b.key == "app_refresh" for b in at.button))
 
 
 print()

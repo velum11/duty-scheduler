@@ -24,32 +24,58 @@ import streamlit as st
 # §2 색상 토큰 (semantic) — 배지/칩 HTML 생성 시 파이썬에서도 참조한다.
 # ---------------------------------------------------------------------------
 TOKENS: dict[str, str] = {
-    # near-white 웜뉴트럴 캔버스(2026-07-29 사용자 결정 B안) — 흰 표면 대비 1.23→1.108(실측).
-    # 종전 크림 #EBE7DF 에서 near-white 로 완화. 파생 surface-2/3 는 정합 유지(canvas 보다
-    # 밝은 표면 계층)라 변경하지 않는다(과도 변경 금지). line 은 1.32→1.22 로 함께 완화.
-    "canvas": "#F5F3EF",
+    # Claude Design 채택 P1(ADOPTION_SPEC 정본). 캔버스 near-white 웜뉴트럴 #f4f2ee,
+    # 오렌지 단일 액센트(navy 키는 하위호환 위해 유지하되 값은 액센트). 읽는 텍스트 대비 실측:
+    # ink #1c1a17(15.53) · ink-2 #4a453d(8.50) · ink-3 #6b665d(5.1, 최저 읽기 회색).
+    "canvas": "#f4f2ee",
     "surface": "#FFFFFF",
-    "surface-2": "#F7F5F0",
-    "surface-3": "#F1EEE7",
-    "line": "#EBE8E1",
-    "line-strong": "#E4E0D8",
-    "ink": "#24262B",
-    "ink-2": "#5F5C55",
-    "ink-3": "#908C83",
-    "navy": "#1E3A6E",
-    "navy-hover": "#17305C",
-    "gold": "#B4813F",
-    "gold-soft": "#EFE9DC",
-    "info": "#295D91",
-    "info-bg": "#EAF1F8",
-    "success": "#2F6B4F",
-    "success-bg": "#E9F2EC",
-    "warn": "#8A6A1C",
-    "warn-bg": "#FBF2D8",
-    "danger": "#9A3B2E",
-    "danger-bg": "#FBEEEB",
-    "selected-bg": "#E7EEF6",
+    "surface-2": "#fbfaf8",
+    "surface-3": "#f1eee7",
+    "line": "#e6e2da",
+    "line-strong": "#cfc8bd",
+    "ink": "#1c1a17",
+    "ink-2": "#4a453d",
+    "ink-3": "#6b665d",
+    # 단일 오렌지 액센트 — navy/navy-hover 키는 소비처 호환 위해 남기고 값만 액센트로 교체.
+    "navy": "#c2410c",
+    "navy-hover": "#a3350a",
+    "gold": "#8a6212",
+    "gold-soft": "#fdf3ec",
+    "info": "#2f4d99",
+    "info-bg": "#eef2fb",
+    "success": "#2f6b45",
+    "success-bg": "#eef5f0",
+    "warn": "#8a6212",
+    "warn-bg": "#fdf3e3",
+    "danger": "#9c3232",
+    "danger-bg": "#fbeeee",
+    "selected-bg": "#fdf3ec",
 }
+
+# ── 라이프사이클 상태 배지 표준 팔레트(ADOPTION_SPEC 정본, radius 999 / 12.5·600) ──
+# 배경/글자/테두리 3색. 도메인(near_miss_*)이 status 코드로 조회한다. 색 신호는 보조이며
+# 라벨 텍스트가 항상 함께 표시된다(이중부호화). 텍스트 대비 실측 4.98~7.09:1(전부 통과).
+LIFECYCLE_BADGE: dict[str, dict[str, str]] = {
+    "SUBMITTED": {"bg": "#fdf3e3", "text": "#8a6212", "border": "#f0dfbe"},
+    "IN_REVIEW": {"bg": "#eef2fb", "text": "#2f4d99", "border": "#dbe3f4"},
+    "EVALUATED": {"bg": "#eef5f0", "text": "#2f6b45", "border": "#d8e6dd"},
+    "REJECTED": {"bg": "#fbeeee", "text": "#9c3232", "border": "#f0d9d9"},
+    "CLOSED":   {"bg": "#f2f0ec", "text": "#5c564d", "border": "#e4e0d8"},
+}
+
+
+def lifecycle_badge_html(status_code: str, label: str) -> str:
+    """라이프사이클 상태 배지 HTML(ADOPTION_SPEC 팔레트, radius 999 / 12.5px·600).
+
+    ``status_code`` 는 SUBMITTED/IN_REVIEW/EVALUATED/REJECTED/CLOSED. 미지정 코드는
+    중립(CLOSED) 팔레트로 안전 fallback. 라벨은 도메인이 한글화해 넘긴다(코드값 불변)."""
+    pal = LIFECYCLE_BADGE.get(status_code, LIFECYCLE_BADGE["CLOSED"])
+    return (
+        f"<span style='display:inline-flex;align-items:center;padding:3px 11px;"
+        f"border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;"
+        f"color:{pal['text']};background:{pal['bg']};"
+        f"border:1px solid {pal['border']};white-space:nowrap;'>{escape(label)}</span>"
+    )
 
 
 def token(name: str) -> str:
@@ -136,13 +162,13 @@ def _iconbar_mask_css() -> str:
         '.st-key-ms_iconbar div.stButton button{position:relative;}',
         '.st-key-ms_iconbar div.stButton button::before{content:"";position:absolute;'
         'top:50%;left:50%;width:17px;height:17px;transform:translate(-50%,-50%);'
-        'pointer-events:none;background-color:#FFFFFF;'
+        'pointer-events:none;background-color:#4a453d;'  # 중립 스트립 위 단색 라인 아이콘(ink-2)
         '-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;'
         '-webkit-mask-position:center;mask-position:center;'
         '-webkit-mask-size:contain;mask-size:contain;}',
-        # shaded/disabled(globe·인쇄·즐겨찾기·N/A) — 흐리게(기존 disabled 색과 동일 0.4).
+        # shaded/disabled(globe·인쇄·즐겨찾기·N/A) — 흐리게(비활성 룩, ink-3 반투명).
         '.st-key-ms_iconbar div.stButton button:disabled::before'
-        '{background-color:rgba(255,255,255,.4);}',
+        '{background-color:rgba(107,102,93,.5);}',
     ]
     for i, name in enumerate(_ICONBAR_SLOT_GLYPHS, start=1):
         uri = _glyph_data_uri(TOOLBAR_GLYPHS[name])
@@ -165,35 +191,34 @@ _ICONBAR_MASK_CSS: str = _iconbar_mask_css()
 _PAGE_CSS = """
 <style>
 :root {
-  --ms-canvas:#F5F3EF; --ms-surface:#FFFFFF; --ms-surface-2:#F7F5F0; --ms-surface-3:#F1EEE7;
-  --ms-line:#EBE8E1; --ms-line-strong:#E4E0D8; --ms-ink:#24262B; --ms-ink-2:#5F5C55; --ms-ink-3:#908C83;
-  --ms-navy:#1E3A6E; --ms-navy-hover:#17305C; --ms-gold:#B4813F; --ms-gold-soft:#EFE9DC;
-  --ms-band:#0F6FCB; --ms-band-hover:#0C5CB8; /* KPtech 타이틀 밴드(파랑) — 흰 제목 대비 5.05:1 */
-  --ms-info:#295D91; --ms-info-bg:#EAF1F8; --ms-success:#2F6B4F; --ms-success-bg:#E9F2EC;
-  --ms-warn:#8A6A1C; --ms-warn-bg:#FBF2D8; --ms-danger:#9A3B2E; --ms-danger-bg:#FBEEEB;
+  --ms-canvas:#f4f2ee; --ms-surface:#FFFFFF; --ms-surface-2:#fbfaf8; --ms-surface-3:#f1eee7;
+  --ms-line:#e6e2da; --ms-line-strong:#cfc8bd; --ms-ink:#1c1a17; --ms-ink-2:#4a453d; --ms-ink-3:#6b665d;
+  --ms-navy:#c2410c; --ms-navy-hover:#a3350a; --ms-gold:#8a6212; --ms-gold-soft:#fdf3ec;
+  --ms-band:#fbfaf8; --ms-band-hover:#f1eee8; /* 중립 액션 스트립(파랑 밴드 제거, ADOPTION_SPEC §0.4) */
+  --ms-accent:#c2410c; --ms-accent-hover:#a3350a; --ms-accent-tint:#fdf3ec;
+  --ms-mono:"IBM Plex Mono","Consolas","Menlo",monospace;
+  --ms-info:#2f4d99; --ms-info-bg:#eef2fb; --ms-success:#2f6b45; --ms-success-bg:#eef5f0;
+  --ms-warn:#8a6212; --ms-warn-bg:#fdf3e3; --ms-danger:#9c3232; --ms-danger-bg:#fbeeee;
 }
-/* §5 페이지 헤더 — KPtech 풀폭 블루 타이틀 밴드(제목 흰색) 클론.
-   위에서 아래로: 브레드크럼(크림 위 진회색) → 파랑 밴드[리딩 아이콘+제목 / 모드배지+툴바]
-   → 설명(크림 위 진회색). 모든 텍스트 ≥4.5:1: 흰 제목 18px/밴드 #0F6FCB=5.05:1,
-   브레드크럼·설명 ink-2/크림=5.76:1. ms-head/ms-title/ms-mode 클래스는 계약상 유지. */
-.ms-head { display:flex; flex-direction:column; gap:.28rem; margin:0 0 .35rem; }
-.ms-crumb { font-size:.72rem; color:var(--ms-ink-2); margin:0; letter-spacing:.01em; } /* ink-2: 크림 위 5.76 (§2) */
-.ms-band { display:flex; align-items:center; justify-content:space-between; gap:1rem;
-  background:var(--ms-band); border-radius:4px; padding:0 .6rem 0 .85rem; min-height:46px; }
+/* §5 페이지 타이틀 크롬 — 파랑 밴드 제거(ADOPTION_SPEC 항목5). 제목 25px/600(-0.025em) +
+   설명 13.5px. 브레드크럼은 상단 52px 헤더(modules/ui.py)가 소유하므로 본문에선 숨긴다.
+   ms-head/ms-title/ms-mode 클래스명은 계약상 유지(선택자 하위호환). */
+.ms-head { display:flex; flex-direction:column; gap:.15rem; margin:0 0 .35rem; }
+.ms-crumb { display:none; }
+.ms-band { display:flex; flex-direction:column; gap:.15rem; }
 .ms-band-main { display:flex; align-items:center; gap:.6rem; min-width:0; }
-.ms-band-ico { display:inline-flex; align-items:center; color:#FFFFFF; flex:0 0 auto; }
-.ms-band-ico svg { display:block; }
-.ms-title { font-size:18px; font-weight:700; color:#FFFFFF; letter-spacing:-.01em; margin:0;
-  line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } /* 흰색/밴드 5.05:1 */
-.ms-desc { font-size:.81rem; color:var(--ms-ink-2); margin:0; line-height:1.35; }
-/* 밴드 우측 툴바(프로토타입: 시각 전용, 흰 라인 아이콘 — 정보/인쇄/저장/즐겨찾기/새로고침) */
+.ms-band-ico { display:none; }  /* 파랑 밴드 리딩 아이콘 제거 */
+.ms-title { font-size:25px; font-weight:600; color:var(--ms-ink); letter-spacing:-.025em; margin:0;
+  line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ms-desc { font-size:13.5px; color:var(--ms-ink-2); margin:0; line-height:1.35; text-wrap:pretty; }
+/* 밴드 우측 툴바(프로토타입 장식) — 파랑 밴드 제거로 미사용(정적 head 는 아이콘 미렌더). */
 .ms-band-tools { display:flex; align-items:center; gap:.1rem; flex:0 0 auto; }
 .ms-band-tools .ms-mode { margin-right:.4rem; }
 .ms-tool { display:inline-flex; align-items:center; justify-content:center;
-  width:30px; height:30px; border-radius:4px; color:#FFFFFF; cursor:default;
+  width:30px; height:30px; border-radius:6px; color:var(--ms-ink-2); cursor:default;
   transition:background-color 120ms ease; }
 .ms-tool svg { width:17px; height:17px; display:block; }
-.ms-tool:hover { background:rgba(255,255,255,.16); }
+.ms-tool:hover { background:var(--ms-band-hover); }
 /* 모드 배지 — 데이터 연결 신호 전용(점 색: 연결 success / 오류 danger / 샘플 중립) */
 .ms-mode { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .6rem; border-radius:999px;
   background:var(--ms-surface-2); border:1px solid var(--ms-line-strong); font-size:.74rem; font-weight:600;
@@ -251,26 +276,17 @@ _PAGE_CSS = """
    전역 §8 색 규칙이 함께 매칭되지만, 아래 `.st-key-ms_band_live` 접두 규칙이 더 높은/
    같은 특이도 + 뒤 소스순서로 이 밴드 안에서만 이긴다. 다른 화면의 인페이지 액션바
    (조직·근무형태)는 이 클래스가 없어 영향받지 않는다. 이 블록은 §8 규칙 뒤에 둔다. */
-/* 중복 그룹 라벨 제거 — 본문 상단 .crumb(=그룹명, modules/ui.py _breadcrumb_header)이
-   파랑 밴드 breadcrumb 첫 세그먼트("그룹 › 페이지")와 중복된다(사용자 승인 2026-07-26).
-   사이드바 구조·토큰은 건드리지 않고 표현만 정리한다: (1) .crumb 텍스트를 숨기고,
-   (2) 열기 버튼이 없는(=사이드바 표시 중) app_header 헤더는 빈 52px 공백이 남지 않게
-   접는다. 사이드바 숨김 시엔 app_header 가 '사이드바 열기' 버튼(stButton)을 담으므로
-   접지 않아 버튼은 그대로 노출된다(sb_show 계약 보존). */
-.st-key-app_header .crumb { display:none !important; }
-.st-key-app_header:not(:has(div.stButton)) { display:none !important; min-height:0 !important; }
-/* 파랑 타이틀 밴드 — 본문 스크롤 시 상단 고정(메뉴바 동작). 스크롤 부모(section.stMain)
-   기준 sticky. 밴드 배경은 solid(var(--ms-band))라 아래로 지나가는 그리드가 비쳐 보이지
-   않으며, z-index 로 AgGrid iframe 위에 둔다. 밴드만 고정하고 위의 breadcrumb 는 흘러
-   올라가 사라진다(제목+콤팩트 툴바가 메뉴바처럼 상시 노출). */
-/* Streamlit 1.59 는 각 요소를 자기 높이만한 stLayoutWrapper 로 감싼다 — sticky 요소는
-   자신의 컨테이닝 블록(=이 46px 래퍼) 밖으로 이동할 수 없어 그대로 스크롤돼 버린다.
-   밴드를 감싼 래퍼만 display:contents 로 접어, 밴드의 컨테이닝 블록을 그 위의 '긴' 세로
-   블록으로 올려 sticky 가 실제로 붙게 한다(밴드 래퍼 한정 — 다른 요소 무영향). */
+/* 상단 52px 헤더(modules/ui.py app_header)가 MODULE / SCREEN 모노 브레드크럼을 소유한다
+   (ADOPTION_SPEC 항목4). 종전 '.crumb 숨김 + 빈 헤더 접기'는 파랑 밴드가 브레드크럼을
+   중복 표기하던 시절의 정리였고, 밴드 제거 후에는 헤더가 유일한 브레드크럼이므로 숨기지
+   않는다. 헤더 스킨(52px·배경·pill·아이콘)은 modules/ui.py _SHELL_CSS 가 소유. */
+/* 중립 액션 스트립 — 본문 스크롤 시 상단 고정(sticky). 파랑 밴드 제거로 배경은 중립
+   (surface-2)이며 아래로 지나가는 그리드가 비치지 않게 solid + 하단 헤어라인. */
 div[data-testid="stLayoutWrapper"]:has(> .st-key-ms_band_live),
 div[data-testid="stLayoutWrapper"]:has(> .st-key-ms_iconband) { display:contents; }
-.st-key-ms_band_live, .st-key-ms_iconband { background:var(--ms-band); border-radius:4px;
-  padding:.24rem .5rem .24rem .85rem; min-height:46px;
+.st-key-ms_band_live, .st-key-ms_iconband { background:var(--ms-surface-2);
+  border:1px solid var(--ms-line); border-radius:8px;
+  padding:.24rem .5rem .24rem .85rem; min-height:44px;
   position:sticky; top:0; z-index:30; }
 .st-key-ms_band_live div[data-testid="stHorizontalBlock"] { align-items:center; }
 /* ── KPtech 아이콘 전용 툴바(파일럿: 사용자 관리·근무표 편성, master_screen_head("icons")) ──
@@ -289,7 +305,7 @@ div[data-testid="stColumn"]:has(> div .st-key-ms_iconbar) { flex:0 0 auto !impor
 div[data-testid="stColumn"]:has(> div .ms-band-badge) { flex:0 0 auto !important; width:auto !important; }
 div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 .st-key-ms_iconbar div[data-testid="stColumn"] {
-  flex:0 0 30px !important; width:30px !important; min-width:30px !important; }
+  flex:0 0 34px !important; width:34px !important; min-width:34px !important; }
 /* 기능 툴바 아이콘 간격 — 각 아이콘 버튼이 서로 붙지 않고 개별적으로 분리돼 보이도록
    벌린다(참고 이미지 방향, 2026-07-27 사용자 승인). st.columns 의 기본 컬럼 gap(emotion
    클래스, 라이브 측정 8.4px)은 !important 로 주입돼 특이도만으로는 이기지 못하므로 여기서도
@@ -297,25 +313,23 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
    개별로 읽히게 한다(레이아웃/간격만 변경 — 슬롯 수·글리프·클릭 계약 무변경). */
 .st-key-ms_iconbar div[data-testid="stHorizontalBlock"] { gap:.4rem !important; }
 .st-key-ms_iconbar div.stButton { display:flex; justify-content:center; }
-/* 기능 아이콘 버튼을 **기존 장식 클러스터(.ms-tool)와 동일**하게 맞춘다: 30×30 · radius4 ·
-   무테두리 · 흰색 · hover rgba(255,255,255,.16) · transition 120ms(= .ms-tool 값 복제).
-   Material 아이콘은 outlined(FILL 0, wght 400)·17px 로 장식 SVG 라인 아이콘과 같은 계열·
-   굵기·크기로 맞춘다(.ms-tool svg 17×17 과 동일). 별도 룩을 만들지 않는다. */
+/* 기능 아이콘 버튼 — 중립 스트립 위 단색 라인 아이콘(파랑 밴드 제거). 히트영역 32px,
+   시각 30px, hover #f1eee8(=--ms-band-hover). 아이콘색 ink-2, hover 시 ink. */
 .st-key-ms_iconbar div.stButton button {
-  width:30px !important; min-width:30px !important; height:30px !important; min-height:30px !important;
-  padding:0 !important; border-radius:7px !important;  /* 모서리를 살짝 더 둥근 사각형으로(참고 이미지, 2026-07-27) */
+  width:32px !important; min-width:32px !important; height:32px !important; min-height:32px !important;
+  padding:0 !important; border-radius:6px !important;
   background:transparent !important; border:none !important; box-shadow:none !important;
-  color:#FFFFFF !important; transition:background-color 120ms ease !important; }
+  color:var(--ms-ink-2) !important; transition:background-color 120ms ease !important; }
 .st-key-ms_iconbar div.stButton button [data-testid="stIconMaterial"] {
-  font-size:17px !important; color:#FFFFFF !important;
+  font-size:17px !important; color:var(--ms-ink-2) !important;
   font-variation-settings:'FILL' 0, 'wght' 400 !important; }
 .st-key-ms_iconbar div.stButton button:hover:not(:disabled) {
-  background:rgba(255,255,255,.16) !important; border:none !important; }
+  background:var(--ms-band-hover) !important; border:none !important; color:var(--ms-ink) !important; }
 /* shaded(disabled): globe·인쇄·즐겨찾기(Phase2)·N/A 기능 — 아이콘을 흐리게(디스에이블 룩) */
 .st-key-ms_iconbar div.stButton button:disabled { background:transparent !important; }
 .st-key-ms_iconbar div.stButton button:disabled [data-testid="stIconMaterial"] {
-  color:rgba(255,255,255,.4) !important; }
-.st-key-ms_iconbar div.stButton button:focus-visible { outline:2px solid #FFFFFF !important; outline-offset:1px; }
+  color:var(--ms-ink-3) !important; opacity:.45 !important; }
+.st-key-ms_iconbar div.stButton button:focus-visible { outline:2px solid var(--ms-accent) !important; outline-offset:1px; }
 /* 밴드 위 브레드크럼(.ms-crumb) 전역 제거 — 파랑 밴드가 최상단 콘텐츠가 되도록(사용자
    요청 2026-07-27). 위치 정보는 밴드 제목 + 사이드바 활성 상태로 충분. crumb 전용 ms-head
    (툴바 밴드: 밴드는 별도 컨테이너)는 통째로 접어 빈 공간을 없애고, 정적 밴드(toolbar=False,
@@ -333,24 +347,24 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
    `[class*="__del"]:not([class*="__del_"])` 는 :not 로 특이도가 더 높다)이 이 밴드 안에서도
    매칭돼 높이/라운드를 덮어써, 삭제만 큰 버튼으로 튀는 것을 막는다(밴드 스코프 한정). */
 .st-key-ms_band_live div.stButton button { min-height:1.8rem !important; height:1.8rem !important;
-  min-width:0 !important; padding:0 .58rem !important; border-radius:4px !important;
+  min-width:0 !important; padding:0 .58rem !important; border-radius:6px !important;
   font-size:.78rem !important; font-weight:600 !important; white-space:nowrap; gap:.26rem; line-height:1;
-  background:rgba(255,255,255,.12) !important; border:1px solid rgba(255,255,255,.5) !important;
-  color:#FFFFFF !important; }
+  background:var(--ms-surface) !important; border:1px solid var(--ms-line-strong) !important;
+  color:var(--ms-ink) !important; }
 .st-key-ms_band_live div.stButton button [data-testid="stIconMaterial"] { font-size:15px !important; }
 .st-key-ms_band_live div.stButton button:hover:not(:disabled) {
-  background:rgba(255,255,255,.24) !important; border-color:#FFFFFF !important; }
-/* 저장(primary): 활성 시 흰 배경·네이비 글자로 강조(밴드 위 최고 대비) */
+  background:var(--ms-band-hover) !important; border-color:var(--ms-accent) !important; }
+/* 저장(primary): 활성 시 오렌지 액센트 배경·흰 글자로 강조(단일 액센트) */
 .st-key-ms_band_live [class*="__save"] button[kind="primary"] {
-  background:#FFFFFF !important; border-color:#FFFFFF !important; color:var(--ms-navy) !important; }
+  background:var(--ms-accent) !important; border-color:var(--ms-accent) !important; color:#FFFFFF !important; }
 .st-key-ms_band_live [class*="__save"] button[kind="primary"]:hover:not(:disabled) {
-  background:#EEF3FA !important; border-color:#EEF3FA !important; }
-/* 비활성(저장·삭제 등): 밴드 위에서 흐리게 — 클릭 불가 어포던스 */
+  background:var(--ms-accent-hover) !important; border-color:var(--ms-accent-hover) !important; }
+/* 비활성(저장·삭제 등): 흐리게 — 클릭 불가 어포던스 */
 .st-key-ms_band_live div.stButton button:disabled {
-  background:rgba(255,255,255,.10) !important; border-color:rgba(255,255,255,.30) !important;
-  color:rgba(255,255,255,.55) !important; }
+  background:#EDEAE3 !important; border-color:#E7E3DB !important;
+  color:var(--ms-ink-3) !important; }
 /* 포커스 링(키보드) — 밴드 대비 흰 링 */
-.st-key-ms_band_live button:focus-visible { outline:2px solid #FFFFFF !important; outline-offset:1px; }
+.st-key-ms_band_live button:focus-visible { outline:2px solid var(--ms-accent) !important; outline-offset:1px; }
 /* 조직 좌/우 패널 제목 */
 .ms-panel { font-size:.94rem; font-weight:700; color:var(--ms-ink); margin:.2rem 0 .1rem; }
 .ms-panel small { font-weight:500; color:var(--ms-ink-2); }
