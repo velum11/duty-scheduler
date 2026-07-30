@@ -26,15 +26,15 @@ SCREEN_ARCHETYPE = "MATRIX_EDIT"
 import calendar
 import json
 from datetime import date
+from html import escape
 
 import pandas as pd
 import streamlit as st
 from st_aggrid import JsCode
 
-from modules import db, nav, ui
+from modules import db, ui
 from views.common import erp
 from views.common import scaffold
-from views.master import icon_toolbar_specs  # KPtech 아이콘 툴바 스펙 빌더(공통 계약)
 from views.workspace import (
     grid_bool,
     selectable_master_grid,
@@ -48,6 +48,167 @@ _META = ["_row_id", "_row_state", "_sel"]
 # 기존 행의 사번은 읽기 전용(관계키). 신규 행에서만 편집한다.
 _EMP_EDITABLE = JsCode("function(p){ return p.data && p.data._row_state !== 'existing'; }")
 
+# ── §2 팔레트 (팔레트 밖 색 금지 §0-8) ──
+_INK = "#1c1a17"
+_INK2 = "#4a453d"
+_WEAK = "#8b857c"
+_FAINT = "#a09a90"
+_LINE = "#e6e2da"
+_LINE_HDR = "#cfc8bd"
+_LINE_SEC = "#e0dbd2"
+_ACCENT = "#c2410c"
+_ACCENT_TEXT = "#b4451a"
+_MONO = "'IBM Plex Mono', monospace"
+
+# §1-C 그리드 컨테이너 리스킨 — AG Grid iframe 바깥 래퍼에 흰 배경·헤어라인·radius 를 입힌다
+# (내부 헤더/셀 헤어라인은 공용 _MASTER_GRID_CSS 의 #CFC8BB 계열이 §2 와 정합). 셀 색은
+# 근무형태 DB hex(day_style JsCode). sticky 4열은 AG Grid pinned(신원 4열+선택열)로 확보.
+_ROSTER_CSS = f"""
+<style>
+.st-key-se_gridwrap div[data-testid="stAgGrid"] {{
+  border-radius:8px; overflow:hidden; border:1px solid {_LINE_HDR}; background:#ffffff;
+}}
+.se-hint {{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:2px 0 8px; }}
+.se-hint .lab {{ font-size:12px; color:{_INK2}; margin-right:2px; }}
+.se-key {{ display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:7px;
+  border:1px solid {_LINE}; background:#ffffff; font-size:12px; color:{_INK}; white-space:nowrap; }}
+.se-key .n {{ font-family:{_MONO}; font-weight:600; color:{_ACCENT_TEXT}; }}
+.se-key .sw {{ width:9px; height:9px; border-radius:2px; flex:0 0 auto; }}
+.se-ctx {{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; margin:6px 0 10px;
+  font-size:12.5px; color:{_INK2}; }}
+.se-ctx .loc {{ font-weight:600; color:{_INK}; }}
+.se-ctx .num {{ font-family:{_MONO}; font-weight:600; color:{_INK}; }}
+.se-ctx .op {{ color:{_WEAK}; }}
+.se-legend {{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0 2px; }}
+.se-legend .lab {{ font-size:11px; letter-spacing:.1em; color:{_FAINT}; font-family:{_MONO}; margin-right:4px; }}
+.se-leg {{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:{_INK}; }}
+.se-leg .sw {{ width:11px; height:11px; border-radius:3px; flex:0 0 auto; }}
+.se-dirty {{ text-align:right; color:{_ACCENT_TEXT}; font-size:12.5px; font-weight:600; margin-top:6px; }}
+</style>
+"""
+
+
+def _active_ordered() -> list[tuple[str, str, str]]:
+    """활성 근무형태를 sort_order 순으로 (code, short_label, color) 리스트로 반환(도메인 파생)."""
+    wt = db.get_work_types()
+    act = wt[wt["is_active"]] if wt is not None and not wt.empty else wt
+    if act is None or act.empty:
+        return []
+    if "sort_order" in act.columns:
+        act = act.sort_values("sort_order", kind="stable")
+    out = []
+    for _, r in act.iterrows():
+        code = str(r["code"]).strip()
+        if not code:
+            continue
+        sl = str(r.get("short_label") or "").strip() or code
+        color = str(r.get("color") or "").strip()
+        out.append((code, sl, color))
+    return out
+
+
+def _day_cell_handlers(cycle_labels: list[str], number_labels: list[str]) -> dict:
+    """day 컬럼 셀 상호작용 JsCode(§1-C, 도메인 파생): 클릭=근무 순환(빈값 포함),
+    숫자키 1..N=N번째 근무형태·0=지움. 값 반영은 setDataValue→cellValueChanged→기존 dirty/
+    저장 경로 그대로. 편집기 팝업은 grid-level suppressClickEdit 로 막는다(더블클릭=2회 순환)."""
+    cyc = json.dumps(cycle_labels, ensure_ascii=False)
+    nums = json.dumps(number_labels, ensure_ascii=False)
+    on_click = JsCode(
+        "function(e){"
+        "  if(!e.column||e.node==null)return;"
+        f" var cyc={cyc};"
+        "  var node=e.node, colId=e.column.getColId();"
+        "  var cur=String(e.value==null?'':e.value).trim();"
+        "  var idx=cyc.indexOf(cur);"
+        "  var next=cyc[(idx+1)%cyc.length];"
+        "  node.setDataValue(colId, next);"
+        "}"
+    )
+    suppress_kbd = JsCode(
+        "function(p){"
+        "  var e=p.event; if(!e)return false;"
+        "  if(p.editing)return false;"
+        f" var nums={nums};"
+        "  var k=e.key;"
+        "  if(k==='0'){ p.node.setDataValue(p.column.getColId(), ''); return true; }"
+        "  if(k>='1'&&k<='9'){ var i=parseInt(k,10)-1;"
+        "    if(i<nums.length){ p.node.setDataValue(p.column.getColId(), nums[i]); return true; } }"
+        "  return false;"
+        "}"
+    )
+    return {"onCellClicked": on_click, "suppressKeyboardEvent": suppress_kbd}
+
+
+def _day_header_component(day_col: str) -> JsCode:
+    """일자 헤더 2줄(숫자 위·요일 아래) headerComponent. day_col 형식 'D(요일)'."""
+    num = day_col.split("(")[0].strip()
+    wd = day_col.split("(")[1].rstrip(")") if "(" in day_col else ""
+    num_j = json.dumps(num)
+    wd_j = json.dumps(wd)
+    return JsCode(
+        "class{init(p){this.eGui=document.createElement('div');"
+        "this.eGui.style.cssText='line-height:1.12;text-align:center';"
+        f"this.eGui.innerHTML=\"<div style='font-family:IBM Plex Mono,monospace;font-weight:600;"
+        f"font-size:12.5px;color:{_INK}'>\"+{num_j}+\"</div><div style='font-size:10px;color:{_INK2}'>\""
+        f"+{wd_j}+\"</div>\";}}getGui(){{return this.eGui;}}}}"
+    )
+
+
+def _hint_html(number_labels: list[str], colors: dict) -> str:
+    """입력 단축키 안내 라인 — [1 주][2 야]… 실제 활성 근무형태에서 파생(도메인). 색 스와치 포함."""
+    keys = []
+    for i, lab in enumerate(number_labels[:9], start=1):
+        c = colors.get(lab, "")
+        sw = f"<span class='sw' style='background:{c}'></span>" if c.startswith("#") else ""
+        keys.append(f"<span class='se-key'><span class='n'>{i}</span>{sw}{escape(lab)}</span>")
+    return ("<div class='se-hint'><span class='lab'>입력 단축키</span>"
+            + "".join(keys)
+            + "<span class='se-key'><span class='n'>0</span>지움</span></div>")
+
+
+def _context_html(q: dict, dept_name: str, team_name: str,
+                  n_people: int, filled: int, empty: int) -> str:
+    """컨텍스트 라인 — YYYY-MM · 부서 · 조 + 인원/입력/미입력 모노 수치 + 조작 안내."""
+    ym = f"{q['year']}-{q['month']:02d}"
+    return (
+        "<div class='se-ctx'>"
+        f"<span class='loc'>{escape(ym)}</span><span>·</span>"
+        f"<span class='loc'>{escape(dept_name)}</span><span>·</span>"
+        f"<span class='loc'>{escape(team_name)}</span>"
+        f"<span>인원 <span class='num'>{n_people}</span></span>"
+        f"<span>입력 <span class='num'>{filled}</span></span>"
+        f"<span>미입력 <span class='num'>{empty}</span></span>"
+        f"<span class='op'>셀 클릭 = 근무 순환 · 숫자키 입력 · 방향키 이동</span></div>"
+    )
+
+
+def _legend_html(active: list[tuple[str, str, str]]) -> str:
+    """하단 범례 — 활성 근무형태 색·약칭(도메인 파생)."""
+    items = []
+    for _code, sl, color in active:
+        sw = f"<span class='sw' style='background:{color}'></span>" if color.startswith("#") else ""
+        items.append(f"<span class='se-leg'>{sw}{escape(sl)}</span>")
+    return ("<div class='se-legend'><span class='lab'>근무형태</span>" + "".join(items) + "</div>")
+
+
+def _change_count(live: pd.DataFrame, day_cols: list, orig_cells: dict, n_del: int) -> int:
+    """미저장 변경 건수 — 기존 행 셀 변경 + 신규 행 입력 셀 + 삭제 예정 행. dirty 판정과 별개
+    표시용 카운트(셀 클릭 순환/숫자키 입력마다 증가해 자가검증 근거가 된다)."""
+    cnt = int(n_del)
+    if live is None or live.empty or not day_cols:
+        return cnt
+    for _, r in live.iterrows():
+        rid = str(r.get("_row_id"))
+        is_existing = str(r.get("_row_state")) == "existing"
+        for c in day_cols:
+            now = "" if pd.isna(r.get(c)) else str(r.get(c)).strip()
+            if is_existing:
+                if now != orig_cells.get((rid, c), ""):
+                    cnt += 1
+            elif now:
+                cnt += 1
+    return cnt
+
 
 # ---------- 진입점 ----------
 def render(user: dict) -> None:
@@ -56,18 +217,16 @@ def render(user: dict) -> None:
     # 회피(on_click 플래그) 그대로 패널 밖 별도 버튼이다. 편집 버튼·MATRIX 그리드·
     # 저장/dirty/이탈가드는 계약상 이번엔 건드리지 않는다 — top_action_bar·MATRIX
     # 어댑터 추출은 BACKLOG.
-    # toolbar="icons": 헤더 파랑 밴드에 KPtech 아이콘 전용 툴바(정보·globe·추가·조회·삭제·
-    # 인쇄·저장·즐겨찾기) 슬롯을 만들고 핸들을 받는다. 아이콘은 그리드 뒤 건수 계산 후
-    # band.render_icons 로 채운다 — 사용자 관리와 동일 표준(파일럿). 클릭은 이 화면 고유
-    # on_click 플래그(se_*_req)로 남겨(그리드 전송과 경합해도 유실 없음) 기존 소비 경로가
-    # 그대로 처리한다.
-    band = erp.screen_frame(
+    # §1-C 스프레드시트 입력형(구조 교체) — 파랑 아이콘 밴드 제거(§0-3). 액션은 1행(필터 우측)
+    # 으로 이전하고 셀 입력은 클릭 순환 + 숫자키(도메인 파생). 저장/dirty/검증/이탈가드/편성
+    # 스냅샷 계약은 전부 불변(표현 계층만 교체).
+    st.markdown(_ROSTER_CSS, unsafe_allow_html=True)
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="근무표 편성",
         desc="부서와 조를 선택하여 월별 근무표를 관리합니다.",
         breadcrumb="근무표 › 근무표 편성",
         badges=scaffold.mode_badge(),
-        toolbar="icons",
     )
 
     depts = db.get_departments()
@@ -141,19 +300,21 @@ def render(user: dict) -> None:
     v = erp.condition_panel("se", fields, cols=4)
     year, month, dept, team = v["y"], v["m"], v["d"], v["t"]
 
-    # 새로고침도 그리드 전송과 경합하는 on_click 플래그(se_go_req — 저장/행추가/행삭제와
-    # 동일 패턴)로 받되, 버튼은 상단 타이틀 밴드로 승격했다. 여기서는 직전 rerun 에서
-    # on_click 이 세팅한 플래그만 소비한다(밴드 채움은 그리드 뒤). on_click 플래그는 rerun
-    # 을 넘겨 유지되므로 버튼 렌더 위치와 무관하게 클릭이 유실되지 않는다.
-    clicked = st.session_state.pop("se_go_req", False)
+    # §1-C 1행 우측 액션 슬롯 — 필터 오른쪽에 행 추가·조회·행 삭제·[저장]을 둔다(deferred fill:
+    # n_sel/dirty 는 그리드 뒤에 확정되므로 슬롯만 잡고 나중에 채운다). 클릭은 화면 고유
+    # on_click 플래그(se_*_req)로 남겨 그리드 전송과 경합해도 유실되지 않는다(기존 계약).
+    action_slot = st.container()
+    st.markdown(f"<div style='border-top:1px solid {_LINE_SEC};margin:2px 0 10px;'></div>",
+                unsafe_allow_html=True)
 
+    clicked = st.session_state.pop("se_go_req", False)
     show_flash("schedule_edit")
 
     if team is None:
         ui.empty_state("선택한 부서에 등록된 조/팀이 없습니다.", head="월별 근무표")
         return
 
-    # 조회 범위 결정 + 조건 변경/새로고침 가드 (dirty 는 직전 렌더 기준)
+    # 조회 범위 결정 + 조건 변경/새로고침 가드 (dirty 는 직전 렌더 기준) — 계약 불변.
     params = {"year": year, "month": month, "dept": dept, "team": team}
     q = st.session_state.get("q_schedule_edit")
     if q is None:
@@ -162,7 +323,6 @@ def render(user: dict) -> None:
         _load_grid(q)
     elif clicked or params != q:
         if st.session_state.get("se_dirty"):
-            # 이미 보류된 이동(페이지/로그아웃)이 있으면 덮어쓰지 않는다.
             st.session_state.setdefault("nav_pending", {"type": "scope", "params": params})
         else:
             q = params
@@ -171,15 +331,24 @@ def render(user: dict) -> None:
     elif "se_rows" not in st.session_state:
         _load_grid(q)
 
-    # 삭제 예정 패널 (저장 전 실제 삭제 범위 안내 + 취소)
     _deleted_panel(q)
 
     day_cols = [c for c, _ in st.session_state["se_days"]]
     row_cols = _META + _FIXED + day_cols
 
-    # 표 작업 영역: 메타 정보 한 줄(통계 카드 없음). [행 추가]·[행 삭제] 버튼은 상단 타이틀
-    # 밴드로 승격했으므로, 여기서는 메타 슬롯만 확보하고 건수 계산 뒤 채운다.
-    meta_slot = st.container()
+    # ── 도메인 파생(하드코딩 금지): 활성 근무형태 순서·색·약칭 → 순환 목록·숫자키·힌트·범례 ──
+    active = _active_ordered()
+    display_of, _codes, _lc = _label_maps()
+    number_labels = [display_of.get(code, sl) for code, sl, _c in active][:9]
+    cycle_labels = [display_of.get(code, sl) for code, sl, _c in active] + [""]  # 빈값 포함(지움)
+    hint_colors = {}
+    for code, sl, color in active:
+        if color.startswith("#"):
+            hint_colors[display_of.get(code, sl)] = color
+
+    # 입력 단축키 힌트 라인 → 컨텍스트 라인(값은 그리드 뒤 채움) → 표
+    st.markdown(_hint_html(number_labels, hint_colors), unsafe_allow_html=True)
+    context_slot = st.container()
 
     col_config = {
         "사번": {"pinned": "left", "width": 112, "minWidth": 96,
@@ -189,36 +358,42 @@ def render(user: dict) -> None:
         "부서": {"pinned": "left", "width": 116, "minWidth": 96, "cellClass": "md-c-left"},
         "조": {"pinned": "left", "width": 88, "minWidth": 72, "cellClass": "md-c-left"},
     }
-    # 날짜 셀 색상 — work_types 기준정보의 색상을 약칭(표시값)·코드에 매핑한다.
-    # 범례 없이 셀 색만으로 근무를 식별할 수 있게 하되, 연한 배경 + 진한 본문색으로
-    # 가독성을 우선한다 (DESIGN.md §15 조회 화면 규칙과 동일 계열).
+    # 날짜 셀 색상 — work_types 기준정보 hex 를 약칭/코드에 매핑(도메인 SoT, 하드코딩 금지).
     day_style = JsCode(
         "function(p) {"
         f"  const colors = {json.dumps(st.session_state.get('se_colors', {}), ensure_ascii=False)};"
         "  const v = String(p.value == null ? '' : p.value).trim();"
         "  const c = colors[v];"
         "  if (!c) { return { textAlign: 'center' }; }"
-        "  return { backgroundColor: c + '26', color: '#1F2328', fontWeight: 600, textAlign: 'center' };"
+        "  return { backgroundColor: c + '26', color: '#1c1a17', fontWeight: 600, textAlign: 'center' };"
         "}"
     )
+    # 셀 클릭=근무 순환(빈값 포함) + 숫자키 1..N/0 = 근무형태/지움(도메인 파생). 값은
+    # setDataValue→cellValueChanged→기존 dirty/검증/저장 경로 그대로(계약 불변).
+    handlers = _day_cell_handlers(cycle_labels, number_labels)
     for c in day_cols:
-        col_config[c] = {"width": 58, "minWidth": 50, "cellClass": "md-c-center", "cellStyle": day_style}
+        col_config[c] = {
+            "width": 44, "minWidth": 34, "cellClass": "md-c-center", "cellStyle": day_style,
+            "headerComponent": _day_header_component(c),  # 일자 헤더 2줄(숫자/요일)
+            **handlers,
+        }
 
-    # 그리드에 넘기는 데이터(se_feed)는 remount 시점 값으로 고정한다 — 매 rerun
-    # 편집 결과를 되돌려주면 컴포넌트 재전송이 버튼 클릭 rerun 을 삼킬 수 있다.
-    # 대신 편집 값은 매 rerun se_rows(권위 상태)에 동기화해 어떤 rerun 경로에서도
-    # 미저장 입력이 보존되게 한다.
+    # se_feed 는 remount 시점 값으로 고정(편집 결과 재전송이 버튼 클릭 rerun 을 삼키는 것 방지).
     nonce = st.session_state.setdefault("se_nonce", 0)
     feed = st.session_state.get("se_feed", st.session_state["se_rows"])
-    grid_df = selectable_master_grid(
-        feed,
-        key=f"se_grid_{nonce}",
-        columns={c: "text" for c in _FIXED + day_cols},
-        order=_FIXED + day_cols,
-        height=min(max(240, 35 * len(feed) + 120), 520),
-        col_config=col_config,
-        select_all_header=True,  # 표시 중인 기존 행만 대상 (신규 행 제외)
-    )
+    with st.container(key="se_gridwrap"):
+        grid_df = selectable_master_grid(
+            feed,
+            key=f"se_grid_{nonce}",
+            columns={c: "text" for c in _FIXED + day_cols},
+            order=_FIXED + day_cols,
+            height=min(max(210, 30 * len(feed) + 96), 500),  # ≈62vh 내부 스크롤
+            col_config=col_config,
+            select_all_header=True,  # 표시 중인 기존 행만 대상 (신규 행 제외)
+            # 셀 높이 30px(§1-C) + 클릭/더블클릭 편집기 팝업 금지(클릭=순환). 셀은 editable
+            # 유지되어 Ctrl+V 붙여넣기·키보드 입력은 보존한다(편집기만 클릭으로 안 열림).
+            extra_grid_options={"rowHeight": 30, "suppressClickEdit": True},
+        )
 
     # 구조 변경(− 제거/붙여넣기 신규 행) + 사번 자동 조회를 권위 상태로 동기화
     if _sync_rows(grid_df, row_cols):
@@ -226,33 +401,29 @@ def render(user: dict) -> None:
 
     live = _live(grid_df)
 
-    # 메타 정보 한 줄 — 통계 카드·범례 대신 표 위 요약 텍스트로 정리
+    # 건수 계산
     existing_live = live[live["_row_state"] == "existing"] if not live.empty else live
     n_exist = len(existing_live)
-    n_new = len(live) - n_exist
     n_sel = int(existing_live["_sel"].map(grid_bool).sum()) if n_exist else 0
     n_del = len(st.session_state.get("se_deleted", []))
+    n_people = len(live)
     filled = 0
     if not live.empty and day_cols:
         filled = int(live[day_cols].apply(
             lambda col: col.map(lambda v: bool(str(v).strip()) if pd.notna(v) else False)
         ).sum().sum())
-    meta = (
-        f"대상 월 <b style='color:#3D3A34'>{q['year']}-{q['month']:02d}</b>"
-        f" · 표시 <b style='color:#3D3A34'>{n_exist}</b>명"
-        f" · 신규 <b style='color:#3D3A34'>{n_new}</b>명"
-        f" · 선택 <b style='color:#3D3A34'>{n_sel}</b>명"
-        f" · 입력 <b style='color:#3D3A34'>{filled}</b>건"
-    )
-    if n_del:
-        meta += f" · 삭제 예정 <b style='color:#9A3B2E'>{n_del}</b>명"
-    with meta_slot:
+    empty_cells = max(n_people * len(day_cols) - filled, 0)
+
+    # 컨텍스트 라인 채움(YYYY-MM · 부서 · 조 + 인원/입력/미입력)
+    with context_slot:
         st.markdown(
-            f"<div style='color:#8A8880; font-size:0.78rem; line-height:1.6rem;'>{meta}</div>",
+            _context_html(q, dept_names.get(q["dept"], q["dept"]),
+                          team_names.get(q["team"], q["team"]),
+                          n_people, filled, empty_cells),
             unsafe_allow_html=True,
         )
 
-    # dirty 판정: 원본 스냅샷과 현재 편집 상태(정규화)를 비교
+    # dirty 판정: 원본 스냅샷과 현재 편집 상태(정규화)를 비교 — 계약 불변.
     dirty = _canon(live, st.session_state.get("se_deleted", []), day_cols) \
         != st.session_state.get("se_orig")
     st.session_state["se_dirty"] = dirty
@@ -261,8 +432,7 @@ def render(user: dict) -> None:
     elif st.session_state.get("nav_guard", {}).get("owner") == "schedule_edit":
         st.session_state.pop("nav_guard", None)
 
-    # 브라우저 새로고침/탭 닫기 경고 (best effort — 브라우저 기본 문구 표시).
-    # st.html 은 iframe 이 아니라 메인 문서에 삽입되므로 window(=앱 최상위)에 직접 건다.
+    # 브라우저 새로고침/탭 닫기 경고 (best effort)
     st.html(
         "<script>window.onbeforeunload = "
         + ("function(e){e.preventDefault(); e.returnValue='';};" if dirty else "null;")
@@ -270,47 +440,35 @@ def render(user: dict) -> None:
         unsafe_allow_javascript=True,
     )
 
-    # 미저장 이탈 확인 (사이드바 이동/로그아웃 = ui.request_nav 보류분, 조건 변경 = scope).
-    # 그리드보다 아래에 렌더링해야 대화 삽입/제거가 그리드 iframe 을 재생성해
-    # 미저장 편집 값을 리셋하는 일이 없다.
+    # 미저장 이탈 확인 (그리드보다 아래에 렌더 — iframe 재생성로 편집 리셋 방지)
     pending = st.session_state.get("nav_pending")
     if pending:
         _leave_dialog(pending, q)
 
-    # 저장 버튼은 상단 타이틀 밴드로 승격했다 — 미저장 안내만 표 아래에 남긴다.
-    if dirty:
-        st.markdown(
-            "<div style='text-align:right; color:#9A3B2E; font-size:0.78rem;'>"
-            "저장되지 않은 변경사항이 있습니다</div>",
-            unsafe_allow_html=True,
-        )
+    # ── 하단: 범례(근무형태 색) + 미저장 변경 N건 ──
+    st.markdown(_legend_html(active), unsafe_allow_html=True)
+    changed = _change_count(live, day_cols, st.session_state.get("se_orig_cells", {}), n_del)
+    st.markdown(f"<div class='se-dirty'>미저장 변경 {changed}건</div>", unsafe_allow_html=True)
 
-    # 상단 밴드 채움 — KPtech 아이콘 전용 툴바(사용자 관리와 동일 표준). 추가·조회·삭제·저장
-    # 아이콘만 이 화면에 적용(정보=화면 설명 popover, globe·인쇄·즐겨찾기는 shaded).
-    # 활성/비활성·툴팁은 master 규칙을 그대로 미러링한다:
-    #   · 삭제 = 선택 0이면 비활성(사유 tooltip),  · 저장 = 변경 없으면 비활성.
-    # 저장의 '변경' 신호는 위 dirty(=_canon(live, se_deleted, day_cols) != se_orig)로,
-    # 셀 편집·행 추가·행 삭제 예약을 **모두** 포함한다(대기 중 삭제/추가가 저장에서 막히지
-    # 않음 — 데이터 유실 방지). 추가·조회(새로고침)는 항상 활성.
-    # 클릭은 반드시 이 화면 고유 on_click 플래그(se_add_req/se_del_req/se_save_req/
-    # se_go_req)로 남겨(그리드 전송과 경합해도 유실 없음) 아래 소비 블록이 처리한다 —
-    # 플래그·버튼 key·저장/삭제 흐름은 byte-동일, 렌더(pill→아이콘)만 변경.
-    if band is not None:
-        band.render_icons(icon_toolbar_specs(
-            "se", info_content=nav.page_desc("schedule_edit"),
-            add={"key": "se_add", "help": "행 추가",
-                 "on_click": lambda: st.session_state.update(se_add_req=True)},
-            refresh={"key": "se_go", "help": "조회/새로고침",
-                     "on_click": lambda: st.session_state.update(se_go_req=True)},
-            delete={"key": "se_del", "disabled": n_sel == 0,
-                    "help": "삭제할 행을 먼저 선택" if n_sel == 0 else "삭제",
-                    "on_click": lambda: st.session_state.update(se_del_req=True)},
-            save={"key": "se_save", "disabled": not dirty,
-                  "help": "저장할 변경이 없습니다" if not dirty else "저장",
-                  "on_click": lambda: st.session_state.update(se_save_req=True)},
-        ))
+    # ── 1행 우측 액션 슬롯 채움(deferred): 행 추가 · 조회 · 행 삭제 · [저장]. 플래그·key·흐름 불변. ──
+    with action_slot:
+        _sp, ca, cg, cd, cs = st.columns([4.8, 1.3, 1.3, 1.3, 1.3], vertical_alignment="center")
+        with ca:
+            st.button("행 추가", key="se_add", width="stretch",
+                      on_click=lambda: st.session_state.update(se_add_req=True))
+        with cg:
+            st.button("조회", key="se_go", width="stretch",
+                      on_click=lambda: st.session_state.update(se_go_req=True))
+        with cd:
+            st.button("행 삭제", key="se_del", width="stretch", disabled=n_sel == 0,
+                      help="삭제할 행을 먼저 선택" if n_sel == 0 else "삭제",
+                      on_click=lambda: st.session_state.update(se_del_req=True))
+        with cs:
+            st.button("저장", key="se_save", type="primary", width="stretch", disabled=not dirty,
+                      help="저장할 변경이 없습니다" if not dirty else "저장",
+                      on_click=lambda: st.session_state.update(se_save_req=True))
 
-    # 버튼 플래그 처리 (최신 live 기준) — 밴드/인페이지 어느 위치에서 클릭됐든 동일 소비.
+    # 버튼 플래그 처리 (최신 live 기준)
     if st.session_state.pop("se_save_req", False):
         _save(live, q, day_cols)
     if st.session_state.pop("se_del_req", False):
