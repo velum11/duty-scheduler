@@ -52,8 +52,8 @@ _EDITABLE_STATUS = "SUBMITTED"
 # ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴 고정. ──
 _INK = "#1c1a17"
 _INK2 = "#4a453d"
-_WEAK = "#8b857c"
-_FAINT = "#a09a90"
+_MUT = "#6b665d"    # Codex P1: 읽는 작은 텍스트(모노 오버라인·미도달 단계 라벨) — 5.1:1↑
+_WEAK = "#8b857c"   # 비텍스트 어포던스 전용(행 펼침 캐럿 ›, 3.27:1 ≥3:1) — 읽는 텍스트엔 미사용
 _LINE = "#e6e2da"
 _LINE_SEC = "#e0dbd2"
 _ACCENT = "#c2410c"
@@ -236,7 +236,7 @@ def _steps_html(status: str) -> str:
         if reached:
             dot, txt, bg, bd = _ACCENT, _INK, _ACCENT_TINT, "#f0dfd0"
         else:
-            dot, txt, bg, bd = "#cfc8bd", _WEAK, "transparent", _LINE
+            dot, txt, bg, bd = "#cfc8bd", _MUT, "transparent", _LINE
         pills.append(_step_pill(dot, txt, bg, bd, lab))
     if rejected:
         pills.append(_step_pill("#9c3232", "#9c3232", "#fbeeee", "#f0d9d9", "반려"))
@@ -281,7 +281,7 @@ def _detail_blocks_html(report: dict) -> str:
         cells.append(
             f"<div style='flex:{flex};min-width:0;border-left:2px solid {_LINE_SEC};"
             "padding-left:14px;display:flex;flex-direction:column;gap:6px;'>"
-            f"<span style='font-size:11px;letter-spacing:0.1em;color:{_FAINT};font-family:{_MONO};'>{tag}</span>"
+            f"<span style='font-size:11px;letter-spacing:0.1em;color:{_MUT};font-family:{_MONO};'>{tag}</span>"
             f"<span style='font-size:12.5px;font-weight:600;color:{_INK2};'>{escape(label)}</span>"
             f"<p style='margin:0;font-size:14.5px;line-height:1.7;color:{_INK};text-wrap:pretty;"
             f"white-space:pre-wrap;'>{body}</p></div>"

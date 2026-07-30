@@ -485,7 +485,10 @@ _MASTER_GRID_CSS = {
     ".ag-root-wrapper": {"border": "1px solid #CFC8BB"},
     ".ag-header": {"border-bottom": "1px solid #CFC8BB"},
     ".ag-header-cell": {"border-right": "1px solid rgba(30, 30, 30, 0.12)"},
-    ".ag-header-cell-label": {"justify-content": "center"},
+    # Codex P2(§3·§8-6): 표 헤더 12.5px — AG 테마 기본(12px)이 .ag-header-cell-text 에
+    # 걸려 있어 라벨·텍스트 둘 다 12.5px 로 못박는다(신원 헤더가 셀 14.5 와 정합).
+    ".ag-header-cell-label": {"justify-content": "center", "font-size": "12.5px"},
+    ".ag-header-cell-text": {"font-size": "12.5px"},
     ".ag-cell": {
         "border-right": "1px solid rgba(30, 30, 30, 0.10)",
         "display": "flex",

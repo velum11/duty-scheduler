@@ -293,7 +293,7 @@ _WT_CROW_CSS = """
 .wt-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
 .wt-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
-.wt-crow .dist { font-size:11.5px; color:#a09a90; white-space:nowrap; }
+.wt-crow .dist { font-size:11.5px; color:#6b665d; white-space:nowrap; }
 </style>
 """
 
@@ -1140,7 +1140,7 @@ _EXTRA_CSS = """
 .ms-preview { margin:.1rem 0 0; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;
   background:transparent; border:none; border-radius:0; padding:0; }
 .ms-preview-t { flex:0 0 auto; font-family:'IBM Plex Mono',monospace; font-size:.62rem;
-  font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:#a09a90; }
+  font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:#6b665d; }
 .ms-sws { display:flex; flex-wrap:wrap; gap:.26rem; }
 .ms-sw { display:inline-flex; align-items:center; padding:.12rem; flex:0 0 auto;
   background:var(--ms-surface-2); border:1px solid var(--ms-line); border-radius:5px; }

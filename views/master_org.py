@@ -162,12 +162,12 @@ _ORG_PAGE_CSS = """
   border:none !important; border-bottom:1px solid #e0dbd2 !important; border-radius:0 !important;
   box-shadow:none !important; font-size:.8rem; }
 .ms-ctx > span:first-child { font-family:'IBM Plex Mono',monospace; font-weight:600;
-  letter-spacing:.12em; text-transform:uppercase; font-size:.62rem; color:#a09a90; }
+  letter-spacing:.12em; text-transform:uppercase; font-size:.62rem; color:#6b665d; }
 .ms-ctx b { padding:.14rem .55rem; border-radius:7px; background:#f2f0ec; border:1px solid #e4e0d8;
   color:#5c564d; font-weight:600; }
 .ms-ctx b.pin, .ms-ctx b.sel { background:#fdf3ec; border-color:#f0dfd0; color:#b4451a; }
 .ms-ctx .arw { font-size:.92rem; color:#cfc8bd; }
-.ms-ctx .none { font-style:normal; color:#8b857c; }
+.ms-ctx .none { font-style:normal; color:#6b665d; }
 
 /* 잠김 상태 밀도 완화(기능 보존) — 슬림 플레이스홀더 + 잠긴 시트 액션바 숨김. */
 .st-key-org_dept__sheet .ms-locked, .st-key-org_unit__sheet .ms-locked {

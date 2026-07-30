@@ -51,8 +51,10 @@ _EMP_EDITABLE = JsCode("function(p){ return p.data && p.data._row_state !== 'exi
 # ── §2 팔레트 (팔레트 밖 색 금지 §0-8) ──
 _INK = "#1c1a17"
 _INK2 = "#4a453d"
-_WEAK = "#8b857c"
-_FAINT = "#a09a90"
+# Codex P1: _WEAK(.se-ctx .op 운영단위 라벨)·_FAINT(.se-legend .lab 모노 오버라인)는 읽는
+# 텍스트라 #6b665d(5.1:1↑)로 상향 — #8b857c·#a09a90 은 읽는 텍스트 금지.
+_WEAK = "#6b665d"
+_FAINT = "#6b665d"
 _LINE = "#e6e2da"
 _LINE_HDR = "#cfc8bd"
 _LINE_SEC = "#e0dbd2"
@@ -351,12 +353,18 @@ def render(user: dict) -> None:
     context_slot = st.container()
 
     col_config = {
-        "사번": {"pinned": "left", "width": 112, "minWidth": 96,
-                "editable": _EMP_EDITABLE, "cellClass": "md-c-left"},
+        # Codex P2(§8-6): 신원 4열 본문 14.5px. 사번(10자리 모노)은 96px 폭을 좌우 패딩
+        # 4px 축소로 수용(잘림 없음 실측). 30px 행 높이·sticky(pinned left) 유지.
+        "사번": {"pinned": "left", "width": 96, "minWidth": 96,
+                "editable": _EMP_EDITABLE, "cellClass": "md-c-left",
+                "cellStyle": {"fontSize": "14.5px", "paddingLeft": "4px", "paddingRight": "4px"}},
         "성명": {"pinned": "left", "width": 92, "minWidth": 80,
-                "editable": False, "cellClass": "md-c-left"},
-        "부서": {"pinned": "left", "width": 116, "minWidth": 96, "cellClass": "md-c-left"},
-        "조": {"pinned": "left", "width": 88, "minWidth": 72, "cellClass": "md-c-left"},
+                "editable": False, "cellClass": "md-c-left",
+                "cellStyle": {"fontSize": "14.5px"}},
+        "부서": {"pinned": "left", "width": 116, "minWidth": 96, "cellClass": "md-c-left",
+                "cellStyle": {"fontSize": "14.5px"}},
+        "조": {"pinned": "left", "width": 88, "minWidth": 72, "cellClass": "md-c-left",
+              "cellStyle": {"fontSize": "14.5px"}},
     }
     # 날짜 셀 색상 — work_types 기준정보 hex 를 약칭/코드에 매핑(도메인 SoT, 하드코딩 금지).
     day_style = JsCode(
@@ -364,8 +372,9 @@ def render(user: dict) -> None:
         f"  const colors = {json.dumps(st.session_state.get('se_colors', {}), ensure_ascii=False)};"
         "  const v = String(p.value == null ? '' : p.value).trim();"
         "  const c = colors[v];"
-        "  if (!c) { return { textAlign: 'center' }; }"
-        "  return { backgroundColor: c + '26', color: '#1c1a17', fontWeight: 600, textAlign: 'center' };"
+        # Codex P2(§8-6 우선): 근무 셀 본문 14.5px(목업 픽셀보다 §8-6). 30px 행 높이 유지.
+        "  if (!c) { return { textAlign: 'center', fontSize: '14.5px' }; }"
+        "  return { backgroundColor: c + '26', color: '#1c1a17', fontWeight: 600, textAlign: 'center', fontSize: '14.5px' };"
         "}"
     )
     # 셀 클릭=근무 순환(빈값 포함) + 숫자키 1..N/0 = 근무형태/지움(도메인 파생). 값은

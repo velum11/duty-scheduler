@@ -115,7 +115,7 @@ _MU_CSS = """
 .mu-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
 .mu-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
-.mu-crow .dist { font-size:11.5px; color:#a09a90; white-space:nowrap; }
+.mu-crow .dist { font-size:11.5px; color:#6b665d; white-space:nowrap; }
 </style>
 """
 
@@ -511,6 +511,17 @@ _ACTIVE_PILL_RENDERER = JsCode(
           + 'border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;'
           + 'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';white-space:nowrap';
         e.textContent = on ? '재직' : '퇴직';
+        // Codex P2: 편집 단서 — 보호 계정이 아니면 커서 pointer + tooltip 로 '더블클릭/Enter 변경'을
+        // 안내한다(편집 동작·잠금 로직은 불변, 표시 단서만). 보호 계정은 잠금 사유를 tooltip 로 노출.
+        var d = p.data || {};
+        var prot = (d._protected === '1' || d._protected === 1);
+        if (prot) {
+          e.title = '보호 계정 — 재직 상태를 변경할 수 없습니다';
+          e.style.cursor = 'not-allowed';
+        } else {
+          e.title = '더블클릭 또는 Enter/F2 로 재직·퇴직 변경';
+          e.style.cursor = 'pointer';
+        }
         this.eGui = e;
       }
       getGui(){ return this.eGui; }
