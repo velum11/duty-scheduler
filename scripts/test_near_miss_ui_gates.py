@@ -159,7 +159,10 @@ render_src = inspect.getsource(nmi.render)
 check("진입가드: has_near_miss_improvement_access(배정 기반)",
       "has_near_miss_improvement_access" in render_src)
 body_src = inspect.getsource(nmi._render_body)
-check("MASTER_DETAIL split 사용(master_detail_frame)", "master_detail_frame" in body_src)
+# §1-A 큐 처리형: 좌우 분할(master_detail_frame) 제거 → 큐 칩 스트립 + 전체폭 상세.
+check("§1-A 큐 칩 스트립(좌우분할 제거)",
+      "_render_queue_chips" in body_src and "master_detail_frame" not in body_src)
+check("진입 시 첫 건 자동 선택", "ordered[0]" in body_src)
 # Phase2: 큐는 actor-aware(list_near_miss_improvements) + 담당자 스코핑(_scope_reports).
 impr_for_src = inspect.getsource(nmi._improvements_for)
 check("큐 actor-aware(list_near_miss_improvements)", "list_near_miss_improvements" in impr_for_src)

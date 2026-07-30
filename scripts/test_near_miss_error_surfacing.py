@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import inspect
 import sys
 from pathlib import Path
 
@@ -86,7 +87,8 @@ check("정상 부재 dict 비어있음(그러나 오류 아님)", imps_absent ==
 check("정상 부재는 '미작성' 라벨(오류 표식과 구분)",
       nmi._confirm_state_of(None) == "미작성")
 
-# 그리드 행: load_failed 면 담당자·확인상태 모두 '조회실패'로 노출(미지정/미작성 위장 없음).
+# §1-A 큐 칩 스트립 재구조: 담당자·확인상태 열이 없다. load_failed 는 KPI 파생 지표를 0으로
+# 위장하지 않고 '—'로 표면화한다(오류≠정상 부재). _render_body 는 별도 error 배너도 띄운다.
 _QUEUE_REPORTS = pd.DataFrame([
     {"id": "r1", "report_no": "NM-1", "work_name": "작업A",
      "confirmed_grade": "B", "incident_date": "2026-07-01"},
@@ -96,10 +98,12 @@ _QUEUE_REPORTS = pd.DataFrame([
 with _swap(db, "list_near_miss_improvements",
            lambda ids, **kw: (_ for _ in ()).throw(_Boom("boom"))):
     imps_q, lf_q = nmi._improvements_for(_QUEUE_REPORTS, _VIEWER)
-rows = nmi._queue_rows(_QUEUE_REPORTS, imps_q, lf_q)
-check("그리드 행 확인상태='조회실패'", set(rows["확인상태"]) == {nmi._LOAD_FAILED_LABEL})
-check("그리드 행 담당자='조회실패'(미지정 위장 아님)",
-      set(rows["담당자"]) == {nmi._LOAD_FAILED_LABEL})
+check("큐 조회 실패 → load_failed=True(오류 표면화)", lf_q is True)
+kpi_fail = nmi._kpi_strip_html(_QUEUE_REPORTS, imps_q, lf_q)
+check("KPI 파생 지표는 실패 시 '—'(0 위장 아님)", "—" in kpi_fail)
+check("KPI 종결 대기(큐 크기)는 실제 표시(2)", ">2<" in kpi_fail)
+body_src = inspect.getsource(nmi._render_body)
+check("load_failed 시 별도 error 배너 표면화", "load_failed" in body_src and "st.error" in body_src)
 
 
 # ===== 2) near_miss_my._render_revision_banner =====
