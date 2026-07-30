@@ -1,28 +1,28 @@
-"""내 아차사고 — 본인이 등록한 아차사고 목록 + 상세 + 상태(+ 제출됨 자기수정).
+"""내 아차사고 — 목록형 아코디언(DESIGN.md §1-B) + SUBMITTED 자기수정.
 
-DESIGN.md §0 화면 유형: ``MASTER_DETAIL`` — 읽기 목록(본인 작성 건) + 상세/워크플로
-패널(상세 확인 + SUBMITTED 상태에서만 본문 수정). 상단 액션바는 조회(새로고침)만 두고,
-유일한 쓰기(본문 수정)는 상세 패널의 scope 액션이 담당한다.
+신판 DESIGN.md §1-B "목록형(건수 적음)" 골격으로 구현한다(색 리스킨이 아니라 구조 교체):
 
-신원 계약(중요): 목록 범위는 화면 위젯이 아니라 인증된 세션 사용자의 사번으로 고정한다
-(``get_near_miss_reports({"reporter_emp_no": <세션 사번>})``). 수정도 세션 사용자를 그대로
-넘겨(``db.update_near_miss_report(report_id, payload, current_user=...)``) 파사드가 소유자·
-상태를 서버측에서 재확인한다 — 타인 건 열람·수정 위조 방지.
+    행 = 한 줄 요약(보고번호 모노 · 제목 14.5/600 · 날짜 · 원인 · 상태 · 캐럿) —
+    행 클릭 시 아래로 펼침(아코디언). 행 구분은 헤어라인, 카드 금지.
+    펼친 영역: 진행 단계 pill(제출→검토중→평가완료→종결) + 본문 블록(WHAT/CAUSE/…)
+    + 수정/취소.
 
-수정 게이트: 선택 건이 ``SUBMITTED`` 일 때만 수정 진입이 나타난다. 파사드
-``db.update_near_miss_report`` 는 병렬 작업으로 추가되는 중이라, 부재 시
-``hasattr(db, "update_near_miss_report")`` 로 진입을 가드하고 통합 대기 안내만 노출한다.
+- 좌우 분할·행 체크박스·"보고서를 선택하세요" 빈 패널·본문 아이콘 툴바 띠 제거(§0 금지 1·2·3).
+- 카드 금지(§0 금지 5) — 헤어라인+여백+상태 좌측 색바만. §2~§4 값만(§0 금지 8).
+- §7 매핑: 아코디언은 클릭 행(st.button) + session_state 펼침(expander 남용 없음).
 
-보완요청 피드백: 평가자가 보완요청(반송)한 제출됨(SUBMITTED) 건은 ``info`` 배너로 사유를
-안내한다(반려 ≠ 보완요청 — 별도 시각·문구). 보고자는 기존 SUBMITTED 자기수정·재제출
-경로로 자연 연결된다(별도 재제출 버튼 없음).
+레퍼런스 골격: ``아차사고 관리.dc.html`` isMine 블록(585~628).
 
-범위 밖(의도적 미구현): 제출 취소(deferred — 버튼 없음/안내만, 삭제로 대체하지 않음),
-복잡한 상태 시스템.
+기능 계약(불변 — 표현 계층만 교체):
+  - 목록 범위는 위젯이 아니라 인증 세션 사번으로 고정(``reporter_emp_no=<세션 사번>``).
+  - 본문 수정은 소유자 + ``SUBMITTED`` 상태에서만. 수정도 세션 사용자를 그대로 넘겨
+    (``db.update_near_miss_report(..., current_user=...)``) 파사드가 소유자·상태를 서버측
+    재확인한다(타인 건 열람·수정 위조 방지). db.py 무수정.
+  - 보완요청(info)·반려(warn)는 별개 시각·문구 유지. U/M/A 공유 — USER 모바일 동작 보존.
 """
 from __future__ import annotations
 
-# DESIGN.md §0 화면 유형 규약 — 읽기 목록 + 상세/워크플로 패널.
+# DESIGN.md §1-B 목록형 아코디언 — 읽기 목록 + 인라인 펼침 상세/워크플로.
 SCREEN_ARCHETYPE = "MASTER_DETAIL"
 
 from datetime import date
@@ -31,82 +31,83 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import auth, db, nav, ui
+from modules import auth, db, ui
 from views.common import erp, scaffold
-from views.master import TOKENS, banner, icon_toolbar_specs, sheet_head
+from views.master import banner
 from views.master.lifecycle import Readiness, ReadinessState
 
 _PAGE_ID = "near_miss_my"
-_SEL_KEY = "nm_my_selected_id"
+_SEL_KEY = "nm_my_selected_id"      # 펼쳐진(선택된) 보고서 id(문자열) — 단일 아코디언.
 
 _STATUS_LABEL = {
     "SUBMITTED": "제출됨", "IN_REVIEW": "검토중", "EVALUATED": "평가완료",
     "REJECTED": "반려", "CLOSED": "종결",
 }
-_STATUS_COLOR = {
-    "SUBMITTED": TOKENS["info"], "IN_REVIEW": TOKENS["gold"],
-    "EVALUATED": TOKENS["success"], "REJECTED": TOKENS["danger"], "CLOSED": TOKENS["ink-3"],
-}
 _CAUSE_LABEL = {
     "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘·충돌",
     "SLIP": "미끄러짐·넘어짐", "BURN": "화상·고온", "PINCH": "협착", "ETC": "기타",
 }
-# 등급 색·순서(§3.1: 등급=셰브런+색텍스트, pill 아님). S=최상위 위험. TOKENS 재사용(신규 색 0).
-_GRADE_COLOR = {
-    "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
-    "C": TOKENS["info"], "D": TOKENS["ink-3"],
-}
-_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
 _EDITABLE_STATUS = "SUBMITTED"
 
-
-def _grade_mark(grade, empty: str = "없음") -> str:
-    """등급 마크(§3.1: 셰브런+색텍스트, pill 아님). 빈 값은 중립 점 마커(empty 라벨)."""
-    g = str(grade or "").strip().upper()
-    if not g:
-        return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
-    return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
-
-# 큐 표시 열 + 숨김 자연키(_report_id). 선택은 자연키로 오간다(정렬·필터 후 위치 비의존).
-# USER·모바일 세로 폭에서 가로 스크롤 0 을 보장하려고 목록은 식별에 필요한 4열만 남긴다
-# (제안등급은 상세 메타로 내려 좁은 폭 열 폭 합을 줄인다 — 평가/개선조치 파일럿의 밀도 결정과 동일).
-_KEY_FIELD = "_report_id"
-_QUEUE_COLS = ["보고번호", "작업명", "발생일", "상태"]
-# 폭 합(고정 3열 + 작업명 minWidth ≈ 348)을 모바일 세로 스택 시 목록 폭(≈370px)에 맞춰
-# 가로 스크롤 0 을 보장한다(실측 조정). @1024·1366 넓은 폭에선 flex 작업명이 여유를 채운다.
-_QUEUE_COL_CONFIG = {
-    "보고번호": {"flex": 0, "width": 100, "minWidth": 88, "cellClass": "md-c-left"},
-    "작업명": {"flex": 1.4, "minWidth": 88, "cellClass": "md-c-left"},
-    "발생일": {"flex": 0, "width": 90, "minWidth": 82, "cellClass": "md-c-center"},
-    "상태": {"flex": 0, "width": 70, "minWidth": 60, "maxWidth": 92, "cellClass": "md-c-center"},
+# ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴 고정. ──
+_INK = "#1c1a17"
+_INK2 = "#4a453d"
+_WEAK = "#8b857c"
+_FAINT = "#a09a90"
+_LINE = "#e6e2da"
+_LINE_SEC = "#e0dbd2"
+_ACCENT = "#c2410c"
+_ACCENT_TINT = "#fdf3ec"
+_NEUTRAL = "#5c564d"
+_MONO = "'IBM Plex Mono', monospace"
+# 상태 색(§2 배지 텍스트색) — 행 좌측 색바 + 진행 단계 pill 에 사용. 전부 §2 값.
+_STATUS_COLOR = {
+    "SUBMITTED": "#2f4d99", "IN_REVIEW": "#8a6212", "EVALUATED": "#2f6b45",
+    "REJECTED": "#9c3232", "CLOSED": _NEUTRAL,
 }
-# USER·터치 행 피치(§0.6 — 44px, 32×32 히트영역 계약과 정합). 데스크톱 34 가 아니라 44 를 준다.
-_ROW_PX = 44
+
+_MINE_CSS = f"""
+<style>
+/* 한 줄 요약 행 = 전체폭 클릭 버튼(아코디언 토글). 카드 금지 — 헤어라인 + 상태 좌측 색바만. */
+[class*="st-key-myrow_"] button {{
+  width:100%; text-align:left; justify-content:flex-start;
+  background:transparent !important; border:none !important;
+  border-bottom:1px solid {_LINE} !important; border-left:3px solid transparent !important;
+  border-radius:0 !important; padding:13px 12px !important; min-height:52px !important;
+  font-size:14.5px !important; font-weight:500 !important; color:{_INK} !important;
+  box-shadow:none !important; white-space:normal !important; line-height:1.4 !important;
+}}
+[class*="st-key-myrow_"] button > div {{ justify-content:flex-start; text-align:left; flex:1 1 auto; min-width:0; }}
+[class*="st-key-myrow_"] button:hover {{ background:#faf8f4 !important; }}
+[class*="st-key-myrow_"] button:focus-visible {{ outline:2px solid {_ACCENT} !important; outline-offset:-2px; }}
+/* 상태 좌측 색바(색+형태 이중부호화, 상태 라벨 텍스트와 병행) */
+[class*="__SUBMITTED__"] button {{ border-left-color:#2f4d99 !important; }}
+[class*="__IN_REVIEW__"] button {{ border-left-color:#8a6212 !important; }}
+[class*="__EVALUATED__"] button {{ border-left-color:#2f6b45 !important; }}
+[class*="__REJECTED__"] button {{ border-left-color:#9c3232 !important; }}
+[class*="__CLOSED__"] button {{ border-left-color:{_NEUTRAL} !important; }}
+/* 펼침 상태(선택) — 오렌지 틴트 배경 + 오렌지 캐럿(선택 이중부호화). 캐럿은 우측. */
+[class*="__shut"] button::after {{ content:"\\203A"; margin-left:auto; padding-left:10px; color:{_WEAK}; font-size:17px; }}
+[class*="__open"] button::after {{ content:"\\02C5"; margin-left:auto; padding-left:10px; color:{_ACCENT}; font-size:17px; }}
+[class*="__open"] button {{ background:{_ACCENT_TINT} !important; }}
+[class*="__open"] button:hover {{ background:#fbe9dc !important; }}
+/* 펼친 영역 수정/취소 버튼 — 히트영역 34px */
+[class*="st-key-nm_my_editbtn_"] button, [class*="st-key-nm_my_cancel_"] button {{
+  min-height:34px !important; border-radius:8px !important; font-size:13px !important; }}
+</style>
+"""
 
 
 def render(user: dict) -> None:
-    band = erp.screen_frame(
+    # 제목 크롬만(아이콘 툴바 밴드 없음 §0-3) — 아이콘은 상단 52px 헤더에만.
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="내 아차사고",
         desc="본인이 등록한 아차사고와 처리 상태를 확인합니다.",
         breadcrumb="아차사고 › 내 아차사고",
         badges=scaffold.mode_badge(),
-        toolbar="icons",
     )
-    # 상단 파랑 밴드 아이콘 툴바(공통 표준). page-scope 조회 액션은 새로고침뿐 — search
-    # 아이콘 클릭의 rerun 만으로 아래 목록이 재조회된다(구 pill 과 동일). 유일한 쓰기(본문
-    # 수정)는 상세 패널 scope 액션 소관이라 밴드 추가·삭제·저장은 N/A(shaded).
-    if band is not None:
-        band.render_icons(icon_toolbar_specs(
-            _PAGE_ID, info_content=nav.page_desc(_PAGE_ID),
-            add={"key": f"{_PAGE_ID}__add_na", "disabled": True,
-                 "help": "이 화면에서는 사용하지 않습니다"},
-            refresh={"key": f"{_PAGE_ID}_refresh", "help": "새로고침", "on_click": None},
-            delete={"key": f"{_PAGE_ID}__del_na", "disabled": True,
-                    "help": "이 화면에서는 사용하지 않습니다"},
-            save={"key": f"{_PAGE_ID}__save_na", "disabled": True,
-                  "help": "이 화면에서는 사용하지 않습니다"},
-        ))
+    st.markdown(_MINE_CSS, unsafe_allow_html=True)
 
     emp_no = str(user.get("emp_no") or "").strip()
     if not emp_no:
@@ -115,9 +116,6 @@ def render(user: dict) -> None:
         return
 
     _readiness().banner()
-
-    # 영역 순서(§0.3): title(밴드 아이콘 툴바) → primary(목록) + details(상세).
-    # 새로고침은 상단 밴드 아이콘으로 이전했다(위 render_icons — 인페이지 pill 제거).
 
     try:
         reports = db.get_near_miss_reports({"reporter_emp_no": emp_no})
@@ -133,20 +131,7 @@ def render(user: dict) -> None:
                        head="내 아차사고")
         return
 
-    # 영역 순서(§0.3): primary(큐) + details(상세). USER·모바일 좁은 폭에서는 st.columns 가
-    # 세로로 접혀 목록→상세 스택이 된다(§0.7). 데스크톱(M/A)에서는 §0.6 강제(상세 폭 ≥600px)에
-    # 맞춰 목록 40%·상세 60%로 분할한다(SUBMITTED 자기수정 폼 확보). 선택은 select_grid 행클릭.
-    list_col, detail_col = erp.master_detail_frame(list_ratio=1.0, detail_ratio=1.5)
-    selected_id = st.session_state.get(_SEL_KEY)
-    with list_col:
-        picked = _render_queue(reports, selected_id)
-    # 선택을 상세 렌더 전에 소비한다 — select_grid 의 selectionChanged rerun 이 이미 일어난
-    # run 이므로 여기서 세션만 갱신하면 추가 st.rerun 없이 곧바로 상세를 그린다(즉시 상세).
-    if picked is not None and picked != selected_id:
-        st.session_state[_SEL_KEY] = picked
-        selected_id = picked
-    with detail_col:
-        _render_detail(user, reports)
+    _render_list(user, reports)
 
 
 # ---------- readiness (migration 006 3-state) ----------
@@ -165,7 +150,6 @@ def _readiness() -> ReadinessState:
     return ReadinessState.ready()
 
 
-# ---------- 목록/큐(primary — 단일 선택) ----------
 def _clean(value) -> str:
     if value is None:
         return ""
@@ -177,128 +161,133 @@ def _clean(value) -> str:
     return str(value).strip()
 
 
-def _queue_rows(reports: pd.DataFrame) -> pd.DataFrame:
-    """큐 표시 프레임 — 숨김 자연키(_report_id) + 표시 4열."""
-    cols = [_KEY_FIELD, *_QUEUE_COLS]
-    if reports is None or reports.empty:
-        return pd.DataFrame(columns=cols)
+# ---------- 목록형 아코디언 ----------
+def _render_list(user: dict, reports: pd.DataFrame) -> None:
+    """한 줄 요약 행(전체폭 클릭 버튼) + 클릭 시 인라인 펼침(단일 아코디언, session_state).
+
+    행 클릭=선택(펼침). 이미 열린 행을 다시 클릭하면 접힌다. 행 구분은 헤어라인이며 상태는
+    좌측 색바(색)+상태 라벨(형태)로 이중부호화한다. 좁은 폭에선 요약 텍스트가 wrap 된다."""
     frame = reports.sort_values("incident_date", ascending=False, kind="stable")
-    rows = []
-    for _, r in frame.iterrows():
-        status = _clean(r.get("status"))
-        rows.append({
-            _KEY_FIELD: str(r.get("id")),
-            "보고번호": _clean(r.get("report_no")) or "-",
-            "작업명": _clean(r.get("work_name")) or "-",
-            "발생일": _clean(r.get("incident_date")) or "-",
-            "상태": _STATUS_LABEL.get(status, status or "-"),
-        })
-    return pd.DataFrame(rows, columns=cols)
+    st.markdown(f"<div style='border-top:1px solid {_LINE_SEC};'></div>", unsafe_allow_html=True)
 
-
-def _render_queue(reports: pd.DataFrame, selected_id) -> str | None:
-    """내 아차사고를 단일 선택 큐로 렌더하고 선택된 보고서 자연키를 돌려준다.
-
-    구 ``st.selectbox('상세 볼 보고서')`` 를 없애고 목록 행 선택이 상세 선택을 대체한다
-    (Codex 지적 — 목록 클릭=상세). ``erp.select_grid`` 네이티브 single-selection: 행 클릭 시
-    체크 마커 + 배경 틴트로 이중부호화(§4)되고, 선택 자연키(_report_id)를 반환한다(정렬·필터
-    후 위치 비의존). USER·터치 밀도 44px(§0.6)."""
-    rows = _queue_rows(reports)
-    sheet_head("내 아차사고", count=len(rows))
-    status_rules = {label: _STATUS_COLOR[code] for code, label in _STATUS_LABEL.items()}
-    return erp.select_grid(
-        rows, key=f"{_PAGE_ID}_queue", key_field=_KEY_FIELD,
-        columns=_QUEUE_COLS, selected_key=selected_id,
-        col_config=_QUEUE_COL_CONFIG, color_rules={"상태": status_rules},
-        row_height=_ROW_PX,
-    )
-
-
-# ---------- 상세(details, 그룹2 골격) + SUBMITTED 자기수정 ----------
-def _render_detail(user: dict, reports: pd.DataFrame) -> None:
-    """그룹2 상세: 상태 badge → 피드백 배너 → 짧은 메타 2열 + 핵심 내용 → 워크플로(자기수정)
-    상단 근처 → 부차 서술 접기. 선택은 왼쪽 큐 행클릭(_SEL_KEY)이 소유한다(구 selectbox 제거)."""
-    selected_id = st.session_state.get(_SEL_KEY)
-    if not selected_id:
-        erp.detail_empty("보고서를 선택하세요",
-                         "왼쪽 목록에서 행을 클릭하면 상세와 처리 상태를 확인할 수 있습니다.")
-        return
-
-    match = reports[reports["id"].astype(str) == str(selected_id)]
-    if match.empty:
-        # 목록에서 사라진 stale 선택 — _SEL_KEY 해제하고 미선택 상태로 되돌린다.
+    open_id = st.session_state.get(_SEL_KEY)
+    open_id = str(open_id) if open_id is not None else None
+    ids = set(frame["id"].astype(str))
+    if open_id is not None and open_id not in ids:
+        open_id = None
         st.session_state.pop(_SEL_KEY, None)
-        erp.detail_empty("보고서를 선택하세요",
-                         "선택한 보고서를 목록에서 찾을 수 없습니다. 목록에서 다시 선택하세요.")
-        return
-    report = match.iloc[0].to_dict()
-    status = _clean(report.get("status"))
 
-    # ── 상단: 보고번호 + 상태 배지(색+라벨 이중부호화) ──
-    _render_detail_head(report, status)
+    for _, r in frame.iterrows():
+        rid = str(r.get("id"))
+        status = _clean(r.get("status"))
+        cause = _clean(r.get("cause_code"))
+        report_no = _clean(r.get("report_no")) or "(번호 미상)"
+        title = _clean(r.get("work_name")) or "(제목 없음)"
+        inc_date = _clean(r.get("incident_date")) or "-"
+        cause_label = _CAUSE_LABEL.get(cause, cause) or "-"
+        status_label = _STATUS_LABEL.get(status, status or "-")
+        is_open = (rid == open_id)
 
-    # ── 피드백 배너(상단 근처) — 반려(warn)와 보완요청(info)은 별개 시각·문구를 유지한다. ──
-    if status == "REJECTED" and _clean(report.get("rejection_reason")):
-        banner("warn", f"반려 사유: {_clean(report.get('rejection_reason'))}")
-    # 보완요청(반송) 피드백 — 제출됨(SUBMITTED) 상태에서 평가자가 재작성을 요청한 경우.
-    # 반려(REJECTED=종결분기)와 별개 의미·별개 문구·별개 시각(info)이며, 보고자는 기존
-    # SUBMITTED 자기수정·재제출 경로로 자연 연결된다(별도 재제출 버튼 없음).
-    if status == "SUBMITTED":
-        _render_revision_banner(selected_id)
+        # 한 줄 요약(버튼 라벨) — 보고번호 · 제목 · 날짜 · 원인 · 상태. 캐럿·상태 색바는 CSS.
+        label = f"{report_no}    {title}    {inc_date} · {cause_label} · {status_label}"
+        key = f"myrow_{rid}__{status or 'NONE'}__{'open' if is_open else 'shut'}"
+        if st.button(label, key=key, width="stretch"):
+            st.session_state[_SEL_KEY] = None if is_open else rid
+            st.rerun()
 
-    # ── 짧은 메타 2열 + 핵심 내용(작업명·사고내용, 전폭) ──
-    _render_report_context(report)
-
-    # ── 워크플로(SUBMITTED 자기수정 액션) — 핵심 내용 바로 뒤(부차 서술보다 위). ──
-    _render_edit_entry(user, report, status)
-
-    # ── 부차 참조 서술(발생원인 상세·작업내용·예방대책·현장 상황) 기본 접힘으로 상세 높이 bound. ──
-    _render_report_reference(report)
+        if is_open:
+            _render_detail(user, r.to_dict(), status)
 
 
-def _render_detail_head(report: dict, status: str) -> None:
-    """보고번호(제목 §2 20/700). 상태는 아래 메타 스트립(§3.2)에서 pill 로 노출한다."""
-    report_no = escape(_clean(report.get("report_no")) or "(번호 미상)")
-    st.markdown(
-        f"<div style='font-size:20px;font-weight:700;color:{TOKENS['ink']};"
-        f"line-height:1.2;margin:2px 0 8px;'>{report_no}</div>",
-        unsafe_allow_html=True,
+# ---------- 펼친 영역(상세 + 워크플로) ----------
+def _render_detail(user: dict, report: dict, status: str) -> None:
+    """펼친 행 상세: 진행 단계 pill → 피드백 배너 → 본문 블록 → 수정/취소.
+
+    SUBMITTED 건은 보완요청(info) 배너를 호출하고, REJECTED 건은 반려(warn) 배너를 띄운다
+    (별개 시각·문구). 선택(펼침)은 _SEL_KEY 가 소유한다."""
+    with st.container(border=False):
+        st.markdown(_steps_html(status), unsafe_allow_html=True)
+
+        # ── 피드백 배너 — 반려(warn)와 보완요청(info)은 별개 시각·문구를 유지한다. ──
+        if status == "REJECTED" and _clean(report.get("rejection_reason")):
+            banner("warn", f"반려 사유: {_clean(report.get('rejection_reason'))}")
+        if status == "SUBMITTED":
+            _render_revision_banner(report.get("id"))
+
+        st.markdown(_detail_blocks_html(report), unsafe_allow_html=True)
+
+        # ── 워크플로(SUBMITTED 자기수정) — 소유자+제출됨에서만. ──
+        _render_edit_entry(user, report, status)
+        st.markdown(f"<div style='height:8px'></div>", unsafe_allow_html=True)
+
+
+def _steps_html(status: str) -> str:
+    """진행 단계 pill(제출→검토중→평가완료→종결). 현행 상태값 기준으로 도달 단계를 채운다.
+
+    반려(REJECTED)는 분기 표현: 제출만 도달로 두고 마지막에 '반려' pill(danger)을 덧붙인다."""
+    order = [("SUBMITTED", "제출"), ("IN_REVIEW", "검토중"),
+             ("EVALUATED", "평가완료"), ("CLOSED", "종결")]
+    codes = [c for c, _ in order]
+    rejected = (status == "REJECTED")
+    cur = codes.index(status) if status in codes else 0
+    pills = []
+    for i, (_code, lab) in enumerate(order):
+        reached = (i == 0) if rejected else (i <= cur)
+        if reached:
+            dot, txt, bg, bd = _ACCENT, _INK, _ACCENT_TINT, "#f0dfd0"
+        else:
+            dot, txt, bg, bd = "#cfc8bd", _WEAK, "transparent", _LINE
+        pills.append(_step_pill(dot, txt, bg, bd, lab))
+    if rejected:
+        pills.append(_step_pill("#9c3232", "#9c3232", "#fbeeee", "#f0d9d9", "반려"))
+    return (f"<div style='display:flex;flex-wrap:wrap;align-items:center;gap:6px;"
+            f"margin:12px 0 16px;'>{''.join(pills)}</div>")
+
+
+def _step_pill(dot: str, txt: str, bg: str, bd: str, label: str) -> str:
+    return (
+        f"<span style='display:inline-flex;align-items:center;gap:6px;padding:4px 11px;"
+        f"border-radius:999px;border:1px solid {bd};background:{bg};font-size:12px;"
+        f"font-weight:600;color:{txt};white-space:nowrap;'>"
+        f"<span style='width:7px;height:7px;border-radius:50%;background:{dot};flex:0 0 auto;'></span>"
+        f"{escape(label)}</span>"
     )
 
 
-def _render_report_context(report: dict) -> None:
-    """읽기 메타 스트립(§3.2: 상태·발생일·제안등급·확정등급·발생원인 상시 노출) + 핵심 내용.
+def _detail_blocks_html(report: dict) -> str:
+    """펼친 영역 본문 블록(§1-B) — 좌측 2px 보더 + 모노 오버라인 + 라벨 + 본문 14.5px/1.7.
 
-    형식 분리(§3.1): 상태=lifecycle pill / 등급=grade_mark(셰브런+색텍스트) / 발생원인=평문."""
+    상단에 제안등급·확정등급 메타를 한 줄로 덧붙인다(행 요약엔 없는 등급 컨텍스트)."""
+    pg = _clean(report.get("proposed_grade")) or "없음"
+    cg = _clean(report.get("confirmed_grade")) or "미정"
+    meta = (
+        f"<div style='display:flex;flex-wrap:wrap;gap:6px 20px;margin:0 0 14px;font-size:12.5px;color:{_INK2};'>"
+        f"<span>제안등급 <b style='color:{_INK};'>{escape(pg)}</b></span>"
+        f"<span>확정등급 <b style='color:{_INK};'>{escape(cg)}</b></span></div>"
+    )
     cause = _clean(report.get("cause_code"))
-    status = _clean(report.get("status"))
-    status_badge = erp.status_badge_html(
-        _STATUS_LABEL.get(status, status or "-"),
-        _STATUS_COLOR.get(status, TOKENS["ink-3"]),
-    )
-    erp.metadata_strip([
-        ("상태", status_badge, "html"),
-        ("발생일", _clean(report.get("incident_date")) or "-"),
-        ("제안등급", _grade_mark(report.get("proposed_grade"), empty="없음"), "html"),
-        ("확정등급", _grade_mark(report.get("confirmed_grade"), empty="미정"), "html"),
-        ("발생원인", _CAUSE_LABEL.get(cause, cause) or "-"),
-    ])
-    erp.field_block("작업명", _clean(report.get("work_name")))
-    erp.field_block("사고내용", _clean(report.get("incident_content")))
-
-
-def _render_report_reference(report: dict) -> None:
-    """참조성 서술(발생원인 상세·작업내용·예방대책·현장 상황)을 기본 접힘 expander 로 내린다.
-
-    자기수정 워크플로가 이 위에 있으므로 장문 케이스에서도 주요 행동(수정 진입)이 긴 서술에
-    밀리지 않는다(§0.4 sticky/fixed 미사용, st.expander 네이티브 접기만)."""
-    with st.expander("보고서 상세 더 보기", expanded=False):
-        cause_detail = _clean(report.get("cause_detail"))
-        if cause_detail:
-            erp.field_block("발생원인 상세", cause_detail)
-        erp.field_block("작업내용", _clean(report.get("work_content")))
-        erp.field_block("예방대책", _clean(report.get("countermeasure")))
-        erp.field_block("작업현장 상황설명", _clean(report.get("site_description")))
+    cause_detail = _clean(report.get("cause_detail"))
+    cause_val = (_CAUSE_LABEL.get(cause, cause) or "") + (f" · {cause_detail}" if cause_detail else "")
+    blocks = [
+        ("WHAT", "사고내용", _clean(report.get("incident_content")), True),
+        ("CAUSE", "발생원인", cause_val, False),
+        ("ACTION", "예방대책", _clean(report.get("countermeasure")), True),
+        ("TASK", "작업내용", _clean(report.get("work_content")), False),
+    ]
+    cells = []
+    for tag, label, value, long in blocks:
+        flex = "2 1 420px" if long else "1 1 260px"
+        body = escape(value).strip() or "-"
+        cells.append(
+            f"<div style='flex:{flex};min-width:0;border-left:2px solid {_LINE_SEC};"
+            "padding-left:14px;display:flex;flex-direction:column;gap:6px;'>"
+            f"<span style='font-size:11px;letter-spacing:0.1em;color:{_FAINT};font-family:{_MONO};'>{tag}</span>"
+            f"<span style='font-size:12.5px;font-weight:600;color:{_INK2};'>{escape(label)}</span>"
+            f"<p style='margin:0;font-size:14.5px;line-height:1.7;color:{_INK};text-wrap:pretty;"
+            f"white-space:pre-wrap;'>{body}</p></div>"
+        )
+    return (meta + "<div style='display:flex;flex-wrap:wrap;gap:20px 32px;'>"
+            + "".join(cells) + "</div>")
 
 
 def _render_revision_banner(report_id) -> None:
@@ -306,9 +295,8 @@ def _render_revision_banner(report_id) -> None:
 
     반려(REJECTED) 배너는 ``warn``(경고), 보완요청은 ``info``(파랑)로 **별도 시각**을 준다
     — 반려는 종결분기, 보완요청은 재작성 요청이라 성격이 다르다. 007 미적용이면 facade 가
-    None 을 돌려주므로 배너가 뜨지 않는다(정상 부재 = 가짜 표시 없음). 반면 실제 조회
-    오류는 '보완요청 없음'으로 조용히 삼키지 않고 danger 배너로 표면화한다 — 보완요청이
-    걸린 건을 오류 때문에 못 본 채 방치하지 않기 위함이다(오류≠정상 부재)."""
+    None 을 돌려주므로 배너가 뜨지 않는다(정상 부재). 실제 조회 오류는 '보완요청 없음'으로
+    조용히 삼키지 않고 danger 배너로 표면화한다(오류≠정상 부재)."""
     try:
         rev = db.get_near_miss_revision_request(report_id)
     except db.DATA_SOURCE_ERRORS as exc:
@@ -329,26 +317,30 @@ def _render_revision_banner(report_id) -> None:
 
 
 def _render_edit_entry(user: dict, report: dict, status: str) -> None:
-    """SUBMITTED 상태에서만 본문 수정 진입을 노출한다. 제출 취소는 범위 밖(안내만)."""
+    """SUBMITTED 상태에서만 본문 수정 진입을 노출한다(소유자 검증은 facade 소관). 제출 취소는 범위 밖."""
     if status != _EDITABLE_STATUS:
         st.caption("제출됨 상태에서만 내용을 수정할 수 있습니다.")
         return
-    # 파사드가 아직 없으면(병렬 통합 대기) 진입을 막고 사유만 알린다.
     if not hasattr(db, "update_near_miss_report"):
         banner("info", "수정 기능은 통합 대기 중입니다(update_near_miss_report 파사드 연결 후 활성화).")
         return
 
-    with st.expander("내용 수정 (제출됨 상태)", expanded=False):
+    rid = str(report.get("id"))
+    edit_key = f"nm_my_edit_open_{rid}"
+    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
+        if st.button("내용 수정", key=f"nm_my_editbtn_{rid}", type="secondary"):
+            st.session_state[edit_key] = not bool(st.session_state.get(edit_key, False))
+            st.rerun()
+        st.button("제출 취소", key=f"nm_my_cancel_{rid}", disabled=True,
+                  help="제출 취소는 후속 반영 예정입니다.", type="secondary")
+    if st.session_state.get(edit_key):
         _render_edit_form(user, report)
-    st.caption("제출 취소는 현재 준비되지 않았습니다(후속 반영 예정).")
 
 
 def _render_edit_form(user: dict, report: dict) -> None:
     rid = report.get("id")
     with st.form(f"nm_my_edit_{rid}", clear_on_submit=False):
         work_name = st.text_input("작업명", value=_clean(report.get("work_name")), max_chars=120)
-        # 제안 등급 입력은 사용자 요구 변경(2026-07-29)으로 제거했다 — 기존 저장값은 보존한다
-        # (수정으로 조용히 지워지지 않게). 발생일·발생원인을 2열로 배치(§0.6 중첩 1회 내).
         c1, c2 = st.columns(2)
         with c1:
             inc = _clean(report.get("incident_date"))
@@ -398,9 +390,8 @@ def _render_edit_form(user: dict, report: dict) -> None:
 def _save_edit(report_id, payload: dict) -> None:
     """세션 사용자로 본문 수정을 시도한다(파사드가 소유자·SUBMITTED 를 서버측 재확인).
 
-    도메인 검증 오류(ValueError)는 사용자 안전 문구이므로 그대로 노출하고, 그 외
-    예외는 원문(raw)을 감춰 일반 안내로 접는다.
-    """
+    도메인 검증 오류(ValueError)는 사용자 안전 문구이므로 그대로 노출하고, 그 외 예외는
+    원문(raw)을 감춰 일반 안내로 접는다."""
     try:
         db.update_near_miss_report(report_id, payload, current_user=auth.get_current_user())
     except ValueError as exc:
