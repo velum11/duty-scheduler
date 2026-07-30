@@ -79,24 +79,26 @@ def test_render_smoke() -> None:
     check("동적 그리드 높이(master_grid_height) 사용", "master_grid_height" in src)
 
 
-# ===== 1-1) 액션 위치 = 상단 타이틀 밴드 (사용자 관리와 통일된 KPtech 아이콘 툴바) =====
+# ===== 1-1) 액션 위치 = §1-E 건수 행 우측 (아이콘 밴드 제거, 8단계) =====
 def test_action_bar_above_grid() -> None:
-    print("액션 위치(상단 밴드) — screen_frame(toolbar=\"icons\") → 그리드 뒤 건수 계산 후 아이콘 밴드 채움")
+    print("액션 위치(§1-E 건수 행 우측) — 아이콘 밴드 제거, 건수 행에 행 추가·삭제·저장·새로고침")
     import inspect
     from views import master_work_types as m
     src = inspect.getsource(m.render)
-    # 밴드 핸들을 헤더에서 받고(toolbar="icons"), 그리드 렌더 뒤 건수 계산 후 아이콘으로 채운다.
+    # §1-E 구조: 헤더 밴드/툴바 제거. 액션은 그리드 뒤 건수 계산 후 건수 행(count_row_slot)
+    # 우측에 page_action_specs + state.action_requester + {page}__{role} 키 버튼으로 채운다.
     i_frame = src.find("erp.screen_frame(")
-    i_toolbar = src.find('toolbar="icons"')
     i_grid = src.find("render_master_grid(spec")
-    i_fill = src.find("band.render_icons(")
-    check("헤더에서 밴드 핸들 확보(toolbar=\"icons\")", 0 <= i_frame and 0 <= i_toolbar)
-    check("밴드를 그리드 건수 계산 뒤에 채움", i_fill > i_grid)
-    check("밴드에 아이콘 툴바 스펙(icon_toolbar_specs) 채움",
-          i_fill >= 0 and "icon_toolbar_specs" in src[i_fill - 300:i_fill + 100])
+    i_crow = src.find("count_row_slot = st.container()")
     i_specs = src.find("page_action_specs")
-    check("아이콘 활성/사유는 공통 액션 규칙(page_action_specs) 재사용",
-          0 <= i_specs < i_fill)
+    check("헤더는 중립 프레임(erp.screen_frame)만 사용", 0 <= i_frame)
+    check("아이콘 밴드 제거(toolbar/render_icons 없음)",
+          'toolbar="icons"' not in src and "render_icons" not in src)
+    check("건수 행 슬롯을 그리드보다 먼저 확보", 0 <= i_crow < i_grid)
+    check("액션은 그리드 건수 계산 뒤 채움(page_action_specs)", i_grid < i_specs)
+    check("액션 활성/사유는 공통 규칙(page_action_specs) 재사용", 0 <= i_specs)
+    check("클릭은 동일 flag 계약(action_requester + {page}__{role} 키)",
+          "state.action_requester(role)" in src and 'f"{PAGE_ID}__{role}"' in src)
     check("배너 슬롯은 그리드보다 먼저 확보", 0 <= src.find("banner_slot = st.container()") < i_grid)
 
 
@@ -198,13 +200,13 @@ def test_unified_redesign_features() -> None:
     frame_new["_row_state"] = "new"
     check("신규 행은 요약 분포에서 제외", m._summary_counts(frame_new) == (0, 0))
 
-    summary_src = inspect.getsource(m._render_summary_chips)
-    check("요약칩이 공통 chip_html 사용", "chip_html" in summary_src)
-    check("요약칩에 사용 중/미사용 라벨", "사용 중" in summary_src and "미사용" in summary_src)
-    check("요약칩은 필터결과 기준(_summary_counts 사용, 전체 db 카운트 아님)",
-          "_summary_counts" in summary_src and "get_work_types" not in summary_src)
-    check("요약칩을 그리드 위 슬롯에서 렌더", "_render_summary_chips" in render_src
-          and 0 <= render_src.find("summary_slot = st.container()") < render_src.find("render_master_grid(spec"))
+    # §1-E(8단계): 요약칩 카드 제거 → 건수 행(count_row_slot)에 사용 중/미사용 분포를
+    # _summary_counts(필터결과 기준) 로 인라인 표기. 전체 db 카운트가 아니라 라이브 프레임 기준.
+    check("건수 행에 사용 중/미사용 라벨", "사용 중" in render_src and "미사용" in render_src)
+    check("분포는 필터결과 기준(_summary_counts(live) 사용, 전체 db 카운트 아님)",
+          "_summary_counts(live)" in render_src)
+    check("분포·건수를 그리드 위 건수 행 슬롯에서 렌더",
+          0 <= render_src.find("count_row_slot = st.container()") < render_src.find("render_master_grid(spec"))
 
 
 # ===== 1-5) 미리보기 색·약칭 계약 (DESIGN.md §150) =====

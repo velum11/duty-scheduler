@@ -172,15 +172,30 @@ _SHORT_LABEL_RENDERER = JsCode(
         const use = (u === true || u === 'true' || u === 1 || u === '사용' || u === '재직');
         return !removed && use;
       }
+      _textOn(hex) {
+        const m = /^#([0-9a-fA-F]{6})$/.exec(hex); if (!m) { return '#1c1a17'; }
+        const n = parseInt(m[1], 16);
+        const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+        const L = 0.2126 * f((n >> 16) & 255) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
+        return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#ffffff' : '#000000';
+      }
       _render(p) {
         const g = this.eGui; g.innerHTML = '';
         g.style.display = 'flex'; g.style.alignItems = 'center'; g.style.gap = '6px'; g.style.height = '100%';
+        const d = p.data || {};
         const val = String(p.value == null ? '' : p.value).trim();
+        const hex = String(d['색상'] == null ? '' : d['색상']).trim();
+        const valid = /^#([0-9a-fA-F]{6})$/.test(hex);
+        // §1-E: 약칭 = 근무형태 색 chip(DB hex solid, dc t.chipStyle). 근무표/대시보드 배지와
+        // 동일한 색 어휘로, 색이 없으면 평문 폴백. 색·약칭 SoT 는 DB(이 셀은 표시 전용).
         const t = document.createElement('span');
         t.textContent = val || '—';
-        if (!val) { t.style.color = '#908C83'; }
+        if (val && valid) {
+          t.style.background = hex; t.style.color = this._textOn(hex);
+          t.style.padding = '1px 9px'; t.style.borderRadius = '999px';
+          t.style.fontSize = '12.5px'; t.style.fontWeight = '600'; t.style.letterSpacing = '.01em';
+        } else if (!val) { t.style.color = '#908C83'; }
         g.appendChild(t);
-        const d = p.data || {};
         if (val && this._active(d) && p.api) {
           let count = 0;
           const self = this;
@@ -233,7 +248,7 @@ _DUP_REFRESH = JsCode(
     function(e) {
       const col = (e.column && e.column.getColId) ? e.column.getColId()
                   : (e.colDef && e.colDef.field);
-      if ((col === '약칭' || col === '사용') && e.api) {
+      if ((col === '약칭' || col === '사용' || col === '색상') && e.api) {
         e.api.refreshCells({ columns: ['약칭'], force: true });
       }
     }
@@ -248,22 +263,60 @@ _EDIT_NEW_ONLY = JsCode("function(p){ return !!(p.data && p.data._row_state === 
 _CODE_READONLY_RULES = {"ms-cell-readonly": "data._row_state !== 'new'"}
 
 
+# §1-E 불리언 pill 렌더러(사용·실근무) — §2 배지 팔레트. 편집은 불리언 체크박스(더블클릭)로
+# 보존한다(값·저장 경로 불변, pill 은 display-only). 6단계 재직 pill 과 동일 패턴.
+def _bool_pill(on_label: str, off_label: str, on_pal: list[str]) -> JsCode:
+    off = ["#f2f0ec", "#5c564d", "#e4e0d8"]  # 중립(§2 종결 배지)
+    import json as _json
+    on_j, off_j = _json.dumps(on_pal), _json.dumps(off)
+    on_l, off_l = _json.dumps(on_label), _json.dumps(off_label)
+    return JsCode(
+        "(class { init(p){"
+        "  var on=(p.value===true||p.value===1||p.value==='1'||p.value==='true'||p.value==='Y');"
+        f" var c=on?{on_j}:{off_j}; var lbl=on?{on_l}:{off_l};"
+        "  var e=document.createElement('span');"
+        "  e.style.cssText='display:inline-flex;align-items:center;padding:2px 10px;'"
+        "    +'border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;'"
+        "    +'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';white-space:nowrap';"
+        "  e.textContent=lbl; this.eGui=e;"
+        "} getGui(){return this.eGui;} refresh(){return false;} })"
+    )
+
+
+_USE_PILL_RENDERER = _bool_pill("사용", "미사용", ["#eef5f0", "#2f6b45", "#d8e6dd"])    # 사용=success
+_WORK_PILL_RENDERER = _bool_pill("근무", "비근무", ["#eef2fb", "#2f4d99", "#dbe3f4"])   # 실근무=info
+
+# §1-E 건수 행 CSS(근무형태 제목 + 건수 pill + 사용/미사용). §2 리터럴.
+_WT_CROW_CSS = """
+<style>
+.wt-crow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.wt-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
+.wt-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
+  padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
+.wt-crow .dist { font-size:11.5px; color:#a09a90; white-space:nowrap; }
+</style>
+"""
+
+
 # ---- 컬럼 폭·정렬(디자인 계약 §4·mockup) ----
 _COL_WIDTHS = {
     "코드": {"width": 108, "minWidth": 88, "pinned": "left", "cellClass": "md-c-left",
             "editable": _EDIT_NEW_ONLY},
-    "명칭": {"width": 118, "minWidth": 96, "cellClass": "md-c-left"},
+    "명칭": {"width": 118, "minWidth": 96, "cellClass": "md-c-left",
+            "cellStyle": {"fontSize": "14.5px"}},  # §1-E 본문 14.5
     "분류": {"width": 96, "minWidth": 76, "cellClass": "md-c-left", "cellRenderer": _CATEGORY_RENDERER},
     "약칭": {"width": 130, "minWidth": 96, "cellClass": "md-c-left", "cellRenderer": _SHORT_LABEL_RENDERER},
     "시작": {"width": 80, "minWidth": 66, "cellClass": "md-c-center ms-num"},
     "종료": {"width": 80, "minWidth": 66, "cellClass": "md-c-center ms-num"},
     "색상": {"width": 156, "minWidth": 130, "cellClass": "md-c-left",
             "cellRenderer": _COLOR_RENDERER, "cellEditor": _COLOR_EDITOR},
-    "실근무": {"width": 76, "minWidth": 64, "cellClass": "md-c-center"},
+    # §1-E: 근무 여부(실근무)·사용 = pill 렌더러(§2 팔레트) + 불리언 체크박스 편집(더블클릭).
+    # 값·저장·is_work/is_active 경로 불변(pill display-only). 특근수당은 부가 플래그라 체크박스 유지.
+    "실근무": {"width": 84, "minWidth": 68, "cellClass": "md-c-center", "cellRenderer": _WORK_PILL_RENDERER},
     "특근수당": {"width": 84, "minWidth": 72, "cellClass": "md-c-center"},
-    "설명": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left"},
+    "설명": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left", "cellStyle": {"fontSize": "14.5px"}},
     "표시순서": {"width": 92, "minWidth": 78, "cellClass": "md-c-center ms-num"},
-    "사용": {"width": 66, "minWidth": 58, "cellClass": "md-c-center"},
+    "사용": {"width": 84, "minWidth": 66, "cellClass": "md-c-center", "cellRenderer": _USE_PILL_RENDERER},
 }
 
 
@@ -334,22 +387,18 @@ def _col_config() -> dict:
 def render(user: dict) -> None:
     state = DraftState(PAGE_ID)
 
-    sample = db.is_sample_mode()
-    mode_badge = style.mode_badge_html(connected=not sample, sample=sample)
-    # toolbar="icons": 헤더 파랑 밴드에 KPtech 아이콘 전용 툴바(정보·globe·추가·조회·삭제·
-    # 인쇄·저장·즐겨찾기) 슬롯을 만들고 핸들을 받는다. 아이콘은 그리드 뒤 건수 계산 후
-    # band.render_icons 로 채운다(dirty/선택 정확 — 사용자 관리와 동일 표준). pill 텍스트
-    # 라벨 툴바에서 아이콘 포맷으로 통일(2026-07-27).
+    # §1-E 표형(구조 교체) — 아이콘 밴드 제거(§0-3, 6단계와 동일). 실기능 액션(행 추가·삭제·
+    # 저장·새로고침)은 건수 행 우측으로 이전(동일 flag 계약). 색·약칭·시간/HEX 검증·참조 확인 후
+    # 비활성화 우선·미리보기 계약은 전부 보존.
     _WT_DESC = "근무형태(코드·명칭·약칭·색상)를 표에서 직접 편집하고 [저장]으로 일괄 반영합니다."
-    band = erp.screen_frame(
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="근무형태 관리",
         desc=_WT_DESC,
         breadcrumb="기준정보 › 근무형태 관리",
-        badges=mode_badge,
-        toolbar="icons",
     )
     st.markdown(_EXTRA_CSS, unsafe_allow_html=True)  # 미리보기·오류 목록 보조 스타일(항상 주입)
+    st.markdown(_WT_CROW_CSS, unsafe_allow_html=True)
 
     # ---- 조건 패널(우측 인라인 라벨, KP-standard) — 위젯 key 는 기존 DraftState 스코프
     #      키(state.key("f_active")/"f_search")를 widget_key 로 그대로 지정해 세션 상태를
@@ -372,20 +421,20 @@ def render(user: dict) -> None:
         _load_editor(state, params)
     # CONFIRM → banner_slot 폐기 확인 바에서 처리 / KEEP → 현재 draft 유지
 
-    # ---- 표 위 슬롯(§7): 액션바 → 배너 → 표 순서 확정. 건수는 그리드 후 계산하므로
-    #      슬롯을 먼저 확보하고 나중에 채운다(사용자·조직 화면과 동일 배치). ----
-    summary_slot = st.container()  # 요약 칩(필터결과 사용/미사용 분포) — 표 위 최상단
+    # §1-E: 필터 줄 → 미리보기 스와치(우측, deferred=live 색·약칭) → 헤어라인 → 건수 행 → 표.
+    preview_slot = st.container()   # 미리보기(근무형태 색·약칭) — live 색으로 그리드 뒤 채움
+    st.markdown("<div style='border-top:1px solid #e0dbd2;margin:2px 0 8px;'></div>",
+                unsafe_allow_html=True)
+    count_row_slot = st.container()  # 건수 행(근무형태 + 건수 pill + 사용/미사용 + 우측 액션) — deferred
     banner_slot = st.container()  # 배너(삭제 확인/폐기 확인/원장/오류/flash 중 1개)
 
     # ---- 그리드 ----
     frame = _render_frame(state)
-    with summary_slot:
-        _render_summary_chips(frame, params)
     spec = MasterGridSpec(
         page_id=PAGE_ID, columns=_GRID_COLUMNS, order=_USER_COLS,
         col_config=_col_config(), select_all=True,
         height=master_grid_height(len(frame)),
-        grid_options={"onCellValueChanged": _DUP_REFRESH},
+        grid_options={"onCellValueChanged": _DUP_REFRESH, "rowHeight": 42},  # §1-E 행 높이 확대
     )
     grid_df = render_master_grid(spec, frame, key=state.grid_key())
 
@@ -400,36 +449,51 @@ def render(user: dict) -> None:
     state.set_dirty(dtotal > 0)
     st.session_state[state.key(_LAST_COUNTS)] = (new_count, changed_count, sel_count)
 
-    # ---- 아이콘 툴바 채움(상단 파랑 밴드 슬롯에 지연 채움) ----
-    # 활성/비활성·변경 배지·툴팁 사유는 인페이지 액션바(master_action_bar)와 동일 규칙
-    # (page_action_specs). 클릭은 인페이지와 동일한 state.action_requester(role) on_click
-    # 플래그 + {page_id}__{role} 키로 남겨 아래 take_actions 가 소비한다(저장/삭제/추가/
-    # 새로고침 경로 무변경 — 렌더만 아이콘으로 이전). 이 화면이 실제로 쓰는 4개 기능
-    # (추가/삭제/저장/새로고침)만 활성이고, 미사용(globe/인쇄/즐겨찾기)은 shaded 로 남는다.
-    if band is not None:
-        specs = master.page_action_specs(sel_count=sel_count, dirty_total=dtotal, can_save=True)
-        by_role = {s["role"]: s for s in specs}
+    # 미리보기 스와치(live 색·약칭) 채움 — 근무표/대시보드 미리보기 계약 보존(§150).
+    with preview_slot:
+        _render_preview(live)
 
-        def _icon_action(role: str, name: str) -> dict:
+    # ---- §1-E 건수 행 채움(deferred) — 근무형태 + 건수 pill + 사용/미사용 + 우측 행 추가·삭제·
+    #      저장·새로고침. 활성/사유/라벨은 page_action_specs(인페이지 규칙 그대로), 클릭은 동일
+    #      flag(state.action_requester) + {page}__{role} 키(저장/삭제/추가/새로고침 경로 무변경,
+    #      §8 색은 role-key class 로 자동=저장 오렌지 primary). ----
+    specs = master.page_action_specs(sel_count=sel_count, dirty_total=dtotal, can_save=True)
+    by_role = {s["role"]: s for s in specs}
+    active_ct, inactive_ct = _summary_counts(live)
+    with count_row_slot:
+        ci, ca, cd, cs, cr = st.columns([4.8, 1.15, 1.05, 1.35, 1.15],
+                                        vertical_alignment="center")
+        with ci:
+            dist = (f"<span class='dist'>사용 중 {active_ct} · 미사용 {inactive_ct}</span>"
+                    if (active_ct or inactive_ct) else "")
+            st.markdown(
+                f"<div class='wt-crow'><span class='t'>근무형태</span>"
+                f"<span class='pill'>{len(existing)}</span>{dist}</div>",
+                unsafe_allow_html=True,
+            )
+
+        def _act(colobj, role: str, name: str, primary: bool = False) -> None:
             s = by_role[role]
-            return {"key": f"{PAGE_ID}__{role}", "on_click": state.action_requester(role),
-                    "disabled": s["disabled"], "help": (s["help"] or name) if s["disabled"] else name}
+            colobj.button(
+                s["label"] if role == SAVE else name,
+                key=f"{PAGE_ID}__{role}", width="stretch",
+                type="primary" if primary else "secondary",
+                icon=s.get("icon"), disabled=s["disabled"],
+                help=(s["help"] or name) if s["disabled"] else None,
+                on_click=state.action_requester(role),
+            )
 
-        band.render_icons(master.icon_toolbar_specs(
-            PAGE_ID, info_content=_WT_DESC,
-            add=_icon_action(ADD, "행 추가"),
-            refresh=_icon_action(REFRESH, "조회/새로고침"),
-            delete=_icon_action(DELETE, "삭제"),
-            save=_icon_action(SAVE, "저장"),
-        ))
+        _act(ca, ADD, "행 추가")
+        _act(cd, DELETE, "삭제")
+        _act(cs, SAVE, "저장", primary=True)
+        _act(cr, REFRESH, "새로고침")
 
     # ---- 배너(표 위 슬롯, 단일 우선순위: 삭제확인 > 폐기확인 > 저장원장/오류 > flash) ----
     with banner_slot:
         _render_banners(state, params)
 
-    # ---- 상태 스트립(§20, 표 하단) + 근무표 미리보기 ----
+    # ---- 상태 스트립(§20, 표 하단) ----
     count_strip(int(len(existing)), new_count, changed_count, sel_count)
-    _render_preview(live)
 
     # ---- 액션 소비(commit handshake: 최신 grid_df 수신 후에 flag 소비) ----
     actions = master.take_actions(state)
@@ -1072,11 +1136,11 @@ def _render_preview(live: pd.DataFrame) -> None:
 
 _EXTRA_CSS = """
 <style>
-.ms-preview { margin-top:.5rem; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;
-  background:var(--ms-surface); border:1px solid var(--ms-line); border-radius:8px;
-  padding:.38rem .6rem; }
-.ms-preview-t { flex:0 0 auto; font-size:.72rem; font-weight:700; color:var(--ms-ink-2);
-  letter-spacing:-.01em; }
+/* §1-E: 미리보기는 카드 아님 — 인라인 스와치 스트립(배경·테두리 제거, 헤어라인 컨텍스트). */
+.ms-preview { margin:.1rem 0 0; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;
+  background:transparent; border:none; border-radius:0; padding:0; }
+.ms-preview-t { flex:0 0 auto; font-family:'IBM Plex Mono',monospace; font-size:.62rem;
+  font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:#a09a90; }
 .ms-sws { display:flex; flex-wrap:wrap; gap:.26rem; }
 .ms-sw { display:inline-flex; align-items:center; padding:.12rem; flex:0 0 auto;
   background:var(--ms-surface-2); border:1px solid var(--ms-line); border-radius:5px; }
