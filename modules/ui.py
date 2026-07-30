@@ -6,7 +6,7 @@ App Shell 구조 (DESIGN.md §2):
   조회 조건 → 요약 카드 → 그리드).
 
 구현 방식: st.sidebar 에 헤더/메뉴/사용자 카드를 렌더링하고 _SHELL_CSS 로 스타일링한다.
-숨김 상태(st.session_state.sb_hidden)에서는 사이드바를 렌더링하지 않고
+접힘 상태(st.session_state.sb_collapsed)에서는 사이드바를 66px 레일로 전환하고
 본문 브레드크럼 좌측에 열기 버튼(▤)을 표시한다. CSS 는 이 모듈에서만 관리한다.
 
 공개 API:
@@ -201,8 +201,9 @@ _SHELL_CSS = """
   --sb-text: #a49d92;        /* 기본 글자 — 다크 위 6.54:1 */
   --sb-text-dim: #9a9284;    /* 사번 등 보조 글자 — 다크 위 5.70:1(≥4.5) */
   --sb-placeholder: #8b857c; /* 검색 placeholder 전용 (본문 텍스트 아님) */
-  --sb-icon: #a49d92;        /* 폴더/chevron 아이콘색(그룹 마커) */
-  --sb-guide: #2f2c26;       /* 리프 좌측 가이드(연결)선 — 하위임을 명확히 */
+  --sb-icon: #a49d92;        /* 캐럿 아이콘색(그룹 마커) */
+  --sb-mark: #4a453d;        /* 모듈 6px 사각 마크(비활성) — 활성은 --sb-accent */
+  --sb-dot: #4f4a43;         /* 리프 5px 점(비활성) — 활성은 --sb-accent */
   --sb-hover: #24221e;       /* row hover (배경보다 한 단계 밝게) */
   --sb-sel-bg: #2f2c26;      /* 선택 행 배경 */
   --sb-sel-text: #fdf3ec;    /* 선택 항목 밝은 텍스트 */
@@ -233,7 +234,7 @@ section[data-testid="stSidebar"] {
   transition: width 0.28s ease;
 }
 section[data-testid="stSidebar"] > div:first-child { width: var(--sb-w) !important; }
-/* 기존 «/» 접기 토글 제거 — 숨김/열기는 아이콘 버튼 + st.session_state.sb_hidden 으로 제어 */
+/* 기존 «/» 접기 토글 제거 — 접힘(66px 레일)/펼침은 아이콘 버튼 + st.session_state.sb_collapsed 로 제어 */
 div[data-testid="stSidebarHeader"] { display: none !important; }
 div[data-testid="stSidebarContent"] {
   padding: 0 !important; display: flex; flex-direction: column; height: 100%;
@@ -308,9 +309,8 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
   outline: 2px solid var(--sb-focus) !important; outline-offset: 1px;
 }
 .st-key-sb_hide div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
-/* 아이콘 전용 버튼(접기/열기/로그아웃)은 내부 래퍼도 가운데 정렬 */
+/* 아이콘 전용 버튼(접기/로그아웃)은 내부 래퍼도 가운데 정렬 */
 .st-key-sb_hide div.stButton button > div, .st-key-sb_hide div.stButton button > div > span,
-.st-key-sb_show div.stButton button > div, .st-key-sb_show div.stButton button > div > span,
 .st-key-sb_user div.stButton button > div, .st-key-sb_user div.stButton button > div > span {
   justify-content: center; text-align: center;
 }
@@ -335,57 +335,59 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
   border-color: var(--sb-accent) !important; box-shadow: none !important;
 }
 
-/* ===== 메뉴 트리 (폴더 그룹 vs 들여쓴 페이지 리프 — 계층을 한눈에 명확히) ===== */
+/* ===== 메뉴 트리 (DESIGN §4·§7: 폴더 아이콘 금지 — 모듈=6px 사각 마크+캐럿, 리프=5px 점) ===== */
 .st-key-sb_nav { background: var(--sb-tree-bg); padding: 6px 0 10px; }
 .sb-empty { padding: 12px 20px; font-size: 12px; color: var(--sb-text-dim); }
 
-/* 최상위 항목: 그룹 헤더(sbg_) + 단독 항목(sbs_) 공통 30px·14px */
+/* 최상위 항목: 그룹 헤더(sbg_) + 단독 모듈(sbs_) 공통 32px·14px */
 div[class*="st-key-sbg_"] div.stButton > button,
 div[class*="st-key-sbs_"] div.stButton > button {
-  height: 32px; min-height: 32px; padding: 0 12px 0 10px;
-  font-size: 14px; color: var(--sb-text) !important; gap: 6px;
+  height: 32px; min-height: 32px; padding: 0 12px 0 12px;
+  font-size: 14px; font-weight: 600; color: var(--sb-text) !important; gap: 9px;
 }
-/* 그룹 헤더 = 폴더: 좌측 폴더 아이콘 + 세미볼드 + 우측 chevron */
-div[class*="st-key-sbg_"] div.stButton > button { font-weight: 600; }
-div[class*="st-key-sbg_"] div.stButton > button::before {
-  content: ""; flex: 0 0 auto; width: 15px; height: 15px;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%23a49d92' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/%3E%3C/svg%3E") no-repeat center / 15px 15px;
-}
-/* 그룹 헤더 우측 chevron (닫힘 ▸ / 열림 ▾) — flush right. 라벨 div(flex:1)가 밀어낸다 */
-div[class*="st-key-sbg_"] div.stButton > button::after {
-  content: "\\25B8"; flex: 0 0 auto; margin-left: 8px;
-  font-size: 10px; color: var(--sb-icon); line-height: 1;
-}
-div[class*="_grpopen"] div.stButton > button::after { content: "\\25BE"; }
-/* 활성 경로 그룹(현재 페이지의 부모) = 밝은 텍스트 + 굵게 */
-div[class*="st-key-sbg_"] div.stButton > button[kind="primary"] {
-  font-weight: 700; color: var(--sb-sel-text) !important; background: transparent !important;
-}
-/* 단독 최상위 항목(대시보드) = 폴더 아님(홈 아이콘, chevron 없음). 활성 시 밝은 텍스트+굵게 */
-div[class*="st-key-sbs_"] div.stButton > button { font-weight: 500; }
+/* 모듈 좌측 6px 사각 마크(활성 오렌지) — 폴더 아이콘 대체(§7) */
+div[class*="st-key-sbg_"] div.stButton > button::before,
 div[class*="st-key-sbs_"] div.stButton > button::before {
-  content: ""; flex: 0 0 auto; width: 15px; height: 15px;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%23a49d92' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 11l9-7 9 7'/%3E%3Cpath d='M5 10v9h14v-9'/%3E%3C/svg%3E") no-repeat center / 15px 15px;
+  content: ""; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 2px;
+  background: var(--sb-mark);
 }
+div[class*="st-key-sbg_"] div.stButton > button[kind="primary"]::before,
+div[class*="st-key-sbs_"] div.stButton > button[kind="primary"]::before {
+  background: var(--sb-accent);
+}
+/* 그룹 헤더 우측 캐럿 › — 열림 시 90° 회전(라벨 div flex:1 이 밀어낸다) */
+div[class*="st-key-sbg_"] div.stButton > button::after {
+  content: "\\203A"; flex: 0 0 auto; margin-left: 8px;
+  font-size: 14px; line-height: 1; color: var(--sb-text-dim);
+  transform: rotate(0deg); transition: transform 0.15s ease;
+}
+div[class*="_grpopen"] div.stButton > button::after { transform: rotate(90deg); }
+/* 활성 경로 그룹(현재 페이지의 부모) = 밝은 텍스트 + 굵게 */
+div[class*="st-key-sbg_"] div.stButton > button[kind="primary"],
 div[class*="st-key-sbs_"] div.stButton > button[kind="primary"] {
-  color: var(--sb-sel-text) !important; font-weight: 700; background: var(--sb-sel-bg) !important;
+  font-weight: 700; color: var(--sb-sel-text) !important;
+}
+/* 단독 모듈(대시보드) 활성 = 선택 배경까지(직접 이동형 모듈, 캐럿 없음) */
+div[class*="st-key-sbs_"] div.stButton > button[kind="primary"] {
+  background: var(--sb-sel-bg) !important;
 }
 
-/* 리프(페이지, sbi_) — 26px·13px, 더 깊은 들여쓰기 + 좌측 세로 가이드선(연결선). */
+/* 리프(페이지, sbi_) — 28px·13px, 들여쓰기 + 좌측 5px 점(§4). 가이드선 없음. */
 div[class*="st-key-sbi_"] div.stButton > button {
   height: 28px; min-height: 28px; padding: 0 12px 0 18px;
-  font-size: 13px; font-weight: 400; color: var(--sb-text) !important;
+  font-size: 13px; font-weight: 400; color: var(--sb-text) !important; gap: 10px;
 }
 div[class*="st-key-sbi_"] div.stButton > button::before {
-  content: ""; flex: 0 0 auto; align-self: stretch; width: 14px; margin-right: 10px;
-  border-left: 1px solid var(--sb-guide);
+  content: ""; flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--sb-dot);
 }
-/* 활성 리프(현재 페이지) = 밝은 텍스트 + 굵게 + 선택 배경 강조 */
+/* 활성 리프(현재 페이지) = 밝은 텍스트 + 굵게 + 선택 배경 + 오렌지 점 + 좌측 오렌지 바 */
 div[class*="st-key-sbi_"] div.stButton > button[kind="primary"] {
   color: var(--sb-sel-text) !important; font-weight: 700; background: var(--sb-sel-bg) !important;
+  box-shadow: inset 2px 0 0 var(--sb-accent);
 }
 div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
-  border-left-color: var(--sb-accent);
+  background: var(--sb-accent);
 }
 
 /* ===== 하단 사용자 카드 (다크, 맨 아래 고정: 좌측 정보 + 우측 로그아웃 아이콘) ===== */
@@ -460,20 +462,89 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
   outline: 2px solid var(--accent) !important; outline-offset: 1px;
 }
 .st-key-hdr_refresh div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
-/* 사이드바 열기(펼치기) 버튼 — 접힘 상태에서 헤더 좌측. 심플 아이콘. */
-.st-key-sb_show div.stButton button {
-  width: 34px; min-height: 34px; height: 34px; padding: 0; justify-content: center;
-  color: var(--ink-2) !important;
-  background: transparent !important; border: 1px solid transparent !important; border-radius: 7px;
-  box-shadow: none !important;
+</style>
+"""
+
+# 66px 접힘 레일 CSS — collapsed 일 때 _SHELL_CSS 뒤에 주입(폭·글리프 스타일만 덮음).
+# 브랜드 W·모듈 2글자 글리프·유저 아바타·로그아웃을 세로 스택으로, 히트영역 ≥40px(≥32 강제),
+# 모든 글리프 버튼은 help(tooltip/접근성 이름) 필수(표현 계층·접근성). §2 팔레트만.
+_RAIL_CSS = """
+<style>
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"] > div:first-child {
+  width: 66px !important; min-width: 66px !important; max-width: 66px !important;
 }
-.st-key-sb_show div.stButton button:hover {
-  color: var(--ink) !important; background: #f1eee8 !important;
+/* 레일 상단: 브랜드 W + 펼치기 토글(세로 중앙) */
+.st-key-sb_rail_head {
+  background: var(--sb-brand-bg); border-bottom: 1px solid var(--sb-border);
+  padding: 8px 0; display: flex; flex-direction: column; align-items: center; gap: 6px;
 }
-.st-key-sb_show div.stButton button:focus-visible {
-  outline: 2px solid var(--accent) !important; outline-offset: 1px;
+.sb-rail-logo {
+  width: 30px; height: 30px; border-radius: 7px; background: var(--sb-accent);
+  color: #fff; font-size: 14px; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center;
 }
-.st-key-sb_show div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
+.st-key-sb_expand div.stButton button {
+  width: 40px; height: 40px; min-height: 40px; padding: 0; justify-content: center;
+  color: var(--sb-text) !important; background: transparent !important;
+  border: 1px solid transparent !important; border-radius: 7px; margin: 0 auto;
+}
+.st-key-sb_expand div.stButton button:hover {
+  color: var(--sb-sel-text) !important; background: var(--sb-hover) !important;
+}
+.st-key-sb_expand div.stButton button:focus-visible {
+  outline: 2px solid var(--sb-focus) !important; outline-offset: 1px;
+}
+.st-key-sb_expand div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
+/* 레일 모듈 글리프 스택 — 2글자 글리프, 히트영역 44px, 활성=오렌지 */
+.st-key-sb_rail_nav { background: var(--sb-tree-bg); padding: 8px 0; }
+/* help(tooltip) 가 붙은 버튼은 button 이 div.stButton 의 직계가 아니므로(툴팁 래퍼 개입)
+   자손 결합자(descendant)로 선택한다 — 직계 '>' 는 매치되지 않는다. */
+div[class*="st-key-sbr_"] div.stButton button {
+  width: 44px; height: 44px; min-height: 44px; margin: 3px auto; padding: 0;
+  justify-content: center !important; text-align: center;
+  border-radius: 8px; font-size: 12px; font-weight: 600; letter-spacing: -0.03em;
+  color: var(--sb-text) !important; background: #26241f !important;
+}
+div[class*="st-key-sbr_"] div.stButton button > div,
+div[class*="st-key-sbr_"] div.stButton button > div > span {
+  justify-content: center; text-align: center;
+}
+div[class*="st-key-sbr_"] div.stButton button:hover {
+  color: var(--sb-sel-text) !important; background: var(--sb-hover) !important;
+}
+div[class*="st-key-sbr_"] div.stButton button[kind="primary"] {
+  background: var(--sb-accent) !important; color: #fff !important;
+}
+div[class*="st-key-sbr_"] div.stButton button:focus-visible {
+  outline: 2px solid var(--sb-focus) !important; outline-offset: -2px;
+}
+/* 레일 하단: 유저 아바타 + 로그아웃(세로 중앙, 맨 아래 고정) */
+section[data-testid="stSidebar"] div[data-testid="stLayoutWrapper"]:has(> .st-key-sb_rail_user) {
+  margin-top: auto;
+}
+.st-key-sb_rail_user {
+  margin-top: auto; padding: 8px 0; background: var(--sb-col-bg);
+  border-top: 1px solid var(--sb-border);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.sb-rail-ava {
+  width: 30px; height: 30px; border-radius: 50%; background: #33302a;
+  color: #ddd6cb; font-size: 12.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.st-key-sb_rail_user div.stButton button {
+  width: 40px; height: 40px; min-height: 40px; padding: 0; justify-content: center;
+  color: var(--sb-text) !important; background: transparent !important;
+  border: 1px solid transparent !important; border-radius: 7px; margin: 0 auto;
+}
+.st-key-sb_rail_user div.stButton button:hover {
+  color: var(--sb-sel-text) !important; background: var(--sb-hover) !important;
+}
+.st-key-sb_rail_user div.stButton button:focus-visible {
+  outline: 2px solid var(--sb-focus) !important; outline-offset: 1px;
+}
+.st-key-sb_rail_user div.stButton button [data-testid="stIconMaterial"] { font-size: 17px; }
 </style>
 """
 
@@ -586,7 +657,7 @@ def app_shell(user: dict) -> str:
         page = nav.default_page(user["role"], caps)
         st.session_state.nav_page = page
 
-    st.session_state.setdefault("sb_hidden", False)
+    collapsed = st.session_state.setdefault("sb_collapsed", False)
 
     # 이동 가드 안전장치: 가드 소유 화면이 아닌 곳에 남은 가드는 정리한다.
     guard = st.session_state.get("nav_guard")
@@ -595,9 +666,15 @@ def app_shell(user: dict) -> str:
         st.session_state.pop("nav_pending", None)
 
     st.markdown(_SHELL_CSS, unsafe_allow_html=True)
+    # 접힘(66px 레일)은 완전 숨김이 아니라 폭·내용 전환(DESIGN §4). 사이드바는 항상
+    # 렌더하고, 레일 CSS 를 _SHELL_CSS 뒤에 주입해 폭·글리프 스타일만 덮는다(표현 계층).
+    if collapsed:
+        st.markdown(_RAIL_CSS, unsafe_allow_html=True)
 
-    if not st.session_state.sb_hidden:
-        with st.sidebar:
+    with st.sidebar:
+        if collapsed:
+            _sidebar_rail(groups, page, user)
+        else:
             _sidebar_brand()
             query = _sidebar_search()
             _sidebar_nav(groups, page, query)
@@ -647,7 +724,7 @@ def _shell_groups(role: str, caps=None) -> list:
 
 
 def _sidebar_brand() -> None:
-    """사이드바 헤더: 골드 로고 마크 + 앱명(교대 근무표) + 숨김(▤) 버튼."""
+    """사이드바 헤더: 오렌지 로고 마크 + 앱명(교대 근무표) + 접기(66px 레일) 버튼."""
     with st.container(key="sb_head"):
         brand, toggle = st.columns([5, 1.15], vertical_alignment="center")
         brand.markdown(
@@ -657,9 +734,66 @@ def _sidebar_brand() -> None:
         )
         with toggle:
             if st.button("", icon=":material/view_sidebar:", key="sb_hide",
-                         type="tertiary", help="사이드바 접기"):
-                st.session_state.sb_hidden = True
+                         type="tertiary", help="사이드바 접기(66px 레일)"):
+                st.session_state.sb_collapsed = True
                 st.rerun()
+
+
+# ---------- 모듈 글리프(66px 레일 전용) ----------
+_MODULE_GLYPH = {
+    "home": "홈", "schedule": "근무", "near_miss": "아차", "master": "기준",
+}
+
+
+def _module_glyph(group: dict) -> str:
+    """레일 모듈 2글자 글리프 — 고정 매핑, 미지정 그룹은 라벨 앞 2글자 폴백."""
+    return _MODULE_GLYPH.get(group["id"], (group["label"] or "·")[:2])
+
+
+def _sidebar_rail(groups: list, page: str, user: dict) -> None:
+    """66px 접힘 레일(DESIGN §4) — 브랜드 W·모듈 2글자 글리프·유저 아바타·로그아웃 세로 스택.
+
+    표현 계층만(Codex): 모든 글리프는 help(tooltip/접근성 이름) 필수. 모듈 글리프 클릭은
+    라우팅·권한 로직을 재사용한다 — 단독 모듈(홈)은 request_nav 로 그 페이지 이동(가드 준수),
+    다자식 모듈은 사이드바를 펼치고(sb_collapsed=False) 해당 그룹을 열어 리프를 고르게 한다.
+    메뉴 숨김은 접근 제어가 아니며 route 권한 재검증은 불변이다."""
+    # 브랜드 W + 펼치기 토글(세로)
+    with st.container(key="sb_rail_head"):
+        st.markdown("<div class='sb-rail-logo'>W</div>", unsafe_allow_html=True)
+        if st.button("", icon=":material/view_sidebar:", key="sb_expand",
+                     type="tertiary", help="사이드바 펼치기(234px)"):
+            st.session_state.sb_collapsed = False
+            st.rerun()
+
+    # 모듈 글리프 스택
+    with st.container(key="sb_rail_nav"):
+        for g in groups:
+            gid = g["id"]
+            active = any(c["id"] == page for c in g["children"])
+            if st.button(
+                _module_glyph(g),
+                key=f"sbr_{gid}",
+                type="primary" if active else "secondary",
+                help=g["label"],
+                width="stretch",
+            ):
+                if len(g["children"]) == 1:
+                    request_nav({"type": "page", "target": g["children"][0]["id"]})
+                else:
+                    st.session_state.sb_collapsed = False
+                    st.session_state[f"sb_grp_{gid}"] = True
+                    st.rerun()
+
+    # 유저 아바타 + 로그아웃(하단 세로 스택)
+    name = str(user.get("name", "")) or "?"
+    with st.container(key="sb_rail_user"):
+        st.markdown(
+            f"<div class='sb-rail-ava' title='{escape(name)}'>{escape(name[:1])}</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("", icon=":material/logout:", key="btn_logout",
+                     type="tertiary", help="로그아웃"):
+            request_nav({"type": "logout"})
 
 
 # ---------- 이동 가드 (미저장 변경 보호 — 기능 전용, 시각 요소 없음) ----------
@@ -804,7 +938,10 @@ def _conn_pill_html() -> str:
 
 def _breadcrumb_header(user: dict, page: str) -> None:
     """본문 상단 52px 아이콘 헤더 — 좌측 MODULE / SCREEN 모노 브레드크럼,
-    우측 연결 상태 pill + 실기능 아이콘(새로고침). 사이드바 숨김 시 좌측에 열기 버튼."""
+    우측 연결 상태 pill + 실기능 아이콘(새로고침).
+
+    사이드바는 항상 렌더된다(접힘=66px 레일, 완전 숨김 없음) — 헤더에 별도 '열기'
+    버튼을 두지 않는다(펼치기는 레일 내부 토글이 소유)."""
     if page == "master_org":
         module_label, screen_label = "기준정보", "조직 관리"
     else:
@@ -819,17 +956,8 @@ def _breadcrumb_header(user: dict, page: str) -> None:
     conn_html = _conn_pill_html()
 
     with st.container(key="app_header"):
-        if st.session_state.get("sb_hidden"):
-            btn, text, pill, refresh = st.columns(
-                [0.5, 7.3, 2.6, 0.6], vertical_alignment="center")
-            with btn:
-                if st.button("", icon=":material/view_sidebar:", key="sb_show",
-                             type="tertiary", help="사이드바 열기"):
-                    st.session_state.sb_hidden = False
-                    st.rerun()
-        else:
-            text, pill, refresh = st.columns(
-                [7.8, 2.6, 0.6], vertical_alignment="center")
+        text, pill, refresh = st.columns(
+            [7.8, 2.6, 0.6], vertical_alignment="center")
         text.markdown(crumb_html, unsafe_allow_html=True)
         pill.markdown(conn_html, unsafe_allow_html=True)
         with refresh:

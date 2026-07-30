@@ -92,17 +92,22 @@ check("조직 관리 메뉴 id 고정", [c["id"] for c in master_children] == [
 ])
 
 
-# ===== 3) 접힘(숨김) 상태 — 열기 버튼(sb_show) 표시, 접기 버튼 숨김 =====
-print("사이드바 접힘 상태 (sb_hidden=True)")
+# ===== 3) 접힘(66px 레일) 상태 — 펼치기 버튼 + 모듈 글리프 + 로그아웃, 접기 버튼 없음 =====
+# DESIGN §4: 완전 숨김이 아니라 66px 레일로 전환(모듈 2글자 글리프·브랜드·유저 세로 스택).
+print("사이드바 접힘 레일 상태 (sb_collapsed=True)")
 at2 = AppTest.from_file(str(ROOT / "app.py"), default_timeout=45)
 at2.session_state["user"] = ADMIN
 at2.session_state["nav_page"] = "dashboard"
-at2.session_state["sb_hidden"] = True
+at2.session_state["sb_collapsed"] = True
 at2.run()
-check("접힘 상태 렌더 예외 없음", not at2.exception)
+check("레일 상태 렌더 예외 없음", not at2.exception)
 keys2 = {b.key for b in at2.button}
-check("접힘 상태: 열기 버튼(sb_show) 표시", "sb_show" in keys2)
-check("접힘 상태: 사이드바 미렌더(접기 버튼 없음)", "sb_hide" not in keys2)
+check("레일: 펼치기 버튼(sb_expand) 표시", "sb_expand" in keys2)
+check("레일: 모듈 글리프 버튼(sbr_*) 표시", any(str(k).startswith("sbr_") for k in keys2))
+check("레일: 로그아웃(btn_logout) 유지", "btn_logout" in keys2)
+check("레일: 확장형 접기 버튼(sb_hide) 미표시", "sb_hide" not in keys2)
+check("레일: 확장형 리프/그룹(sbi_/sbg_) 미표시",
+      not any(str(k).startswith(("sbi_", "sbg_")) for k in keys2))
 
 
 # ===== 4) MANAGER App Shell 동일 동작 =====
@@ -133,9 +138,14 @@ else:
 # ===== 6) 계약 불변 (소스) — 로그아웃 동작·펼침/접힘 키 =====
 print("동작 계약 불변")
 check("로그아웃은 auth.logout 로 처리(apply_nav)", "auth.logout()" in inspect.getsource(ui.apply_nav))
-check("접기 버튼이 sb_hidden=True 설정", "sb_hidden = True" in inspect.getsource(ui._sidebar_brand))
-check("열기 버튼이 sb_hidden=False 설정", "sb_hidden = False" in inspect.getsource(ui._breadcrumb_header))
+check("접기 버튼이 sb_collapsed=True 설정(66px 레일)", "sb_collapsed = True" in inspect.getsource(ui._sidebar_brand))
+check("펼치기 버튼이 sb_collapsed=False 설정(레일 내부)", "sb_collapsed = False" in inspect.getsource(ui._sidebar_rail))
 check("로그아웃 버튼이 request_nav(logout) 유지", '"type": "logout"' in inspect.getsource(ui._sidebar_user_card))
+# 레일 라우팅·접근성 계약: 모듈 글리프는 help(tooltip/접근성 이름) 필수, route 는 request_nav 재사용
+rail_src = inspect.getsource(ui._sidebar_rail)
+check("레일 모듈 글리프에 help(접근성 이름) 필수", "help=g[\"label\"]" in rail_src or "help=g['label']" in rail_src)
+check("레일 단독 모듈은 request_nav 로 이동(가드 준수)", "request_nav" in rail_src)
+check("레일 다자식 모듈은 펼침+그룹 오픈(라우팅 변경 아님)", "sb_grp_" in rail_src)
 
 
 # ===== 7) 심플 아이콘 스타일 계약 (칩/전체폭/텍스트/구분선 제거) =====
@@ -148,7 +158,7 @@ check("로그아웃 아이콘 버튼(btn_logout) 존재",
 check("로그아웃이 전체폭(width=stretch) 아님", 'width="stretch"' not in card_src)
 check("로그아웃이 사용자 카드 우측 컬럼 배치", "st.columns" in card_src)
 check("접기 버튼(sb_hide) 아이콘 존재", 'key="sb_hide"' in inspect.getsource(ui._sidebar_brand))
-check("열기 버튼(sb_show) 아이콘 존재", 'key="sb_show"' in inspect.getsource(ui._breadcrumb_header))
+check("펼치기 버튼(sb_expand) 아이콘 존재(레일)", 'key="sb_expand"' in inspect.getsource(ui._sidebar_rail))
 # 사용자 정보-로그아웃 구분선 제거 (직전 버전의 separator)
 check("사용자 카드 구분선 제거", "border-bottom: 1px solid rgba(255, 255, 255, 0.07)" not in ui_src)
 # 세 아이콘 버튼 기본 투명 배경 + hover + focus-visible (CSS)
@@ -189,23 +199,36 @@ check("테마 준비 토큰 주석", "이 토큰 블록만 오버라이드" in s
 check("활성 리프 밝은텍스트+굵게+선택배경",
       'div[class*="st-key-sbi_"] div.stButton > button[kind="primary"] {' in shell_css
       and "color: var(--sb-sel-text) !important; font-weight: 700; background: var(--sb-sel-bg)" in shell_css)
-# 그룹 vs 리프 계층 명확화(폴더 아이콘 + 들여쓰기 + 가이드선) — 구조 보존
-check("그룹 헤더 폴더 아이콘(::before)",
-      'st-key-sbg_"] div.stButton > button::before' in shell_css and "M3 7a2 2 0 0 1 2-2" in shell_css)
-check("그룹 헤더 세미볼드(600)로 대비 강화",
-      'div[class*="st-key-sbg_"] div.stButton > button { font-weight: 600' in shell_css)
-check("리프 좌측 가이드선(::before border-left)",
+# DESIGN §4·§7: 폴더 아이콘 제거 → 모듈 6px 사각 마크 + 캐럿, 리프 5px 점(가이드선 제거)
+check("폴더 아이콘 제거(§7) — 폴더 SVG 경로 없음", "M3 7a2 2 0 0 1 2-2" not in shell_css)
+check("모듈 6px 사각 마크(::before)",
+      'st-key-sbg_"] div.stButton > button::before' in shell_css
+      and "flex: 0 0 6px; width: 6px; height: 6px; border-radius: 2px" in shell_css
+      and "background: var(--sb-mark)" in shell_css)
+check("활성 모듈 마크 오렌지(--sb-accent)",
+      'button[kind="primary"]::before' in shell_css and "background: var(--sb-accent)" in shell_css)
+check("모듈 세미볼드(600)", "font-weight: 600; color: var(--sb-text)" in shell_css)
+check("리프 5px 점(::before, 가이드선 아님)",
       'st-key-sbi_"] div.stButton > button::before' in shell_css
-      and "border-left: 1px solid var(--sb-guide)" in shell_css)
-check("리프 들여쓰기 그룹보다 깊음(pad-left 18 vs 그룹 10)",
-      "padding: 0 12px 0 18px" in shell_css and "padding: 0 12px 0 10px" in shell_css)
-check("가이드선 토큰(--sb-guide)·아이콘 토큰(--sb-icon)",
-      "--sb-guide:" in shell_css and "--sb-icon:" in shell_css)
-check("활성 리프 가이드선 강조색(액센트)",
-      "border-left-color: var(--sb-accent)" in shell_css)
-# 접이식 그룹 chevron(닫힘 ▸ / 열림 ▾)
-check("그룹 chevron ▸(닫힘)", "\\25B8" in shell_css)
-check("그룹 chevron ▾(열림)", "\\25BE" in shell_css and "_grpopen" in shell_css)
+      and "flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%" in shell_css)
+check("가이드선 제거(--sb-guide 토큰·border-left 없음)",
+      "--sb-guide" not in shell_css and "border-left: 1px solid var(--sb-guide)" not in shell_css)
+check("리프 들여쓰기 그룹보다 깊음(pad-left 18 vs 그룹 12)",
+      "padding: 0 12px 0 18px" in shell_css and "padding: 0 12px 0 12px" in shell_css)
+check("마크·점 토큰(--sb-mark/--sb-dot)·캐럿 토큰(--sb-icon)",
+      "--sb-mark:" in shell_css and "--sb-dot:" in shell_css and "--sb-icon:" in shell_css)
+check("활성 리프 오렌지 점 + 좌측 오렌지 바",
+      'st-key-sbi_"] div.stButton > button[kind="primary"]::before' in shell_css
+      and "box-shadow: inset 2px 0 0 var(--sb-accent)" in shell_css)
+# 접이식 그룹 캐럿 › 회전(닫힘 0deg / 열림 90deg)
+check("그룹 캐럿 › 회전(닫힘 0deg / 열림 90deg)",
+      "\\203A" in shell_css and "rotate(0deg)" in shell_css
+      and "rotate(90deg)" in shell_css and "_grpopen" in shell_css)
+# 66px 레일 CSS 계약 — 폭 66px + 모듈 글리프 히트영역 + 세로 스택
+check("레일 폭 66px 전환", "_RAIL_CSS" in ui_src and "width: 66px !important" in ui._RAIL_CSS)
+check("레일 모듈 글리프 히트영역(≥40px)", "st-key-sbr_" in ui._RAIL_CSS and "height: 44px" in ui._RAIL_CSS)
+check("레일 세로 스택(브랜드 W·유저 아바타)",
+      "sb-rail-logo" in ui._RAIL_CSS and "sb-rail-ava" in ui._RAIL_CSS)
 # 검색 상자 + 즐겨찾기 제외
 nav_src = inspect.getsource(ui._sidebar_nav)
 search_src = inspect.getsource(ui._sidebar_search)

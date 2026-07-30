@@ -123,6 +123,9 @@ for label, src in _SRC.items():
     # (_text_on)가 배지 텍스트색으로 반환하는 '#000000' 리터럴은 정당한 사용이므로
     # 해당 함수 블록만 제외하고 검사한다(#1B1B1D 는 예외 없이 전역 금지 유지).
     scrub = re.sub(r"def _text_on\([^)]*\)[\s\S]*?(?=\ndef |\nclass |\Z)", "", src)
+    # JS 약칭 색 chip 의 WCAG 대비 헬퍼(_textOn)가 반환하는 흑/백 삼항('#000000')도
+    # _text_on 과 동일한 정당 사용이므로 그 삼항만 제외한다(그 외 #000000·#1B1B1D 는 여전히 금지).
+    scrub = re.sub(r"'#ffffff'\s*:\s*'#000000'", "", scrub)
     check(f"{label}: 검정 저장 버튼 색(#1B1B1D/#000000) 없음",
           "#1B1B1D" not in src and "#000000" not in scrub)
 
