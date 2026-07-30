@@ -112,8 +112,10 @@ check("검토착수는 current_user=auth.get_current_user() 전달(신원 서버
 # 종결 버튼은 이 화면에 없다(개선조치 소관) — 회귀 방지. detail_actions 튜플에 종결 라벨 없음.
 check("평가 화면에 종결 버튼 미도입(detail_actions 라벨 없음)",
       '("종결"' not in detail_src and "'종결'," not in detail_src)
-# 순수 UI 계약 — detail_actions 는 여전히 라벨/kind/disabled/help 튜플만 넘긴다.
-check("검토착수 default 버튼(primary 아님)", '("검토착수", "default"' in detail_src)
+# §1-A 액션 바 — 평가확정만 primary CTA, 검토착수는 보조(secondary) 버튼.
+check("평가확정만 primary CTA(검토착수는 보조 secondary)",
+      'st.button("평가확정"' in detail_src and 'type="primary"' in detail_src
+      and 'st.button("검토착수"' in detail_src and 'type="secondary"' in detail_src)
 
 
 # ===== 3) stats 보고서 종결률 =====
@@ -195,7 +197,12 @@ print("평가 보완요청")
 check("보완요청 scope 액션 라벨 존재", '"보완요청"' in detail_src)
 check("보완요청 → request_near_miss_revision 파사드", "request_near_miss_revision" in detail_src)
 check("보완요청 활성 게이트: status == 'IN_REVIEW'", 'status != "IN_REVIEW"' in detail_src)
-check("보완요청 전용 사유 필드(반려 사유와 별개)", "nm_revreason_" in detail_src)
+# §1-A 단일 의견 필드(dc 정본) — 반려·보완요청 공용, 각각 의견 필수. 반려=rejection_reason,
+# 보완요청=사유로 재사용하되 버튼·facade·의미는 별개(반려≠보완요청).
+check("단일 의견 필드 공용(반려=rejection_reason, 보완요청=사유; 각각 필수)",
+      "rejection_reason=opinion" in detail_src
+      and "opinion," in detail_src
+      and "not opinion" in detail_src)
 check("반려 버튼 여전히 존재(별도 의미)", '"반려"' in detail_src)
 check("보완요청도 current_user 서버측 확정",
       "request_near_miss_revision" in detail_src and "auth.get_current_user()" in detail_src)

@@ -1,52 +1,29 @@
-"""아차사고 평가 화면 — 대기 큐(단일 선택 목록) + 케이스 상세 드릴다운.
+"""아차사고 평가 관리 — 큐 처리형(DESIGN.md §1-A).
 
-DESIGN.md §0 화면 유형: ``MASTER_DETAIL``. 이 화면은 다건 인라인 편집·저장 그리드가
-아니라, 조회 전용 목록(큐)과 그 옆 상세/워크플로 패널로 구성된 읽기 목록 + 상세 화면이다
-(§0.8/§0.1 유형 매뉴페스트: MASTER_DETAIL = 읽기 목록 + 상세/워크플로). 상단 액션바는
-page-scope 조회 액션(새로고침)만 두고, 유일한 쓰기(평가확정/반려)는 상세 패널의
-scope 액션(``erp.detail_actions``)이 담당한다 — 파사드 직접 호출, 그리드 저장 lifecycle
-미사용(이 화면은 다건 편집·저장이 아니라 단건 상태전이라 ``run_save`` 대상이 아니다).
-목록 그리드는 중립 키트의 **단일 선택 어댑터**(``erp.select_grid``)를 쓴다 — 편집
-렌더러(``render_master_grid``)의 ``_action`` 열·paste·hidden 편집메타·unsafe jscode 를
-쓰지 않고, AgGrid 네이티브 single-selection(체크 마커 + 배경 틴트 이중부호화)으로 케이스를
-고른다. 선택은 자연키(보고서 id)로 오가며(정렬·필터 후 위치 비의존), 상세 렌더 전에 소비해
-추가 rerun 없이 상세를 그린다(§0.5 capability 분리 정합).
+신판 DESIGN.md §1-A "큐 처리형" 골격을 그대로 구현한다(색 리스킨이 아니라 구조 교체):
 
-권한 게이트: ``auth.can_evaluate_near_miss(user)`` — ADMIN/MANAGER 또는 안전담당자만
-평가할 수 있다(``modules/auth.py``). 게이트를 통과하지 못하면 조회 전용 안내만 보여주고
-그리드·상세 패널을 렌더하지 않는다.
+    제목/설명 → [지표 스트립] → 헤어라인 → [큐 칩 스트립] → 헤어라인
+    → [선택 건 전체폭 상세] → 헤어라인 → [하단 액션 바]
 
-파사드 호출(전부 ``modules/db.py`` 만 사용, repository 직접 호출 없음):
-  - ``db.get_near_miss_reports(filters)`` — 목록 조회 후 SUBMITTED/IN_REVIEW 만
-    화면에서 필터링(파사드는 단일 status 필터만 지원하므로 두 상태는 클라이언트 측에서
-    골라낸다).
-  - ``db.get_near_miss_report(report_id)`` — 상세 패널 단건 재조회(선택 갱신·행위 직전
-    최신 상태 확인).
-  - ``db.evaluate_near_miss(report_id, grade, current_user=...)`` — 평가확정
-    (SUBMITTED/IN_REVIEW 에서만 허용, 서버측에서 평가자·시각을 확정한다).
-  - ``db.update_near_miss_status(report_id, "IN_REVIEW", current_user=...)`` — 검토착수
-    상태전이(SUBMITTED 에서만, 전이표 밖이면 ValueError). 전용 사유 필드가 없어 payload
-    없이 상태만 바꾼다(보완요청 SUBMITTED 반송은 사유 저장이 007 종속이라 이번 범위 아님).
-  - ``db.update_near_miss_status(report_id, "REJECTED", rejection_reason=,
-    current_user=...)`` — 반려 상태전이(전이표 밖이면 ValueError).
-  - ``db.request_near_miss_revision(report_id, reason, current_user=...)`` — 보완요청
-    (IN_REVIEW→SUBMITTED 반송 + 사유 서버기록). 반려(REJECTED, 종결분기)와 **의미가
-    다르다**: 보완요청은 보고자에게 재작성을 요청하는 것이고 사유는 rejection_reason 을
-    재사용하지 않는다. IN_REVIEW 에서만 가능하며 007 미적용/probe 오류면 파사드가
-    fail-closed 로 차단한다(사유 없는 반송 방지).
-  - ``db.near_miss_schema_probe()`` — migration 006 준비 상태(3-state) 배너.
+- 좌우 분할·행 체크박스·"케이스를 선택하세요" 빈 패널을 쓰지 않는다(§0 금지 1·2).
+- 진입 시 큐의 첫 건이 자동 선택된다. 칩 클릭 = 선택(오렌지 칩), 이전/다음으로 순회.
+- 본문에 빈 아이콘 툴바 띠를 넣지 않는다(§0 금지 3) — 아이콘은 상단 52px 헤더에만.
+- 카드(테두리+radius+그림자) 금지(§0 금지 5) — 구획은 헤어라인 + 여백만.
+- 색·크기·간격은 §2~§4 값만 사용(§0 금지 8, 새 색 없음).
 
-신원 위조 방지: 두 쓰기 호출 모두 ``current_user=auth.get_current_user()`` 를 그대로
-넘긴다(위젯 입력이 아니라 세션 사용자) — 파사드가 사번을 다시 DB 에서 확인해 평가자를
-서버측으로 확정한다(``modules/db.py::_near_miss_actor``).
+레퍼런스 골격: ``아차사고 관리.dc.html`` isEval 블록(509~583).
 
-stale 처리: 두 파사드 모두 사전평가 상태(SUBMITTED/IN_REVIEW)를 조건부로 확인하고,
-다른 평가자가 먼저 처리했으면 정확한 문구("상태가 이미 변경되어...")를 담은
-``ValueError`` 를 낸다. 이 화면은 그 메시지를 원문 그대로 배너에 노출한다(가공/삭제
-금지) — 새 예외 텍스트를 만들지 않는다. 배너는 2단계(제목 + 원문 사유) 패턴이며 raw
-traceback 은 절대 노출하지 않는다(``_run_action``).
+기능 계약(불변 — 표현 계층만 교체):
+  - 권한 게이트 ``auth.can_evaluate_near_miss(user)``.
+  - 상태 전이 4종: 검토착수(SUBMITTED→IN_REVIEW) · 평가확정(evaluate_near_miss) ·
+    보완요청(IN_REVIEW→SUBMITTED, request_near_miss_revision) · 반려(→REJECTED).
+    반려·보완요청은 '의견' 필수(dc 와 동일한 단일 의견 입력 — 반려는 rejection_reason,
+    보완요청은 사유로 재사용). 신원은 서버측(current_user=auth.get_current_user())으로 확정.
+  - 등급 세그먼트 값은 ``db.NEAR_MISS_GRADES`` 도메인 소스에서 파생(하드코딩 없음).
+  - 모든 파사드 호출은 ``modules/db.py`` 만 사용(repository 직접 호출 없음). stale 충돌은
+    파사드 원문 메시지를 배너로 그대로 노출(가공 금지).
 """
-# DESIGN.md §0 화면 유형 규약 — 읽기 목록(큐) + 상세/워크플로 패널.
+# DESIGN.md §1-A 큐 처리형 — 읽기 큐(칩) + 전체폭 상세/워크플로.
 SCREEN_ARCHETYPE = "MASTER_DETAIL"
 
 from html import escape
@@ -54,25 +31,22 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import auth, db, nav
+from modules import auth, db
 from views.common import erp, scaffold
 from views.master import (
-    TOKENS,
     DraftState,
     Readiness,
     ReadinessState,
     empty_state,
-    icon_toolbar_specs,
-    sheet_head,
+    lifecycle_badge_html,
     show_flash,
 )
 
 _STATE = DraftState("nm_eval")
-_PAGE_ID = _STATE.page_id  # erp.top_action_bar/detail_actions 위젯 key 스코프(동일 page_id).
+_PAGE_ID = _STATE.page_id
 
-# 이 화면이 다루는 "평가 대기" 상태 — 파사드 NEAR_MISS_STATUSES 의 부분집합.
-# db.evaluate_near_miss 의 _NEAR_MISS_PRE_EVAL_STATES 와 같은 집합(소스 오브 트루스는
-# db.py 이며 여기서는 화면 필터링용으로 상수만 복제한다).
+# 이 화면이 다루는 "평가 대기" 상태 — 파사드 NEAR_MISS_STATUSES 의 부분집합
+# (SoT 는 db.py, 여기서는 화면 필터링용 상수 복제).
 _PENDING_STATUSES = ("SUBMITTED", "IN_REVIEW")
 
 _STATUS_LABEL = {
@@ -82,24 +56,7 @@ _STATUS_LABEL = {
     "REJECTED": "반려",
     "CLOSED": "종결",
 }
-# 상태 색(이중부호화 — 라벨 텍스트는 항상 함께 표시되므로 색은 보조 신호). 기준정보 색
-# 토큰(views/master/style.py TOKENS)을 재사용해 새 색을 만들지 않는다(near_miss_view 와 동일).
-_STATUS_COLOR = {
-    "SUBMITTED": TOKENS["info"],
-    "IN_REVIEW": TOKENS["gold"],
-    "EVALUATED": TOKENS["success"],
-    "REJECTED": TOKENS["danger"],
-    "CLOSED": TOKENS["ink-3"],
-}
-# 등급 색·순서(§3.1 handoff: 등급=셰브런+색텍스트, pill 아님). level 이 높을수록 상위 위험
-# (S=최상위) — 형식은 kit(grade_mark_html)이, 매핑은 이 화면(도메인 owner)이 확정한다.
-# 색은 기준정보 TOKENS 재사용(신규 색 0개, near_miss_stats 와 동일 팔레트).
-_GRADE_COLOR = {
-    "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
-    "C": TOKENS["info"], "D": TOKENS["ink-3"],
-}
-_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
-# 발생원인 코드→한글 라벨(§3.1: 분류축=평문 — 색 없음, 읽기 향상). near_miss_stats 와 동일.
+# 발생원인 코드→한글 라벨(§3.1: 분류축=평문, 색 없음). near_miss_stats 와 동일.
 _CAUSE_LABEL = {
     "JAM": "협착", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
     "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "끼임", "ETC": "기타",
@@ -112,50 +69,73 @@ _NOT_READY_MSG = (
 _PROBE_ERROR_MSG = (
     "아차사고 스키마 상태 확인 실패 — 재확인이 필요합니다(확인 전까지 평가는 차단됩니다)."
 )
-_STALE_MARK = "이미 변경"  # db._NEAR_MISS_STALE_MESSAGE 원문 일부 — kind 분기용(warning vs error).
+_STALE_MARK = "이미 변경"  # db._NEAR_MISS_STALE_MESSAGE 원문 일부 — kind 분기(warning vs error).
 
-# 큐 표시 열 — 첫 열은 사람이 읽는 식별자(작업명), 상태는 색+한글 라벨. 상세에 이미 나오는
-# 제안등급은 큐에서 빼 @1024 좁은 목록 컬럼의 가로 스크롤을 없앤다(불필요 메타열 제거).
-_QUEUE_COLS = ["작업명", "신고자", "발생일", "상태"]
-_KEY_FIELD = "_report_id"  # 숨김 자연키 열(선택 반환값) — 표시 컬럼을 오염시키지 않는다.
-# 폭 합(첫 열 minWidth + 나머지 고정폭)을 좁은 목록 컬럼(@1024 ≈ 420px)에 맞춰 가로
-# 스크롤 0 을 보장한다: 128(min) + 104 + 94 + 84 = 410 ≤ 뷰포트. flex 작업명이 잔여를 흡수.
-_QUEUE_COL_CONFIG = {
-    "작업명": {"flex": 1.7, "minWidth": 128, "cellClass": "md-c-left"},
-    "신고자": {"flex": 0, "width": 104, "minWidth": 82, "maxWidth": 148, "cellClass": "md-c-left"},
-    "발생일": {"flex": 0, "width": 94, "minWidth": 82, "maxWidth": 116,
-              "cellClass": "md-c-center"},
-    "상태": {"flex": 0, "width": 84, "minWidth": 74, "maxWidth": 108,
-            "cellClass": "md-c-center"},
-}
+_SEL_KEY = "nm_eval_selected_id"       # 상세에 열린 보고서 id(문자열)
+_OP_KEY = "nm_eval_opinion_"           # 평가 의견(반려·보완요청 공용) prefix + id
+_GRADE_KEY = "nm_eval_grade_"          # 확정 등급 선택 prefix + id
 
-_SEL_KEY = "nm_eval_selected_id"  # 상세 패널에 열린 보고서 id(문자열). 케이스 이탈 시 pop.
+# ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴로 고정해 새 색 유입을 원천 차단한다. ──
+_INK = "#1c1a17"          # 본문
+_INK2 = "#4a453d"         # 보조(섹션 라벨)
+_WEAK = "#8b857c"         # 약함
+_FAINT = "#a09a90"        # 아주 약함(모노 오버라인·메타 라벨 — §2·dc 정본)
+_LINE = "#e6e2da"         # 행 헤어라인
+_LINE_HDR = "#cfc8bd"     # 표 헤더 헤어라인
+_LINE_SEC = "#e0dbd2"     # 섹션 헤어라인
+_ACCENT = "#c2410c"
+_ACCENT_TEXT = "#b4451a"
+_ACCENT_TINT = "#fdf3ec"
+_MONO = "'IBM Plex Mono', monospace"
+
+# 화면 스코프 CSS(칩·세그먼트·나브·의견 입력) — 선택 상태는 색+형태 이중부호화(오렌지 배경
+# +굵기). 히트영역 ≥32px. primary=선택/CTA 는 전역 오렌지 액센트(modules/ui.py) 재사용.
+_EVAL_CSS = f"""
+<style>
+/* 큐 칩(선택=primary 오렌지, 비선택=secondary 흰+테두리) — pill, 히트영역 32px */
+[class*="st-key-nmq_"] button {{
+  border-radius:999px !important; min-height:32px !important; height:auto !important;
+  padding:5px 14px !important; font-size:12.5px !important; font-weight:600 !important;
+  white-space:nowrap !important; line-height:1.2 !important;
+}}
+/* 등급 세그먼트(선택=primary 오렌지) — 모노 코드, radius 7, 히트영역 32px */
+[class*="st-key-nmg_"] button {{
+  border-radius:7px !important; min-width:44px !important; min-height:34px !important;
+  padding:6px 12px !important; font-family:{_MONO} !important; font-size:14px !important;
+  font-weight:600 !important;
+}}
+/* 이전/다음 나브 — 32x32 정사각 */
+.st-key-nm_qprev button, .st-key-nm_qnext button {{
+  min-width:32px !important; width:32px !important; min-height:32px !important; height:32px !important;
+  padding:0 !important; border-radius:7px !important; font-size:14px !important;
+}}
+/* 액션 버튼(검토착수/보완요청/반려/평가확정) — 히트영역 34px */
+[class*="st-key-nm_act_"] button {{
+  min-height:34px !important; border-radius:8px !important; font-size:13px !important;
+  font-weight:600 !important; white-space:nowrap !important;
+}}
+/* 세그먼트 인라인 라벨 */
+.nm-seg-label {{ font-size:12.5px; font-weight:500; color:{_INK2}; white-space:nowrap; }}
+.nm-qhead {{ display:flex; align-items:center; gap:8px; margin:2px 0 6px; }}
+.nm-qhead .t {{ font-size:14px; font-weight:600; color:{_INK}; }}
+.nm-qhead .c {{ font-family:{_MONO}; font-size:11px; font-weight:600; padding:2px 8px;
+  border-radius:999px; background:{_ACCENT_TINT}; color:{_ACCENT_TEXT}; }}
+.nm-qpos {{ font-family:{_MONO}; font-size:11.5px; color:{_FAINT}; white-space:nowrap; }}
+</style>
+"""
 
 
+# ---------- 진입 ----------
 def render(user: dict) -> None:
-    band = erp.screen_frame(
+    # 제목 크롬만(아이콘 툴바 밴드 없음 §0-3) — 아이콘은 상단 52px 헤더에만.
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="평가 관리",
         desc="등록된 아차사고를 검토해 등급을 확정하거나 반려합니다.",
         breadcrumb="아차사고 › 평가 관리",
         badges=scaffold.mode_badge(),
-        toolbar="icons",
     )
-    # 상단 파랑 밴드 아이콘 툴바(공통 표준). 이 화면의 page-scope 조회 액션은 새로고침
-    # 뿐이다 — search 아이콘 클릭이 유발하는 rerun 만으로 _load_pending_reports() 가 매
-    # 렌더 무조건 재조회한다(구 pill 과 동일 — on_click 없이 클릭=rerun). 평가확정·반려
-    # (쓰기)는 상세 패널 scope 액션 소관이라 밴드 추가·삭제·저장은 N/A(shaded).
-    if band is not None:
-        band.render_icons(icon_toolbar_specs(
-            _PAGE_ID, info_content=nav.page_desc("near_miss_evaluate"),
-            add={"key": f"{_PAGE_ID}__add_na", "disabled": True,
-                 "help": "이 화면에서는 사용하지 않습니다"},
-            refresh={"key": f"{_PAGE_ID}_refresh", "help": "새로고침", "on_click": None},
-            delete={"key": f"{_PAGE_ID}__del_na", "disabled": True,
-                    "help": "이 화면에서는 사용하지 않습니다"},
-            save={"key": f"{_PAGE_ID}__save_na", "disabled": True,
-                  "help": "이 화면에서는 사용하지 않습니다"},
-        ))
+    st.markdown(_EVAL_CSS, unsafe_allow_html=True)
     if not auth.can_evaluate_near_miss(user):
         empty_state(
             "평가 권한이 없습니다",
@@ -183,10 +163,6 @@ def _render_body(user: dict) -> None:
             db.near_miss_schema_probe(force=True)
             st.rerun()
 
-    # page-scope 조회 액션(새로고침)은 상단 밴드 아이콘으로 이전했다(render 의 render_icons).
-    # 아이콘 클릭이 유발하는 rerun 만으로 아래 _load_pending_reports() 가 매 렌더 무조건
-    # 재조회하므로 별도 배선이 필요 없다(인페이지 pill 제거).
-
     try:
         reports = _load_pending_reports()
     except db.DATA_SOURCE_ERRORS as exc:
@@ -196,22 +172,42 @@ def _render_body(user: dict) -> None:
         st.error("평가 대기 목록을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # 상세는 판단 워크플로형이라 §0.6 강제(상세 폭 ≥600px)를 만족하도록 목록 40%·상세 60%로
-    # 분할한다(1366 기준 상세 ≈660px). 목록은 4열로 좁혀도 첫 열(작업명) flex 로 식별성을 유지한다.
-    list_col, detail_col = erp.master_detail_frame(list_ratio=1.0, detail_ratio=1.5)
+    # ── 지표 스트립(제목 바로 아래 첫 블록 §0-4) — 좌측 2px 보더 + 26px 모노 숫자 ──
+    subm = inrev = 0
+    if reports is not None and not reports.empty:
+        counts = reports["status"].astype(str).value_counts()
+        subm = int(counts.get("SUBMITTED", 0))
+        inrev = int(counts.get("IN_REVIEW", 0))
+    total = subm + inrev
+    st.markdown(_metric_strip_html([
+        ("평가 대기", subm, "건", "SUBMITTED", True),
+        ("검토중", inrev, "건", "IN REVIEW", False),
+        ("대기 합계", total, "건", "PENDING", False),
+    ]), unsafe_allow_html=True)
+    _hairline()
+
+    ordered = _ordered_ids(reports)
+    if not ordered:
+        st.markdown(
+            f"<div style='padding:22px 0;font-size:14.5px;color:{_INK2};'>"
+            "현재 평가 대기 중인 아차사고가 없습니다.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    # 진입 시 첫 건 자동 선택(§1-A) — 선택이 없거나 큐에서 사라진 경우.
     selected_id = st.session_state.get(_SEL_KEY)
-    with list_col:
-        picked = _render_queue(reports, selected_id)
-    # 선택을 상세 렌더 **전에** 소비한다 — select_grid 의 selectionChanged rerun 이 이미
-    # 일어난 run 이므로 여기서 세션만 갱신하면 추가 st.rerun 없이 곧바로 상세를 그린다.
-    if picked is not None and picked != selected_id:
-        st.session_state[_SEL_KEY] = picked
-        selected_id = picked
-    with detail_col:
-        _render_detail(user, readiness, selected_id)
+    if selected_id not in ordered:
+        selected_id = ordered[0]
+        st.session_state[_SEL_KEY] = selected_id
+
+    reports_by_id = {str(r["id"]): r for _, r in reports.iterrows()}
+    _render_queue_chips(ordered, reports_by_id, selected_id)
+    _hairline()
+    _render_detail(user, readiness, selected_id)
 
 
-# ---------- 데이터 적재 ----------
+# ---------- 데이터 ----------
 def _load_pending_reports() -> pd.DataFrame:
     """활성 아차사고 중 평가 대기(SUBMITTED/IN_REVIEW)만. 단일 status 필터만 지원하는
     파사드 계약이라 두 상태는 여기서 클라이언트 측으로 골라낸다."""
@@ -222,80 +218,160 @@ def _load_pending_reports() -> pd.DataFrame:
     return df[mask].reset_index(drop=True)
 
 
+def _ordered_ids(df: pd.DataFrame) -> list[str]:
+    if df is None or df.empty:
+        return []
+    frame = df.sort_values("incident_date", ascending=False, kind="stable")
+    return [str(v) for v in frame["id"].tolist()]
+
+
 def _reporter_label(emp_no) -> str:
     emp_no = str(emp_no or "").strip()
     if not emp_no:
-        return ""
+        return "-"
     try:
         record = db.find_user_by_emp_no(emp_no)
     except Exception:
-        # 이름 라벨링은 부가 정보 — 조회 실패로 큐/상세 렌더 전체를 막지 않고 사번만 표시한다.
         return emp_no
     name = str(record.get("name") or "").strip() if record else ""
     return f"{name}({emp_no})" if name else emp_no
 
 
-def _queue_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """큐 표시 프레임 — 숨김 자연키(_report_id) + 표시 4열(작업명·신고자·발생일·상태)."""
-    cols = [_KEY_FIELD, *_QUEUE_COLS]
-    if df is None or df.empty:
-        return pd.DataFrame(columns=cols)
-    frame = df.sort_values("incident_date", ascending=False, kind="stable").reset_index(drop=True)
-    rows = pd.DataFrame({
-        _KEY_FIELD: frame["id"].astype(str),
-        "작업명": frame["work_name"].fillna("").astype(str),
-        "신고자": frame["reporter_emp_no"].map(_reporter_label),
-        "발생일": frame["incident_date"].fillna("").astype(str),
-        "상태": frame["status"].astype(str).map(lambda s: _STATUS_LABEL.get(s, s)),
-    })
-    return rows[cols].reset_index(drop=True)
-
-
-# ---------- 큐 그리드(단일 선택) ----------
-def _render_queue(reports: pd.DataFrame, selected_id) -> str | None:
-    """평가 대기 큐를 단일 선택 목록으로 렌더하고 선택된 보고서 자연키를 돌려준다.
-
-    편집 그리드가 아니라 ``erp.select_grid``(네이티브 single-selection) — 행 클릭으로
-    케이스를 고르면 체크 마커 + 배경 틴트로 이중부호화되고, 선택 자연키(_report_id)를
-    반환한다(정렬·필터 후 위치 비의존)."""
-    rows = _queue_rows(reports)
-    sheet_head("평가 대기 큐", count=len(rows))
-
-    # 상태 색 규칙(대기 두 상태만) — 한글 라벨 → 색. 텍스트 라벨은 항상 유지(색은 보조).
-    status_rules = {_STATUS_LABEL[s]: _STATUS_COLOR[s] for s in _PENDING_STATUSES}
-    return erp.select_grid(
-        rows, key=f"{_PAGE_ID}_queue", key_field=_KEY_FIELD,
-        columns=_QUEUE_COLS, selected_key=selected_id,
-        col_config=_QUEUE_COL_CONFIG,
-        color_rules={"상태": status_rules},
+# ---------- 지표 스트립 ----------
+def _metric_strip_html(items) -> str:
+    """지표 스트립 HTML(§1-A) — 좌측 2px 보더 + 26px 모노 숫자. items=[(label,value,unit,note,accent)]."""
+    cells = []
+    for label, value, unit, note, accent in items:
+        border = _ACCENT if accent else _LINE_SEC
+        valcolor = _ACCENT_TEXT if accent else _INK
+        cells.append(
+            f"<div style='flex:1 1 150px;min-width:0;display:flex;flex-direction:column;gap:5px;"
+            f"padding:0 18px;border-left:2px solid {border};'>"
+            f"<span style='font-size:12px;color:{_WEAK};'>{escape(label)}</span>"
+            f"<div style='display:flex;align-items:baseline;gap:4px;'>"
+            f"<span style='font-family:{_MONO};font-size:26px;font-weight:600;letter-spacing:-0.03em;"
+            f"color:{valcolor};'>{int(value)}</span>"
+            f"<span style='font-size:11.5px;color:{_FAINT};'>{escape(unit)}</span></div>"
+            f"<span style='font-size:11px;color:{_FAINT};font-family:{_MONO};'>{escape(note)}</span></div>"
+        )
+    return (
+        f"<div style='display:flex;flex-wrap:wrap;gap:12px;padding:2px 0 14px;'>{''.join(cells)}</div>"
     )
 
 
-# ---------- 상세 패널 ----------
-# 상태→색/라벨(도메인 매핑)은 이 화면이 소유하고, 배지·메타·전폭 필드의 **표시**는 중립 kit
-# 순수 primitive(erp.status_badge_html/meta_col_html/field_block)에 위임한다(§0.3, 복제 제거).
-def _status_badge_html(status: str) -> str:
-    """상태 배지 — 도메인 매핑(색+한글 라벨)을 kit 순수 표시 primitive 로 렌더(이중부호화)."""
-    label = _STATUS_LABEL.get(status, status)
-    color = _STATUS_COLOR.get(status, TOKENS["ink-2"])
-    return erp.status_badge_html(label, color)
+def _hairline() -> None:
+    st.markdown(
+        f"<div style='border-top:1px solid {_LINE_SEC};margin:2px 0 10px;'></div>",
+        unsafe_allow_html=True,
+    )
 
 
-def _grade_mark_html(grade: str) -> str:
-    """등급 마크 — 셰브런(방향/개수)+색 텍스트(§3.1 handoff, pill 아님). 도메인 매핑(색·순서)을
-    kit grade_mark_html 로 렌더한다. 미확정(빈 값)은 중립 점 마커."""
-    g = str(grade or "").strip().upper()
-    if not g:
-        return erp.grade_mark_html("없음", TOKENS["ink-3"], level=None)
-    color = _GRADE_COLOR.get(g, TOKENS["ink-2"])
-    return erp.grade_mark_html(g, color, level=_GRADE_LEVEL.get(g))
+# ---------- 큐 칩 스트립 ----------
+def _render_queue_chips(ordered: list[str], reports_by_id: dict, selected_id: str) -> None:
+    """평가 대기 큐를 칩 스트립으로 렌더(§1-A·§7: st.button 반복 + session_state.sel).
+
+    선택 칩 = 오렌지(primary), 나머지 = 흰+테두리(secondary). 우측에 [n/m] + 이전/다음."""
+    idx = ordered.index(selected_id)
+    st.markdown(
+        f"<div class='nm-qhead'><span class='t'>평가 대기 큐</span>"
+        f"<span class='c'>{len(ordered)}</span></div>",
+        unsafe_allow_html=True,
+    )
+    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
+        for rid in ordered:
+            r = reports_by_id.get(rid, {})
+            short = str(r.get("report_no") or rid)[-8:]
+            title = str(r.get("work_name") or "(제목 없음)")
+            if len(title) > 22:
+                title = title[:21] + "…"
+            picked = st.button(
+                f"{short} · {title}",
+                key=f"nmq_{rid}",
+                type="primary" if rid == selected_id else "secondary",
+            )
+            if picked and rid != selected_id:
+                st.session_state[_SEL_KEY] = rid
+                st.rerun()
+        # 우측: 위치 + 이전/다음
+        st.markdown(f"<span class='nm-qpos'>{idx + 1}/{len(ordered)}</span>",
+                    unsafe_allow_html=True)
+        if st.button("‹", key="nm_qprev", help="이전 건",
+                     disabled=idx <= 0, type="secondary"):
+            st.session_state[_SEL_KEY] = ordered[idx - 1]
+            st.rerun()
+        if st.button("›", key="nm_qnext", help="다음 건",
+                     disabled=idx >= len(ordered) - 1, type="secondary"):
+            st.session_state[_SEL_KEY] = ordered[idx + 1]
+            st.rerun()
+
+
+# ---------- 전체폭 상세 + 액션 바 ----------
+def _detail_read_html(report: dict, status: str) -> str:
+    """선택 건 전체폭 상세(§1-A) — 보고번호+상태 배지 / 제목 / 우측 메타 / 본문 블록.
+
+    본문 블록 WHAT·TASK·SITE·CAUSE·ACTION = 좌측 2px 보더 + 모노 오버라인 + 라벨 + 본문
+    14.5px/1.7. 긴 항목 flex:2 1 420px, 짧은 항목 flex:1 1 260px(2열로 자연 채움)."""
+    report_no = escape(str(report.get("report_no") or "-"))
+    badge = lifecycle_badge_html(status, _STATUS_LABEL.get(status, status))
+    title = escape(str(report.get("work_name") or "(제목 없음)"))
+
+    proposed = str(report.get("proposed_grade") or "").strip() or "미지정"
+    meta = [
+        ("발생일", str(report.get("incident_date") or "-")),
+        ("신고자", _reporter_label(report.get("reporter_emp_no"))),
+        ("부서", str(report.get("dept_code") or "-")),
+        ("제안등급", proposed),
+    ]
+    meta_cells = "".join(
+        f"<div style='display:flex;flex-direction:column;gap:3px;'>"
+        f"<span style='font-size:10.5px;letter-spacing:0.08em;color:{_FAINT};font-family:{_MONO};'>"
+        f"{escape(label)}</span>"
+        f"<span style='font-size:13.5px;color:{_INK};'>{escape(str(value))}</span></div>"
+        for label, value in meta
+    )
+    head = (
+        "<div style='padding:4px 0 18px;display:flex;flex-wrap:wrap;align-items:flex-start;"
+        "justify-content:space-between;gap:14px 20px;'>"
+        "<div style='display:flex;flex-direction:column;gap:7px;min-width:0;'>"
+        "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;'>"
+        f"<span style='font-family:{_MONO};font-size:18px;font-weight:600;color:{_INK};'>{report_no}</span>"
+        f"{badge}</div>"
+        f"<span style='font-size:17px;color:{_INK};font-weight:600;letter-spacing:-0.02em;'>{title}</span>"
+        "</div>"
+        f"<div style='display:flex;flex-wrap:wrap;gap:12px 26px;'>{meta_cells}</div>"
+        "</div>"
+    )
+
+    cause = str(report.get("cause_code") or "")
+    cause_detail = str(report.get("cause_detail") or "")
+    cause_val = _CAUSE_LABEL.get(cause, cause) + (f" · {cause_detail}" if cause_detail else "")
+    blocks = [
+        ("WHAT", "사고 내용", str(report.get("incident_content") or ""), True),
+        ("TASK", "작업 내용", str(report.get("work_content") or ""), False),
+        ("SITE", "현장 설명", str(report.get("site_description") or ""), False),
+        ("CAUSE", "원인", cause_val, False),
+        ("ACTION", "대책", str(report.get("countermeasure") or ""), True),
+    ]
+    block_cells = []
+    for tag, label, value, long in blocks:
+        flex = "2 1 420px" if long else "1 1 260px"
+        body = escape(value).strip() or "-"
+        block_cells.append(
+            f"<div style='flex:{flex};min-width:0;border-left:2px solid {_LINE_SEC};"
+            "padding-left:14px;display:flex;flex-direction:column;gap:6px;'>"
+            f"<span style='font-size:11px;letter-spacing:0.1em;color:{_FAINT};font-family:{_MONO};'>{tag}</span>"
+            f"<span style='font-size:12.5px;font-weight:600;color:{_INK2};'>{escape(label)}</span>"
+            f"<p style='margin:0;font-size:14.5px;line-height:1.7;color:{_INK};text-wrap:pretty;"
+            f"white-space:pre-wrap;'>{body}</p></div>"
+        )
+    body_blocks = (
+        "<div style='padding:22px 0 22px;border-top:1px solid "
+        f"{_LINE_SEC};display:flex;flex-wrap:wrap;gap:22px 32px;'>{''.join(block_cells)}</div>"
+    )
+    return head + body_blocks
 
 
 def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
-    if not selected_id:
-        erp.detail_empty("케이스를 선택하세요", "왼쪽 큐에서 행을 클릭하면 상세 내용이 여기에 표시됩니다.")
-        return
-
     try:
         report = db.get_near_miss_report(selected_id)
     except db.DATA_SOURCE_ERRORS as exc:
@@ -304,146 +380,116 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
     except Exception:
         st.error("케이스를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
+
     status = str(report.get("status") or "") if report else ""
     if report is None or status not in _PENDING_STATUSES:
-        # 다른 평가자가 먼저 처리했거나(EVALUATED/REJECTED/CLOSED) 삭제됨 — stale 선택 해제
-        # (상세와 _SEL_KEY 동시 해제, 큐도 자연키 불일치로 선택 마커가 함께 풀린다).
+        # 다른 평가자가 먼저 처리했거나 삭제됨 — stale 선택 해제 후 재조회 안내.
         st.session_state.pop(_SEL_KEY, None)
-        erp.detail_empty(
-            "이 케이스는 더 이상 대기 중이 아닙니다",
-            "다른 사용자가 먼저 처리했을 수 있습니다. 목록을 새로고침한 뒤 다시 선택하세요.",
+        st.markdown(
+            f"<div style='padding:22px 0;font-size:14.5px;color:{_INK2};'>"
+            "이 케이스는 더 이상 대기 중이 아닙니다. 다른 사용자가 먼저 처리했을 수 있습니다 — "
+            "새로고침한 뒤 다시 선택하세요.</div>",
+            unsafe_allow_html=True,
         )
         return
 
-    # ── 상단: 보고번호(제목 §2 20/700) ──
-    report_no = escape(str(report.get("report_no") or "-"))
+    # ── 전체폭 상세(읽기 HTML) ──
+    st.markdown(_detail_read_html(report, status), unsafe_allow_html=True)
+
+    # ── 하단 액션 바(§1-A): 등급 세그먼트 S~D | 의견 입력 | 검토착수 보완요청 반려 [평가확정] ──
     st.markdown(
-        f"<div style='font-size:20px;font-weight:700;color:{TOKENS['ink']};"
-        f"line-height:1.2;margin:2px 0 8px;'>{report_no}</div>",
+        f"<div style='border-top:1px solid {_LINE_SEC};margin:2px 0 12px;'></div>",
         unsafe_allow_html=True,
     )
-
-    # ── 읽기 메타 스트립(§3.2 handoff): 상태·발생일·신고자·부서·제안등급을 접지 않고
-    #    상시 노출한다(§0.6). 형식 분리(§3.1): 상태=lifecycle pill(1축) / 제안등급=grade_mark
-    #    (셰브런+색텍스트, pill 아님) / 나머지=평문. 4개 상세의 상단 메타 처리를 통일한다(F6). ──
-    proposed = str(report.get("proposed_grade") or "")
-    cause = str(report.get("cause_code") or "")
-    cause_detail = str(report.get("cause_detail") or "")
-    cause_label = _CAUSE_LABEL.get(cause, cause)
-    cause_val = cause_label + (f" · {cause_detail}" if cause_detail else "")
-    erp.metadata_strip([
-        ("상태", _status_badge_html(status), "html"),
-        ("발생일", str(report.get("incident_date") or "-")),
-        ("신고자", _reporter_label(report.get("reporter_emp_no"))),
-        ("부서", str(report.get("dept_code") or "-")),
-        ("제안등급", _grade_mark_html(proposed), "html"),
-    ])
-
-    # ── 판단 컨텍스트(§0.6 강제: 접지 않고 노출) — 평가 결정에 필요한 핵심 서술을 상세에
-    #    상시 노출한다. 작업명·사고 내용·작업 내용·대책·현장 설명·원인은 등급 확정/반려
-    #    판단의 근거이므로 expander 로 숨기지 않는다(참조성 첨부만 아래 접기 유지). ──
-    erp.field_block("작업명", str(report.get("work_name") or ""))
-    erp.field_block("사고 내용", str(report.get("incident_content") or ""))
-    erp.field_block("작업 내용", str(report.get("work_content") or ""))
-    erp.field_block("대책", str(report.get("countermeasure") or ""))
-    erp.field_block("현장 설명", str(report.get("site_description") or ""))
-    if cause_val.strip():
-        erp.field_block("원인", cause_val)
-
-    # ── 평가 워크플로 클러스터(등급 select + 사유 + scope 액션) — 판단 컨텍스트 바로 뒤 ──
-    st.markdown(
-        f"<div style='border-top:1px solid {TOKENS['line']};margin:12px 0 2px;'></div>",
-        unsafe_allow_html=True,
-    )
-    grades = list(db.NEAR_MISS_GRADES)
-    default_idx = grades.index(proposed) if proposed in grades else 0
-    # 확정 등급은 짧은 코드값(S–D) — 내용 맞춤 폭(§0.6 강제: 전폭 컨트롤 금지).
-    grade = st.selectbox("확정 등급", grades, index=default_idx, key=f"nm_grade_{selected_id}",
-                         width=160)
+    grades = list(db.NEAR_MISS_GRADES)  # 도메인 소스 파생(하드코딩 금지)
+    proposed = str(report.get("proposed_grade") or "").strip().upper()
+    grade_key = f"{_GRADE_KEY}{selected_id}"
+    cur_grade = st.session_state.get(grade_key)
+    if cur_grade not in grades:
+        cur_grade = proposed if proposed in grades else (grades[0] if grades else "")
+        st.session_state[grade_key] = cur_grade
 
     can_write = readiness.write_enabled
-    reason = st.text_area(
-        "반려 사유(반려 시 필수)", key=f"nm_reason_{selected_id}", height=56, disabled=not can_write,
-    )
-    # 보완요청 전용 사유(반려와 별개 필드·별개 의미: 보완요청=보고자 재작성 요청, 반려=종결분기).
-    # IN_REVIEW 에서만 의미가 있어 그 외 상태에서는 입력을 비활성화한다.
-    revision_reason = st.text_area(
-        "보완요청 사유(보완요청 시 필수)", key=f"nm_revreason_{selected_id}", height=56,
-        disabled=(not can_write) or status != "IN_REVIEW",
-    )
+    op_key = f"{_OP_KEY}{selected_id}"
+    opinion = str(st.session_state.get(op_key, "") or "").strip()
 
-    # 상세 패널 scope 액션(§0.4) — 실제 쓰기는 이 두 버튼만 담당한다(page 액션바에는
-    # 없음). disabled/help 판정은 여기서 그대로 계산해 넘기고, erp.detail_actions 는
-    # 순수 UI(버튼 렌더 + 클릭 반환)만 담당한다 — facade 호출·current_user 전달·
-    # 오류/stale 처리는 이 화면(아래 클릭 분기 + ``_run_action``)이 그대로 소유한다.
-    # 검토착수(SUBMITTED→IN_REVIEW): 아직 검토에 착수하지 않은(SUBMITTED) 케이스에서만
-    # 활성. 큐는 SUBMITTED/IN_REVIEW 만 담으므로 IN_REVIEW 는 이미 착수한 상태라 비활성.
-    # 검토착수는 전용 사유 필드 없이 상태만 전이한다(보완요청은 아래 별도 버튼·전용 사유).
+    # 활성 게이트(불변 계약 보존)
     review_disabled = (not can_write) or status != "SUBMITTED"
-    if not can_write:
-        review_help = readiness.message
-    elif status != "SUBMITTED":
-        review_help = "이미 검토에 착수한 케이스입니다."
-    else:
-        review_help = None
-
+    review_help = (
+        readiness.message if not can_write
+        else ("이미 검토에 착수한 케이스입니다." if status != "SUBMITTED" else None)
+    )
     eval_disabled = not can_write
     eval_help = None if can_write else readiness.message
-
-    reject_disabled = (not can_write) or not str(reason or "").strip()
-    reject_help = readiness.message if not can_write else (
-        None if str(reason or "").strip() else "반려 사유를 입력하세요."
-    )
-
-    # 보완요청(IN_REVIEW→SUBMITTED): 검토중 케이스만 활성, 사유 필수. 반려와 별도 버튼·의미.
-    revision_disabled = (not can_write) or status != "IN_REVIEW" or not str(revision_reason or "").strip()
+    # 보완요청(IN_REVIEW→SUBMITTED): 검토중 케이스만, 의견 필수. 반려와 별개 의미.
+    revision_disabled = (not can_write) or status != "IN_REVIEW" or not opinion
     if not can_write:
         revision_help = readiness.message
     elif status != "IN_REVIEW":
         revision_help = "검토중(IN_REVIEW) 케이스만 보완요청할 수 있습니다."
-    elif not str(revision_reason or "").strip():
-        revision_help = "보완요청 사유를 입력하세요."
+    elif not opinion:
+        revision_help = "평가 의견을 입력하세요(보완요청 시 필수)."
     else:
         revision_help = None
+    # 반려(→REJECTED): 의견 필수.
+    reject_disabled = (not can_write) or not opinion
+    reject_help = (
+        readiness.message if not can_write
+        else (None if opinion else "평가 의견을 입력하세요(반려 시 필수).")
+    )
 
-    # 종결(EVALUATED→CLOSED)은 이 평가 대기 화면의 책임이 아니다 — 큐가 SUBMITTED/IN_REVIEW
-    # 만 담아 여기서는 항상 비활성일 수밖에 없었다. 종결 UI 는 향후 개선조치 관리 화면에서
-    # 재설계하며(별도 제품 결정 — BACKLOG 추적), db.py 의 EVALUATED→CLOSED 전이 능력
-    # 자체는 데이터 계약으로 그대로 유지한다(이 화면에서 버튼만 제거).
-    clicks = erp.detail_actions(_PAGE_ID, [
-        ("검토착수", "default", review_disabled, review_help),
-        ("평가확정", "primary", eval_disabled, eval_help),
-        ("보완요청", "default", revision_disabled, revision_help),
-        ("반려", "default", reject_disabled, reject_help),
-    ])
+    # 등급 세그먼트 — 확정 등급 라벨 + S~D 버튼(선택=오렌지 primary).
+    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
+        st.markdown("<span class='nm-seg-label'>확정 등급</span>", unsafe_allow_html=True)
+        for g in grades:
+            hit = st.button(g, key=f"nmg_{g}_{selected_id}",
+                            type="primary" if g == cur_grade else "secondary")
+            if hit and g != cur_grade:
+                st.session_state[grade_key] = g
+                st.rerun()
 
-    # ── 참조성 첨부(사진)만 기본 접힘으로 남긴다 — 판단 컨텍스트(서술)는 위에 상시 노출했고,
-    #    첨부 뷰어는 미구현이라 자리표시만 접어 상세 높이를 절약한다(§0.4 st.expander 네이티브). ──
+    # 의견 입력(flex:1) + 액션 버튼 — 반려·보완요청 공용 단일 의견(dc 정본).
+    with st.container(horizontal=True, gap="small", vertical_alignment="bottom"):
+        st.text_input(
+            "평가 의견 · 반려·보완요청 시 필수",
+            key=op_key, width="stretch", disabled=not can_write,
+            placeholder="검토 의견을 한 줄로",
+        )
+        review = st.button("검토착수", key=f"nm_act_review_{selected_id}",
+                           disabled=review_disabled, help=review_help, type="secondary")
+        revision = st.button("보완요청", key=f"nm_act_revision_{selected_id}",
+                             disabled=revision_disabled, help=revision_help, type="secondary")
+        reject = st.button("반려", key=f"nm_act_reject_{selected_id}",
+                           disabled=reject_disabled, help=reject_help, type="secondary")
+        evaluate = st.button("평가확정", key=f"nm_act_eval_{selected_id}",
+                             disabled=eval_disabled, help=eval_help, type="primary")
+
+    # ── 참조성 첨부(사진)만 접힘 — 판단 컨텍스트(서술)는 위에 상시 노출(뷰어 미구현 자리표시). ──
     photos = report.get("photo_paths") or []
     with st.expander(f"첨부 사진 ({len(photos)}건)", expanded=False):
-        if photos:
-            st.caption(f"첨부 사진 {len(photos)}건 (뷰어 미구현 — 자리표시)")
-        else:
-            st.caption("첨부된 사진이 없습니다.")
+        st.caption(
+            f"첨부 사진 {len(photos)}건 (뷰어 미구현 — 자리표시)" if photos
+            else "첨부된 사진이 없습니다."
+        )
 
-    if clicks.get("검토착수"):
-        # 검토착수 후 케이스는 IN_REVIEW 로 여전히 큐(대기)에 남는다. _run_action 은 기존
-        # 패턴대로 선택을 닫고 성공 배너를 띄운다 — 목록에서 다시 선택해 평가/반려를 이어간다.
+    grade = st.session_state.get(grade_key, cur_grade)
+    if review:
         _run_action(user, "검토착수", lambda: db.update_near_miss_status(
             selected_id, "IN_REVIEW", current_user=auth.get_current_user(),
         ))
-    if clicks.get("평가확정"):
+    if evaluate:
         _run_action(user, "평가확정", lambda: db.evaluate_near_miss(
             selected_id, grade, current_user=auth.get_current_user(),
         ))
-    if clicks.get("보완요청"):
-        # 보완요청: IN_REVIEW→SUBMITTED 반송 + 사유 서버기록(보고자 재작성 요청). 반려와 별개.
+    if revision:
+        # 보완요청: IN_REVIEW→SUBMITTED 반송 + 의견을 사유로 서버기록(반려와 별개 의미).
         _run_action(user, "보완요청", lambda: db.request_near_miss_revision(
-            selected_id, revision_reason, current_user=auth.get_current_user(),
+            selected_id, opinion, current_user=auth.get_current_user(),
         ))
-    if clicks.get("반려"):
+    if reject:
         _run_action(user, "반려", lambda: db.update_near_miss_status(
-            selected_id, "REJECTED", rejection_reason=reason, current_user=auth.get_current_user(),
+            selected_id, "REJECTED", rejection_reason=opinion,
+            current_user=auth.get_current_user(),
         ))
 
 
@@ -453,8 +499,8 @@ def _flash_kind_for(exc: Exception) -> str:
 
 
 def _run_action(user: dict, label: str, call) -> None:
-    """평가/반려 공통 실행 — 예외를 여기서 흡수해 raw traceback 을 노출하지 않는다
-    (2단계 배너: 제목 + 파사드 원문 사유, stale 메시지는 가공 없이 그대로 노출)."""
+    """평가/반려 공통 실행 — 예외를 흡수해 raw traceback 을 노출하지 않는다
+    (2단계 배너: 제목 + 파사드 원문 사유, stale 메시지는 가공 없이 그대로)."""
     try:
         call()
     except ValueError as exc:
@@ -467,5 +513,5 @@ def _run_action(user: dict, label: str, call) -> None:
         _STATE.set_flash("error", f"{label} 처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.")
         st.rerun()
     _STATE.set_flash("success", f"{label} 완료.")
-    st.session_state.pop(_SEL_KEY, None)  # 처리된 케이스는 큐에서 빠지므로 상세 패널을 닫는다.
+    st.session_state.pop(_SEL_KEY, None)  # 처리된 케이스는 큐에서 빠지므로 상세를 닫는다.
     st.rerun()
