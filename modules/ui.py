@@ -449,6 +449,13 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
 /* 헤더 우측 표준 아이콘 8종 — 상시 노출. 히트영역 32px, hover #f1eee8. 활성/음영은
    색+커서+tooltip 이중부호화(활성=ink-2·pointer / 음영=ink-3 반투명·not-allowed). */
 .st-key-app_header div.stButton { display: flex; justify-content: flex-end; }
+/* 한 줄 flex: 브레드크럼 신축 + pill·아이콘 내용폭 고정(좁은 폭 겹침 방지). 아이콘 슬롯 2px. */
+.st-key-hdr_row { align-items: center; flex-wrap: nowrap !important; gap: 2px !important; }
+.st-key-hdr_row > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden; }
+.st-key-hdr_row > div:nth-child(2) { flex: 0 0 auto !important; margin-right: 12px; }  /* 연결 pill */
+/* 3번째 이후 직계 자식 = 8종 아이콘(요소 컨테이너). 내용폭 32px 고정 → 2px 연속 배치. */
+.st-key-hdr_row > div:nth-child(n+3) { flex: 0 0 32px !important; width: 32px !important; min-width: 32px !important; }
+div[class*="st-key-hdr_ic_"] div.stButton { justify-content: center; }
 div[class*="st-key-hdr_ic_"] div.stButton button {
   width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center;
   background: transparent !important; border: 1px solid transparent !important; border-radius: 6px;
@@ -979,21 +986,23 @@ def _breadcrumb_header(user: dict, page: str) -> None:
     )
     conn_html = _conn_pill_html()
 
+    # 한 줄 가로 flex: 브레드크럼(flex:1 신축) + 연결 pill + 8종 아이콘(내용폭 고정). 아이콘은
+    # 슬롯 2px 연속 배치(dc 원본), pill 과는 약간 여백. 좁은 폭에서도 pill·아이콘 폭이 고정돼
+    # 브레드크럼만 줄어 겹치지 않는다(히트영역 32px 는 슬롯 크기로 충족).
     with st.container(key="app_header"):
-        cols = st.columns([5.6, 2.2] + [0.5] * len(_HEADER_ICONS),
-                          vertical_alignment="center")
-        cols[0].markdown(crumb_html, unsafe_allow_html=True)
-        cols[1].markdown(conn_html, unsafe_allow_html=True)
-        for i, (label, icon, active) in enumerate(_HEADER_ICONS):
-            with cols[2 + i]:
-                # 상시 노출 + 음영: 비활성 아이콘은 disabled(클릭 무동작)+음영 tooltip 로
-                # '이 화면에서는 사용하지 않음'을 이중부호화한다. 활성은 실기능 tooltip.
+        with st.container(key="hdr_row", horizontal=True, gap="small",
+                          vertical_alignment="center"):
+            st.markdown(crumb_html, unsafe_allow_html=True)
+            st.markdown(conn_html, unsafe_allow_html=True)
+            for label, icon, active in _HEADER_ICONS:
+                # 상시 노출 + 음영: 비활성은 disabled(클릭 무동작)+음영 tooltip, 활성은 실기능.
                 slot = "on" if active else "off"
                 with st.container(key=f"hdr_ic_{slot}_{icon}"):
                     clicked = st.button(
                         "", icon=f":material/{icon}:", key=f"app_hdr_{icon}",
                         type="tertiary", disabled=not active,
-                        help=(f"{label}" if active else f"{label} — 이 화면에서는 사용하지 않습니다"),
+                        help=(f"{label}" if active
+                              else f"{label} — 이 화면에서는 사용하지 않습니다"),
                     )
                     if clicked and icon == "refresh":
                         st.rerun()
