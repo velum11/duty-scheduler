@@ -45,12 +45,15 @@ _NO_ROWS = (
 # 조건 필터 스트립. 카드 radius/보더/padding 은 단일 토큰(_CARD_RADIUS = 8px)으로 통일한다.
 _KIT_CSS = f"""
 <style>
-/* §1-E 필터 라벨 — 상단 정렬 12.5/500(dc isUsers). 입력은 아래(_render_widget). */
+/* §1-E 필터 라벨 — 상단 정렬 12.5/500(dc isUsers). 입력은 아래(_render_widget).
+   라벨-입력 겹침 방지: 라벨 블록 높이 확보 + 하단 여백. */
 .erp-lbl {{
-  text-align: left; color: {TOKENS['ink-2']}; font-size: 12.5px; font-weight: 500;
-  line-height: 1.2; margin: 0 0 3px; white-space: nowrap;
+  display: block; text-align: left; color: {TOKENS['ink-2']}; font-size: 12.5px;
+  font-weight: 500; line-height: 1.3; height: 17px; margin: 0 0 5px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }}
+/* 라벨 markdown 컨테이너가 접혀 위젯과 겹치지 않게 여백 확보(전역 margin-bottom:0 보정). */
+[class*="st-key-erpcond_"] [data-testid="stMarkdownContainer"]:has(.erp-lbl) {{ margin-bottom: 5px !important; }}
 /* 요약/KPI = 한 줄 스트립(§0.6 강제): 독립 카드 나열이 아니라 hairline 구분 단일 박스.
    높이 ≤72px(padding 8+8 + 값 ~20 + 라벨 ~14 ≈ 50px). 카드 겹침의 근본 해결 — 항목이
    행을 넘지 않는다. */
@@ -277,7 +280,7 @@ def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3,
     with st.container(key=f"erpcond_{page_id}"):
         for start in range(0, len(fields), cols):
             row = fields[start:start + cols]
-            slots = st.columns([1] * cols, vertical_alignment="bottom")
+            slots = st.columns([1] * cols, vertical_alignment="top")
             for j, f in enumerate(row):
                 with slots[j]:
                     st.markdown(f"<div class='erp-lbl'>{f.label}</div>",
