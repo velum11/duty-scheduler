@@ -9,12 +9,17 @@ user_id)이다. 화면은 자연키(dept_code / team_code / emp_no / duty_date)�
 DataFrame 을 훼손하지 않도록 항상 copy 후 컬럼을 추가한다.
 """
 import hashlib
+import logging
 from datetime import date, datetime, timezone
 
 import pandas as pd
 import streamlit as st
 
 from modules import config, photo_storage, sample_data, supabase_repository, validators
+
+# 감사/진단 로거. **비밀 금지**: 서명 URL·service key·개인정보를 남기지 않는다. 사진
+# 관련 로그는 보고서 id 와 스토리지 객체 경로(near-miss/{id}/{uuid}.jpg)만 기록한다.
+_LOG = logging.getLogger("duty.db")
 
 DATA_SOURCE_ERRORS = (
     config.DataSourceConfigurationError,
@@ -1683,13 +1688,10 @@ def _near_miss_editable_fields(payload: dict) -> dict:
         raise ValueError(f"제안 등급이 유효하지 않습니다: {proposed}")
     incident_date = str(payload.get("incident_date") or "").strip()
     date.fromisoformat(incident_date)  # 형식 오류 시 ValueError
-    photo = payload.get("photo_paths") or []
-    if not isinstance(photo, (list, tuple)):
-        raise ValueError("photo_paths 는 배열이어야 합니다.")
-    if len(photo) > photo_storage.MAX_PHOTOS:
-        raise ValueError(
-            f"사진은 보고서당 최대 {photo_storage.MAX_PHOTOS}장까지 첨부할 수 있습니다."
-        )
+    # photo_paths 는 본문(편집) 계약에서 **완전히 제외**한다(P1-3, repository 와 동일).
+    # 사진 배열은 오직 첨부/삭제 CAS 경로로만 변경한다 — 본문 수정이 사진 배열을 read-
+    # modify-write 로 덮어써 lost update 를 내는 것을 차단한다. payload 의 photo_paths 는
+    # 읽지도 저장하지도 않는다(무시).
     return {
         "work_name": work_name,
         "work_content": str(payload.get("work_content") or ""),
@@ -1700,7 +1702,6 @@ def _near_miss_editable_fields(payload: dict) -> dict:
         "cause_code": cause,
         "cause_detail": str(payload.get("cause_detail") or ""),
         "incident_date": incident_date,
-        "photo_paths": [str(p) for p in photo],
     }
 
 
@@ -1722,6 +1723,9 @@ def _sample_near_miss_record(payload: dict, store: pd.DataFrame) -> dict:
         "report_no": _sample_report_no(store, body["incident_date"]),
         "status": "SUBMITTED",
         **body,
+        # 사진은 create 시점엔 항상 빈 배열(create-then-upload). body 는 photo_paths 를
+        # 담지 않으므로(P1-3) 여기서 명시 초기화한다 — supabase 계약과 parity.
+        "photo_paths": [],
         "confirmed_grade": None,
         "reporter_emp_no": reporter,
         "evaluator_emp_no": "",
@@ -1735,8 +1739,8 @@ def _sample_near_miss_record(payload: dict, store: pd.DataFrame) -> dict:
 
 
 def _sample_update_near_miss(
-    report_id, *, expected_status=None, owner_emp_no=None, clear_eval: bool = False,
-    allow_null=(), **changes
+    report_id, *, expected_status=None, owner_emp_no=None, expected_photo_paths=None,
+    clear_eval: bool = False, allow_null=(), **changes
 ) -> bool:
     """sample 스토어의 단일 보고서 필드를 변경한다(존재하는 컬럼만).
 
@@ -1744,9 +1748,13 @@ def _sample_update_near_miss(
     UPDATE 와 동일한 원자 전이 계약을 sample 에서도 모사). ``owner_emp_no`` 가 주어지면
     보고자(reporter_emp_no)가 **정확히 일치**(trim only, casefold 아님)할 때만 적용한다
     — supabase 의 ``where reporter_user_id=?`` 조건과 대응하는 소유자 게이트다.
-    적용하면 True, 대상 없음·상태 불일치(이미 전이됨)·소유자 불일치면 False 를 반환해
-    파사드가 stale 오류를 낼 수 있게 한다. ``allow_null`` 에 든 컬럼은 값이 None 이어도
-    갱신한다(제안등급 해제 등) — 기본은 None 을 건너뛰어 전이 시 다른 필드 클로버를 막는다."""
+    ``expected_photo_paths`` 가 주어지면 현재 저장된 사진 배열이 그 스냅샷과 **정확히
+    일치**할 때만 적용한다(P1-3 CAS) — supabase 의 ``updated_at`` CAS 와 대응해, 두 동시
+    사진 변경이 서로를 덮어쓰는 lost update 를 sample 에서도 막는다(경합 시 False→stale).
+    적용하면 True, 대상 없음·상태 불일치(이미 전이됨)·소유자 불일치·사진 스냅샷 불일치면
+    False 를 반환해 파사드가 stale 오류를 낼 수 있게 한다. ``allow_null`` 에 든 컬럼은 값이
+    None 이어도 갱신한다(제안등급 해제 등) — 기본은 None 을 건너뛰어 전이 시 다른 필드
+    클로버를 막는다."""
     store = _near_miss_store().copy()
     mask = store["id"].astype(str) == str(report_id)
     if not mask.any():
@@ -1755,6 +1763,14 @@ def _sample_update_near_miss(
         current = store.loc[mask, "status"].astype(str).str.strip()
         if not (current == str(expected_status).strip()).all():
             return False
+    if expected_photo_paths is not None:
+        # CAS: 현재 사진 배열이 읽은 스냅샷과 다르면(그 사이 다른 첨부/삭제) 적용 거부.
+        snapshot = [str(p) for p in expected_photo_paths]
+        for i in store.index[mask]:
+            cur = store.at[i, "photo_paths"]
+            cur_list = [str(p) for p in cur] if isinstance(cur, (list, tuple)) else []
+            if cur_list != snapshot:
+                return False
     if owner_emp_no is not None:
         # 정확 일치(trim only, casefold 아님) — 대소문자만 다른 사번(ABC vs abc)은
         # supabase(reporter_user_id 구분)처럼 별개 소유자다. casefold 하면 sample 에서만
@@ -1966,11 +1982,13 @@ def upload_near_miss_photo(report_id, file_bytes, filename, *, current_user) -> 
     data, _ext, content_type = photo_storage.validate_and_compress(file_bytes, filename)
     path = photo_storage.build_object_path(report_id)
     new_paths = existing + [path]
+    snapshot = current.get("updated_at")  # P1-3 CAS 토큰(supabase updated_at)
 
     if is_sample_mode():
         ok = _sample_update_near_miss(
             report_id, expected_status=_NEAR_MISS_EDITABLE_STATUS,
-            owner_emp_no=actor["emp_no"], photo_paths=new_paths,
+            owner_emp_no=actor["emp_no"], expected_photo_paths=existing,
+            photo_paths=new_paths,
         )
         if not ok:
             raise ValueError(_NEAR_MISS_STALE_MESSAGE)
@@ -1984,14 +2002,20 @@ def upload_near_miss_photo(report_id, file_bytes, filename, *, current_user) -> 
     supabase_repository.upload_near_miss_photo_object(path, data, content_type)
     try:
         updated = supabase_repository.set_near_miss_photo_paths(
-            report_id, new_paths, reporter_emp_no=actor["emp_no"], updated_by=actor["emp_no"],
+            report_id, new_paths, reporter_emp_no=actor["emp_no"],
+            expected_updated_at=snapshot, updated_by=actor["emp_no"],
         )
     except Exception:
-        # 경로 배열 갱신 실패(게이트 stale 등) → 방금 올린 객체를 best-effort 정리(고아 방지).
+        # 경로 배열 갱신 실패(CAS stale 등) → 방금 올린 객체를 보상 삭제(고아 방지).
+        # 보상 삭제까지 실패하면 고아 객체가 남으므로 감사 로그를 남긴다(P1-4). 로그에는
+        # 보고서 id 와 객체 경로만 — 서명 URL·키는 절대 남기지 않는다.
         try:
             supabase_repository.remove_near_miss_photo_object(path)
         except Exception:  # noqa: BLE001 — 정리 실패는 원 오류를 가리지 않는다.
-            pass
+            _LOG.warning(
+                "near-miss photo orphan after failed path-append: report_id=%s object=%s",
+                report_id, path,
+            )
         raise
     finally:
         _invalidate_near_miss()
@@ -2031,8 +2055,14 @@ def delete_near_miss_photo(report_id, path, *, current_user) -> dict:
 
     게이트는 첨부와 동일(보고자 본인 + SUBMITTED). ``path`` 는 해당 보고서 경로
     스킴에 속해야 한다(임의 경로 객체 삭제 차단). photo_paths 에서 먼저 제거(원자적
-    조건부)한 뒤 객체를 삭제한다 — 참조가 사라진 dangling 이미지를 만들지 않기 위해
-    참조 제거를 우선한다(객체 삭제 실패는 고아 객체로 남지만 표시 무결성은 유지)."""
+    CAS)한 뒤 객체를 삭제한다 — 참조가 사라진 dangling 이미지를 만들지 않기 위해 참조
+    제거를 우선한다.
+
+    반환: ``{"photo_paths": 갱신배열, "storage_deleted": bool}``. **P1-4**: 스토리지
+    객체 삭제가 실패해도 성공으로 위장하지 않는다 — ``storage_deleted=False`` 로 부분
+    성공(참조는 제거됐으나 객체는 남음=고아)을 표면화하고, 보고서 id·객체 경로만 감사
+    로그로 남긴다(서명 URL·키 기록 금지). 참조 제거(CAS) 자체가 경합/게이트로 실패하면
+    stale 오류를 올린다(아무 것도 삭제하지 않음)."""
     actor = _near_miss_actor(current_user, action="아차사고 사진 삭제")
     current = _near_miss_owner_editable_gate(report_id, actor)
     target = str(path or "")
@@ -2042,29 +2072,40 @@ def delete_near_miss_photo(report_id, path, *, current_user) -> dict:
     if target not in existing:
         raise ValueError("첨부되지 않은 사진입니다.")
     new_paths = [p for p in existing if p != target]
+    snapshot = current.get("updated_at")  # P1-3 CAS 토큰
 
     if is_sample_mode():
         ok = _sample_update_near_miss(
             report_id, expected_status=_NEAR_MISS_EDITABLE_STATUS,
-            owner_emp_no=actor["emp_no"], photo_paths=new_paths,
+            owner_emp_no=actor["emp_no"], expected_photo_paths=existing,
+            photo_paths=new_paths,
         )
         if not ok:
             raise ValueError(_NEAR_MISS_STALE_MESSAGE)
         _near_miss_photo_store().pop(target, None)
-        return {"photo_paths": new_paths}
+        return {"photo_paths": new_paths, "storage_deleted": True}
 
     try:
         updated = supabase_repository.set_near_miss_photo_paths(
-            report_id, new_paths, reporter_emp_no=actor["emp_no"], updated_by=actor["emp_no"],
+            report_id, new_paths, reporter_emp_no=actor["emp_no"],
+            expected_updated_at=snapshot, updated_by=actor["emp_no"],
         )
     finally:
         _invalidate_near_miss()
-    # 참조 제거 성공 후 객체 삭제(best-effort — 실패해도 dangling 참조는 없다).
+    # 참조 제거(CAS) 성공 후 객체 삭제. 실패는 은폐하지 않고 부분성공으로 표면화(P1-4).
+    storage_deleted = True
     try:
         supabase_repository.remove_near_miss_photo_object(target)
-    except Exception:  # noqa: BLE001 — 고아 객체는 표시 무결성에 영향 없음(정리 배치 대상).
-        pass
-    return {"photo_paths": list((updated or {}).get("photo_paths") or new_paths)}
+    except Exception:  # noqa: BLE001 — 객체 삭제 실패 = 고아 객체(표시 무결성엔 영향 없음).
+        storage_deleted = False
+        _LOG.warning(
+            "near-miss photo storage delete failed (reference removed, object orphaned): "
+            "report_id=%s object=%s", report_id, target,
+        )
+    return {
+        "photo_paths": list((updated or {}).get("photo_paths") or new_paths),
+        "storage_deleted": storage_deleted,
+    }
 
 
 def update_near_miss_status(

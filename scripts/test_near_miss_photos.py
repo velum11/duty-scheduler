@@ -246,27 +246,164 @@ def test_upload_blocked_when_not_submitted() -> None:
           raises(lambda: db.delete_near_miss_photo(rid, p, current_user=reporter), ValueError) is not None)
 
 
-def test_photo_paths_max_three_validators() -> None:
-    print("photo_paths 배열 max 3 — create/update 검증(db 파사드 + repository)")
-    four = ["near-miss/1/a.jpg", "near-miss/1/b.jpg", "near-miss/1/c.jpg", "near-miss/1/d.jpg"]
-    # db 파사드 편집 검증.
-    check("db _near_miss_editable_fields 4장 거부",
-          isinstance(raises(lambda: db._near_miss_editable_fields({
-              "work_name": "w", "cause_code": "JAM", "incident_date": "2026-07-10",
-              "photo_paths": four}), ValueError), ValueError))
-    check("db 3장 허용", db._near_miss_editable_fields({
+def test_body_edit_ignores_photo_paths() -> None:
+    print("P1-3: 본문 수정은 photo_paths 를 무시(사진 배열 불변) — db·repo 검증에서 제외")
+    reporter = _sample_user(0)
+    rid = _fresh_report(reporter)["id"]
+    p = db.upload_near_miss_photo(rid, _img_bytes("JPEG"), "a.jpg", current_user=reporter)["path"]
+    # 본문 수정 payload 에 photo_paths=[] 를 실어도(삭제 위장) 사진은 그대로 유지된다.
+    db.update_near_miss_report(rid, {
+        "work_name": "본문만 수정", "cause_code": "FALL", "cause_detail": "d",
+        "incident_content": "c", "work_content": "w", "countermeasure": "m",
+        "site_description": "s", "incident_date": "2026-07-11", "photo_paths": [],
+    }, current_user=reporter)
+    after = db.get_near_miss_report(rid)
+    check("본문 수정 반영", after["work_name"] == "본문만 수정")
+    check("사진 배열 불변(본문 수정이 무시)", after["photo_paths"] == [p])
+    # 편집 검증 헬퍼는 photo_paths 키를 반환에 포함하지 않는다(계약 제외).
+    fields = db._near_miss_editable_fields({
         "work_name": "w", "cause_code": "JAM", "incident_date": "2026-07-10",
-        "photo_paths": four[:3]})["photo_paths"] == four[:3])
-    # repository 편집 검증.
-    check("repo _near_miss_editable_payload 4장 거부",
-          isinstance(raises(lambda: sr._near_miss_editable_payload({
-              "work_name": "w", "cause_code": "JAM", "incident_date": "2026-07-10",
-              "photo_paths": four}), sr.SupabaseDataError), sr.SupabaseDataError))
+        "photo_paths": ["x.jpg"]})
+    check("db 편집 헬퍼에 photo_paths 없음", "photo_paths" not in fields)
+    payload = sr._near_miss_editable_payload({
+        "work_name": "w", "cause_code": "JAM", "incident_date": "2026-07-10",
+        "photo_paths": ["x.jpg"]})
+    check("repo 편집 헬퍼에 photo_paths 없음", "photo_paths" not in payload)
+
+
+def test_photo_cas_concurrent_stale() -> None:
+    print("P1-3 CAS: read 이후 다른 사진 변경이 끼면 stale 로 거부(lost update 방지)")
+    reporter = _sample_user(0)
+    rid = _fresh_report(reporter)["id"]
+    # 업로드 파사드 내부: gate read(existing=[]) 이후, set 직전에 다른 첨부가 끼어드는 경합을
+    # _sample_update_near_miss CAS 로 잡는지 직접 검증한다.
+    # 1) 먼저 사진 1장을 넣어 현재 배열을 [p0] 으로 만든다.
+    p0 = db.upload_near_miss_photo(rid, _img_bytes("JPEG"), "a.jpg", current_user=reporter)["path"]
+    # 2) stale 스냅샷([])으로 CAS 를 시도하면 현재([p0])와 달라 거부(False)돼야 한다.
+    ok_stale = db._sample_update_near_miss(
+        rid, expected_status="SUBMITTED", owner_emp_no=reporter["emp_no"],
+        expected_photo_paths=[], photo_paths=["near-miss/9/deadbeefdeadbeefdeadbeefdeadbeef.jpg"])
+    check("stale 스냅샷 CAS 거부", ok_stale is False)
+    check("거부 후 사진 배열 불변", db.get_near_miss_report(rid)["photo_paths"] == [p0])
+    # 3) 올바른 스냅샷([p0])이면 적용된다.
+    ok_fresh = db._sample_update_near_miss(
+        rid, expected_status="SUBMITTED", owner_emp_no=reporter["emp_no"],
+        expected_photo_paths=[p0], photo_paths=[p0])
+    check("일치 스냅샷 CAS 적용", ok_fresh is True)
+
+
+def test_delete_storage_failure_surfaced() -> None:
+    print("P1-4: 스토리지 삭제 실패는 성공 위장 금지 — storage_deleted=False 로 표면화")
+    reporter = _sample_user(0)
+    rid = _fresh_report(reporter)["id"]
+    p = db.upload_near_miss_photo(rid, _img_bytes("JPEG"), "a.jpg", current_user=reporter)["path"]
+    # supabase 삭제 경로만 겨냥해 파사드 게이트/actor 는 그대로 두고 repo 경계만 mock 한다.
+    saved = {
+        "sample": db.is_sample_mode, "actor": db._near_miss_actor,
+        "gate": db._near_miss_owner_editable_gate, "setp": sr.set_near_miss_photo_paths,
+        "rm": sr.remove_near_miss_photo_object, "inv": db._invalidate_near_miss,
+    }
+    db.is_sample_mode = lambda: False
+    db._invalidate_near_miss = lambda: None
+    db._near_miss_actor = lambda cu, *, action: {"emp_no": reporter["emp_no"]}
+    db._near_miss_owner_editable_gate = lambda rid_, actor: {
+        "reporter_emp_no": reporter["emp_no"], "status": "SUBMITTED",
+        "photo_paths": [p], "updated_at": "2026-07-31T00:00:00+00:00"}
+    sr.set_near_miss_photo_paths = lambda rid_, paths, **k: {"photo_paths": list(paths)}
+    def boom_remove(path):
+        raise sr.SupabaseDataError("Supabase near-miss-photos 사진 삭제 실패: network")
+    sr.remove_near_miss_photo_object = boom_remove
+    try:
+        res = db.delete_near_miss_photo(rid, p, current_user=reporter)
+        check("참조는 제거됨(부분 성공)", res["photo_paths"] == [])
+        check("스토리지 삭제 실패 표면화(storage_deleted=False)", res["storage_deleted"] is False)
+    finally:
+        db.is_sample_mode = saved["sample"]
+        db._near_miss_actor = saved["actor"]
+        db._near_miss_owner_editable_gate = saved["gate"]
+        sr.set_near_miss_photo_paths = saved["setp"]
+        sr.remove_near_miss_photo_object = saved["rm"]
+        db._invalidate_near_miss = saved["inv"]
+
+
+def test_owned_path_uuid_format() -> None:
+    print("P2: is_owned_path 는 {32-hex uuid}.jpg 형식을 강제(임의 파일명 배제)")
+    good = db.photo_storage.build_object_path(7)
+    check("정상 uuid 경로 소유", db.photo_storage.is_owned_path(7, good))
+    check("임의 파일명 배제", db.photo_storage.is_owned_path(7, "near-miss/7/anything.jpg") is False)
+    check("대문자 hex 배제", db.photo_storage.is_owned_path(7, "near-miss/7/DEADBEEFDEADBEEFDEADBEEFDEADBEEF.jpg") is False)
+    check("확장자 위반 배제", db.photo_storage.is_owned_path(7, "near-miss/7/deadbeefdeadbeefdeadbeefdeadbeef.png") is False)
+
+
+def test_decompression_bomb_and_formats() -> None:
+    print("P1-2: 픽셀 상한(decompression bomb) 거부 + 디코더 3종 제한")
+    from PIL import Image
+    # MAX_IMAGE_PIXELS 초과 이미지는 거부(원본 bytes 는 작아도 픽셀 수로 차단).
+    big = Image.new("RGB", (7000, 7000), (10, 20, 30))  # 49MP > 40MP 상한
+    buf = io.BytesIO(); big.save(buf, format="PNG")
+    exc = raises(lambda: ps.validate_and_compress(buf.getvalue(), "big.png"), ps.PhotoValidationError)
+    check("40MP 초과 거부", exc is not None)
+    # 상한 이하(정상)는 통과.
+    okimg = Image.new("RGB", (1200, 1200), (10, 20, 30))
+    b2 = io.BytesIO(); okimg.save(b2, format="PNG")
+    out, ext, _ = ps.validate_and_compress(b2.getvalue(), "ok.png")
+    check("상한 이하 정상 처리", ext == "jpg" and ps.sniff_image_type(out) == "jpg")
+    check("MAX_IMAGE_PIXELS 상수 노출", ps.MAX_IMAGE_PIXELS == 40 * 1000 * 1000)
+
+
+def test_validate_and_compress_idempotent() -> None:
+    print("멱등: 이미 정규화된 JPEG 는 재압축 없이 통과 — validate(out)==out")
+    out, ext, ctype = ps.validate_and_compress(_img_bytes("PNG", size=(2000, 1500)), "src.png")
+    check("1차 산출 JPEG ≤1600px ≤500KB", ext == "jpg" and len(out) <= ps.TARGET_BYTES)
+    # 2차: 1차 산출물을 다시 넣으면 바이트가 동일해야 한다(재압축 안 함).
+    out2, ext2, ctype2 = ps.validate_and_compress(out, "out.jpg")
+    check("2차 산출 바이트 동일(멱등)", out2 == out)
+    check("2차 ext/ctype 동일", ext2 == "jpg" and ctype2 == "image/jpeg")
+    # 3차도 동일(고정점).
+    out3, _, _ = ps.validate_and_compress(out2, "out.jpg")
+    check("3차도 동일(고정점)", out3 == out)
+    # 단, 최대변 초과 JPEG 는 정규화 대상(멱등 단축 미적용) → 크기 축소.
+    from PIL import Image
+    big = Image.new("RGB", (2400, 1000), (30, 60, 90))
+    bb = io.BytesIO(); big.save(bb, format="JPEG", quality=80)
+    red, rext, _ = ps.validate_and_compress(bb.getvalue(), "big.jpg")
+    with Image.open(io.BytesIO(red)) as im:
+        check("최대변 초과 JPEG 는 축소(멱등 단축 제외)", max(im.size) <= ps.MAX_EDGE_PX)
 
 
 def test_bucket_probe_sample_ready() -> None:
     print("사진 버킷 probe: sample 은 항상 READY(세션 인메모리)")
     check("sample 버킷 READY", db.near_miss_photo_bucket_probe() == sr.READINESS_READY)
+
+
+def test_public_bucket_fail_closed() -> None:
+    print("P1-5: 공개 버킷은 READY 오인 금지 — PROBE_ERROR(쓰기 차단)")
+    saved = sr.client
+    class _B:
+        def __init__(self, name, public): self.name = name; self.public = public
+    class _Storage:
+        def __init__(self, public): self._public = public
+        def list_buckets(self): return [_B(sr.NEAR_MISS_PHOTO_BUCKET, self._public)]
+    class _Client:
+        def __init__(self, public): self.storage = _Storage(public)
+    try:
+        # 비공개 → READY
+        sr.client = lambda: _Client(False)
+        sr.reset_near_miss_photo_bucket_readiness()
+        check("비공개 버킷 READY", sr.near_miss_photo_bucket_probe(force=True) == sr.READINESS_READY)
+        check("비공개 ready True", sr.near_miss_photo_bucket_ready() is True)
+        # 공개 → PROBE_ERROR(비캐시, 쓰기 차단)
+        sr.client = lambda: _Client(True)
+        sr.reset_near_miss_photo_bucket_readiness()
+        check("공개 버킷 PROBE_ERROR", sr.near_miss_photo_bucket_probe(force=True) == sr.READINESS_PROBE_ERROR)
+        check("공개 ready False(쓰기 차단)", sr.near_miss_photo_bucket_ready() is False)
+        # public 판정 불가(None) → PROBE_ERROR
+        sr.client = lambda: _Client(None)
+        sr.reset_near_miss_photo_bucket_readiness()
+        check("public 불명도 fail-closed", sr.near_miss_photo_bucket_probe(force=True) == sr.READINESS_PROBE_ERROR)
+    finally:
+        sr.client = saved
+        sr.reset_near_miss_photo_bucket_readiness()
 
 
 def main() -> int:
@@ -281,8 +418,14 @@ def main() -> int:
         test_upload_owner_and_state_gate,
         test_delete_photo,
         test_upload_blocked_when_not_submitted,
-        test_photo_paths_max_three_validators,
+        test_body_edit_ignores_photo_paths,
+        test_photo_cas_concurrent_stale,
+        test_delete_storage_failure_surfaced,
+        test_owned_path_uuid_format,
+        test_decompression_bomb_and_formats,
+        test_validate_and_compress_idempotent,
         test_bucket_probe_sample_ready,
+        test_public_bucket_fail_closed,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")

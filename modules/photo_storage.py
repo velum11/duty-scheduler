@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import io
+import re
 import uuid
 
 # --- 계약 상수 ---------------------------------------------------------------
@@ -29,12 +30,23 @@ JPEG_QUALITY = 80                    # 1차 JPEG 품질
 _MIN_QUALITY = 40                    # 목표 용량 접근을 위한 품질 하한(과열화 방지)
 TARGET_BYTES = 500 * 1024            # 압축 목표(≤500KB, best-effort)
 
+# decompression bomb 방어: 디코드(EXIF/RGB 변환) 전에 픽셀 수 상한을 강제한다.
+# 원본 bytes 는 작아도 디코드 시 폭발적으로 커지는 이미지(예: 고압축 PNG)를 막는다.
+# 업무상 폰/카메라 사진(≤ ~수천만 픽셀)을 충분히 수용하는 40MP 로 정한다.
+MAX_IMAGE_PIXELS = 40 * 1000 * 1000  # 40MP
+
 # 정규화 산출물은 항상 JPEG.
 OUTPUT_EXT = "jpg"
 OUTPUT_CONTENT_TYPE = "image/jpeg"
 
 # 허용 입력 형식(확장자 + 매직바이트 지문). 저장은 JPEG 로 정규화하지만 입력은 세 형식.
 _ALLOWED_EXTS = {"jpg", "jpeg", "png", "webp"}
+# 매직바이트 지문 ↔ PIL 디코더 이름. Image.open(formats=...) 로 디코더를 이 3종으로
+# 제한해, 지문을 통과한 뒤에도 다른 포맷 디코더로 우회되는 것을 막는다(P1-2).
+_PIL_FORMATS = ("JPEG", "PNG", "WEBP")
+
+# 저장 파일명 형식: {32-hex uuid}.jpg. is_owned_path 강화(P2)에 쓴다.
+_OBJECT_NAME_RE = re.compile(r"^[0-9a-f]{32}\.jpg$")
 
 
 class PhotoValidationError(ValueError):
@@ -100,19 +112,61 @@ def validate_and_compress(file_bytes: bytes, filename: str) -> tuple[bytes, str,
             "이미지 처리 구성요소(Pillow)를 사용할 수 없어 사진을 저장할 수 없습니다."
         ) from exc
 
+    # decompression bomb 방어(P1-2): 전역 MAX_IMAGE_PIXELS 를 업무 허용치로 명시하고,
+    # DecompressionBombWarning 을 오류로 승격해 큰 이미지가 조용히 처리되지 않게 한다.
+    # (Pillow 기본은 ~89MP 초과 시 Warning, 2x 초과 시 DecompressionBombError.)
+    import warnings
+    from PIL import Image as _PILImage
+    _PILImage.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+
+    orientation = None
     try:
-        with Image.open(io.BytesIO(data)) as img:
-            img = ImageOps.exif_transpose(img)  # 폰 촬영 회전 보정
-            if img.mode in ("RGBA", "LA", "P"):
-                # 투명/팔레트 → 흰 배경 합성 후 RGB(JPEG 는 알파 미지원).
-                img = img.convert("RGBA")
-                bg = Image.new("RGB", img.size, (255, 255, 255))
-                bg.paste(img, mask=img.split()[-1])
-                img = bg
-            else:
-                img = img.convert("RGB")
-            img.thumbnail((MAX_EDGE_PX, MAX_EDGE_PX), Image.LANCZOS)
-            out = _encode_jpeg(img)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            # 디코더를 지문 3종으로 제한(우회 방지). 헤더만 읽어 크기를 먼저 검사한다.
+            with Image.open(io.BytesIO(data), formats=_PIL_FORMATS) as probe:
+                w, h = probe.size
+                try:
+                    orientation = probe.getexif().get(0x0112)  # EXIF Orientation 태그
+                except Exception:  # noqa: BLE001 — EXIF 없음/손상은 무시(회전 없음으로 간주).
+                    orientation = None
+        if w <= 0 or h <= 0 or (w * h) > MAX_IMAGE_PIXELS:
+            mp = MAX_IMAGE_PIXELS // 1_000_000
+            raise PhotoValidationError(
+                f"이미지 해상도가 너무 큽니다. 최대 약 {mp}MP 까지 첨부할 수 있습니다."
+            )
+    except PhotoValidationError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — bomb 경고 승격/손상 헤더 포함.
+        raise PhotoValidationError(
+            "이미지 해상도를 확인할 수 없거나 허용치를 초과했습니다. "
+            "손상되지 않은 JPG·PNG·WEBP 파일인지 확인하세요."
+        ) from exc
+
+    # 멱등(idempotent) 단축: 입력이 이미 정규화된 JPEG(매직바이트 jpg · 최대변 ≤ MAX_EDGE_PX
+    # · ≤ TARGET_BYTES · 회전 EXIF 없음)면 재압축하지 않고 검증만 통과시킨다. 이 함수의
+    # 출력은 정확히 이 조건을 만족하므로 ``validate_and_compress(out) == out`` 이 성립한다
+    # (재업로드/재처리 시 화질 열화·바이트 변동 방지). 회전 EXIF 가 있으면(1/None 이 아니면)
+    # 통과시키지 않는다 — 방향 보정을 건너뛰지 않기 위함(정확성 우선).
+    if (sniffed == "jpg" and max(w, h) <= MAX_EDGE_PX and len(data) <= TARGET_BYTES
+            and orientation in (None, 0, 1)):
+        return data, OUTPUT_EXT, OUTPUT_CONTENT_TYPE
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data), formats=_PIL_FORMATS) as img:
+                img = ImageOps.exif_transpose(img)  # 폰 촬영 회전 보정
+                if img.mode in ("RGBA", "LA", "P"):
+                    # 투명/팔레트 → 흰 배경 합성 후 RGB(JPEG 는 알파 미지원).
+                    img = img.convert("RGBA")
+                    bg = Image.new("RGB", img.size, (255, 255, 255))
+                    bg.paste(img, mask=img.split()[-1])
+                    img = bg
+                else:
+                    img = img.convert("RGB")
+                img.thumbnail((MAX_EDGE_PX, MAX_EDGE_PX), Image.LANCZOS)
+                out = _encode_jpeg(img)
     except PhotoValidationError:
         raise
     except Exception as exc:  # noqa: BLE001 — 손상/미지원 이미지.
@@ -162,13 +216,18 @@ def build_object_path(report_id) -> str:
 
 
 def is_owned_path(report_id, path: str) -> bool:
-    """``path`` 가 해당 report_id 의 사진 경로 스킴에 속하는지 확인한다.
+    """``path`` 가 해당 report_id 의 사진 경로 스킴에 정확히 속하는지 확인한다.
 
-    삭제 시 다른 보고서/임의 경로의 객체를 지우지 못하게 하는 방어선이다."""
+    삭제 시 다른 보고서/임의 경로의 객체를 지우지 못하게 하는 방어선이다(P2 강화):
+    ``near-miss/{report_id}/{32-hex uuid}.jpg`` 형식을 정규식으로 강제한다 — 접두만
+    맞고 파일명이 임의인 경로(예: ``near-miss/1/anything.jpg``)를 배제한다."""
     try:
         seg = _report_segment(report_id)
     except PhotoValidationError:
         return False
     prefix = f"near-miss/{seg}/"
     p = str(path or "")
-    return p.startswith(prefix) and "/" not in p[len(prefix):] and p.endswith(f".{OUTPUT_EXT}")
+    if not p.startswith(prefix):
+        return False
+    name = p[len(prefix):]
+    return bool(_OBJECT_NAME_RE.match(name))

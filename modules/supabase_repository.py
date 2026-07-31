@@ -5,6 +5,7 @@ natural keys used by the existing Streamlit views.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date
 from functools import lru_cache
@@ -15,6 +16,10 @@ import streamlit as st
 from supabase import Client, create_client
 
 from modules import config, validators
+
+# 감사/진단 로거. **비밀 금지**: 서명 URL·service key·개인정보를 기록하지 않는다.
+# 사진 관련 로그는 보고서 id 와 스토리지 객체 경로(near-miss/{id}/{uuid}.jpg)만 남긴다.
+_LOG = logging.getLogger("duty.supabase_repository")
 
 # id↔자연키 매핑 memoize 의 ttl(초). db.py 파사드 읽기 캐시와 같은 짧은 staleness
 # 안전망을 쓴다 — 쓰기 후에는 db.py 의 _invalidate_* 가 이 매핑 캐시도 함께 비운다.
@@ -157,9 +162,15 @@ def client() -> Client:
 
 
 def reset_client() -> None:
-    """Drop the cached client so a subsequent call creates a fresh connection."""
+    """Drop the cached client so a subsequent call creates a fresh connection.
+
+    새 연결은 다른 프로젝트를 가리킬 수 있으므로 프로젝트 종속 readiness 캐시도 함께
+    비운다(P2): 조직 확장·아차사고 스키마·사진 버킷 readiness 를 모두 무효화해 다음
+    확인에서 재프로브하게 한다(연결 교체 후 stale READY 로 쓰기가 열리는 것 방지)."""
     client.cache_clear()
     reset_org_readiness()
+    reset_near_miss_readiness()
+    reset_near_miss_photo_bucket_readiness()
 
 
 def reset_org_readiness() -> None:
@@ -1678,14 +1689,10 @@ def _near_miss_editable_payload(payload: dict) -> dict:
         date.fromisoformat(incident_date)
     except ValueError as exc:
         raise SupabaseDataError(f"사고 발생일 형식이 유효하지 않습니다: {incident_date}") from exc
-    photo_paths = payload.get("photo_paths") or []
-    if not isinstance(photo_paths, (list, tuple)):
-        raise SupabaseDataError("photo_paths 는 배열이어야 합니다.")
-    from modules import photo_storage
-    if len(photo_paths) > photo_storage.MAX_PHOTOS:
-        raise SupabaseDataError(
-            f"사진은 보고서당 최대 {photo_storage.MAX_PHOTOS}장까지 첨부할 수 있습니다."
-        )
+    # photo_paths 는 본문(편집) 계약에서 **완전히 제외**한다(P1-3). 사진 배열은 오직
+    # 첨부/삭제 CAS 경로(set_near_miss_photo_paths)로만 변경한다 — 본문 수정이 read-
+    # modify-write 로 사진 배열을 덮어써 lost update 를 내는 것을 원천 차단한다. 여기서
+    # payload 의 photo_paths 는 읽지도 저장하지도 않는다(무시).
     return {
         "work_name": work_name,
         "work_content": _clean_text(payload.get("work_content")),
@@ -1696,7 +1703,6 @@ def _near_miss_editable_payload(payload: dict) -> dict:
         "cause_code": cause_code,
         "cause_detail": _clean_text(payload.get("cause_detail")),
         "incident_date": incident_date,
-        "photo_paths": [str(p) for p in photo_paths],
     }
 
 
@@ -1723,6 +1729,9 @@ def _near_miss_write_payload(payload: dict) -> dict:
         department_id = dept_by_code[dept_code]
     return {
         **body,
+        # 사진은 create 시점엔 항상 빈 배열이다(업로드는 report_id 가 필요해 생성 이후에만
+        # 가능 — create-then-upload 모델). payload 의 photo_paths 는 신뢰하지 않는다.
+        "photo_paths": [],
         "reporter_user_id": user_by_emp[reporter_emp],
         "department_id": department_id,
         "status": "SUBMITTED",
@@ -1852,11 +1861,17 @@ def near_miss_photo_bucket_ready() -> bool:
 def near_miss_photo_bucket_probe(*, force: bool = False) -> str:
     """사진 Storage 버킷 준비 상태를 3-state 로 확인한다(read-only, 1회 probe 후 캐시).
 
-    반환: ``READINESS_READY``(버킷 존재) / ``READINESS_NOT_READY``(버킷 없음) /
-    ``READINESS_PROBE_ERROR``(확인 자체 실패 — 권한/네트워크). PROBE_ERROR 는 캐시하지
-    않는다(일시 장애를 '없음'으로 고착시키지 않음). near_miss 스키마 3-state 관행과 동일.
+    반환: ``READINESS_READY``(버킷 존재 **및 비공개**) / ``READINESS_NOT_READY``(버킷
+    없음) / ``READINESS_PROBE_ERROR``(확인 실패 — 권한/네트워크 **또는 버킷이 public 인
+    오설정**). PROBE_ERROR 는 캐시하지 않는다(일시 장애를 '없음'으로 고착시키지 않음).
+    near_miss 스키마 3-state 관행과 동일.
 
-    **read-only**: ``list_buckets`` 만 호출하며 버킷을 생성하지 않는다(생성은 승인 게이트)."""
+    **P1-5 fail-closed**: 버킷이 존재해도 ``public`` 이 명시적으로 False 가 아니면
+    READY 로 보지 않는다 — 공개 버킷은 signed URL 계약(비공개 전용 접근)을 깨므로
+    쓰기를 차단한다(공개면 READY 오인 금지). public 판정 불가(속성 부재)도 보수적으로
+    비-READY 로 접는다.
+
+    **read-only**: ``list_buckets`` 만 호출하며 버킷을 생성/수정하지 않는다(생성은 승인 게이트)."""
     global _NM_PHOTO_BUCKET_READY, _NM_PHOTO_BUCKET_PROBE
     if force:
         _NM_PHOTO_BUCKET_PROBE = None
@@ -1864,19 +1879,34 @@ def near_miss_photo_bucket_probe(*, force: bool = False) -> str:
         return _NM_PHOTO_BUCKET_PROBE
     try:
         buckets = client().storage.list_buckets()
-        names = set()
+        match = None
         for b in buckets or []:
             name = getattr(b, "name", None) or getattr(b, "id", None)
             if name is None and isinstance(b, dict):
                 name = b.get("name") or b.get("id")
-            if name:
-                names.add(str(name))
-        if NEAR_MISS_PHOTO_BUCKET in names:
+            if name and str(name) == NEAR_MISS_PHOTO_BUCKET:
+                match = b
+                break
+        if match is None:
+            _NM_PHOTO_BUCKET_PROBE = READINESS_NOT_READY
+            _NM_PHOTO_BUCKET_READY = False
+            return _NM_PHOTO_BUCKET_PROBE
+        # public 플래그 확인 — 명시적 False 만 READY. 공개/불명은 fail-closed.
+        is_public = getattr(match, "public", None)
+        if is_public is None and isinstance(match, dict):
+            is_public = match.get("public")
+        if is_public is False:
             _NM_PHOTO_BUCKET_PROBE = READINESS_READY
             _NM_PHOTO_BUCKET_READY = True
         else:
-            _NM_PHOTO_BUCKET_PROBE = READINESS_NOT_READY
-            _NM_PHOTO_BUCKET_READY = False
+            # 공개 버킷(또는 public 판정 불가) = 오설정 → PROBE_ERROR(비캐시, 쓰기 차단).
+            _LOG.warning(
+                "near-miss photo bucket %s misconfigured: public=%r (expected private) — writes blocked",
+                NEAR_MISS_PHOTO_BUCKET, is_public,
+            )
+            _NM_PHOTO_BUCKET_PROBE = None
+            _NM_PHOTO_BUCKET_READY = None
+            return READINESS_PROBE_ERROR
     except Exception as exc:  # noqa: BLE001 — 확인 실패는 미적용으로 단정하지 않는다.
         _NM_PHOTO_BUCKET_PROBE = None
         _NM_PHOTO_BUCKET_READY = None
@@ -1940,14 +1970,19 @@ def remove_near_miss_photo_object(path: str) -> None:
 
 
 def set_near_miss_photo_paths(
-    report_id, paths, *, reporter_emp_no: str, updated_by=None,
+    report_id, paths, *, reporter_emp_no: str, expected_updated_at=None, updated_by=None,
 ) -> dict | None:
-    """사진 경로 배열만 원자적 조건부 UPDATE 한다(소유자+SUBMITTED).
+    """사진 경로 배열만 원자적 조건부 CAS-UPDATE 한다(소유자+SUBMITTED+스냅샷 일치).
 
-    ``where id=? and reporter_user_id=? and status='SUBMITTED'`` — 본문 수정과 같은
-    소유자·상태 게이트를 서버측에서 강제한다. 0행이면 비소유자/비SUBMITTED/삭제됨이므로
-    stale 오류를 낸다(lost update 금지). 배열 원소는 문자열로 정규화하고 최대
-    ``photo_storage.MAX_PHOTOS`` 장으로 제한한다(계약 재확인)."""
+    ``where id=? and reporter_user_id=? and status='SUBMITTED'`` 에 더해,
+    ``expected_updated_at`` 이 주어지면 ``and updated_at=<스냅샷>`` 조건을 붙여
+    **compare-and-swap** 한다(P1-3). 사진 첨부/삭제는 read(현재 배열)→modify→write 라,
+    소유자·상태만으로는 두 동시 요청이 서로의 배열을 덮어써 lost update 가 난다. 갱신
+    행이 조회 시점 이후로 바뀌지 않았을 때만(updated_at 트리거가 매 UPDATE 마다 갱신)
+    적용하므로, 그 사이 다른 사진 변경/본문 수정이 있었으면 0행 → stale 오류로 표면화해
+    재조회를 유도한다(덮어쓰지 않음). 0행은 비소유자/비SUBMITTED/삭제됨/경합 중 하나다.
+
+    배열 원소는 문자열로 정규화하고 최대 ``photo_storage.MAX_PHOTOS`` 장으로 제한한다."""
     from modules import photo_storage
 
     if not near_miss_extensions_ready():
@@ -1970,6 +2005,11 @@ def set_near_miss_photo_paths(
         .eq("reporter_user_id", user_by_emp[reporter])
         .eq("status", "SUBMITTED")
     )
+    if expected_updated_at is not None and str(expected_updated_at).strip():
+        # CAS 토큰: 읽은 시점의 updated_at. timestamptz 는 = 로 순간(instant) 비교되어
+        # 텍스트 표기 차이에 견고하다. 트리거(near_miss_reports_set_updated_at)가 매
+        # UPDATE 마다 now() 로 갱신하므로 경합 write 는 스냅샷과 어긋나 0행이 된다.
+        query = query.eq("updated_at", str(expected_updated_at))
     response = _execute(query, "사진경로 갱신", NEAR_MISS_TABLE)
     saved = (response.data or [None])[0]
     if saved is None:

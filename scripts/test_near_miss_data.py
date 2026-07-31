@@ -705,7 +705,9 @@ def test_update_owner_submitted_allows_edit() -> None:
     check("원인 코드 수정 반영", updated["cause_code"] == "FALL")
     check("제안 등급 수정 반영", updated["proposed_grade"] == "B")
     check("사고일 수정 반영", updated["incident_date"] == "2026-07-15")
-    check("사진 배열 수정 반영(list 보존)", updated["photo_paths"] == ["a.jpg", "b.jpg"])
+    # P1-3: 본문 수정은 photo_paths 를 건드리지 않는다(payload 의 사진 배열은 무시).
+    # 사진은 오직 upload/delete CAS 경로로만 바뀐다 — 생성 시 빈 배열이 그대로 보존된다.
+    check("사진 배열은 본문 수정에서 무시(생성값 [] 보존)", updated["photo_paths"] == [])
     # server-owned 필드는 위조 시도에도 불변.
     check("상태는 SUBMITTED 유지(위조 무시)", updated["status"] == "SUBMITTED")
     check("report_no 불변", updated["report_no"] == orig_report_no)
@@ -778,7 +780,10 @@ def test_update_invalid_values_rejected() -> None:
     check("잘못된 원인 코드 거부", bad(cause_code="NOPE") is not None)
     check("잘못된 제안 등급 거부", bad(proposed_grade="Z") is not None)
     check("잘못된 사고일 형식 거부", bad(incident_date="2026/07/15") is not None)
-    check("photo_paths 비배열 거부", bad(photo_paths="notalist") is not None)
+    # P1-3: photo_paths 는 본문 계약에서 제외 — payload 에 비배열이 와도 오류가 아니라
+    # 무시(저장·검증 대상 아님). 편집 헬퍼 반환에 photo_paths 키가 없음을 확인한다.
+    fields = db._near_miss_editable_fields(_valid_edit(photo_paths="notalist"))
+    check("photo_paths 는 편집 계약에서 제외(무시)", "photo_paths" not in fields)
     # 검증 실패 후에도 원본은 그대로(DB 요청 전 차단).
     check("검증 실패는 본문 미변경", db.get_near_miss_report(rid)["work_name"] == "설비 점검")
 
