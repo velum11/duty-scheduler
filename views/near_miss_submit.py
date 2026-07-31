@@ -6,8 +6,14 @@
     우측: 필수항목 체크리스트 + 진행 바(좁아지면 본문 아래로 wrap). 하단 [제안서 제출](오렌지).
 
 - 본문 아이콘 툴바 띠·카드 제거(§0 금지 3·5). §2~§4 값만(§0 금지 8).
-- 03 · 사진 첨부 섹션은 **생략**한다: 현재 사진 저장 기능이 GATED(미구현, photo_paths=[])라
-  거짓 어포던스를 만들지 않기 위함(§0). '임시 저장' 버튼도 현재 앱에 없어 추가하지 않는다.
+- 03 · 사진 첨부 섹션(선택): st.file_uploader(다중) + st.camera_input(촬영, expander)로
+  현장 사진을 첨부한다. **스테이징-후-첨부** 흐름이다 — db 사진 업로드 API 는 '이미 존재하는
+  SUBMITTED 소유 보고서'를 요구하는데 등록 폼에는 제출 전까지 report_id 가 없으므로, 선택
+  사진을 세션에 스테이징(선택 즉시 photo_storage 로 검증·압축)했다가 제출로 보고서가 생성된
+  뒤 각 사진을 db.upload_near_miss_photo(new_id,...) 로 첨부한다. 업로더/카메라는 st.form 밖에
+  배치한다(폼 위젯은 제출 전까지 반응하지 않아 썸네일·삭제 상호작용 불가 — §0.4 FORM_ENTRY
+  예외). 사진은 선택 항목이라 필수 8필드·체크리스트에 미포함, 없어도 제출된다. '임시 저장'
+  버튼은 현재 앱 미지원이라 추가하지 않는다.
 - 체크리스트 진행 표시는 st.form 제약상 **렌더 시점(직전 rerun) 세션 값** 기준이다(폼 위젯은
   제출 전까지 세션에 커밋되지 않음) — 스크립트 해킹 없이 form 계약을 지킨 적응이다.
 
@@ -20,18 +26,25 @@ U/M/A 공유 — USER 모바일에서 체크리스트가 본문 아래로 내려
 # DESIGN.md §1-D 폼형 — 단건 입력·제출.
 SCREEN_ARCHETYPE = "FORM_ENTRY"
 
+import uuid
 from datetime import date
 from html import escape
 
 import streamlit as st
 
-from modules import auth, db, ui
+from modules import auth, db, photo_storage, ui
 from views.common import erp
 from views.common import scaffold
 from views.master import PersistResult, banner, ledger_banner
 
 _PAGE_ID = "near_miss_submit"
 _DONE_KEY = "nm_submit_done"
+
+# ── 사진 스테이징(제출 전 세션 보관 → 제출 성공 후 db API 로 첨부) ──
+_STAGE_KEY = "nm_photo_stage"        # list[{"id","name","bytes"}] — 검증·압축된 JPEG bytes
+_STAGE_SEEN_KEY = "nm_photo_seen"    # 이미 처리한 업로더/카메라 file_id 집합(중복 스테이징 방지)
+_UP_KEY = "nm_f_photo_uploader"
+_CAM_KEY = "nm_f_photo_camera"
 
 _FORM_WIDGET_KEYS = [
     "nm_f_work_name", "nm_f_incident_date", "nm_f_cause_code",
@@ -113,6 +126,16 @@ _FORM_CSS = f"""
   gap:12px 16px; padding:16px 0 0; margin-top:22px; border-top:1px solid {_LINE_SEC}; }}
 .nm-submitbar .hint {{ font-size:12.5px; color:{_WEAK}; }}
 .nm-submitbar .hint b {{ color:{_INK}; font-weight:600; }}
+/* 03 · 사진 첨부(선택) — 업로더 드롭존을 §2 팔레트 헤어라인·점선으로 정돈(카드 아님). */
+.st-key-nm_photo_zone [data-testid="stFileUploaderDropzone"] {{
+  background:#fbfaf8 !important; border:1px dashed #dcd6cc !important; border-radius:10px !important; }}
+.st-key-nm_photo_zone [data-testid="stFileUploaderDropzone"]:hover {{ border-color:{_LINE_HDR} !important; }}
+/* 스테이징 썸네일 — 헤어라인 프레임(카드 그림자 없음). */
+.st-key-nm_photo_thumbs [data-testid="stImage"] img {{
+  border:1px solid {_LINE} !important; border-radius:8px !important; }}
+/* 삭제 버튼(썸네일 아래) — 히트영역 32px, 중립 텍스트. */
+[class*="st-key-nm_photo_del_"] button {{ min-height:32px !important; border-radius:8px !important;
+  font-size:12.5px !important; color:{_INK2} !important; }}
 /* ≤900px: 체크리스트가 본문 아래로 내려간다(좁은 폭·모바일). */
 @media (max-width:900px) {{
   .st-key-nm_form_wrap div[data-testid="stHorizontalBlock"] {{ flex-direction:column; }}
@@ -147,6 +170,87 @@ def _dept_display(dept_code: str) -> str:
 def _reset_form_state() -> None:
     for key in _FORM_WIDGET_KEYS:
         st.session_state.pop(key, None)
+    _reset_photo_stage()
+
+
+def _reset_photo_stage() -> None:
+    """스테이징한 사진 bytes·처리 표식을 세션에서 정리한다(제출 성공·화면 이탈 시 메모리 잔류 방지)."""
+    st.session_state.pop(_STAGE_KEY, None)
+    st.session_state.pop(_STAGE_SEEN_KEY, None)
+
+
+def _ingest_photo(data: bytes, name: str) -> str | None:
+    """업로드 1장을 선택 즉시 검증·압축해 스테이지에 추가한다. 오류 문구(없으면 None) 반환.
+
+    photo_storage 순수 계약(확장자+매직바이트 jpg/png/webp·원본 10MB·JPEG 정규화)을 재사용해
+    잘못된 파일을 제출 전에 즉시 걸러낸다(modules 무수정 — API 소비만). 3장 초과분은 제외한다."""
+    stage = st.session_state.setdefault(_STAGE_KEY, [])
+    if len(stage) >= photo_storage.MAX_PHOTOS:
+        return f"사진은 최대 {photo_storage.MAX_PHOTOS}장까지 첨부할 수 있습니다. '{name}'은(는) 제외했습니다."
+    try:
+        out, _ext, _ctype = photo_storage.validate_and_compress(data, name)
+    except photo_storage.PhotoValidationError as exc:
+        return f"{name}: {exc}"
+    except Exception:  # noqa: BLE001 — 손상/미지원 이미지(원문 비노출).
+        return f"{name}: 이미지를 처리할 수 없습니다."
+    stage.append({"id": uuid.uuid4().hex, "name": name, "bytes": out})
+    return None
+
+
+def _render_photo_stage() -> None:
+    """03 · 사진 첨부(선택) — 업로더(다중)+카메라(expander) 스테이징 + 썸네일·개별 삭제.
+
+    st.form 밖에서 렌더한다(반응형 상호작용). 선택 즉시 검증·압축해 세션에 스테이징하고,
+    실제 저장은 제출 성공 후 _attach_staged_photos 가 db API 로 수행한다."""
+    _section("03", "사진 첨부", opt="선택")
+    stage = st.session_state.setdefault(_STAGE_KEY, [])
+    seen = st.session_state.setdefault(_STAGE_SEEN_KEY, set())
+    errors: list[str] = []
+
+    with st.container(key="nm_photo_zone"):
+        ups = st.file_uploader(
+            "현장 사진 선택", type=["jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True, key=_UP_KEY, label_visibility="collapsed",
+            help=f"JPG·PNG·WEBP · 최대 {photo_storage.MAX_PHOTOS}장 · 원본 10MB 이하",
+        )
+    for f in (ups or []):
+        fid = getattr(f, "file_id", None) or f.name
+        if fid in seen:
+            continue
+        seen.add(fid)
+        err = _ingest_photo(f.getvalue(), f.name or "사진.jpg")
+        if err:
+            errors.append(err)
+
+    with st.expander("사진 촬영 (카메라)", expanded=False):
+        cam = st.camera_input("사진 촬영", key=_CAM_KEY, label_visibility="collapsed")
+    if cam is not None:
+        fid = getattr(cam, "file_id", None)
+        if fid and fid not in seen:
+            seen.add(fid)
+            err = _ingest_photo(cam.getvalue(), "촬영사진.jpg")
+            if err:
+                errors.append(err)
+
+    for e in errors:
+        banner("warn", e)
+
+    if stage:
+        with st.container(key="nm_photo_thumbs"):
+            cols = st.columns(photo_storage.MAX_PHOTOS)
+            for i, ph in enumerate(stage):
+                with cols[i]:
+                    st.image(ph["bytes"], width="stretch")
+                    if st.button("삭제", key=f"nm_photo_del_{ph['id']}", width="stretch"):
+                        st.session_state[_STAGE_KEY] = [p for p in stage if p["id"] != ph["id"]]
+                        st.rerun()
+
+    st.markdown(
+        f"<div style='font-size:12px;color:{_WEAK};margin-top:8px;line-height:1.6;'>"
+        f"{len(stage)} / {photo_storage.MAX_PHOTOS}장 · 사진은 선택 항목입니다. "
+        f"선택한 사진은 <b style='color:{_INK};font-weight:600;'>[제안서 제출]</b> 시 함께 첨부됩니다.</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _identity_row(user: dict) -> None:
@@ -279,10 +383,13 @@ def render(user: dict) -> None:
                 # ── 하단 제출 바(임시 저장 없음 — 현재 앱 미지원, 거짓 어포던스 금지) ──
                 st.markdown(
                     "<div class='nm-submitbar'><span class='hint'>제출 후 상태는 "
-                    "<b>제출됨(SUBMITTED)</b>이 됩니다.</span></div>",
+                    "<b>제출됨(SUBMITTED)</b>이 됩니다. 사진(선택)은 아래 03에서 첨부합니다.</span></div>",
                     unsafe_allow_html=True,
                 )
                 submitted = erp.form_submit("제안서 제출", disabled=not can_submit)
+
+            # 03 · 사진 첨부 — st.form 밖(반응형 상호작용). 제출 성공 후 db API 로 첨부한다.
+            _render_photo_stage()
         with check_col:
             st.markdown(_checklist_html(), unsafe_allow_html=True)
 
@@ -354,8 +461,32 @@ def _persist_and_report(payload: dict) -> None:
         return
 
     report_no = _clean((record or {}).get("report_no")) or "(채번 확인 필요)"
-    st.session_state[_DONE_KEY] = {"report_no": report_no}
+    # 보고서 생성 성공 → 스테이징한 사진을 db API 로 첨부(스테이징-후-첨부). 개별 실패는 경고로
+    # 표면화하되 제출 자체는 성공 처리한다(사진은 선택 항목). 처리 후 세션 스테이지를 정리한다.
+    photo_warnings = _attach_staged_photos((record or {}).get("id"))
+    _reset_photo_stage()
+    st.session_state[_DONE_KEY] = {"report_no": report_no, "photo_warnings": photo_warnings}
     st.rerun()
+
+
+def _attach_staged_photos(report_id) -> list[str]:
+    """제출 성공 후 스테이징 사진을 순차 첨부한다(소유자+SUBMITTED 게이트는 파사드가 재확인).
+
+    신원은 위젯이 아니라 세션 사용자에서 서버측 확정한다(위조 방지). 개별 실패 문구 목록을
+    반환한다(빈 목록이면 전부 성공)."""
+    stage = st.session_state.get(_STAGE_KEY) or []
+    if not report_id or not stage:
+        return []
+    current_user = auth.get_current_user()
+    warnings: list[str] = []
+    for ph in stage:
+        try:
+            db.upload_near_miss_photo(report_id, ph["bytes"], ph["name"], current_user=current_user)
+        except ValueError as exc:
+            warnings.append(f"{ph['name']}: {exc}")
+        except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).
+            warnings.append(f"{ph['name']}: 첨부하지 못했습니다.")
+    return warnings
 
 
 def _render_post_submit(done: dict) -> None:
@@ -364,6 +495,13 @@ def _render_post_submit(done: dict) -> None:
     ledger_banner(PersistResult.success(_PAGE_ID, [report_no]))
     banner("success",
            f"아차사고를 접수했습니다. 접수번호 {report_no} · 상태 제출됨(SUBMITTED)")
+
+    # 사진 첨부 부분 실패 안내 — 보고서는 저장됐고 SUBMITTED 동안 '내 아차사고'에서 재첨부 가능.
+    warns = done.get("photo_warnings") or []
+    if warns:
+        banner("warn",
+               "일부 사진을 첨부하지 못했습니다: " + " / ".join(warns)
+               + " — 제출됨(SUBMITTED) 상태 동안 '내 아차사고'에서 다시 첨부할 수 있습니다.")
 
     st.markdown(
         f"<div style='font-size:12.5px;color:{_INK2};margin:6px 0 4px;'>다음 작업을 선택하세요.</div>",

@@ -31,7 +31,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import auth, db, ui
+from modules import auth, db, photo_storage, ui
 from views.common import erp, scaffold
 from views.master import banner
 from views.master.lifecycle import Readiness, ReadinessState
@@ -234,6 +234,9 @@ def _render_detail(user: dict, report: dict, status: str) -> None:
 
         st.markdown(_detail_blocks_html(report), unsafe_allow_html=True)
 
+        # ── 사진(읽기 그리드) + 소유자·SUBMITTED 첨부/삭제. ──
+        _render_my_photos(report, status)
+
         # ── 워크플로(SUBMITTED 자기수정) — 소유자+제출됨에서만. ──
         _render_edit_entry(user, report, status)
         st.markdown(f"<div style='height:8px'></div>", unsafe_allow_html=True)
@@ -332,6 +335,133 @@ def _render_revision_banner(report_id) -> None:
     at = _clean(rev.get("revision_requested_at"))
     meta = " / ".join(p for p in (requester, at) if p)
     banner("info", f"보완요청: {reason}" + (f" — 요청 {meta}" if meta else ""))
+
+
+def _normalize_photo_paths(value) -> list[str]:
+    """photo_paths 셀(list / 문자열화 JSON / NaN)을 안전하게 경로 리스트로 정규화한다."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(p) for p in value if str(p).strip()]
+    try:
+        if pd.isna(value):
+            return []
+    except (TypeError, ValueError):
+        pass
+    s = str(value).strip()
+    if not s or s in ("[]", "nan"):
+        return []
+    try:
+        import json
+        arr = json.loads(s)
+        if isinstance(arr, list):
+            return [str(p) for p in arr if str(p).strip()]
+    except Exception:  # noqa: BLE001 — 파싱 실패는 사진 없음으로 취급.
+        pass
+    return []
+
+
+def _render_my_photos(report: dict, status: str) -> None:
+    """첨부 사진 썸네일 그리드(읽기) + 소유자·SUBMITTED 첨부/삭제(라이브 db API).
+
+    조회 화면과 달리 내 아차사고는 report_id 가 이미 있으므로 스테이징 없이 db API 를 직접
+    호출한다(게이트: 소유자+SUBMITTED — 파사드가 세션 사용자로 서버측 재확인, 위조 방지).
+    업로더/카메라·삭제는 st.form(수정 폼) 밖의 상시 상세 영역에 두어 즉시 반응한다."""
+    rid = report.get("id")
+    paths = _normalize_photo_paths(report.get("photo_paths"))
+    editable = (status == _EDITABLE_STATUS)
+    if not paths and not editable:
+        return
+
+    # 이전 rerun 에서 stash 한 첨부/삭제 결과 문구를 표시(성공 썸네일은 재조회로 자동 반영).
+    _flush_photo_msg(rid)
+
+    st.markdown(
+        f"<div style='font-family:{_MONO};font-size:11px;letter-spacing:0.12em;"
+        f"color:{_INK2};margin:16px 0 8px;'>사진 · {len(paths)}</div>",
+        unsafe_allow_html=True,
+    )
+    if paths:
+        cols = st.columns(3)
+        for i, path in enumerate(paths):
+            with cols[i % 3]:
+                url = db.get_near_miss_photo_url(path)
+                if url:
+                    st.image(url, width="stretch")
+                else:
+                    st.caption("사진을 불러올 수 없습니다.")
+                if editable and st.button("삭제", key=f"nm_my_photodel_{rid}_{i}", width="stretch"):
+                    _delete_my_photo(rid, path)
+
+    if not editable:
+        return
+    if len(paths) >= photo_storage.MAX_PHOTOS:
+        st.caption(f"사진은 최대 {photo_storage.MAX_PHOTOS}장까지 첨부할 수 있습니다.")
+        return
+
+    seen = st.session_state.setdefault(f"nm_my_photoseen_{rid}", set())
+    ups = st.file_uploader(
+        "사진 추가", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True,
+        key=f"nm_my_photoup_{rid}", label_visibility="collapsed",
+        help=f"JPG·PNG·WEBP · 최대 {photo_storage.MAX_PHOTOS}장 · 원본 10MB 이하",
+    )
+    new_files = [f for f in (ups or []) if (getattr(f, "file_id", None) or f.name) not in seen]
+    with st.expander("사진 촬영 (카메라)", expanded=False):
+        cam = st.camera_input("사진 촬영", key=f"nm_my_photocam_{rid}", label_visibility="collapsed")
+    cam_new = cam if (cam is not None and getattr(cam, "file_id", None)
+                      and cam.file_id not in seen) else None
+    if new_files or cam_new is not None:
+        _add_my_photos(rid, new_files, cam_new, seen)
+
+
+def _add_my_photos(report_id, files: list, cam, seen: set) -> None:
+    """선택/촬영 사진을 db API 로 첨부한다(소유자+SUBMITTED 게이트는 파사드 재확인). 결과 후 rerun."""
+    current_user = auth.get_current_user()
+    errors: list[str] = []
+    for f in files:
+        seen.add(getattr(f, "file_id", None) or f.name)
+        try:
+            db.upload_near_miss_photo(report_id, f.getvalue(), f.name or "사진.jpg",
+                                      current_user=current_user)
+        except ValueError as exc:
+            errors.append(f"{f.name}: {exc}")
+        except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).
+            errors.append(f"{f.name}: 첨부하지 못했습니다.")
+    if cam is not None:
+        seen.add(getattr(cam, "file_id", None))
+        try:
+            db.upload_near_miss_photo(report_id, cam.getvalue(), "촬영사진.jpg",
+                                      current_user=current_user)
+        except ValueError as exc:
+            errors.append(f"촬영사진: {exc}")
+        except Exception:  # noqa: BLE001
+            errors.append("촬영사진: 첨부하지 못했습니다.")
+    if errors:
+        _stash_photo_msg(report_id, "warn", "일부 사진을 첨부하지 못했습니다: " + " / ".join(errors))
+    st.rerun()
+
+
+def _delete_my_photo(report_id, path: str) -> None:
+    """첨부 사진 1장을 삭제한다(소유자+SUBMITTED 게이트는 파사드 재확인). 결과 후 rerun."""
+    try:
+        db.delete_near_miss_photo(report_id, path, current_user=auth.get_current_user())
+    except ValueError as exc:
+        _stash_photo_msg(report_id, "danger", f"사진을 삭제하지 못했습니다 — {exc}")
+    except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).
+        _stash_photo_msg(report_id, "danger", "사진 삭제 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.")
+    st.rerun()
+
+
+def _stash_photo_msg(report_id, kind: str, text: str) -> None:
+    """rerun 을 넘겨 다음 렌더에서 표시할 사진 처리 결과 문구를 세션에 보관한다."""
+    st.session_state[f"nm_my_photomsg_{report_id}"] = (kind, text)
+
+
+def _flush_photo_msg(report_id) -> None:
+    """stash 한 사진 처리 결과 문구를 한 번 표시하고 소비한다."""
+    msg = st.session_state.pop(f"nm_my_photomsg_{report_id}", None)
+    if msg:
+        banner(msg[0], msg[1])
 
 
 def _render_edit_entry(user: dict, report: dict, status: str) -> None:
