@@ -125,7 +125,7 @@ check("(1,1) → 50%", nms._closure_rate_label(1, 1) == "50%")
 check("(2,0) → 100%", nms._closure_rate_label(2, 0) == "100%")
 check("(0,3) → 0%", nms._closure_rate_label(0, 3) == "0%")
 check("(1,2) → 33%(반올림)", nms._closure_rate_label(1, 2) == "33%")
-kpi_src = inspect.getsource(nms._kpi_cards)
+kpi_src = inspect.getsource(nms._kpi_cards_cumulative)
 check("KPI 행에 '보고서 종결률' 타일 추가", "보고서 종결률" in kpi_src)
 # KPI 타일 라벨 자체에 'CAPA' 명칭을 쓰지 않는다(미확인 종결을 CAPA 완료로 오표기 금지).
 check("KPI 타일 라벨에 'CAPA' 명칭 미사용", "CAPA" not in kpi_src)

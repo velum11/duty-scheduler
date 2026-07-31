@@ -423,8 +423,10 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
             format_func=lambda c: dept_names.get(c, c),
         )
 
-    # 기간 지정 체크 시에만 날짜 2필드를 렌더한다(§0.6 강제: 비활성 필드가 자리를 상시 점유
-    # 하지 않음). 4열 배치로 조건은 ≤2행(미지정 5필드=2행 / 지정 7필드=2행)에 든다.
+    # 필터 순서(피드백3): 자주 쓰는 축을 앞에 둔다 — 기간 → 부서 → 상태, 그 뒤 확정등급 → 원인.
+    # 기본 기간은 '전체'(미지정=전 기간 조회, date 파라미터 생략). '기간 지정' 선택 시에만 날짜
+    # 2필드를 렌더한다(§0.6 강제: 비활성 필드가 자리를 상시 점유하지 않음). cols=5 로 미지정
+    # 5필드는 한 줄에 우선 배치(flex-wrap — 좁아지면 자연 wrap).
     fields: list[erp.Field] = [
         erp.Field(key="period_mode", label="기간", kind="select", width=150,
                   options=["전체", "기간 지정"]),
@@ -438,18 +440,18 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
         ]
     fields += [
         dept_field,
-        # 짧은 코드값(등급 S–D·상태·원인) select 는 내용 맞춤 폭(§0.6 강제: 전폭 금지).
-        erp.Field(key="grade", label="확정등급", kind="select", width=140,
-                  options=[workspace.ALL] + list(db.NEAR_MISS_GRADES)),
+        # 상태를 확정등급보다 앞에(자주 쓰는 축 우선). 짧은 코드값 select 는 내용 맞춤 폭(§0.6).
         erp.Field(key="status", label="상태", kind="select", width=140,
                   options=[workspace.ALL] + list(db.NEAR_MISS_STATUSES),
                   format_func=lambda v: _STATUS_LABEL.get(v, v) if v != workspace.ALL else v),
+        erp.Field(key="grade", label="확정등급", kind="select", width=140,
+                  options=[workspace.ALL] + list(db.NEAR_MISS_GRADES)),
         erp.Field(key="cause", label="원인", kind="select", width=140,
                   options=[workspace.ALL] + list(db.NEAR_MISS_CAUSE_CODES),
                   format_func=lambda v: _CAUSE_LABEL.get(v, v) if v != workspace.ALL else v),
     ]
     # [조회]를 필터 줄 우측에 인라인(오렌지)으로 — 별도 박스 분리 제거(피드백 #3).
-    v, clicked = erp.condition_panel(_PAGE_ID, fields, cols=4,
+    v, clicked = erp.condition_panel(_PAGE_ID, fields, cols=5,
                                      submit=("조회", f"{_PAGE_ID}_go"))
 
     on = v["period_mode"] == "기간 지정"

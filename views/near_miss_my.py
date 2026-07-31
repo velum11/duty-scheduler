@@ -25,13 +25,14 @@ from __future__ import annotations
 # DESIGN.md §1-B 목록형 아코디언 — 읽기 목록 + 인라인 펼침 상세/워크플로.
 SCREEN_ARCHETYPE = "MASTER_DETAIL"
 
-from datetime import date
+from datetime import date, timedelta
 from html import escape
 
 import pandas as pd
 import streamlit as st
 
 from modules import auth, db, photo_storage, ui
+from views import workspace
 from views.common import erp, scaffold
 from views.common.photo_paths import normalize_photo_paths
 from views.master import banner
@@ -123,8 +124,12 @@ def render(user: dict) -> None:
 
     _readiness().banner()
 
+    # 상태·기간 필터(§1-E) — 목록이 늘어도 원하는 건을 좁힐 수 있게. facade 파라미터
+    # (reporter_emp_no+status+date_from/date_to)로 서버측 필터한다. 제출 버튼 없이 변경 즉시
+    # 재조회(내 목록은 소규모라 반응형이 자연스럽다).
+    filters, active = _collect_my_filters(emp_no)
     try:
-        reports = db.get_near_miss_reports({"reporter_emp_no": emp_no})
+        reports = db.get_near_miss_reports(filters)
     except db.DATA_SOURCE_ERRORS as exc:
         st.error(f"내 아차사고 목록을 불러오지 못했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
         return
@@ -133,13 +138,53 @@ def render(user: dict) -> None:
         return
 
     if reports is None or reports.empty:
-        ui.empty_state("아직 등록한 아차사고가 없습니다. '아차사고 등록'에서 접수할 수 있습니다.",
-                       head="내 아차사고")
+        if active:
+            ui.empty_state("조건에 해당하는 내 아차사고가 없습니다. 상태·기간 필터를 조정해 보세요.",
+                           head="내 아차사고")
+        else:
+            ui.empty_state("아직 등록한 아차사고가 없습니다. '아차사고 등록'에서 접수할 수 있습니다.",
+                           head="내 아차사고")
         return
 
-    # §0-4·분석 화면 표준 타일: 제목 바로 아래 내 보고 합계(기존 데이터 파생).
+    # §0-4·분석 화면 표준 타일: 제목 바로 아래 내 보고 합계(현재 필터 결과 기준 파생).
     erp.metric_strip(_my_metrics(reports))
     _render_list(user, reports)
+
+
+def _collect_my_filters(emp_no: str) -> tuple[dict, bool]:
+    """§1-E 필터 줄(상태·기간)을 렌더하고 facade 조회조건 dict + 필터활성 여부를 만든다.
+
+    범위는 위젯이 아니라 인증 세션 사번으로 고정(reporter_emp_no) — 상태/기간만 사용자가
+    조정한다. 기본 기간은 '전체'(미지정=전 기간, date 생략). 제출 버튼 없이 변경 즉시 반영."""
+    period_on = st.session_state.get(f"{_PAGE_ID}_period_mode") == "기간 지정"
+    fields: list[erp.Field] = [
+        erp.Field(key="status", label="상태", kind="select", width=160,
+                  options=[workspace.ALL] + list(db.NEAR_MISS_STATUSES),
+                  format_func=lambda v: _STATUS_LABEL.get(v, v) if v != workspace.ALL else v),
+        erp.Field(key="period_mode", label="기간", kind="select", width=140,
+                  options=["전체", "기간 지정"]),
+    ]
+    if period_on:
+        fields += [
+            erp.Field(key="from", label="발생일(시작)", kind="date",
+                      value=date.today() - timedelta(days=90), width=150),
+            erp.Field(key="to", label="발생일(종료)", kind="date",
+                      value=date.today(), width=150),
+        ]
+    v = erp.condition_panel(_PAGE_ID, fields, cols=4)
+
+    filters: dict = {"reporter_emp_no": emp_no}
+    active = False
+    if v["status"] != workspace.ALL:
+        filters["status"] = v["status"]
+        active = True
+    if v["period_mode"] == "기간 지정":
+        active = True
+        if "from" in v:
+            filters["date_from"] = v["from"].isoformat()
+        if "to" in v:
+            filters["date_to"] = v["to"].isoformat()
+    return filters, active
 
 
 def _my_metrics(reports: pd.DataFrame) -> list[tuple]:
@@ -434,13 +479,23 @@ def _add_my_photos(report_id, files: list, cam, seen: set) -> None:
 
 
 def _delete_my_photo(report_id, path: str) -> None:
-    """첨부 사진 1장을 삭제한다(소유자+SUBMITTED 게이트는 파사드 재확인). 결과 후 rerun."""
+    """첨부 사진 1장을 삭제한다(소유자+SUBMITTED 게이트는 파사드 재확인). 결과 후 rerun.
+
+    파사드 반환의 ``storage_deleted``(P1-4)가 False 면 참조는 제거됐으나 저장소 파일 정리가
+    지연됐다는 뜻이므로 부분성공으로 표면화한다(성공 위장 금지)."""
     try:
-        db.delete_near_miss_photo(report_id, path, current_user=auth.get_current_user())
+        res = db.delete_near_miss_photo(report_id, path, current_user=auth.get_current_user())
     except ValueError as exc:
         _stash_photo_msg(report_id, "danger", f"사진을 삭제하지 못했습니다 — {exc}")
+        st.rerun()
+        return
     except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).
         _stash_photo_msg(report_id, "danger", "사진 삭제 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.")
+        st.rerun()
+        return
+    if isinstance(res, dict) and res.get("storage_deleted") is False:
+        _stash_photo_msg(report_id, "warn",
+                         "사진 참조는 제거됐으나 저장소 파일 정리가 지연될 수 있습니다(자동 정리 예정).")
     st.rerun()
 
 

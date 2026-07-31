@@ -24,13 +24,14 @@ from __future__ import annotations
 # DESIGN.md §1-A 큐 처리형 — 읽기 큐(칩) + 전체폭 상세/워크플로.
 SCREEN_ARCHETYPE = "MASTER_DETAIL"
 
-from datetime import date
+from datetime import date, timedelta
 from html import escape
 
 import pandas as pd
 import streamlit as st
 
 from modules import auth, db
+from views import workspace
 from views.common import erp, scaffold
 from views.master import (
     DraftState,
@@ -167,26 +168,33 @@ def _render_body(user: dict) -> None:
     scoped = _scope_reports(reports, improvements, is_reviewer, load_failed)
 
     # ── KPI 스트립(제목 바로 아래 첫 블록 §0-4) — 기존 요약 지표를 상단으로 이동 + 기한초과. ──
+    # KPI 는 항상 전체 스코프 큐 기준(실제 종결 대기·기한초과 총량) — 필터로 왜곡하지 않는다.
     st.markdown(_kpi_strip_html(scoped, improvements, load_failed), unsafe_allow_html=True)
     _hairline()
 
-    ordered = _ordered_ids(scoped)
+    # ── 큐 위 필터(조치 단계·담당자·기간) — 뷰단 필터링(facade 파라미터 없음, 코디 B-2). ──
+    # 권한·스코핑·KPI 는 불변이며, 표시 큐만 좁힌다. 제출 버튼 없이 변경 즉시 반영.
+    fq, fq_active = _collect_impr_filters(scoped, improvements)
+    scoped_view = _apply_impr_filters(scoped, improvements, fq)
+
+    ordered = _ordered_ids(scoped_view)
     if not ordered:
+        msg = ("조건에 해당하는 종결 대기 건이 없습니다. 조치 단계·담당자·기간 필터를 조정하세요."
+               if fq_active else "현재 종결 대기 중인 개선조치 건이 없습니다.")
         st.markdown(
-            f"<div style='padding:22px 0;font-size:14.5px;color:{_INK2};'>"
-            "현재 종결 대기 중인 개선조치 건이 없습니다.</div>",
+            f"<div style='padding:22px 0;font-size:14.5px;color:{_INK2};'>{msg}</div>",
             unsafe_allow_html=True,
         )
         return
 
-    # 진입 시 첫 건 자동 선택(§1-A) — 선택이 없거나 큐에서 사라진 경우.
+    # 진입 시 첫 건 자동 선택(§1-A) — 선택이 없거나 (필터로) 큐에서 사라진 경우.
     selected_id = st.session_state.get(_SEL_KEY)
     if selected_id not in ordered:
         selected_id = ordered[0]
         st.session_state[_SEL_KEY] = selected_id
         st.session_state.pop(_CLOSE_CONFIRM_KEY, None)
 
-    reports_by_id = {str(r["id"]): r for _, r in scoped.iterrows()}
+    reports_by_id = {str(r["id"]): r for _, r in scoped_view.iterrows()}
     _render_queue_chips(ordered, reports_by_id, improvements, load_failed, selected_id)
     _hairline()
     _render_detail(user, readiness)
@@ -235,6 +243,103 @@ def _ordered_ids(df: pd.DataFrame) -> list[str]:
         return []
     frame = df.sort_values("incident_date", ascending=False, kind="stable")
     return [str(v) for v in frame["id"].tolist()]
+
+
+# ---------- 큐 필터(뷰단 — 조치 단계·담당자·기간) ----------
+_FILTER_PID = f"{_PAGE_ID}_flt"          # condition_panel page_id(세션 위젯 키 접두)
+_STAGE_OPTS = ["전체", "미작성", "작성중", "확인대기", "확인됨", "반려"]
+
+
+def _impr_stage(imp) -> str:
+    """개선조치 한 건의 '조치 단계' 라벨(제출/확인 상태 파생 — 필터·표시 어휘 통일).
+
+    미작성(imp 없음) < 작성중(DRAFT) < 확인대기(SUBMITTED·PENDING) < 확인됨(CONFIRMED) /
+    반려(REJECTED). 확정 상태(확인됨/반려)를 제출 상태보다 우선 판정한다."""
+    if not imp:
+        return "미작성"
+    confirm = str(imp.get("confirm_status") or "").strip()
+    submit = str(imp.get("submit_status") or "").strip()
+    if confirm == "CONFIRMED":
+        return "확인됨"
+    if confirm == "REJECTED":
+        return "반려"
+    if submit == "SUBMITTED":
+        return "확인대기"
+    if submit == "DRAFT":
+        return "작성중"
+    return "미작성"
+
+
+def _collect_impr_filters(scoped: pd.DataFrame, improvements: dict) -> tuple[dict, bool]:
+    """§1-E 필터 줄(조치 단계·담당자·기간)을 렌더하고 (필터 dict, 활성여부)를 반환한다.
+
+    담당자 옵션은 현재 스코프 큐에 실제 배정된 담당자만(+전체)으로 구성한다(허수 옵션 방지).
+    기본 기간은 '전체'. 제출 버튼 없이 변경 즉시 반영(뷰단 필터)."""
+    period_on = st.session_state.get(f"{_FILTER_PID}_period_mode") == "기간 지정"
+    assignees: list[str] = []
+    seen: set = set()
+    if scoped is not None and not scoped.empty:
+        for _, r in scoped.iterrows():
+            imp = improvements.get(str(r["id"]))
+            emp = str((imp or {}).get("assignee_emp_no") or "").strip()
+            if emp and emp not in seen:
+                seen.add(emp)
+                assignees.append(emp)
+    assignees.sort()
+
+    fields: list[erp.Field] = [
+        erp.Field(key="stage", label="조치 단계", kind="select", width=150, options=_STAGE_OPTS),
+        erp.Field(key="assignee", label="담당자", kind="select", width=200,
+                  options=[workspace.ALL] + assignees,
+                  format_func=lambda e: "전체" if e == workspace.ALL else _user_label(e)),
+        erp.Field(key="period_mode", label="기간", kind="select", width=140,
+                  options=["전체", "기간 지정"]),
+    ]
+    if period_on:
+        fields += [
+            erp.Field(key="from", label="발생일(시작)", kind="date",
+                      value=date.today() - timedelta(days=180), width=150),
+            erp.Field(key="to", label="발생일(종료)", kind="date",
+                      value=date.today(), width=150),
+        ]
+    v = erp.condition_panel(_FILTER_PID, fields, cols=4)
+
+    on = v["period_mode"] == "기간 지정"
+    q = {
+        "stage": v["stage"],
+        "assignee": v["assignee"],
+        "date_from": v["from"].isoformat() if on and "from" in v else "",
+        "date_to": v["to"].isoformat() if on and "to" in v else "",
+    }
+    active = (v["stage"] != "전체") or (v["assignee"] != workspace.ALL) or on
+    return q, active
+
+
+def _apply_impr_filters(scoped: pd.DataFrame, improvements: dict, q: dict) -> pd.DataFrame:
+    """뷰단 필터 적용(권한·스코핑 불변 — 표시 큐만 좁힌다). 조건 불일치 행을 제거한다."""
+    if scoped is None or scoped.empty:
+        return scoped
+    stage = q.get("stage") or "전체"
+    assignee = q.get("assignee")
+    date_from = q.get("date_from") or ""
+    date_to = q.get("date_to") or ""
+    keep = []
+    for idx, r in scoped.iterrows():
+        imp = improvements.get(str(r["id"]))
+        if stage != "전체" and _impr_stage(imp) != stage:
+            continue
+        if assignee not in (None, workspace.ALL):
+            if str((imp or {}).get("assignee_emp_no") or "").strip() != str(assignee).strip():
+                continue
+        inc = str(r.get("incident_date") or "")
+        if date_from and inc < date_from:
+            continue
+        if date_to and inc > date_to:
+            continue
+        keep.append(idx)
+    if not keep:
+        return scoped.iloc[0:0]
+    return scoped.loc[keep].reset_index(drop=True)
 
 
 def _user_label(emp_no) -> str:
