@@ -13,11 +13,9 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import db, nav, ui
+from modules import db, ui
 from views import workspace
 from views.common import erp
-from views.common import scaffold
-from views.master import icon_toolbar_specs
 
 # 버킷 표시 순서와 대표 색상(카테고리 accent — 색만이 아닌 라벨 병기로 이중 부호화).
 # classify_work_group 은 주간/야간/OFF/휴가/None 을 반환한다. OFF→휴무(라벨만),
@@ -78,29 +76,14 @@ def render(user: dict) -> None:
         _render_user(user)
         return
 
-    band = erp.screen_frame(
+    # §1-F 변형: 헤더 중립 프레임만(아이콘 밴드 제거 — 표준 아이콘 8종은 상단 52px 헤더가
+    # 소유 §A-5). 새로고침 등은 상단 헤더 아이콘/rerun 이 담당한다.
+    erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="대시보드",
         desc="오늘 근무 현황과 근무표 등록 현황을 확인합니다.",
         breadcrumb="홈 › 대시보드",
-        badges=scaffold.mode_badge(),
-        toolbar="icons",
     )
-    # 상단 파랑 밴드 아이콘 툴바(사용자 관리·근무표 편성과 동일 표준). 조회 전용 화면이라
-    # 조회/새로고침(search 아이콘)만 활성이고 추가·삭제·저장은 N/A(shaded). 새로고침은 별도
-    # wiring 없이 버튼 클릭이 유발하는 rerun 만으로 아래 근무 조회가 재실행된다(구 pill 과
-    # 동일 — on_click 없이 클릭=rerun). 인페이지 pill(top_action_bar)은 제거했다.
-    if band is not None:
-        band.render_icons(icon_toolbar_specs(
-            "dashboard", info_content=nav.page_desc("dashboard"),
-            add={"key": "dashboard__add_na", "disabled": True,
-                 "help": "이 화면에서는 사용하지 않습니다"},
-            refresh={"key": "dashboard_refresh", "help": "새로고침", "on_click": None},
-            delete={"key": "dashboard__del_na", "disabled": True,
-                    "help": "이 화면에서는 사용하지 않습니다"},
-            save={"key": "dashboard__save_na", "disabled": True,
-                  "help": "이 화면에서는 사용하지 않습니다"},
-        ))
     the_date = _date_nav_bar()
     _inject_board_style()
 
@@ -137,13 +120,8 @@ def render(user: dict) -> None:
         st.error("근무 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    erp.status_region([
-        ("당일 근무", f"{totals['주간'] + totals['야간']}명"),
-        ("주간", f"{totals['주간']}명"),
-        ("야간", f"{totals['야간']}명"),
-        ("휴무", f"{totals['휴무']}명"),
-    ])
-    st.write("")
+    # §1-F 지표 스트립(제목 바로 아래) — 당일 근무·주간·야간·휴무, 좌측 2px 보더 + 26px 모노.
+    st.markdown(_kpi_strip_html(totals), unsafe_allow_html=True)
 
     if not board:
         ui.empty_state(
@@ -155,13 +133,12 @@ def render(user: dict) -> None:
     # 항상 주간·야간·휴무 컬럼을 두고, 값이 있을 때만 휴가·기타 컬럼을 덧붙인다.
     columns = [b for b in _BUCKET_ORDER if b in {"주간", "야간", "휴무"} or b in present_buckets]
 
+    # 당일 근무 현황 — §1-E 헤어라인 그룹 섹션(카드 제거). 그룹별 버킷 구조는 기존 로직 유지.
     for group in board:
-        with ui.card():
-            ui.panel_head(group["name"], f"{group['total']}명")
-            st.markdown(
-                _group_grid_html(group, columns, display_of, color_of),
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            _group_html(group, columns, display_of, color_of),
+            unsafe_allow_html=True,
+        )
 
 
 # ---------- 일자 네비게이션 ----------
@@ -348,8 +325,64 @@ def _build_board(day_rows, users, wt, snap=None, manager_dept=None):
     return board, present_buckets, totals
 
 
+def _text_on(hex_color: str) -> str:
+    """근무형태 DB hex 배경 위 대비 텍스트색(흰/검) — WCAG 상대명도(약칭 배지 가독)."""
+    m = str(hex_color or "").strip().lstrip("#")
+    if len(m) != 6:
+        return "#ffffff"
+    try:
+        r, g, b = (int(m[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return "#ffffff"
+
+    def _lin(c: float) -> float:
+        c /= 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    lum = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+    return "#ffffff" if (1.05 / (lum + 0.05)) >= ((lum + 0.05) / 0.05) else "#111111"
+
+
+def _kpi_strip_html(totals: dict) -> str:
+    """§1-F 지표 스트립 — 좌측 2px 보더 + 26px 모노 값. 강조(당일 근무)만 오렌지 보더."""
+    on_duty = totals.get("주간", 0) + totals.get("야간", 0)
+    metrics = [
+        ("당일 근무", on_duty, on_duty > 0),
+        ("주간", totals.get("주간", 0), False),
+        ("야간", totals.get("야간", 0), False),
+        ("휴무", totals.get("휴무", 0), False),
+    ]
+    cells = []
+    for label, value, accent in metrics:
+        border = "#c2410c" if accent else "#e0dbd2"
+        vcolor = "#b4451a" if accent else "#1c1a17"
+        cells.append(
+            f"<div class='dash-kpi' style='border-left:2px solid {border};'>"
+            f"<span class='dash-klabel'>{escape(label)}</span>"
+            f"<div class='dash-kval-row'>"
+            f"<span class='dash-kval' style='color:{vcolor};'>{value}</span>"
+            f"<span class='dash-kunit'>명</span></div></div>"
+        )
+    return f"<div class='dash-kpis'>{''.join(cells)}</div>"
+
+
+def _group_html(group, columns, display_of, color_of) -> str:
+    """한 그룹 섹션(§1-E 헤어라인) — 그룹명+인원 헤더 + 버킷 그리드(카드 없음)."""
+    head = (
+        "<div class='dash-group-head'>"
+        f"<span class='dash-group-name'>{escape(group['name'])}</span>"
+        f"<span class='dash-group-count'>{group['total']}</span>명"
+        "</div>"
+    )
+    return (
+        "<div class='dash-group'>" + head
+        + _group_grid_html(group, columns, display_of, color_of)
+        + "</div>"
+    )
+
+
 def _group_grid_html(group, columns, display_of, color_of) -> str:
-    """한 그룹 카드 내부의 버킷 컬럼 그리드(auto-fit → 좁은 폭에서 자연 줄바꿈)."""
+    """한 그룹 내부의 버킷 컬럼 그리드(auto-fit → 좁은 폭에서 자연 줄바꿈). 카드 아님(헤어라인)."""
     cols_html = []
     for bucket in columns:
         people = group["buckets"].get(bucket, [])
@@ -381,34 +414,59 @@ def _person_badge(code: str, display_of: dict, color_of: dict) -> str:
         return ""
     label = display_of.get(code, code)
     color = color_of.get(code) or color_of.get(label) or "#9AA0A6"
-    return f"<span class='dash-badge' style='background:{color}'>{escape(label)}</span>"
+    return (f"<span class='dash-badge' style='background:{color};color:{_text_on(color)}'>"
+            f"{escape(label)}</span>")
 
 
 def _inject_board_style() -> None:
+    # §1-F 지표 스트립 + §1-E 헤어라인 보드(카드 없음). §2 팔레트, 작은 의미 텍스트 ≥#6b665d.
+    # 모노(값·건수)는 전역 stMarkdownContainer 폰트 규칙(특이도 0,2,0)을 0,3,0 규칙으로 덮어
+    # 강제한다(Streamlit 이 인라인 font-family 를 제거하므로 CSS 로).
     st.markdown(
         """
 <style>
-.dash-date-label { font-size:13px; color:#5F5C55; padding-top:.5rem; }
+.dash-date-label { font-size:13px; color:#6b665d; padding-top:.5rem; }
 .dash-date-label b { font-weight:700; }
-.dash-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
-  gap:.55rem; margin-top:.35rem; }
-.dash-col { border:1px solid #E4E0D8; border-radius:8px; overflow:hidden; background:#FFFFFF; }
-.dash-col-head { display:flex; align-items:center; gap:.4rem; padding:.4rem .55rem;
-  background:#F7F5F0; border-bottom:1px solid #E4E0D8; }
-.dash-dot { width:9px; height:9px; border-radius:2px; flex:0 0 auto; }
-.dash-bucket { font-size:12.5px; font-weight:600; color:#24262B; }
-.dash-count { margin-left:auto; font-size:12.5px; font-weight:600; color:#24262B;
-  font-variant-numeric:tabular-nums; }
-.dash-list { padding:.2rem .35rem .35rem; display:flex; flex-direction:column; gap:.1rem; }
-.dash-person { display:flex; align-items:center; gap:.4rem; padding:.24rem .2rem;
-  border-bottom:1px solid #F1EEE7; }
+/* §1-F 지표 스트립 — 좌측 2px 보더 + 26px 모노 값(카드 박스 없음) */
+.dash-kpis { display:flex; flex-wrap:wrap; gap:12px; margin:.5rem 0 1.1rem; }
+.dash-kpi { flex:1 1 120px; min-width:0; display:flex; flex-direction:column; gap:4px; padding:2px 16px; }
+.dash-klabel { font-size:12px; color:#6b665d; }
+.dash-kval-row { display:flex; align-items:baseline; gap:4px; }
+.dash-kval { font-size:26px; font-weight:600; letter-spacing:-0.03em; }
+.dash-kunit { font-size:11.5px; color:#6b665d; }
+/* §1-E 그룹 섹션 — 헤어라인 구획, 카드/보더/그림자 없음 */
+.dash-group { padding:6px 0 14px; border-bottom:1px solid #e0dbd2; margin-bottom:4px; }
+.dash-group:last-child { border-bottom:0; }
+.dash-group-head { display:flex; align-items:baseline; gap:8px; margin:2px 0 8px;
+  font-size:12px; color:#6b665d; }
+.dash-group-name { font-size:14px; font-weight:600; color:#1c1a17; }
+.dash-group-count { font-weight:600; color:#1c1a17; }
+.dash-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:6px 22px; margin-top:.2rem; }
+.dash-col { min-width:0; }
+.dash-col-head { display:flex; align-items:center; gap:.4rem; padding:0 0 5px;
+  border-bottom:1px solid #cfc8bd; }
+.dash-dot { width:8px; height:8px; border-radius:2px; flex:0 0 auto; }
+.dash-bucket { font-size:12.5px; font-weight:600; color:#1c1a17; }
+.dash-count { margin-left:auto; font-size:12.5px; font-weight:600; color:#1c1a17; }
+.dash-list { padding:2px 0 0; display:flex; flex-direction:column; }
+.dash-person { display:flex; align-items:center; gap:.45rem; padding:.28rem 0;
+  border-bottom:1px solid #e6e2da; }
 .dash-person:last-child { border-bottom:none; }
 .dash-badge { display:inline-flex; align-items:center; justify-content:center; min-width:26px;
-  padding:.05rem .32rem; border-radius:5px; color:#FFFFFF; font-size:11px; font-weight:600;
-  flex:0 0 auto; }
-.dash-name { font-size:13px; color:#24262B; overflow-wrap:anywhere; }
-.dash-team { margin-left:auto; font-size:11.5px; color:#5F5C55; flex:0 0 auto; }
-.dash-empty { color:#908C83; font-size:12.5px; padding:.3rem .2rem; }
+  padding:.05rem .34rem; border-radius:6px; font-size:11.5px; font-weight:600; flex:0 0 auto; }
+.dash-name { font-size:14.5px; color:#1c1a17; overflow-wrap:anywhere; }
+.dash-team { margin-left:auto; font-size:11.5px; color:#6b665d; flex:0 0 auto; }
+.dash-empty { color:#6b665d; font-size:12.5px; padding:.3rem 0; }
+/* 모노 강제(값·건수) — 인라인 font-family 는 Streamlit 이 제거하므로 0,3,0 규칙으로 */
+.stApp [data-testid="stMarkdownContainer"] .dash-kval,
+.stApp [data-testid="stMarkdownContainer"] .dash-count,
+.stApp [data-testid="stMarkdownContainer"] .dash-group-count {
+  font-family:'IBM Plex Mono','Consolas','Menlo',monospace; font-variant-numeric:tabular-nums;
+}
+@media (max-width:768px) {
+  .dash-grid { grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:6px 14px; }
+}
 </style>
 """,
         unsafe_allow_html=True,
