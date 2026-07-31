@@ -29,13 +29,8 @@ from views.master.lifecycle import Readiness, ReadinessState
 
 _PAGE_ID = "near_miss_view"
 
-# §1-E 필터 줄 아래 헤어라인(§2 섹션 헤어라인). 작은 의미 텍스트는 §A-2(≥#6b665d)를 따르며
-# 상세 메타·오버라인은 공용 erp 키트(ink-2/ink-3=#6b665d)가 이미 준수한다.
-_VIEW_CSS = """
-<style>
-.nmv-hr { border-top: 1px solid #e0dbd2; margin: 2px 0 10px; }
-</style>
-"""
+# 필터 줄 하단 헤어라인·라벨 정렬·지표 타일은 공용 erp 키트(_KIT_CSS)가 소유한다
+# (condition_panel §1-E·metric_strip). 작은 의미 텍스트는 §A-2(≥#6b665d)를 따른다.
 # 선택형 목록 자연키(항상 hidden) + 선택 상태 세션키. 선택은 자연키(id)로 오간다
 # (정렬·필터 후 위치 비의존). 필터/새로고침 시 _SEL_KEY 를 해제한다.
 _KEY_FIELD = "_report_id"
@@ -111,14 +106,15 @@ def render(user: dict) -> None:
         desc="아차사고 보고서를 조건별로 조회합니다.",
         breadcrumb="아차사고 › 조회",
     )
-    st.markdown(_VIEW_CSS, unsafe_allow_html=True)
-
     # 접근 범위(제품 결정 — Coordinator): 아차사고 조회는 전 사용자에게 열려 있고
     # 회사 전체 범위이며, 신고자 이름·상세 내용을 숨기지 않는다. 과거 평가자 전용 게이트
     # (auth.can_evaluate_near_miss)와 MANAGER 부서 스코프(_scope_for)는 이 경로에서
     # 제거했다. _scope_for 정의 자체는 회귀 계약(scripts/test_near_miss_view.py)이
     # 고정하고 있어 남겨두되(과거 스코프 동작 보존), render 는 더 이상 호출하지 않는다.
     _readiness().banner()
+    # §0-4: 지표는 제목 바로 아래 첫 블록. 값은 조회 결과(df)에서 파생하므로 슬롯을 먼저
+    # 확보하고(필터 위) 결과 준비 후 채운다(deferred). 조회 전/빈 결과면 비운다.
+    metric_slot = st.container()
 
     try:
         dept_names = _all_dept_names()
@@ -129,13 +125,9 @@ def render(user: dict) -> None:
         st.error("조직 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # 영역 순서(§1-E): 필터 줄(조건 패널) + 우측 [조회] → 헤어라인 → 건수 행 → 표 →
-    # 상세 → 상태. [조회] 클릭이 조회 트리거(구 밴드 새로고침 대체).
-    q = _collect_conditions("all", None, dept_names)
-    _lft, _rgt = st.columns([8.4, 1.4], vertical_alignment="center")
-    with _rgt:
-        clicked = st.button("조회", key=f"{_PAGE_ID}_go", type="primary", width="stretch")
-    st.markdown("<div class='nmv-hr'></div>", unsafe_allow_html=True)
+    # 영역 순서(§1-E): 필터 줄(조건 패널·우측 인라인 [조회]) → 헤어라인(condition_panel 소유)
+    # → 건수 행 → 표 → 상세. [조회] 클릭이 조회 트리거.
+    q, clicked = _collect_conditions("all", None, dept_names)
     if clicked:
         # 필터/조회로 결과 집합이 바뀌면 이전 선택을 해제한다(stale 상세 방지).
         st.session_state.pop(_SEL_KEY, None)
@@ -172,6 +164,10 @@ def render(user: dict) -> None:
         st.error("사용자·부서 정보를 불러오지 못해 목록을 표시할 수 없습니다. 잠시 후 다시 확인하세요.")
         return
 
+    # §1-F 지표 타일(제목 바로 아래 슬롯 채움) — 조회 건수·상태 분해(기존 데이터 파생).
+    with metric_slot:
+        erp.metric_strip(_view_metrics(df))
+
     # primary — 선택형 목록(select_grid). 구 st.selectbox 상세 선택을 없애고 행 클릭이 상세
     # 선택을 대체한다(Codex: 목록 클릭=상세). 네이티브 single-selection: 색 틴트+체크박스로
     # 이중부호화(§4), 선택 자연키(_report_id)를 반환한다. 등급/상태 색은 보조 신호(라벨 유지).
@@ -196,14 +192,27 @@ def render(user: dict) -> None:
 
     # details — 행 클릭으로 선택된 보고서만 아래 전체폭 상세로 렌더한다(§8-2: '선택하세요'
     # 빈 안내 패널을 두지 않는다 — 선택 전에는 상세 영역 자체를 그리지 않는다).
+    # 하단 '조회 건수' 박스는 제거하고 제목 아래 지표 타일(metric_slot)로 이관했다(§0-4).
     if st.session_state.get(_SEL_KEY):
         st.write("")
         _render_result_detail(df)
 
-    # status — 조회 결과 규모(건수만 슬림). 평가대기/평가완료/종결·반려 집계는 분석(stats)
-    # 소관으로 이관했다(KPI 중복 제거 — 집계는 stats 소유).
-    st.write("")
-    erp.status_region([("조회 건수", f"{len(df)}건")])
+
+def _view_metrics(df: pd.DataFrame) -> list[tuple]:
+    """조회 결과 지표 타일 항목(기존 데이터 파생) — 조회 건수 + 상태 분해(미평가·평가완료·
+    종결·반려). 새 지표를 만들지 않고 status 컬럼 집계만 쓴다."""
+    n = len(df)
+    codes = df["status"].astype(str) if "status" in df.columns else pd.Series(dtype=str)
+    counts = codes.value_counts().to_dict()
+    pending = counts.get("SUBMITTED", 0) + counts.get("IN_REVIEW", 0)
+    evaluated = counts.get("EVALUATED", 0)
+    closed_rej = counts.get("CLOSED", 0) + counts.get("REJECTED", 0)
+    return [
+        ("조회 건수", n, "건", "TOTAL", n > 0),
+        ("미평가", int(pending), "건", "PENDING", False),
+        ("평가완료", int(evaluated), "건", "DONE", False),
+        ("종결·반려", int(closed_rej), "건", "CLOSED", False),
+    ]
 
 
 def _select_frame(df: pd.DataFrame, display: pd.DataFrame) -> pd.DataFrame:
@@ -329,7 +338,8 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
     필드 key 는 기존 위젯 key suffix 와 동일하게 유지해 세션 상태를 보존한다
     (period_on/from/to/dept/grade/status/cause). 기간 미지정 시 날짜 필드는 비활성.
     """
-    period_on = bool(st.session_state.get(f"{_PAGE_ID}_period_on", False))
+    # 기간 지정 = 체크박스 대신 select(전체/기간 지정) — 정돈된 필터 어휘(피드백 #3).
+    period_on = st.session_state.get(f"{_PAGE_ID}_period_mode") == "기간 지정"
 
     if scope == "scoped":
         dept_field = erp.Field(
@@ -347,7 +357,8 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
     # 기간 지정 체크 시에만 날짜 2필드를 렌더한다(§0.6 강제: 비활성 필드가 자리를 상시 점유
     # 하지 않음). 4열 배치로 조건은 ≤2행(미지정 5필드=2행 / 지정 7필드=2행)에 든다.
     fields: list[erp.Field] = [
-        erp.Field(key="period_on", label="기간 지정", kind="checkbox", value=False),
+        erp.Field(key="period_mode", label="기간", kind="select", width=150,
+                  options=["전체", "기간 지정"]),
     ]
     if period_on:
         fields += [
@@ -368,10 +379,12 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
                   options=[workspace.ALL] + list(db.NEAR_MISS_CAUSE_CODES),
                   format_func=lambda v: _CAUSE_LABEL.get(v, v) if v != workspace.ALL else v),
     ]
-    v = erp.condition_panel(_PAGE_ID, fields, cols=4)
+    # [조회]를 필터 줄 우측에 인라인(오렌지)으로 — 별도 박스 분리 제거(피드백 #3).
+    v, clicked = erp.condition_panel(_PAGE_ID, fields, cols=4,
+                                     submit=("조회", f"{_PAGE_ID}_go"))
 
-    on = bool(v["period_on"])
-    return {
+    on = v["period_mode"] == "기간 지정"
+    q = {
         "dept": v["dept"],
         "grade": v["grade"],
         "status": v["status"],
@@ -380,6 +393,7 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
         "date_from": v["from"].isoformat() if on and "from" in v else "",
         "date_to": v["to"].isoformat() if on and "to" in v else "",
     }
+    return q, clicked
 
 
 def _has_filters(q: dict) -> bool:

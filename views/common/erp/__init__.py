@@ -33,6 +33,7 @@ from views.common.erp.kit import (
     select_grid,
     status_badge_html,
     status_region,
+    metric_strip,
     top_action_bar,
 )
 
@@ -47,6 +48,7 @@ __all__ = [
     "grid_shell",
     "grid_skeleton_html",
     "status_region",
+    "metric_strip",
     "master_detail_frame",
     "detail_empty",
     "detail_actions",

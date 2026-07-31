@@ -45,9 +45,10 @@ _NO_ROWS = (
 # 조건 필터 스트립. 카드 radius/보더/padding 은 단일 토큰(_CARD_RADIUS = 8px)으로 통일한다.
 _KIT_CSS = f"""
 <style>
+/* §1-E 필터 라벨 — 상단 정렬 12.5/500(dc isUsers). 입력은 아래(_render_widget). */
 .erp-lbl {{
-  text-align: right; color: {TOKENS['ink-2']}; font-size: 12.5px; font-weight: 600;
-  line-height: 1.2; padding-right: 2px; white-space: nowrap;
+  text-align: left; color: {TOKENS['ink-2']}; font-size: 12.5px; font-weight: 500;
+  line-height: 1.2; margin: 0 0 3px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }}
 /* 요약/KPI = 한 줄 스트립(§0.6 강제): 독립 카드 나열이 아니라 hairline 구분 단일 박스.
@@ -118,14 +119,36 @@ _KIT_CSS = f"""
 }}
 .erp-empty-t {{ font-size: 13px; font-weight: 600; color: {TOKENS['ink-2']}; }}
 .erp-empty-b {{ font-size: 12px; color: {TOKENS['ink-2']}; line-height: 1.4; }}
-/* 조건 필터 스트립(§0.6 강제): 무거운 카드 박스가 아니라 얇은 스트립 — st.container(border,
-   key=erpcond_*) 래퍼 padding/여백을 압축한다. 내용 비례 높이(1행 ≈47px). */
-[class*="st-key-erpcond_"] {{
-  border-color: {TOKENS['line']} !important; border-radius: {_CARD_RADIUS} !important;
-  background: {TOKENS['surface-2']}; padding: 5px 10px !important;
+/* §1-F/§1-A 지표 타일 스트립(분석 화면 표준·사용자 채택): 좌측 2px 보더 + 26px 모노 값
+   + 라벨 + 모노 오버라인(카드 박스 없음). 요약 수치가 있는 화면 공통 어휘. */
+.erp-metrics {{ display: flex; flex-wrap: wrap; gap: 12px; margin: .3rem 0 1rem; }}
+.erp-metric {{ flex: 1 1 130px; min-width: 0; display: flex; flex-direction: column;
+  gap: 4px; padding: 2px 18px; }}
+.erp-metric-label {{ font-size: 12px; color: #6b665d; }}
+.erp-metric-vrow {{ display: flex; align-items: baseline; gap: 4px; }}
+.erp-metric-val {{ font-size: 26px; font-weight: 600; letter-spacing: -0.03em; color: {TOKENS['ink']}; }}
+.erp-metric-unit {{ font-size: 11.5px; color: #6b665d; }}
+.erp-metric-note {{ font-size: 11px; letter-spacing: .08em; color: #6b665d; }}
+/* 모노 강제(값·오버라인) — Streamlit 이 인라인 font-family 를 제거하므로 0,3,0 규칙으로. */
+.stApp [data-testid="stMarkdownContainer"] .erp-metric-val,
+.stApp [data-testid="stMarkdownContainer"] .erp-metric-note {{
+  font-family: 'IBM Plex Mono','Consolas','Menlo',monospace; font-variant-numeric: tabular-nums;
 }}
-[class*="st-key-erpcond_"] [data-testid="stVerticalBlock"] {{ gap: 4px !important; }}
-[class*="st-key-erpcond_"] [data-testid="stHorizontalBlock"] {{ gap: .5rem !important; }}
+/* §1-E 필터 줄(§0-5 카드 금지): 카드 박스 없이 헤어라인+여백만. 하단 헤어라인으로 표와 구획. */
+[class*="st-key-erpcond_"] {{
+  border: 0 !important; background: transparent !important; padding: 0 !important;
+  border-bottom: 1px solid #e0dbd2 !important; padding-bottom: 10px !important;
+  margin-bottom: 10px !important;
+}}
+[class*="st-key-erpcond_submit_"] {{
+  border: 0 !important; border-bottom: 0 !important; padding: 0 !important; margin: 6px 0 0 !important;
+}}
+[class*="st-key-erpcond_"] [data-testid="stVerticalBlock"] {{ gap: 8px !important; }}
+[class*="st-key-erpcond_"] [data-testid="stHorizontalBlock"] {{ gap: .6rem !important; }}
+/* §1-E 입력 14.5 (dc): 필터 입력 폰트 통일 */
+[class*="st-key-erpcond_"] input, [class*="st-key-erpcond_"] [data-baseweb="select"] div {{
+  font-size: 14.5px;
+}}
 /* help(툴팁) 래퍼가 씌워진 버튼도 앱 기본 버튼 크기를 따르게 — modules/ui.py 의 직계자식
    선택자(.stButton > button)가 툴팁 DOM 체인을 못 잡아 생기는 높이 불일치 보정(detail_actions
    처럼 help 유무가 섞인 버튼을 한 행에 둘 때 가시화). 크기만 맞추는 저위험 규칙. */
@@ -239,27 +262,36 @@ def _render_widget(page_id: str, f: Field):
                         help=f.help, placeholder=f.placeholder)
 
 
-def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3) -> dict:
-    """col-N 우측 인라인 라벨 조건 패널 — 얇은 필터 스트립(§0.6 강제). 반환 ``{field.key: value}``.
+def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3,
+                    submit: tuple[str, str] | None = None):
+    """§1-E 필터 줄(dc isUsers 참조) — 라벨 상단 정렬(12.5/500) + 입력 아래, cols 개/행.
 
-    각 행은 ``[라벨,widget]`` 쌍을 cols 개 나열한 **단일** ``st.columns``(중첩 없음).
-    라벨은 우측정렬 markdown, widget 은 실제 label + ``label_visibility='collapsed'``.
-    무거운 bordered 카드가 아니라 padding·행간을 압축한 스트립이며(키 스코프 CSS
-    ``st-key-erpcond_*``), 내용에 비례한 최소 높이(1366 기준 1행 ≈47px)를 만든다. 컨트롤
-    폭은 ``Field.width`` 로 내용 맞춤한다(짧은 코드값 select 는 과대 폭 금지)."""
+    카드 박스가 아니라 헤어라인+여백만(§0-5 카드 금지). 각 필드는 ``[라벨(위)/widget(아래)]``
+    한 열이며, 한 행에 cols 개 나열한다. 반환 ``{field.key: value}``.
+
+    ``submit=(label, key)`` 를 주면 필터 줄 우측에 primary 버튼([조회] 등)을 같은 블록 안에
+    인라인으로 렌더하고 ``(values, clicked)`` 튜플을 반환한다(미지정이면 dict 반환 — 기존
+    호출부 무변경). 컨트롤 폭은 ``Field.width`` 로 내용 맞춤한다."""
     values: dict = {}
-    ratios = [0.42, 1.0] * cols
-    with st.container(border=True, key=f"erpcond_{page_id}"):
+    clicked = False
+    with st.container(key=f"erpcond_{page_id}"):
         for start in range(0, len(fields), cols):
             row = fields[start:start + cols]
-            slots = st.columns(ratios, vertical_alignment="center")
+            slots = st.columns([1] * cols, vertical_alignment="bottom")
             for j, f in enumerate(row):
-                with slots[j * 2]:
+                with slots[j]:
                     st.markdown(f"<div class='erp-lbl'>{f.label}</div>",
                                 unsafe_allow_html=True)
-                with slots[j * 2 + 1]:
                     values[f.key] = _render_widget(page_id, f)
-    return values
+        if submit is not None:
+            slabel, skey = submit
+            with st.container(key=f"erpcond_submit_{page_id}"):
+                bcols = st.columns([1, 0.26], vertical_alignment="center")
+                with bcols[1]:
+                    clicked = st.button(slabel, key=skey, type="primary", width="stretch")
+    if submit is None:
+        return values
+    return values, clicked
 
 
 # ============================================================ grid skeleton (표현 요소, §0 아키타입 아님)
@@ -733,6 +765,34 @@ def status_region(summary: list[tuple[str, str]]) -> None:
         for label, value in summary
     )
     st.markdown(f"<div class='erp-strip'>{items}</div>", unsafe_allow_html=True)
+
+
+def metric_strip(items: list[tuple]) -> None:
+    """§1-F/§1-A 지표 타일 스트립(분석 화면 표준) — 좌측 2px 보더 + 26px 모노 값 + 라벨 +
+    모노 오버라인. 제목 바로 아래 첫 블록(§0-4)에 둔다. 요약 수치가 있는 화면 공통 어휘.
+
+    ``items``: ``[(label, value, unit, note, accent)]`` — accent True 면 오렌지 보더+값.
+    새 지표를 발명하지 않고 기존 데이터 파생 수치만 넘긴다(호출부 책임). CSS 는 _KIT_CSS
+    (screen_frame 주입)가 소유하며 값·오버라인 모노는 0,3,0 규칙으로 강제한다."""
+    if not items:
+        return
+    cells = []
+    for label, value, unit, note, accent in items:
+        border = "#c2410c" if accent else "#e0dbd2"
+        vcolor = "#b4451a" if accent else TOKENS["ink"]
+        unit_html = (f"<span class='erp-metric-unit'>{escape(str(unit))}</span>"
+                     if unit else "")
+        note_html = (f"<span class='erp-metric-note'>{escape(str(note))}</span>"
+                     if note else "")
+        cells.append(
+            f"<div class='erp-metric' style='border-left:2px solid {border};'>"
+            f"<span class='erp-metric-label'>{escape(str(label))}</span>"
+            f"<div class='erp-metric-vrow'>"
+            f"<span class='erp-metric-val' style='color:{vcolor};'>{escape(str(value))}</span>"
+            f"{unit_html}</div>{note_html}</div>"
+        )
+    st.markdown(f"<div class='erp-metrics'>{''.join(cells)}</div>",
+                unsafe_allow_html=True)
 
 
 # ============================================================ master-detail (MASTER_DETAIL)

@@ -131,7 +131,25 @@ def render(user: dict) -> None:
                        head="내 아차사고")
         return
 
+    # §0-4·분석 화면 표준 타일: 제목 바로 아래 내 보고 합계(기존 데이터 파생).
+    erp.metric_strip(_my_metrics(reports))
     _render_list(user, reports)
+
+
+def _my_metrics(reports: pd.DataFrame) -> list[tuple]:
+    """내 아차사고 합계 타일(기존 status 파생) — 총·진행중·평가완료·종결·반려."""
+    n = len(reports)
+    codes = reports["status"].astype(str) if "status" in reports.columns else pd.Series(dtype=str)
+    c = codes.value_counts().to_dict()
+    in_progress = c.get("SUBMITTED", 0) + c.get("IN_REVIEW", 0)
+    evaluated = c.get("EVALUATED", 0)
+    closed_rej = c.get("CLOSED", 0) + c.get("REJECTED", 0)
+    return [
+        ("총 보고", n, "건", "TOTAL", n > 0),
+        ("진행중", int(in_progress), "건", "IN PROGRESS", False),
+        ("평가완료", int(evaluated), "건", "DONE", False),
+        ("종결·반려", int(closed_rej), "건", "CLOSED", False),
+    ]
 
 
 # ---------- readiness (migration 006 3-state) ----------

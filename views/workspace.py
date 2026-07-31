@@ -904,13 +904,8 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
                   options=[ALL] + list(team_names), format_func=lambda c: team_names.get(c, c)),
         erp.Field(key="kw", label="사번 또는 성명", kind="text"),
     ]
-    v = erp.condition_panel(page_id, fields, cols=3)
-
-    # 조건 줄 우측 [조회] 버튼(§1-E 필터 스타일) → 헤어라인. 클릭이 조회/새로고침 트리거.
-    _lft, _rgt = st.columns([8.4, 1.4], vertical_alignment="center")
-    with _rgt:
-        clicked = st.button("조회", key=f"{page_id}_go", type="primary", width="stretch")
-    st.markdown("<div class='sv-hr'></div>", unsafe_allow_html=True)
+    # 조건 줄 우측 [조회] 인라인(§1-E, condition_panel submit). 헤어라인은 condition_panel 소유.
+    v, clicked = erp.condition_panel(page_id, fields, cols=3, submit=("조회", f"{page_id}_go"))
     if clicked:
         st.session_state[_rg_key] = st.session_state.get(_rg_key, 0) + 1
     refresh_gen = st.session_state.get(_rg_key, 0)
