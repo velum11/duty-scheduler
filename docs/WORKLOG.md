@@ -2,6 +2,14 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-07-31 · 아차사고 사진 첨부 + A4 PDF 출력 기능 신설 (병렬 2워커 + Codex 통합감사)
+
+- **사진 첨부**(사용자 요구: 폰 촬영/선택·PC 업로드·3장·압축): data-contract가 저장 계약 구현(`60e42eb` — modules/photo_storage.py 검증(확장자+매직바이트·≤10MB)/압축(최대변 1600·JPEG ≤500KB)/경로 near-miss/{report_id}/{uuid} 주입불가 + db 파사드 upload/get_url(signed URL)/delete 소유자+SUBMITTED 게이트, 테스트 58), **사용자 승인으로 live 버킷 `near-miss-photos`(비공개) 생성 + guarded 스모크 왕복 성공**(보호 플래그 3종, 기존 데이터 미접촉). ui-feature가 UI 연결(`fa69497` — 등록 폼 스테이징-후-첨부(결정게이트 승인)·즉시 검증·썸네일/삭제·3장 차단, 조회/내아차사고 상세 서명URL 썸네일·소유자 편집, 1366/390 왕복 실측).
+- **A4 PDF 출력**(`c94ef14`): fpdf2+동봉 OFL 한글 TTF로 조회 상세 보고서를 A4 세로 PDF 생성·다운로드(헤더 인쇄 아이콘 활성=상세 선택 시, 파일명=보고번호.pdf), 신규 테스트 12. 사진 이미지 임베드는 후속(현재 파일명 나열).
+- 편성표 피드백 반영(`4eed752`·`d510008` — 헤더 아이콘 실작동·본문 단추 제거·클릭순환 제거(더블클릭 편집 복원)·부서/조 전체 기본·필터 라벨 겹침 수정) + 지표 타일 표준화·조회 필터 §1-E(`228cedc`·`f367093`). 편성표 입력 검증은 사용자 결정으로 현행 유지(저장 시점 검증).
+- **Codex FINAL_INTEGRATED → NO-GO(P1 5) → 전건 수정 → NARROW_RECHECK 4 FIXED+1 PARTIAL → 잔여 표면화 완료**: 업로드 상한 3중 방어(config 10MB·위젯·size 사전검사+30MB 누적캡, `9e108ac`)·decompression bomb(40MP·디코더 제한·Warning 승격)·photo_paths CAS(updated_at 스냅샷·0행 stale·본문 payload 제외)·삭제 실패 storage_deleted 표면화(데이터 `df5f454`+화면 `cadabf3`)·public 버킷 fail-closed. P2 동반: 멱등 압축·readiness 리셋·{32-hex}.jpg 강제·Pillow/fpdf2 버전 핀·OFL 전문(`5c7d0f1`). 잔여 P2/P3(BACKLOG행): migration 배열 제약·signed URL TTL 단축 검토·라이브 어댑터 테스트·PDF 자원 상한.
+- **사용자 추가요청 3건(`cadabf3`)**: 조회 필터 간소화+기간 기본 전체 / 분석 년월 선택+누적·당월 KPI 2그룹(B-1: UI단 계산) / 내 아차사고 상태·기간 + 개선조치 조치단계·담당자·기간 필터(B-2: 뷰단). 잔여: 기능 종단검증+화면 부족점 탐색 QA 단계. 워커 push 이탈 1회(승인 범위 내 결과·시정 통지 완료).
+
 ## 2026-07-30 · ✅ 변곡점: Claude Design 신판 명세 전면 구현 완료 — 9화면 구조 교체 + 셸 §4 (redesign/claude-design-p1)
 
 - Claude Design이 1차 리스킨(색만 변경)을 반려하고 신판 명세(zip: 루트 `DESIGN.md` 전면 교체·`HANDOFF_PROMPT.md`·`아차사고 관리.dc.html` 10화면)를 제공 → **화면 우선·셸 마지막** 순서로 9화면 전부 §1 유형별 구조 교체 완료: 평가·개선조치(§1-A 큐 칩+전체폭 상세), 내 아차사고(§1-B 아코디언), 근무표 편성(§1-C 클릭=근무 순환·숫자키·sticky 4열·붙여넣기 UI 제거/Ctrl+V 유지), 등록(§1-D 3섹션+체크리스트), 기준정보 3종(§1-E 표형·조직은 세로 헤어라인 3열 드릴), 분석(§1-F 지표 6+분포 4블록) + 셸 §4(폴더 아이콘 제거·6px 마크·5px 점·66px 접힘 레일·실기능 아이콘만). 커밋 `85e846a`~`87e4b52` 14개, ORCA orchestration 단일 ui-feature Owner + decision_gate 2회(코디 판정)·Codex 문의 1회.
