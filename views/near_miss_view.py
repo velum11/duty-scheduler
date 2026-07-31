@@ -15,14 +15,16 @@ from __future__ import annotations
 # DESIGN.md §0 화면 유형 규약 — 조회형.
 SCREEN_ARCHETYPE = "READ_VIEW"
 
+import base64
 from datetime import date, timedelta
 from html import escape
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from modules import db, ui
-from views import workspace
+from views import near_miss_pdf, workspace
 from views.common import erp
 from views.master import TOKENS, banner, sheet_head
 from views.master.lifecycle import Readiness, ReadinessState
@@ -112,6 +114,9 @@ def render(user: dict) -> None:
     # 제거했다. _scope_for 정의 자체는 회귀 계약(scripts/test_near_miss_view.py)이
     # 고정하고 있어 남겨두되(과거 스코프 동작 보존), render 는 더 이상 호출하지 않는다.
     _readiness().banner()
+    # 헤더 인쇄 아이콘 기본 음영(상세 미선택). 유효 상세가 렌더되면 _render_result_detail 이
+    # hdr_dis_print=False 로 활성화한다(다음 rerun 헤더 반영 — 1-rerun 지연 수용).
+    st.session_state["hdr_dis_print"] = True
     # §0-4: 지표는 제목 바로 아래 첫 블록. 값은 조회 결과(df)에서 파생하므로 슬롯을 먼저
     # 확보하고(필터 위) 결과 준비 후 채운다(deferred). 조회 전/빈 결과면 비운다.
     metric_slot = st.container()
@@ -295,6 +300,37 @@ def _render_result_detail(df: pd.DataFrame) -> None:
         erp.field_block("작업내용", _clean(report.get("work_content")))
         erp.field_block("예방대책", _clean(report.get("countermeasure")))
         erp.field_block("작업현장 상황설명", _clean(report.get("site_description")))
+
+    # ── A4 세로 PDF 출력 — 상세 다운로드 버튼(발견성) + 헤더 인쇄 아이콘 트리거(자동 다운로드). ──
+    st.session_state["hdr_dis_print"] = False  # 유효 상세 표시 중 → 인쇄 활성(헤더가 다음 rerun 반영)
+    pdf_data = near_miss_pdf.report_to_pdf_data(
+        report,
+        reporter=name_of.get(emp, emp) or "-",
+        dept=dept_of.get(dept, dept) or "-",
+        status_label=_STATUS_LABEL.get(status, status or "-"),
+        cause_label=_CAUSE_LABEL.get(cause, cause) or "-",
+    )
+    fname = f"{pdf_data['report_no']}.pdf"
+    try:
+        pdf_bytes = near_miss_pdf.build_report_pdf(pdf_data)
+    except Exception:
+        pdf_bytes = None
+        st.session_state.pop("nmv_print_req", None)
+        st.caption("PDF 생성에 실패했습니다. 잠시 후 다시 시도하세요.")
+    if pdf_bytes:
+        st.download_button(
+            "PDF 저장 (A4)", data=pdf_bytes, file_name=fname,
+            mime="application/pdf", key="nmv_pdf_dl",
+        )
+        # 헤더 인쇄 아이콘(nmv_print_req) → data-URI 자동 다운로드(추가 클릭 없이).
+        if st.session_state.pop("nmv_print_req", False):
+            b64 = base64.b64encode(pdf_bytes).decode("ascii")
+            components.html(
+                f"<a id='nmvdl' href='data:application/pdf;base64,{b64}' "
+                f"download='{escape(fname)}'></a>"
+                "<script>document.getElementById('nmvdl').click();</script>",
+                height=0,
+            )
 
 
 def _all_dept_names() -> dict:

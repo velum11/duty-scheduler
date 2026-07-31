@@ -277,6 +277,7 @@ NON_SCREEN_REASONS: dict[str, str] = {
     "__init__": "패키지 초기화 모듈 — 화면 아님",
     "workspace": "화면 간 공유 근무표 위젯 — dispatch 로 직접 라우팅되지 않음(schedule_* 가 함수로 호출)",
     "login": "인증 게이트 — dispatch 이전 auth 단계에서 렌더되는 비업무 화면",
+    "near_miss_pdf": "아차사고 보고서 PDF 생성 순수 헬퍼 — render 없음·라우팅되지 않음(near_miss_view 가 함수로 호출)",
 }
 NON_SCREEN = set(NON_SCREEN_REASONS)
 
@@ -679,7 +680,7 @@ check(
 print("(f) gap 6 — 명시적 제외 집합 + 은폐된 실화면 가드")
 check(
     "제외 목록은 사유가 붙은 명시적 집합(암묵 패턴 아님)",
-    NON_SCREEN == {"__init__", "workspace", "login"}
+    NON_SCREEN == {"__init__", "workspace", "login", "near_miss_pdf"}
     and all(NON_SCREEN_REASONS[m] for m in NON_SCREEN),
 )
 check(

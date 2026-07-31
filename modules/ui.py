@@ -975,18 +975,23 @@ _PAGE_HEADER_ACTIONS = {
         "add": "se_add_req", "refresh": "se_go_req",
         "delete": "se_del_req", "save": "se_save_req",
     },
+    # 아차사고 조회: 상세 선택 시 인쇄(=PDF 생성·다운로드) 활성. add/delete/save 는 READ 라 미매핑(음영).
+    "near_miss_view": {"print": "nmv_print_req"},
 }
+# 대상 유무(선택·dirty)에 따라 음영이 갱신되는 아이콘 — 화면이 hdr_dis_{icon} 를 세션에 저장.
+# add·refresh 는 항상 활성(대상 무관).
+_HDR_DISABLEABLE = ("delete", "save", "print")
 
 
 def _hdr_icon_state(page: str, icon: str, default_active: bool):
-    """헤더 아이콘 한 개의 (active, enabled, on_click, tip_role) 을 페이지별로 계산한다.
+    """헤더 아이콘 한 개의 (active, enabled, on_click) 을 페이지별로 계산한다.
 
-    페이지 매핑에 role 이 있으면 실작동(클릭=세션 플래그). 삭제·저장은 hdr_dis_{role} 로
-    음영. 그 외 화면은 기존 기본(새로고침만 활성=rerun, 나머지 음영)."""
+    페이지 매핑에 role 이 있으면 실작동(클릭=세션 플래그). 삭제·저장·인쇄는 hdr_dis_{role}
+    (기본 True=음영·안전)로 음영. 그 외 화면은 기존 기본(새로고침만 활성=rerun, 나머지 음영)."""
     flag = _PAGE_HEADER_ACTIONS.get(page, {}).get(icon)
     if flag is not None:
         enabled = True
-        if icon in ("delete", "save"):
+        if icon in _HDR_DISABLEABLE:
             enabled = not bool(st.session_state.get(f"hdr_dis_{icon}", True))
         return True, enabled, (lambda f=flag: st.session_state.update({f: True}))
     if icon == "refresh":  # 기본 새로고침(그 외 화면) — 클릭=rerun
@@ -1033,6 +1038,8 @@ def _breadcrumb_header(user: dict, page: str) -> None:
                     tip = f"{label} — 삭제할 행을 먼저 선택하세요"
                 elif icon == "save":
                     tip = f"{label} — 저장할 변경이 없습니다"
+                elif icon == "print":
+                    tip = f"{label} — 보고서를 먼저 선택하세요"
                 else:
                     tip = label
                 with st.container(key=f"hdr_ic_{slot}_{icon}"):

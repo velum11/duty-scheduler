@@ -44,3 +44,20 @@ MIT License 허가 문구(각 저작물 공통):
    MIT License, Copyright (c) 2026 Damola Akinleye
    → `duty-erp-ui` Stage 0: intent 3문·뷰당 초점 1개·밀도 사전 명시·use-what-exists·
    컴포넌트 체크포인트·상태 완비 절차.
+
+## 동봉 폰트
+
+5. **Noto Sans CJK KR** (`fonts/NotoSansKR-Regular.ttf`, Google Noto 프로젝트)
+   SIL Open Font License 1.1 (OFL) — 배포 경량화를 위해 한글(AC00-D7A3)+라틴+구두점으로 서브셋. Copyright © 2014-2021 Adobe (https://github.com/adobe-fonts),
+   Google LLC. → 아차사고 보고서 A4 PDF(`views/near_miss_pdf.py`)의 한글 렌더에 동봉·재배포.
+
+   > This Font Software is licensed under the SIL Open Font License, Version 1.1.
+   > This license is available with a FAQ at: https://scripts.sil.org/OFL
+   >
+   > SIL OPEN FONT LICENSE Version 1.1 — 요지: 이 폰트 소프트웨어는 자유롭게 사용·연구·
+   > 수정·재배포할 수 있으며, 그 자체를 판매할 수 없고, 재배포 시 본 라이선스와 저작권
+   > 고지를 포함해야 한다. 전체 조문은 https://openfontlicense.org 를 따른다.
+
+   비고: 배포 이식성을 위해 OFL 한글 폰트를 동봉했다. `views/near_miss_pdf.py` 는 동봉
+   폰트를 우선하고, 없으면 시스템 한글 폰트(맑은고딕/Noto/Nanum)로 폴백한다. 더 가벼운
+   IBM Plex Sans KR(OFL)로 교체하려면 `fonts/` 에 TTF 를 넣고 후보 경로만 갱신하면 된다.
