@@ -1443,6 +1443,13 @@ def hard_delete_test_department(dept_code: str) -> None:
 NEAR_MISS_TABLE = "near_miss_reports"
 # report_no 채번 unique 충돌 시 bounded 재채번 재시도 상한(무한 루프 금지).
 _NEAR_MISS_CREATE_RETRIES = 5
+
+# 아차사고 사진 첨부 Storage 버킷(비공개). service key 서버 전용 접근만 하고,
+# 표시는 signed URL 로 한다(공개 버킷 금지 — 개인정보/현장 사진 노출 방지).
+# 버킷 생성은 승인 게이트 대상이며 이 코드는 생성하지 않는다(read-only probe + fail-closed).
+NEAR_MISS_PHOTO_BUCKET = "near-miss-photos"
+# signed URL 만료(초). 표시용 단기 URL — service key 를 클라이언트에 노출하지 않는다.
+NEAR_MISS_PHOTO_URL_TTL = 3600
 NEAR_MISS_GRADES = ("S", "A", "B", "C", "D")
 NEAR_MISS_CAUSE_CODES = ("JAM", "FALL", "DROP", "HIT", "SLIP", "BURN", "PINCH", "ETC")
 NEAR_MISS_STATUSES = ("SUBMITTED", "IN_REVIEW", "EVALUATED", "CLOSED", "REJECTED")
@@ -1674,6 +1681,11 @@ def _near_miss_editable_payload(payload: dict) -> dict:
     photo_paths = payload.get("photo_paths") or []
     if not isinstance(photo_paths, (list, tuple)):
         raise SupabaseDataError("photo_paths 는 배열이어야 합니다.")
+    from modules import photo_storage
+    if len(photo_paths) > photo_storage.MAX_PHOTOS:
+        raise SupabaseDataError(
+            f"사진은 보고서당 최대 {photo_storage.MAX_PHOTOS}장까지 첨부할 수 있습니다."
+        )
     return {
         "work_name": work_name,
         "work_content": _clean_text(payload.get("work_content")),
@@ -1810,6 +1822,157 @@ def update_near_miss_report(
     saved = (response.data or [None])[0]
     if saved is None:
         # 조건부 0행 = 비소유자/비SUBMITTED/삭제됨 — 덮어쓰지 않고 재조회를 요구한다.
+        raise SupabaseDataError(_NM_STALE_MESSAGE)
+    return _near_miss_natural([saved])[0]
+
+
+# --- 아차사고 사진 첨부 Storage 계약 ---------------------------------------
+# 비공개 버킷 + service key 서버 전용 접근. 표시는 signed URL(단기). 버킷이 없으면
+# 저장은 fail-closed 로 차단하고(NOT_READY), 버킷 생성은 승인 게이트 대상이다.
+_NM_PHOTO_BUCKET_READY: bool | None = None
+_NM_PHOTO_BUCKET_PROBE: str | None = None
+_NM_PHOTO_BUCKET_NOT_READY_MESSAGE = (
+    "사진 저장소(Storage 버킷)가 아직 준비되지 않아 사진을 저장할 수 없습니다. "
+    "관리자 승인 후 버킷을 생성한 뒤 다시 시도하세요."
+)
+
+
+def reset_near_miss_photo_bucket_readiness() -> None:
+    """사진 버킷 readiness 캐시를 비운다(버킷 생성 반영 경로 — 다음 확인에서 재프로브)."""
+    global _NM_PHOTO_BUCKET_READY, _NM_PHOTO_BUCKET_PROBE
+    _NM_PHOTO_BUCKET_READY = None
+    _NM_PHOTO_BUCKET_PROBE = None
+
+
+def near_miss_photo_bucket_ready() -> bool:
+    """사진 버킷 존재 여부(1회 probe 후 캐시). readiness 3-state 와 정합(bool gate)."""
+    return near_miss_photo_bucket_probe() == READINESS_READY
+
+
+def near_miss_photo_bucket_probe(*, force: bool = False) -> str:
+    """사진 Storage 버킷 준비 상태를 3-state 로 확인한다(read-only, 1회 probe 후 캐시).
+
+    반환: ``READINESS_READY``(버킷 존재) / ``READINESS_NOT_READY``(버킷 없음) /
+    ``READINESS_PROBE_ERROR``(확인 자체 실패 — 권한/네트워크). PROBE_ERROR 는 캐시하지
+    않는다(일시 장애를 '없음'으로 고착시키지 않음). near_miss 스키마 3-state 관행과 동일.
+
+    **read-only**: ``list_buckets`` 만 호출하며 버킷을 생성하지 않는다(생성은 승인 게이트)."""
+    global _NM_PHOTO_BUCKET_READY, _NM_PHOTO_BUCKET_PROBE
+    if force:
+        _NM_PHOTO_BUCKET_PROBE = None
+    if _NM_PHOTO_BUCKET_PROBE is not None:
+        return _NM_PHOTO_BUCKET_PROBE
+    try:
+        buckets = client().storage.list_buckets()
+        names = set()
+        for b in buckets or []:
+            name = getattr(b, "name", None) or getattr(b, "id", None)
+            if name is None and isinstance(b, dict):
+                name = b.get("name") or b.get("id")
+            if name:
+                names.add(str(name))
+        if NEAR_MISS_PHOTO_BUCKET in names:
+            _NM_PHOTO_BUCKET_PROBE = READINESS_READY
+            _NM_PHOTO_BUCKET_READY = True
+        else:
+            _NM_PHOTO_BUCKET_PROBE = READINESS_NOT_READY
+            _NM_PHOTO_BUCKET_READY = False
+    except Exception as exc:  # noqa: BLE001 — 확인 실패는 미적용으로 단정하지 않는다.
+        _NM_PHOTO_BUCKET_PROBE = None
+        _NM_PHOTO_BUCKET_READY = None
+        _ = exc
+        return READINESS_PROBE_ERROR
+    return _NM_PHOTO_BUCKET_PROBE
+
+
+def upload_near_miss_photo_object(path: str, data: bytes, content_type: str) -> str:
+    """정규화된 사진 bytes 를 비공개 버킷에 저장한다. 저장 경로를 반환한다.
+
+    버킷 미준비면 fail-closed(NOT_READY). ``upsert=false`` 로 경로 충돌 시 덮어쓰지
+    않는다(uuid 경로라 충돌은 사실상 없다). service key 서버 전용 — 공개 URL 미생성."""
+    if not near_miss_photo_bucket_ready():
+        raise SupabaseDataError(_NM_PHOTO_BUCKET_NOT_READY_MESSAGE)
+    try:
+        client().storage.from_(NEAR_MISS_PHOTO_BUCKET).upload(
+            path, bytes(data),
+            {"content-type": content_type, "cache-control": "3600", "upsert": "false"},
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _sanitized_error("사진 업로드", NEAR_MISS_PHOTO_BUCKET, exc) from exc
+    return path
+
+
+def signed_near_miss_photo_url(path: str, *, expires_in: int = NEAR_MISS_PHOTO_URL_TTL) -> str | None:
+    """비공개 버킷 객체의 단기 signed URL 을 만든다(표시용). 실패 시 None.
+
+    공개 URL 을 만들지 않는다 — 표시는 만료되는 signed URL 로만 한다."""
+    if not near_miss_photo_bucket_ready():
+        return None
+    try:
+        res = client().storage.from_(NEAR_MISS_PHOTO_BUCKET).create_signed_url(path, expires_in)
+    except Exception as exc:  # noqa: BLE001 — 표시 실패는 조용히 접는다(없는 이미지).
+        _ = exc
+        return None
+    if isinstance(res, dict):
+        return res.get("signedURL") or res.get("signedUrl") or res.get("signed_url")
+    return getattr(res, "signed_url", None) or getattr(res, "signedURL", None)
+
+
+def download_near_miss_photo_object(path: str) -> bytes | None:
+    """비공개 버킷 객체 bytes 를 내려받는다(서버 전용). 실패/부재 시 None."""
+    if not near_miss_photo_bucket_ready():
+        return None
+    try:
+        return client().storage.from_(NEAR_MISS_PHOTO_BUCKET).download(path)
+    except Exception as exc:  # noqa: BLE001
+        _ = exc
+        return None
+
+
+def remove_near_miss_photo_object(path: str) -> None:
+    """비공개 버킷 객체를 삭제한다(소유자·상태 게이트는 파사드가 먼저 확인)."""
+    if not near_miss_photo_bucket_ready():
+        raise SupabaseDataError(_NM_PHOTO_BUCKET_NOT_READY_MESSAGE)
+    try:
+        client().storage.from_(NEAR_MISS_PHOTO_BUCKET).remove([path])
+    except Exception as exc:  # noqa: BLE001
+        raise _sanitized_error("사진 삭제", NEAR_MISS_PHOTO_BUCKET, exc) from exc
+
+
+def set_near_miss_photo_paths(
+    report_id, paths, *, reporter_emp_no: str, updated_by=None,
+) -> dict | None:
+    """사진 경로 배열만 원자적 조건부 UPDATE 한다(소유자+SUBMITTED).
+
+    ``where id=? and reporter_user_id=? and status='SUBMITTED'`` — 본문 수정과 같은
+    소유자·상태 게이트를 서버측에서 강제한다. 0행이면 비소유자/비SUBMITTED/삭제됨이므로
+    stale 오류를 낸다(lost update 금지). 배열 원소는 문자열로 정규화하고 최대
+    ``photo_storage.MAX_PHOTOS`` 장으로 제한한다(계약 재확인)."""
+    from modules import photo_storage
+
+    if not near_miss_extensions_ready():
+        raise SupabaseDataError(_NM_NOT_READY_MESSAGE)
+    normalized = [str(p) for p in (paths or [])]
+    if len(normalized) > photo_storage.MAX_PHOTOS:
+        raise SupabaseDataError(
+            f"사진은 보고서당 최대 {photo_storage.MAX_PHOTOS}장까지 첨부할 수 있습니다."
+        )
+    user_by_emp, _ = _user_maps()
+    reporter = _clean_text(reporter_emp_no)
+    if reporter not in user_by_emp:
+        raise SupabaseDataError(f"아차사고 보고자 사번을 찾을 수 없습니다: {reporter}")
+    updates: dict = {"photo_paths": normalized}
+    if updated_by is not None:
+        updates["updated_by"] = _clean_text(updated_by, nullable=True)
+    query = (
+        client().table(NEAR_MISS_TABLE).update(updates)
+        .eq("id", report_id)
+        .eq("reporter_user_id", user_by_emp[reporter])
+        .eq("status", "SUBMITTED")
+    )
+    response = _execute(query, "사진경로 갱신", NEAR_MISS_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
         raise SupabaseDataError(_NM_STALE_MESSAGE)
     return _near_miss_natural([saved])[0]
 

@@ -14,7 +14,7 @@ from datetime import date, datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from modules import config, sample_data, supabase_repository, validators
+from modules import config, photo_storage, sample_data, supabase_repository, validators
 
 DATA_SOURCE_ERRORS = (
     config.DataSourceConfigurationError,
@@ -142,6 +142,10 @@ _ORG_GROUPS_STORE = "store_org_groups"
 # 아차사고(near-miss) 샘플 backing store (migration 006). supabase 모드는 실제
 # near_miss_reports 테이블을 쓰므로 이 스토어를 사용하지 않는다.
 _NEAR_MISS_STORE = "store_near_miss_reports"
+# 아차사고 사진 sample backing store (요구사항 §4 세션 인메모리 계약). 저장 경로 →
+# 정규화된 JPEG bytes 의 dict. supabase 모드는 비공개 Storage 버킷을 쓰므로 이
+# 스토어를 사용하지 않는다(모드별 경로 분리, sample/live 동일 API·거동 parity).
+_NEAR_MISS_PHOTO_STORE = "store_near_miss_photos"
 
 
 def datasource() -> str:
@@ -1682,6 +1686,10 @@ def _near_miss_editable_fields(payload: dict) -> dict:
     photo = payload.get("photo_paths") or []
     if not isinstance(photo, (list, tuple)):
         raise ValueError("photo_paths 는 배열이어야 합니다.")
+    if len(photo) > photo_storage.MAX_PHOTOS:
+        raise ValueError(
+            f"사진은 보고서당 최대 {photo_storage.MAX_PHOTOS}장까지 첨부할 수 있습니다."
+        )
     return {
         "work_name": work_name,
         "work_content": str(payload.get("work_content") or ""),
@@ -1896,6 +1904,167 @@ def update_near_miss_report(report_id, payload: dict, *, current_user) -> dict |
         )
     finally:
         _invalidate_near_miss()
+
+
+# =========================================================================
+# 아차사고 사진 첨부 저장 계약 (Storage 백엔드 — supabase 비공개 버킷 / sample 세션)
+# =========================================================================
+def _near_miss_photo_store() -> dict:
+    """sample 모드 사진 backing store(세션 유지): 저장경로 → 정규화 JPEG bytes."""
+    if _NEAR_MISS_PHOTO_STORE not in st.session_state:
+        st.session_state[_NEAR_MISS_PHOTO_STORE] = {}
+    return st.session_state[_NEAR_MISS_PHOTO_STORE]
+
+
+def _near_miss_owner_editable_gate(report_id, actor) -> dict:
+    """보고서를 조회하고 소유자(보고자 본인)+SUBMITTED 게이트를 확인해 반환한다.
+
+    본문 수정(update_near_miss_report)과 같은 게이트를 사진 첨부/삭제에도 적용한다 —
+    사진은 SUBMITTED 상태의 보고자 본인만 추가·삭제할 수 있다. 소유자 비교는 본문
+    수정과 동일하게 **정확 일치(trim only, casefold 아님)** 다."""
+    current = get_near_miss_report(report_id)
+    if current is None:
+        raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
+    owner = str(current.get("reporter_emp_no") or "").strip()
+    if owner != actor["emp_no"]:
+        raise ValueError(_NEAR_MISS_NOT_OWNER_MESSAGE)
+    if str(current.get("status") or "").strip() != _NEAR_MISS_EDITABLE_STATUS:
+        raise ValueError(_NEAR_MISS_NOT_EDITABLE_MESSAGE)
+    return current
+
+
+def near_miss_photo_bucket_probe(*, force: bool = False) -> str:
+    """사진 저장소(Storage 버킷) 준비 상태를 3-state 로 확인한다(read-only).
+
+    sample 은 항상 READY(세션 인메모리 저장). supabase 는 버킷 존재 여부를 probe 한다
+    (near_miss_schema_probe 와 같은 3-state 관행)."""
+    if is_sample_mode():
+        return supabase_repository.READINESS_READY
+    return supabase_repository.near_miss_photo_bucket_probe(force=force)
+
+
+def upload_near_miss_photo(report_id, file_bytes, filename, *, current_user) -> dict:
+    """소유자(SUBMITTED)가 사진 1장을 첨부한다: 검증→압축→저장→경로 배열 갱신.
+
+    행위자 신원은 payload 가 아니라 인증된 ``current_user``(세션 사용자)에서 서버측
+    확정한다. 게이트: 보고자 본인 + status==SUBMITTED + 현재 첨부 < ``MAX_PHOTOS``.
+    파일은 ``photo_storage.validate_and_compress`` 로 검증(확장자+매직바이트 jpg/png/
+    webp, 원본 ≤10MB)·압축(최대변 1600px·JPEG)한 뒤, **서버가 생성한** 경로
+    ``near-miss/{report_id}/{uuid}.jpg`` 로 저장한다(사용자 파일명은 경로에 미사용).
+    저장 성공 후 photo_paths 배열에 원자적 조건부(소유자+SUBMITTED) 추가한다.
+
+    반환: ``{"path": 저장경로, "photo_paths": 갱신된 배열}``. 검증/게이트 실패는
+    ValueError(사용자 안전 문구). supabase 모드에서 버킷 미준비면 fail-closed."""
+    actor = _near_miss_actor(current_user, action="아차사고 사진 첨부")
+    current = _near_miss_owner_editable_gate(report_id, actor)
+    existing = [str(p) for p in (current.get("photo_paths") or [])]
+    if len(existing) >= photo_storage.MAX_PHOTOS:
+        raise ValueError(
+            f"사진은 보고서당 최대 {photo_storage.MAX_PHOTOS}장까지 첨부할 수 있습니다."
+        )
+    # 검증·압축(도메인 오류는 ValueError=PhotoValidationError 로 그대로 노출).
+    data, _ext, content_type = photo_storage.validate_and_compress(file_bytes, filename)
+    path = photo_storage.build_object_path(report_id)
+    new_paths = existing + [path]
+
+    if is_sample_mode():
+        ok = _sample_update_near_miss(
+            report_id, expected_status=_NEAR_MISS_EDITABLE_STATUS,
+            owner_emp_no=actor["emp_no"], photo_paths=new_paths,
+        )
+        if not ok:
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        self_store = _near_miss_photo_store()
+        self_store[path] = data  # 정규화 bytes 를 세션에 보관(실DB 미변경)
+        return {"path": path, "photo_paths": new_paths}
+
+    # supabase: 버킷 미준비면 fail-closed(저장 전 차단 — 조용한 무시 없음).
+    if not supabase_repository.near_miss_photo_bucket_ready():
+        raise ValueError(supabase_repository._NM_PHOTO_BUCKET_NOT_READY_MESSAGE)
+    supabase_repository.upload_near_miss_photo_object(path, data, content_type)
+    try:
+        updated = supabase_repository.set_near_miss_photo_paths(
+            report_id, new_paths, reporter_emp_no=actor["emp_no"], updated_by=actor["emp_no"],
+        )
+    except Exception:
+        # 경로 배열 갱신 실패(게이트 stale 등) → 방금 올린 객체를 best-effort 정리(고아 방지).
+        try:
+            supabase_repository.remove_near_miss_photo_object(path)
+        except Exception:  # noqa: BLE001 — 정리 실패는 원 오류를 가리지 않는다.
+            pass
+        raise
+    finally:
+        _invalidate_near_miss()
+    return {"path": path, "photo_paths": list((updated or {}).get("photo_paths") or new_paths)}
+
+
+def get_near_miss_photo_url(path: str) -> str | None:
+    """사진 표시용 URL 을 반환한다(없으면 None).
+
+    supabase: 비공개 버킷의 단기 signed URL(service key 서버 전용 — 공개 URL 미생성).
+    sample: 세션 인메모리 bytes 를 data: URL 로 인라인(외부 저장 없음)."""
+    p = str(path or "")
+    if not p:
+        return None
+    if is_sample_mode():
+        data = _near_miss_photo_store().get(p)
+        if not data:
+            return None
+        import base64
+        b64 = base64.b64encode(data).decode("ascii")
+        return f"data:{photo_storage.OUTPUT_CONTENT_TYPE};base64,{b64}"
+    return supabase_repository.signed_near_miss_photo_url(p)
+
+
+def read_near_miss_photo(path: str) -> bytes | None:
+    """사진 원본(정규화 JPEG) bytes 를 반환한다(서버 전용, 없으면 None)."""
+    p = str(path or "")
+    if not p:
+        return None
+    if is_sample_mode():
+        return _near_miss_photo_store().get(p)
+    return supabase_repository.download_near_miss_photo_object(p)
+
+
+def delete_near_miss_photo(report_id, path, *, current_user) -> dict:
+    """소유자(SUBMITTED)가 첨부 사진 1장을 삭제한다: 경로 배열 갱신→객체 삭제.
+
+    게이트는 첨부와 동일(보고자 본인 + SUBMITTED). ``path`` 는 해당 보고서 경로
+    스킴에 속해야 한다(임의 경로 객체 삭제 차단). photo_paths 에서 먼저 제거(원자적
+    조건부)한 뒤 객체를 삭제한다 — 참조가 사라진 dangling 이미지를 만들지 않기 위해
+    참조 제거를 우선한다(객체 삭제 실패는 고아 객체로 남지만 표시 무결성은 유지)."""
+    actor = _near_miss_actor(current_user, action="아차사고 사진 삭제")
+    current = _near_miss_owner_editable_gate(report_id, actor)
+    target = str(path or "")
+    if not photo_storage.is_owned_path(report_id, target):
+        raise ValueError("이 보고서의 사진 경로가 아닙니다.")
+    existing = [str(p) for p in (current.get("photo_paths") or [])]
+    if target not in existing:
+        raise ValueError("첨부되지 않은 사진입니다.")
+    new_paths = [p for p in existing if p != target]
+
+    if is_sample_mode():
+        ok = _sample_update_near_miss(
+            report_id, expected_status=_NEAR_MISS_EDITABLE_STATUS,
+            owner_emp_no=actor["emp_no"], photo_paths=new_paths,
+        )
+        if not ok:
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        _near_miss_photo_store().pop(target, None)
+        return {"photo_paths": new_paths}
+
+    try:
+        updated = supabase_repository.set_near_miss_photo_paths(
+            report_id, new_paths, reporter_emp_no=actor["emp_no"], updated_by=actor["emp_no"],
+        )
+    finally:
+        _invalidate_near_miss()
+    # 참조 제거 성공 후 객체 삭제(best-effort — 실패해도 dangling 참조는 없다).
+    try:
+        supabase_repository.remove_near_miss_photo_object(target)
+    except Exception:  # noqa: BLE001 — 고아 객체는 표시 무결성에 영향 없음(정리 배치 대상).
+        pass
+    return {"photo_paths": list((updated or {}).get("photo_paths") or new_paths)}
 
 
 def update_near_miss_status(
