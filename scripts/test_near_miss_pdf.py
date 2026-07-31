@@ -80,7 +80,7 @@ except Exception as exc:  # noqa: BLE001
 fp = near_miss_pdf._resolve_font()
 check("한글 폰트 경로 해석됨(동봉 또는 시스템)", fp is not None)
 check("동봉 폰트 우선(fonts/NotoSansKR-Regular.ttf)",
-      fp is None or fp.endswith("NotoSansKR-Regular.ttf") or True)  # 동봉 없으면 시스템 폴백 허용
+      fp is None or fp.endswith("NotoSansKR-Regular.ttf"))  # 동봉 폰트 존재 시 그것을 우선(시스템보다)
 
 print()
 if FAIL:

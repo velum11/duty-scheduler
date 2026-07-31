@@ -41,10 +41,18 @@ _PAGE_ID = "near_miss_submit"
 _DONE_KEY = "nm_submit_done"
 
 # ── 사진 스테이징(제출 전 세션 보관 → 제출 성공 후 db API 로 첨부) ──
-_STAGE_KEY = "nm_photo_stage"        # list[{"id","name","bytes"}] — 검증·압축된 JPEG bytes
+_STAGE_KEY = "nm_photo_stage"        # list[{"id","name","bytes","size"}] — 압축 JPEG + 원본 크기
 _STAGE_SEEN_KEY = "nm_photo_seen"    # 이미 처리한 업로더/카메라 file_id 집합(중복 스테이징 방지)
 _UP_KEY = "nm_f_photo_uploader"
 _CAM_KEY = "nm_f_photo_camera"
+
+# 업로드 상한(계약: 원본 ≤10MB/장). photo_storage.MAX_UPLOAD_BYTES 를 단일 출처로 삼되(읽기만),
+# 위젯 인자(max_upload_size, MB)와 서버 config(maxUploadSize) 로 다층 차단한다.
+_MAX_UPLOAD_BYTES = photo_storage.MAX_UPLOAD_BYTES
+_MAX_UPLOAD_MB = max(1, _MAX_UPLOAD_BYTES // (1024 * 1024))
+# 다중 선택 누적 상한 — 스테이징 원본 총량. 3장×10MB 여유를 두되 과대 메모리 적재를 막는다.
+_STAGE_TOTAL_CAP_BYTES = 30 * 1024 * 1024
+_STAGE_TOTAL_CAP_MB = _STAGE_TOTAL_CAP_BYTES // (1024 * 1024)
 
 _FORM_WIDGET_KEYS = [
     "nm_f_work_name", "nm_f_incident_date", "nm_f_cause_code",
@@ -179,21 +187,36 @@ def _reset_photo_stage() -> None:
     st.session_state.pop(_STAGE_SEEN_KEY, None)
 
 
-def _ingest_photo(data: bytes, name: str) -> str | None:
-    """업로드 1장을 선택 즉시 검증·압축해 스테이지에 추가한다. 오류 문구(없으면 None) 반환.
+def _ingest_photo(upload, name: str) -> str | None:
+    """업로드 1장을 선택 즉시 크기 사전검사→검증·압축해 스테이지에 추가한다. 오류 문구(없으면 None).
 
-    photo_storage 순수 계약(확장자+매직바이트 jpg/png/webp·원본 10MB·JPEG 정규화)을 재사용해
-    잘못된 파일을 제출 전에 즉시 걸러낸다(modules 무수정 — API 소비만). 3장 초과분은 제외한다."""
+    ``upload`` 은 ``.size``/``.getvalue()`` 를 가진 UploadedFile. **getvalue() 로 전량 적재하기
+    전에** ``.size`` 로 원본 상한(10MB/장)과 스테이징 누적 상한을 먼저 차단한다(대용량 메모리
+    적재 방지). 그다음 photo_storage 순수 계약(확장자+매직바이트 jpg/png/webp·JPEG 정규화)으로
+    검증·압축해 잘못된 파일을 제출 전에 즉시 거른다(modules 무수정 — API 소비만)."""
     stage = st.session_state.setdefault(_STAGE_KEY, [])
     if len(stage) >= photo_storage.MAX_PHOTOS:
         return f"사진은 최대 {photo_storage.MAX_PHOTOS}장까지 첨부할 수 있습니다. '{name}'은(는) 제외했습니다."
+    # 원본 크기 사전 검사(getvalue 전 — 대용량은 메모리에 올리지 않고 차단).
+    size = getattr(upload, "size", None)
+    if isinstance(size, int) and size > _MAX_UPLOAD_BYTES:
+        return f"{name}: 이미지 용량이 너무 큽니다. 최대 {_MAX_UPLOAD_MB}MB 까지 첨부할 수 있습니다."
+    staged_total = sum(int(p.get("size") or 0) for p in stage)
+    if isinstance(size, int) and staged_total + size > _STAGE_TOTAL_CAP_BYTES:
+        return (f"{name}: 첨부 사진 총 용량이 한도({_STAGE_TOTAL_CAP_MB}MB)를 초과했습니다. "
+                "큰 사진을 줄이거나 일부만 첨부하세요.")
+    try:
+        data = upload.getvalue()
+    except Exception:  # noqa: BLE001 — 업로더 스트림 읽기 실패(원문 비노출).
+        return f"{name}: 파일을 읽을 수 없습니다."
     try:
         out, _ext, _ctype = photo_storage.validate_and_compress(data, name)
     except photo_storage.PhotoValidationError as exc:
         return f"{name}: {exc}"
     except Exception:  # noqa: BLE001 — 손상/미지원 이미지(원문 비노출).
         return f"{name}: 이미지를 처리할 수 없습니다."
-    stage.append({"id": uuid.uuid4().hex, "name": name, "bytes": out})
+    stage.append({"id": uuid.uuid4().hex, "name": name, "bytes": out,
+                  "size": int(size) if isinstance(size, int) else len(data)})
     return None
 
 
@@ -211,14 +234,15 @@ def _render_photo_stage() -> None:
         ups = st.file_uploader(
             "현장 사진 선택", type=["jpg", "jpeg", "png", "webp"],
             accept_multiple_files=True, key=_UP_KEY, label_visibility="collapsed",
-            help=f"JPG·PNG·WEBP · 최대 {photo_storage.MAX_PHOTOS}장 · 원본 10MB 이하",
+            max_upload_size=_MAX_UPLOAD_MB,  # 위젯 단위 상한(MB) — 서버 config 와 병행 차단.
+            help=f"JPG·PNG·WEBP · 최대 {photo_storage.MAX_PHOTOS}장 · 원본 {_MAX_UPLOAD_MB}MB 이하",
         )
     for f in (ups or []):
         fid = getattr(f, "file_id", None) or f.name
         if fid in seen:
             continue
         seen.add(fid)
-        err = _ingest_photo(f.getvalue(), f.name or "사진.jpg")
+        err = _ingest_photo(f, f.name or "사진.jpg")
         if err:
             errors.append(err)
 
@@ -228,7 +252,7 @@ def _render_photo_stage() -> None:
         fid = getattr(cam, "file_id", None)
         if fid and fid not in seen:
             seen.add(fid)
-            err = _ingest_photo(cam.getvalue(), "촬영사진.jpg")
+            err = _ingest_photo(cam, "촬영사진.jpg")
             if err:
                 errors.append(err)
 
@@ -410,7 +434,10 @@ def render(user: dict) -> None:
         banner("danger", "필수 항목을 입력하세요: " + ", ".join(missing))
         return
 
-    # 제안 등급은 등록에서 제외(평가 단계 소관). 사진은 GATED — photo_paths 는 빈 배열(계약 불변).
+    # 제안 등급은 등록에서 제외(평가 단계 소관). 사진은 생성 payload 에 싣지 않고 빈 배열로
+    # 시작한다 — 업로드 API 가 '이미 존재하는 SUBMITTED 보고서'를 요구하므로, 스테이징한 사진은
+    # 보고서 생성 성공 후 _attach_staged_photos 가 db.upload_near_miss_photo 로 append 한다
+    # (스테이징-후-첨부). 즉 photo_paths=[] 는 미구현(GATED)이 아니라 '생성 시점엔 아직 비어 있음'.
     payload = {
         "work_name": _clean(work_name),
         "cause_code": cause_code,
@@ -420,7 +447,7 @@ def render(user: dict) -> None:
         "incident_content": _clean(incident_content),
         "countermeasure": _clean(countermeasure),
         "site_description": _clean(site_description),
-        "photo_paths": [],  # GATED: Storage 버킷 없음 — 사진 첨부 섹션 미노출과 정합.
+        "photo_paths": [],  # 생성 시점엔 빈 배열 — 제출 성공 후 사진을 db API 로 첨부(append).
     }
     _persist_and_report(payload)
 

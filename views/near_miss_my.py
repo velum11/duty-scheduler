@@ -33,6 +33,7 @@ import streamlit as st
 
 from modules import auth, db, photo_storage, ui
 from views.common import erp, scaffold
+from views.common.photo_paths import normalize_photo_paths
 from views.master import banner
 from views.master.lifecycle import Readiness, ReadinessState
 
@@ -48,6 +49,11 @@ _CAUSE_LABEL = {
     "SLIP": "미끄러짐·넘어짐", "BURN": "화상·고온", "PINCH": "협착", "ETC": "기타",
 }
 _EDITABLE_STATUS = "SUBMITTED"
+
+# 업로드 상한(계약: 원본 ≤10MB/장). photo_storage.MAX_UPLOAD_BYTES 단일 출처(읽기만) +
+# 위젯 인자(max_upload_size, MB) + 서버 config(maxUploadSize) 다층 차단.
+_MAX_UPLOAD_BYTES = photo_storage.MAX_UPLOAD_BYTES
+_MAX_UPLOAD_MB = max(1, _MAX_UPLOAD_BYTES // (1024 * 1024))
 
 # ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴 고정. ──
 _INK = "#1c1a17"
@@ -337,30 +343,6 @@ def _render_revision_banner(report_id) -> None:
     banner("info", f"보완요청: {reason}" + (f" — 요청 {meta}" if meta else ""))
 
 
-def _normalize_photo_paths(value) -> list[str]:
-    """photo_paths 셀(list / 문자열화 JSON / NaN)을 안전하게 경로 리스트로 정규화한다."""
-    if value is None:
-        return []
-    if isinstance(value, (list, tuple)):
-        return [str(p) for p in value if str(p).strip()]
-    try:
-        if pd.isna(value):
-            return []
-    except (TypeError, ValueError):
-        pass
-    s = str(value).strip()
-    if not s or s in ("[]", "nan"):
-        return []
-    try:
-        import json
-        arr = json.loads(s)
-        if isinstance(arr, list):
-            return [str(p) for p in arr if str(p).strip()]
-    except Exception:  # noqa: BLE001 — 파싱 실패는 사진 없음으로 취급.
-        pass
-    return []
-
-
 def _render_my_photos(report: dict, status: str) -> None:
     """첨부 사진 썸네일 그리드(읽기) + 소유자·SUBMITTED 첨부/삭제(라이브 db API).
 
@@ -368,7 +350,7 @@ def _render_my_photos(report: dict, status: str) -> None:
     호출한다(게이트: 소유자+SUBMITTED — 파사드가 세션 사용자로 서버측 재확인, 위조 방지).
     업로더/카메라·삭제는 st.form(수정 폼) 밖의 상시 상세 영역에 두어 즉시 반응한다."""
     rid = report.get("id")
-    paths = _normalize_photo_paths(report.get("photo_paths"))
+    paths = normalize_photo_paths(report.get("photo_paths"))
     editable = (status == _EDITABLE_STATUS)
     if not paths and not editable:
         return
@@ -403,7 +385,8 @@ def _render_my_photos(report: dict, status: str) -> None:
     ups = st.file_uploader(
         "사진 추가", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True,
         key=f"nm_my_photoup_{rid}", label_visibility="collapsed",
-        help=f"JPG·PNG·WEBP · 최대 {photo_storage.MAX_PHOTOS}장 · 원본 10MB 이하",
+        max_upload_size=_MAX_UPLOAD_MB,  # 위젯 단위 상한(MB) — 서버 config 와 병행 차단.
+        help=f"JPG·PNG·WEBP · 최대 {photo_storage.MAX_PHOTOS}장 · 원본 {_MAX_UPLOAD_MB}MB 이하",
     )
     new_files = [f for f in (ups or []) if (getattr(f, "file_id", None) or f.name) not in seen]
     with st.expander("사진 촬영 (카메라)", expanded=False):
@@ -420,22 +403,31 @@ def _add_my_photos(report_id, files: list, cam, seen: set) -> None:
     errors: list[str] = []
     for f in files:
         seen.add(getattr(f, "file_id", None) or f.name)
+        name = f.name or "사진.jpg"
+        # 원본 크기 사전 검사(getvalue 전 — 대용량은 메모리 적재 전에 차단).
+        size = getattr(f, "size", None)
+        if isinstance(size, int) and size > _MAX_UPLOAD_BYTES:
+            errors.append(f"{name}: 이미지 용량이 너무 큽니다. 최대 {_MAX_UPLOAD_MB}MB 까지 첨부할 수 있습니다.")
+            continue
         try:
-            db.upload_near_miss_photo(report_id, f.getvalue(), f.name or "사진.jpg",
-                                      current_user=current_user)
+            db.upload_near_miss_photo(report_id, f.getvalue(), name, current_user=current_user)
         except ValueError as exc:
-            errors.append(f"{f.name}: {exc}")
+            errors.append(f"{name}: {exc}")
         except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).
-            errors.append(f"{f.name}: 첨부하지 못했습니다.")
+            errors.append(f"{name}: 첨부하지 못했습니다.")
     if cam is not None:
         seen.add(getattr(cam, "file_id", None))
-        try:
-            db.upload_near_miss_photo(report_id, cam.getvalue(), "촬영사진.jpg",
-                                      current_user=current_user)
-        except ValueError as exc:
-            errors.append(f"촬영사진: {exc}")
-        except Exception:  # noqa: BLE001
-            errors.append("촬영사진: 첨부하지 못했습니다.")
+        cam_size = getattr(cam, "size", None)
+        if isinstance(cam_size, int) and cam_size > _MAX_UPLOAD_BYTES:
+            errors.append(f"촬영사진: 이미지 용량이 너무 큽니다. 최대 {_MAX_UPLOAD_MB}MB 까지 첨부할 수 있습니다.")
+        else:
+            try:
+                db.upload_near_miss_photo(report_id, cam.getvalue(), "촬영사진.jpg",
+                                          current_user=current_user)
+            except ValueError as exc:
+                errors.append(f"촬영사진: {exc}")
+            except Exception:  # noqa: BLE001
+                errors.append("촬영사진: 첨부하지 못했습니다.")
     if errors:
         _stash_photo_msg(report_id, "warn", "일부 사진을 첨부하지 못했습니다: " + " / ".join(errors))
     st.rerun()
@@ -530,7 +522,10 @@ def _render_edit_form(user: dict, report: dict) -> None:
         "incident_content": incident_content,
         "countermeasure": countermeasure,
         "site_description": site_description,
-        "photo_paths": list(report.get("photo_paths") or []),  # 기존 첨부 보존(본문만 수정).
+        # photo_paths 는 본문 수정 payload 에 싣지 않는다(P1-3): 사진 첨부/삭제는 전용 API
+        # (db.upload/delete_near_miss_photo)만 photo_paths 를 변경하며, 본문 수정 경로가 이를
+        # 함께 보내면 두 경로가 사진 배열을 이중 소유하게 된다. 파사드도 본문 수정에서
+        # photo_paths 를 무시하도록 정합되므로 view 도 아예 보내지 않는다.
     }
     _save_edit(rid, payload)
 

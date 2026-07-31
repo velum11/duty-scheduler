@@ -26,6 +26,7 @@ import streamlit.components.v1 as components
 from modules import db, ui
 from views import near_miss_pdf, workspace
 from views.common import erp
+from views.common.photo_paths import normalize_photo_paths
 from views.master import TOKENS, banner, sheet_head
 from views.master.lifecycle import Readiness, ReadinessState
 
@@ -336,30 +337,6 @@ def _render_result_detail(df: pd.DataFrame) -> None:
             )
 
 
-def _normalize_photo_paths(value) -> list[str]:
-    """photo_paths 셀(list / 문자열화 JSON / NaN)을 안전하게 경로 리스트로 정규화한다."""
-    if value is None:
-        return []
-    if isinstance(value, (list, tuple)):
-        return [str(p) for p in value if str(p).strip()]
-    try:
-        if pd.isna(value):
-            return []
-    except (TypeError, ValueError):
-        pass
-    s = str(value).strip()
-    if not s or s in ("[]", "nan"):
-        return []
-    try:
-        import json
-        arr = json.loads(s)
-        if isinstance(arr, list):
-            return [str(p) for p in arr if str(p).strip()]
-    except Exception:  # noqa: BLE001 — 파싱 실패는 사진 없음으로 취급.
-        pass
-    return []
-
-
 def _photo_overline(count: int) -> None:
     """사진 섹션 모노 오버라인(카드 아님·헤어라인 없이 라벨만) — §2 팔레트 중립 텍스트."""
     st.markdown(
@@ -375,7 +352,7 @@ def _render_view_photos(photo_paths) -> None:
 
     표시 URL 은 파사드(db.get_near_miss_photo_url)가 소유한다 — sample 은 data:URL, supabase 는
     단기 서명 URL. 클릭 확대는 st.image 기본 전체화면 버튼을 쓴다(추가 배선 없음)."""
-    paths = _normalize_photo_paths(photo_paths)
+    paths = normalize_photo_paths(photo_paths)
     if not paths:
         return
     _photo_overline(len(paths))

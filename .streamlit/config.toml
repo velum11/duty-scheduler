@@ -9,6 +9,9 @@ font = "sans serif"
 
 [server]
 runOnSave = true
+# 아차사고 사진 업로드 상한(계약: 원본 ≤10MB/장, photo_storage.MAX_UPLOAD_BYTES 와 정합).
+# 위젯 인자(st.file_uploader max_upload_size)와 병행해 서버단에서도 대용량을 차단한다.
+maxUploadSize = 10
 
 [client]
 toolbarMode = "minimal"   # Deploy 버튼/개발용 툴바 숨김
