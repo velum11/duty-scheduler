@@ -966,6 +966,33 @@ _HEADER_ICONS = [
     ("즐겨찾기", "star", False),
 ]
 
+# 단일 범위 화면(부속서 A-5 활성 허용)에서 헤더 아이콘이 실작동하는 페이지 매핑.
+# {page: {icon(role): 세션 플래그 키}} — 헤더 아이콘 클릭이 그 화면의 기존 flag 계약을
+# 발화하고(action_requester 와 동일 의미), 화면 render 가 소비한다(실행 경로·확인 게이트 불변).
+# 삭제·저장의 음영은 화면이 매 렌더 세션에 저장하는 hdr_dis_{role}(기본 True=음영, 안전)로 판정.
+_PAGE_HEADER_ACTIONS = {
+    "schedule_edit": {
+        "add": "se_add_req", "refresh": "se_go_req",
+        "delete": "se_del_req", "save": "se_save_req",
+    },
+}
+
+
+def _hdr_icon_state(page: str, icon: str, default_active: bool):
+    """헤더 아이콘 한 개의 (active, enabled, on_click, tip_role) 을 페이지별로 계산한다.
+
+    페이지 매핑에 role 이 있으면 실작동(클릭=세션 플래그). 삭제·저장은 hdr_dis_{role} 로
+    음영. 그 외 화면은 기존 기본(새로고침만 활성=rerun, 나머지 음영)."""
+    flag = _PAGE_HEADER_ACTIONS.get(page, {}).get(icon)
+    if flag is not None:
+        enabled = True
+        if icon in ("delete", "save"):
+            enabled = not bool(st.session_state.get(f"hdr_dis_{icon}", True))
+        return True, enabled, (lambda f=flag: st.session_state.update({f: True}))
+    if icon == "refresh":  # 기본 새로고침(그 외 화면) — 클릭=rerun
+        return True, True, None
+    return False, False, None
+
 
 def _breadcrumb_header(user: dict, page: str) -> None:
     """본문 상단 52px 아이콘 헤더 — 좌측 MODULE / SCREEN 모노 브레드크럼,
@@ -994,17 +1021,29 @@ def _breadcrumb_header(user: dict, page: str) -> None:
                           vertical_alignment="center"):
             st.markdown(crumb_html, unsafe_allow_html=True)
             st.markdown(conn_html, unsafe_allow_html=True)
-            for label, icon, active in _HEADER_ICONS:
-                # 상시 노출 + 음영: 비활성은 disabled(클릭 무동작)+음영 tooltip, 활성은 실기능.
-                slot = "on" if active else "off"
+            for label, icon, default_active in _HEADER_ICONS:
+                # 상시 노출 + 음영: 활성이지만 비활성(삭제/저장 대상 없음)이면 음영(disabled).
+                active, enabled, on_click = _hdr_icon_state(page, icon, default_active)
+                slot = "on" if (active and enabled) else "off"
+                if not active:
+                    tip = f"{label} — 이 화면에서는 사용하지 않습니다"
+                elif enabled:
+                    tip = label
+                elif icon == "delete":
+                    tip = f"{label} — 삭제할 행을 먼저 선택하세요"
+                elif icon == "save":
+                    tip = f"{label} — 저장할 변경이 없습니다"
+                else:
+                    tip = label
                 with st.container(key=f"hdr_ic_{slot}_{icon}"):
                     clicked = st.button(
                         "", icon=f":material/{icon}:", key=f"app_hdr_{icon}",
-                        type="tertiary", disabled=not active,
-                        help=(f"{label}" if active
-                              else f"{label} — 이 화면에서는 사용하지 않습니다"),
+                        type="tertiary", disabled=not (active and enabled),
+                        help=tip, on_click=on_click,
                     )
-                    if clicked and icon == "refresh":
+                    # 기본 새로고침(on_click 없음)만 클릭 시 rerun. 실작동 아이콘은 on_click
+                    # 이 플래그를 세팅하고 Streamlit 이 자동 rerun → 화면 render 가 소비.
+                    if on_click is None and clicked and icon == "refresh":
                         st.rerun()
 
 

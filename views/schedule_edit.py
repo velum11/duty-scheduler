@@ -43,6 +43,7 @@ from views.workspace import (
 )
 
 _FIXED = ["사번", "성명", "부서", "조"]
+_ALL = "(전체)"  # 부서·조 '전체' 센티널(workspace.ALL 과 동일 값). 전체 조회 시 다부서/조 표시.
 _META = ["_row_id", "_row_state", "_sel"]
 
 # 기존 행의 사번은 읽기 전용(관계키). 신규 행에서만 편집한다.
@@ -110,22 +111,13 @@ def _active_ordered() -> list[tuple[str, str, str]]:
 
 
 def _day_cell_handlers(cycle_labels: list[str], number_labels: list[str]) -> dict:
-    """day 컬럼 셀 상호작용 JsCode(§1-C, 도메인 파생): 클릭=근무 순환(빈값 포함),
-    숫자키 1..N=N번째 근무형태·0=지움. 값 반영은 setDataValue→cellValueChanged→기존 dirty/
-    저장 경로 그대로. 편집기 팝업은 grid-level suppressClickEdit 로 막는다(더블클릭=2회 순환)."""
-    cyc = json.dumps(cycle_labels, ensure_ascii=False)
+    """day 컬럼 셀 상호작용 JsCode(§1-C, 도메인 파생) — 클릭 순환은 제거(사용자 피드백):
+    셀 편집은 더블클릭 편집기·직접 타이핑(이전 방식)으로 하고, 숫자키 1..N=N번째 근무형태·
+    0=지움, 방향키 이동은 유지한다. 값 반영은 setDataValue→cellValueChanged→기존 dirty/저장
+    경로 그대로. Ctrl+V(붙여넣기)도 유지된다. (cycle_labels 는 숫자키/붙여넣기 검증용 보존.)"""
     nums = json.dumps(number_labels, ensure_ascii=False)
-    on_click = JsCode(
-        "function(e){"
-        "  if(!e.column||e.node==null)return;"
-        f" var cyc={cyc};"
-        "  var node=e.node, colId=e.column.getColId();"
-        "  var cur=String(e.value==null?'':e.value).trim();"
-        "  var idx=cyc.indexOf(cur);"
-        "  var next=cyc[(idx+1)%cyc.length];"
-        "  node.setDataValue(colId, next);"
-        "}"
-    )
+    # 숫자키(1..N·0)는 편집 중이 아닐 때만 근무형태 즉시 입력. 그 외 키(방향키 등)는 기본
+    # 동작(이동)을 그대로 두고, 편집 시작 키·타이핑은 AG Grid 기본 편집기로 흘린다.
     suppress_kbd = JsCode(
         "function(p){"
         "  var e=p.event; if(!e)return false;"
@@ -138,7 +130,7 @@ def _day_cell_handlers(cycle_labels: list[str], number_labels: list[str]) -> dic
         "  return false;"
         "}"
     )
-    return {"onCellClicked": on_click, "suppressKeyboardEvent": suppress_kbd}
+    return {"suppressKeyboardEvent": suppress_kbd}
 
 
 def _day_header_component(day_col: str) -> JsCode:
@@ -180,7 +172,7 @@ def _context_html(q: dict, dept_name: str, team_name: str,
         f"<span>인원 <span class='num'>{n_people}</span></span>"
         f"<span>입력 <span class='num'>{filled}</span></span>"
         f"<span>미입력 <span class='num'>{empty}</span></span>"
-        f"<span class='op'>셀 클릭 = 근무 순환 · 숫자키 입력 · 방향키 이동</span></div>"
+        f"<span class='op'>더블클릭 편집 · 숫자키 1~9·0 입력 · 방향키 이동 · Ctrl+V 붙여넣기</span></div>"
     )
 
 
@@ -263,12 +255,18 @@ def render(user: dict) -> None:
     # (Streamlit "default value + Session State API" 경고 방지). 값은 여기서 초기화.
     st.session_state.setdefault("se_y", today.year)
     st.session_state.setdefault("se_m", today.month)
+    # 부서·조 기본 = 전체(피드백 #3). MANAGER 는 아래에서 자기 부서로 잠금(fail-closed 불변).
+    st.session_state.setdefault("se_d", _ALL)
+    st.session_state.setdefault("se_t", _ALL)
 
     # 조회 조건(우측 인라인 라벨, KP-standard) — 위젯 key 는 기존 se_y/se_m/se_d/se_t 를
     # widget_key 로 그대로 지정해 revert 로직(위 67-90행)·테스트가 이름으로 참조하는
     # 세션 키를 변경 없이 유지한다(구조만 이전, views.workspace.schedule_screen 과 동일 패턴).
     if manager_locked:
         cur_dept = user["dept_code"]
+        # MANAGER 는 자기 부서로 잠금(fail-closed). 기본 se_d=_ALL 은 잠금 옵션에 없으므로
+        # 자기 부서로 교정한다(조는 _ALL=자기 부서 전체 조 허용).
+        st.session_state["se_d"] = cur_dept
         dept_field = erp.Field(
             key="d", label="부서", kind="select",
             options=[user["dept_code"]], format_func=lambda c: dept_names.get(c, c),
@@ -278,14 +276,19 @@ def render(user: dict) -> None:
         # 부서→조 종속 옵션: 조 Field 를 만들기 전에 "현재" 부서 선택을 세션 상태에서
         # 읽는다(위젯 렌더 순서가 아니라 세션 상태로 종속을 해석해, 사용자가 부서를 바꾼
         # 그 rerun 에서 조 옵션이 갱신되게 한다 — workspace.schedule_screen 과 동일).
-        cur_dept = st.session_state.get("se_d") or next(iter(dept_names))
+        cur_dept = st.session_state.get("se_d") or _ALL
         dept_field = erp.Field(
             key="d", label="부서", kind="select",
-            options=list(dept_names), format_func=lambda c: dept_names.get(c, c),
+            options=[_ALL] + list(dept_names),
+            format_func=lambda c: "전체 부서" if c == _ALL else dept_names.get(c, c),
             widget_key="se_d",
         )
-    team_rows = teams[(teams["dept_code"] == cur_dept) & teams["is_active"]].sort_values("sort_order")
-    team_names = {r["team_code"]: r["team_name"] for _, r in team_rows.iterrows()}
+    # 부서=전체면 조는 '전체'만(특정 부서 종속 조 목록 없음). 특정 부서면 그 부서 조 + 전체.
+    if cur_dept == _ALL:
+        team_names = {}
+    else:
+        team_rows = teams[(teams["dept_code"] == cur_dept) & teams["is_active"]].sort_values("sort_order")
+        team_names = {r["team_code"]: r["team_name"] for _, r in team_rows.iterrows()}
 
     fields = [
         # format_func=str 명시: 키트 select 기본 포맷터(항등함수)는 int 옵션(연도)을
@@ -296,19 +299,18 @@ def render(user: dict) -> None:
         erp.Field(key="m", label="월", kind="select", options=list(range(1, 13)),
                   format_func=lambda m: f"{m}월", widget_key="se_m"),
         dept_field,
-        erp.Field(key="t", label="조", kind="select", options=list(team_names),
-                  format_func=lambda c: team_names.get(c, c), widget_key="se_t"),
+        erp.Field(key="t", label="조", kind="select", options=[_ALL] + list(team_names),
+                  format_func=lambda c: "전체 조" if c == _ALL else team_names.get(c, c),
+                  widget_key="se_t"),
     ]
     v = erp.condition_panel("se", fields, cols=4)
     year, month, dept, team = v["y"], v["m"], v["d"], v["t"]
 
-    # §1-C 1행 우측 액션 슬롯 — 필터 오른쪽에 행 추가·조회·행 삭제·[저장]을 둔다(deferred fill:
-    # n_sel/dirty 는 그리드 뒤에 확정되므로 슬롯만 잡고 나중에 채운다). 클릭은 화면 고유
-    # on_click 플래그(se_*_req)로 남겨 그리드 전송과 경합해도 유실되지 않는다(기존 계약).
-    action_slot = st.container()
-    st.markdown(f"<div style='border-top:1px solid {_LINE_SEC};margin:2px 0 10px;'></div>",
-                unsafe_allow_html=True)
-
+    # 액션은 상단 52px 헤더 아이콘 4종(추가·새로고침·삭제·저장)이 소유한다(피드백 #1,
+    # 부속서 A-5 단일 범위 화면). 페이지 본문의 4단추는 제거했고, 헤더 아이콘 클릭이 기존
+    # flag(se_*_req)를 발화한다(ui._PAGE_HEADER_ACTIONS). 삭제·저장 음영은 아래에서 세션
+    # (hdr_dis_delete/save)에 저장해 헤더가 읽는다(선택·dirty 변화는 rerun 주기 내 반영).
+    # 필터 하단 헤어라인은 condition_panel(§1-E)이 소유한다.
     clicked = st.session_state.pop("se_go_req", False)
     show_flash("schedule_edit")
 
@@ -399,9 +401,9 @@ def render(user: dict) -> None:
             height=min(max(210, 30 * len(feed) + 96), 500),  # ≈62vh 내부 스크롤
             col_config=col_config,
             select_all_header=True,  # 표시 중인 기존 행만 대상 (신규 행 제외)
-            # 셀 높이 30px(§1-C) + 클릭/더블클릭 편집기 팝업 금지(클릭=순환). 셀은 editable
-            # 유지되어 Ctrl+V 붙여넣기·키보드 입력은 보존한다(편집기만 클릭으로 안 열림).
-            extra_grid_options={"rowHeight": 30, "suppressClickEdit": True},
+            # 셀 높이 30px(§1-C). 클릭 순환 제거(피드백) → suppressClickEdit 해제해 더블클릭
+            # 편집기·직접 타이핑을 복원한다. 숫자키·방향키·Ctrl+V 는 그대로 유지.
+            extra_grid_options={"rowHeight": 30},
         )
 
     # 구조 변경(− 제거/붙여넣기 신규 행) + 사번 자동 조회를 권위 상태로 동기화
@@ -423,12 +425,12 @@ def render(user: dict) -> None:
         ).sum().sum())
     empty_cells = max(n_people * len(day_cols) - filled, 0)
 
-    # 컨텍스트 라인 채움(YYYY-MM · 부서 · 조 + 인원/입력/미입력)
+    # 컨텍스트 라인 채움(YYYY-MM · 부서 · 조 + 인원/입력/미입력). 전체(_ALL)면 라벨로 표기.
+    dept_lbl = "전체 부서" if q.get("dept") == _ALL else dept_names.get(q["dept"], q["dept"])
+    team_lbl = "전체 조" if q.get("team") == _ALL else team_names.get(q["team"], q["team"])
     with context_slot:
         st.markdown(
-            _context_html(q, dept_names.get(q["dept"], q["dept"]),
-                          team_names.get(q["team"], q["team"]),
-                          n_people, filled, empty_cells),
+            _context_html(q, dept_lbl, team_lbl, n_people, filled, empty_cells),
             unsafe_allow_html=True,
         )
 
@@ -459,25 +461,12 @@ def render(user: dict) -> None:
     changed = _change_count(live, day_cols, st.session_state.get("se_orig_cells", {}), n_del)
     st.markdown(f"<div class='se-dirty'>미저장 변경 {changed}건</div>", unsafe_allow_html=True)
 
-    # ── 1행 우측 액션 슬롯 채움(deferred): 행 추가 · 조회 · 행 삭제 · [저장]. 플래그·key·흐름 불변. ──
-    with action_slot:
-        _sp, ca, cg, cd, cs = st.columns([4.8, 1.3, 1.3, 1.3, 1.3], vertical_alignment="center")
-        with ca:
-            st.button("행 추가", key="se_add", width="stretch",
-                      on_click=lambda: st.session_state.update(se_add_req=True))
-        with cg:
-            st.button("조회", key="se_go", width="stretch",
-                      on_click=lambda: st.session_state.update(se_go_req=True))
-        with cd:
-            st.button("행 삭제", key="se_del", width="stretch", disabled=n_sel == 0,
-                      help="삭제할 행을 먼저 선택" if n_sel == 0 else "삭제",
-                      on_click=lambda: st.session_state.update(se_del_req=True))
-        with cs:
-            st.button("저장", key="se_save", type="primary", width="stretch", disabled=not dirty,
-                      help="저장할 변경이 없습니다" if not dirty else "저장",
-                      on_click=lambda: st.session_state.update(se_save_req=True))
+    # ── 헤더 아이콘 음영 상태를 세션에 저장(다음 rerun 의 헤더가 읽음) — 삭제는 선택 0,
+    #    저장은 dirty 0 일 때 음영. 기본 True(음영·안전)로, 값이 준비된 뒤 갱신한다. ──
+    st.session_state["hdr_dis_delete"] = (n_sel == 0)
+    st.session_state["hdr_dis_save"] = (not dirty)
 
-    # 버튼 플래그 처리 (최신 live 기준)
+    # 헤더 아이콘이 발화한 플래그 처리 (최신 live 기준) — 실행 경로·확인 게이트 불변.
     if st.session_state.pop("se_save_req", False):
         _save(live, q, day_cols)
     if st.session_state.pop("se_del_req", False):
@@ -772,11 +761,13 @@ def _load_grid(q: dict) -> None:
 
     users = db.get_users()
     st.session_state["se_users_map"] = _build_users_map(users)  # 조회 시점 캐시 갱신
-    scope = users[
-        users["is_active"]
-        & (users["dept_code"] == q["dept"])
-        & (users["team_code"] == q["team"])
-    ].sort_values("emp_no")
+    # 부서·조 '전체'(_ALL)면 해당 필터를 생략한다(다부서/조 표시). 재직자만 대상.
+    mask = users["is_active"]
+    if q.get("dept") != _ALL:
+        mask = mask & (users["dept_code"] == q["dept"])
+    if q.get("team") != _ALL:
+        mask = mask & (users["team_code"] == q["team"])
+    scope = users[mask].sort_values("emp_no")
     emp_nos = [str(e).strip() for e in scope["emp_no"]]
 
     scheds = db.get_month_schedules(emp_nos, q["year"], q["month"]) if emp_nos else pd.DataFrame(
