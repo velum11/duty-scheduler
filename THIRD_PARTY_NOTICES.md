@@ -53,10 +53,10 @@ MIT License 허가 문구(각 저작물 공통):
 
    > This Font Software is licensed under the SIL Open Font License, Version 1.1.
    > This license is available with a FAQ at: https://scripts.sil.org/OFL
-   >
-   > SIL OPEN FONT LICENSE Version 1.1 — 요지: 이 폰트 소프트웨어는 자유롭게 사용·연구·
-   > 수정·재배포할 수 있으며, 그 자체를 판매할 수 없고, 재배포 시 본 라이선스와 저작권
-   > 고지를 포함해야 한다. 전체 조문은 https://openfontlicense.org 를 따른다.
+
+   **라이선스 전문**: SIL Open Font License 1.1 의 전체 조문을 [`fonts/OFL.txt`](fonts/OFL.txt)
+   에 원문 그대로 동봉한다(OFL §의 "재배포 시 라이선스 사본 포함" 요건 충족). 요약이 아니라
+   원문이 정본이며, 폰트를 재배포할 때 이 파일을 함께 배포한다.
 
    비고: 배포 이식성을 위해 OFL 한글 폰트를 동봉했다. `views/near_miss_pdf.py` 는 동봉
    폰트를 우선하고, 없으면 시스템 한글 폰트(맑은고딕/Noto/Nanum)로 폴백한다. 더 가벼운
