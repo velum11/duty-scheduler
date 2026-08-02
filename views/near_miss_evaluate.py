@@ -74,6 +74,7 @@ _STALE_MARK = "이미 변경"  # db._NEAR_MISS_STALE_MESSAGE 원문 일부 — k
 _SEL_KEY = "nm_eval_selected_id"       # 상세에 열린 보고서 id(문자열)
 _OP_KEY = "nm_eval_opinion_"           # 평가 의견(반려·보완요청 공용) prefix + id
 _GRADE_KEY = "nm_eval_grade_"          # 확정 등급 선택 prefix + id
+_EVAL_ACTIVE_KEY = "nm_eval_active_id"  # 직전 렌더의 활성 케이스 id(케이스 전환 시 등급 선택 초기화)
 
 # ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴로 고정해 새 색 유입을 원천 차단한다. ──
 _INK = "#1c1a17"          # 본문
@@ -404,12 +405,18 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
         unsafe_allow_html=True,
     )
     grades = list(db.NEAR_MISS_GRADES)  # 도메인 소스 파생(하드코딩 금지)
-    proposed = str(report.get("proposed_grade") or "").strip().upper()
     grade_key = f"{_GRADE_KEY}{selected_id}"
+    # 큐 이동/재진입 시 이전 등급 선택을 초기화한다(직전 렌더의 활성 케이스와 다르면 fresh 진입).
+    # 같은 케이스 내 등급 버튼 상호작용(동일 id rerun)에서는 초기화하지 않아 선택이 유지된다.
+    if st.session_state.get(_EVAL_ACTIVE_KEY) != selected_id:
+        st.session_state[_EVAL_ACTIVE_KEY] = selected_id
+        st.session_state.pop(grade_key, None)
+    # 확정 등급 기본은 **미선택**(S 자동 선택 제거) — 평가자가 명시적으로 고르게 한다.
     cur_grade = st.session_state.get(grade_key)
     if cur_grade not in grades:
-        cur_grade = proposed if proposed in grades else (grades[0] if grades else "")
-        st.session_state[grade_key] = cur_grade
+        cur_grade = ""
+        st.session_state[grade_key] = ""
+    grade_selected = cur_grade in grades
 
     can_write = readiness.write_enabled
     op_key = f"{_OP_KEY}{selected_id}"
@@ -421,8 +428,14 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
         readiness.message if not can_write
         else ("이미 검토에 착수한 케이스입니다." if status != "SUBMITTED" else None)
     )
-    eval_disabled = not can_write
-    eval_help = None if can_write else readiness.message
+    # 평가확정: 확정 등급 미선택이면 비활성(+안내). 검토착수·보완요청·반려는 등급 무관(현행 유지).
+    eval_disabled = (not can_write) or (not grade_selected)
+    if not can_write:
+        eval_help = readiness.message
+    elif not grade_selected:
+        eval_help = "등급을 선택하세요."
+    else:
+        eval_help = None
     # 보완요청(IN_REVIEW→SUBMITTED): 검토중 케이스만, 의견 필수. 반려와 별개 의미.
     revision_disabled = (not can_write) or status != "IN_REVIEW" or not opinion
     if not can_write:

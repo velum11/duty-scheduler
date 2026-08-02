@@ -25,11 +25,14 @@ if str(ROOT) not in sys.path:
 
 os.environ["DUTY_DATA_MODE"] = "sample"
 
-from modules import nav  # noqa: E402
+import streamlit as st  # noqa: E402
+
+from modules import auth, db, nav  # noqa: E402
 from views import near_miss_evaluate as nme  # noqa: E402
 from views import near_miss_improvement as nmi  # noqa: E402
 from views import near_miss_my as nmy  # noqa: E402
 from views import near_miss_stats as nms  # noqa: E402
+from views import near_miss_submit as nmsub  # noqa: E402
 
 PASS = 0
 FAIL: list[str] = []
@@ -220,6 +223,65 @@ check("보완요청 문구 사용", "보완요청" in rev_src)
 my_detail_src = inspect.getsource(nmy._render_detail)
 check("SUBMITTED 에서 보완요청 배너 호출", "_render_revision_banner" in my_detail_src)
 check("반려(REJECTED) 배너는 warn 유지(별개 시각)", 'banner("warn"' in my_detail_src)
+
+
+# ===== 8) P1-4 삭제 부분성공 표면화(near_miss_my) — storage_deleted=False 경고 표면화 =====
+print("사진 삭제 부분성공 표면화(storage_deleted)")
+# 표면화 배선 정적 확인: _delete_my_photo 가 반환의 storage_deleted 를 읽어 warn 스태시,
+# _render_my_photos 가 _flush_photo_msg 로 표시한다.
+del_src = inspect.getsource(nmy._delete_my_photo)
+check("_delete_my_photo 가 반환을 캡처(res=)", "res = db.delete_near_miss_photo" in del_src)
+check("storage_deleted is False 분기 존재", 'res.get("storage_deleted") is False' in del_src)
+check("부분성공 경고 문구(정리 지연) 표면화", "정리가 지연" in del_src and '"warn"' in del_src)
+check("_render_my_photos 가 결과 문구를 flush(표시)", "_flush_photo_msg" in inspect.getsource(nmy._render_my_photos))
+
+# 행위 검증: 파사드가 storage_deleted=False 를 돌려주면 warn 문구가 세션에 스태시된다.
+_rid = "p14test"
+_msg_key = f"nm_my_photomsg_{_rid}"
+_orig_del = db.delete_near_miss_photo
+_orig_user = auth.get_current_user
+try:
+    db.delete_near_miss_photo = lambda *a, **k: {"photo_paths": [], "storage_deleted": False}
+    auth.get_current_user = lambda: {"emp_no": "1003", "role": "USER"}
+    st.session_state.pop(_msg_key, None)
+    nmy._delete_my_photo(_rid, "near-miss/1/x.jpg")  # st.rerun 은 bare 모드에서 no-op
+    _stashed = st.session_state.get(_msg_key)
+    check("storage_deleted=False → warn 스태시됨",
+          isinstance(_stashed, tuple) and _stashed[0] == "warn" and "정리가 지연" in _stashed[1])
+    # 대조군: storage_deleted=True 면 부분성공 경고 없음.
+    db.delete_near_miss_photo = lambda *a, **k: {"photo_paths": [], "storage_deleted": True}
+    st.session_state.pop(_msg_key, None)
+    nmy._delete_my_photo(_rid, "near-miss/1/x.jpg")
+    check("storage_deleted=True → 부분성공 경고 없음", st.session_state.get(_msg_key) is None)
+finally:
+    db.delete_near_miss_photo = _orig_del
+    auth.get_current_user = _orig_user
+    st.session_state.pop(_msg_key, None)
+
+
+# ===== 9) Medium 1 — 등록 체크리스트 실시간화(near_miss_submit, st.form 미사용) =====
+print("등록 체크리스트 실시간화(st.form 미사용)")
+sub_render = inspect.getsource(nmsub.render)
+check("등록 폼은 st.form 을 쓰지 않는다(위젯 즉시 세션 반영)", "st.form(" not in sub_render)
+check("제출은 st.button('제안서 제출')", 'st.button("제안서 제출"' in sub_render)
+check("체크리스트는 세션 값을 읽어 실시간 파생", "st.session_state.get(key)" in inspect.getsource(nmsub._checklist_html))
+check("제출 시 전체 재검증(_validate) 계약 유지", "_validate(" in sub_render)
+check("사진 스테이징-후-첨부 유지(_render_photo_stage)", "_render_photo_stage" in sub_render)
+
+
+# ===== 10) Medium 2 — 평가 확정등급 기본 미선택 + 미선택 시 평가확정 비활성 =====
+print("평가 확정등급 기본 미선택 게이트")
+eval_src = inspect.getsource(nme._render_detail)
+check("확정등급 기본 미선택(S/grades[0] 자동선택 제거)",
+      'cur_grade = ""' in eval_src and "grades[0]" not in eval_src)
+check("평가확정은 등급 미선택 시 비활성(grade_selected 게이트)",
+      "grade_selected" in eval_src and "not grade_selected" in eval_src)
+check("미선택 안내 툴팁('등급을 선택하세요')", "등급을 선택하세요" in eval_src)
+check("검토착수/보완요청/반려는 등급 무관(현행 게이트 유지)",
+      'status != "SUBMITTED"' in eval_src and 'status != "IN_REVIEW"' in eval_src and "not opinion" in eval_src)
+check("케이스 전환 시 이전 등급 선택 초기화(_EVAL_ACTIVE_KEY)",
+      "_EVAL_ACTIVE_KEY" in eval_src and "grade_key, None" in eval_src)
+check("등급 목록 db 파생(하드코딩 금지)", "list(db.NEAR_MISS_GRADES)" in eval_src)
 
 
 print()

@@ -10,16 +10,15 @@
   현장 사진을 첨부한다. **스테이징-후-첨부** 흐름이다 — db 사진 업로드 API 는 '이미 존재하는
   SUBMITTED 소유 보고서'를 요구하는데 등록 폼에는 제출 전까지 report_id 가 없으므로, 선택
   사진을 세션에 스테이징(선택 즉시 photo_storage 로 검증·압축)했다가 제출로 보고서가 생성된
-  뒤 각 사진을 db.upload_near_miss_photo(new_id,...) 로 첨부한다. 업로더/카메라는 st.form 밖에
-  배치한다(폼 위젯은 제출 전까지 반응하지 않아 썸네일·삭제 상호작용 불가 — §0.4 FORM_ENTRY
-  예외). 사진은 선택 항목이라 필수 8필드·체크리스트에 미포함, 없어도 제출된다. '임시 저장'
-  버튼은 현재 앱 미지원이라 추가하지 않는다.
-- 체크리스트 진행 표시는 st.form 제약상 **렌더 시점(직전 rerun) 세션 값** 기준이다(폼 위젯은
-  제출 전까지 세션에 커밋되지 않음) — 스크립트 해킹 없이 form 계약을 지킨 적응이다.
+  뒤 각 사진을 db.upload_near_miss_photo(new_id,...) 로 첨부한다. 사진은 선택 항목이라 필수
+  8필드·체크리스트에 미포함, 없어도 제출된다. '임시 저장' 버튼은 현재 앱 미지원이라 추가하지
+  않는다.
+- 체크리스트/진행 바는 **실시간**이다(Medium 1): st.form 을 쓰지 않고 일반 키드 위젯 + st.button
+  제출을 쓰므로 입력이 즉시 세션에 반영돼 진행 표시가 실시간 갱신된다. 제출 시 전체를 재검증한다.
 
 레퍼런스 골격: ``아차사고 관리.dc.html`` isForm 블록(630~735).
 
-기능 계약(불변): 제출 검증·필수 8필드·저장 경로·성공 화면 흐름·st.form 제출 계약 전부 보존.
+기능 계약(불변): 제출 검증·필수 8필드·저장 경로·성공 화면 흐름·사진 스테이징-후-첨부 전부 보존.
 신원(신고자/사번/소속/created_by)은 위젯이 아니라 세션 사용자에서 서버측 확정(위조 방지).
 U/M/A 공유 — USER 모바일에서 체크리스트가 본문 아래로 내려간다(≤900px). db.py 무수정.
 """
@@ -93,10 +92,7 @@ _MONO = "'IBM Plex Mono', monospace"
 
 _FORM_CSS = f"""
 <style>
-/* st.form 기본 테두리 박스 제거 — §0-5 카드 금지(폼 전체를 감싸는 border+radius 금지).
-   기능(폼 배치·제출 계약)은 불변, 시각 박스만 제거한다. */
-[data-testid="stForm"] {{ border:none !important; background:transparent !important;
-  padding:0 !important; }}
+/* (st.form 을 더는 쓰지 않는다 — Medium 1: 체크리스트 실시간화를 위해 일반 위젯으로 전환) */
 /* 신고자 정보 — 카드 아님(헤어라인만). REPORTER 오버라인 + 읽기전용 신원. */
 .nm-reporter {{ display:flex; flex-wrap:wrap; align-items:baseline; gap:.4rem 1.4rem;
   padding:0 0 12px; border-bottom:1px solid {_LINE_SEC}; margin:2px 0 4px; }}
@@ -223,8 +219,8 @@ def _ingest_photo(upload, name: str) -> str | None:
 def _render_photo_stage() -> None:
     """03 · 사진 첨부(선택) — 업로더(다중)+카메라(expander) 스테이징 + 썸네일·개별 삭제.
 
-    st.form 밖에서 렌더한다(반응형 상호작용). 선택 즉시 검증·압축해 세션에 스테이징하고,
-    실제 저장은 제출 성공 후 _attach_staged_photos 가 db API 로 수행한다."""
+    반응형 위젯으로 렌더한다(선택 즉시 썸네일·삭제 반영). 선택 즉시 검증·압축해 세션에 스테이징
+    하고, 실제 저장은 제출 성공 후 _attach_staged_photos 가 db API 로 수행한다."""
     _section("03", "사진 첨부", opt="선택")
     stage = st.session_state.setdefault(_STAGE_KEY, [])
     seen = st.session_state.setdefault(_STAGE_SEEN_KEY, set())
@@ -308,7 +304,9 @@ def _field_filled(key: str, val) -> bool:
 
 
 def _checklist_html() -> str:
-    """필수항목 체크리스트 + 진행 바 — st.form 제약상 렌더 시점 세션 값 기준(직전 rerun)."""
+    """필수항목 체크리스트 + 진행 바 — 실시간(Medium 1). 폼 위젯이 아닌 일반 키드 위젯이라
+    입력 즉시 세션에 반영되고, 이 함수가 위젯 렌더 뒤(우측 열)에서 세션 값을 읽어 현재 상태를
+    그린다. 제출 시점의 전체 재검증(_validate)과는 별개의 진행 표시다."""
     items, done = [], 0
     for label, key in _REQUIRED:
         on = _field_filled(key, st.session_state.get(key))
@@ -363,56 +361,61 @@ def render(user: dict) -> None:
     with st.container(key="nm_form_wrap"):
         form_col, check_col = st.columns([2.7, 1.0], vertical_alignment="top")
         with form_col:
-            with st.form("near_miss_submit_form", clear_on_submit=False):
-                _identity_row(user)
+            # st.form 을 쓰지 않는다(Medium 1): 폼 위젯은 제출 전까지 세션에 커밋되지 않아
+            # 체크리스트/진행 바가 비실시간(전 필드 입력에도 1/8)이었다. 일반 키드 위젯 + st.button
+            # 제출로 바꿔 입력 즉시 세션에 반영되게 한다(체크리스트 실시간). 제출 계약(제출 시 전체
+            # 재검증·필수 8필드·사진 스테이징-후-첨부)은 불변이고, 키드 위젯의 세션 보존(이탈 후
+            # 재진입 시 초안 유지)도 st.form 때와 동일하다(초안 유실 특성 악화 없음).
+            _identity_row(user)
 
-                # ── 01 · 기본 정보 ──
-                _section("01", "기본 정보")
-                c1, c2 = st.columns([2, 1])  # 작업명 2 1 240 / 발생일 1 1 150
-                with c1:
-                    work_name = st.text_input("작업명 *", max_chars=120, key="nm_f_work_name",
-                                              placeholder="예: 3라인 컨베이어 벨트 점검")
-                with c2:
-                    incident_date = st.date_input("발생일 *", value=date.today(),
-                                                  format="YYYY-MM-DD", key="nm_f_incident_date")
-                cause_opts = [""] + list(db.NEAR_MISS_CAUSE_CODES)
-                cc1, cc2 = st.columns([1, 2])  # 발생원인(코드) / 발생원인 상세
-                with cc1:
-                    cause_code = st.selectbox(
-                        "발생원인 *", cause_opts, index=0, key="nm_f_cause_code", width=200,
-                        format_func=lambda c: "— 선택 —" if c == "" else f"{_CAUSE_LABELS.get(c, c)} ({c})",
-                    )
-                with cc2:
-                    cause_detail = st.text_input("발생원인 상세 *", max_chars=200,
-                                                 key="nm_f_cause_detail",
-                                                 placeholder="원인을 구체적으로")
-
-                # ── 02 · 상황 기술 ──
-                _section("02", "상황 기술")
-                incident_content = st.text_area(
-                    "사고내용 *", height=120, key="nm_f_incident_content",
-                    placeholder="무슨 일이 있었는지(아차사고 상황)를 구체적으로 적어 주세요",
+            # ── 01 · 기본 정보 ──
+            _section("01", "기본 정보")
+            c1, c2 = st.columns([2, 1])  # 작업명 2 1 240 / 발생일 1 1 150
+            with c1:
+                work_name = st.text_input("작업명 *", max_chars=120, key="nm_f_work_name",
+                                          placeholder="예: 3라인 컨베이어 벨트 점검")
+            with c2:
+                incident_date = st.date_input("발생일 *", value=date.today(),
+                                              format="YYYY-MM-DD", key="nm_f_incident_date")
+            cause_opts = [""] + list(db.NEAR_MISS_CAUSE_CODES)
+            cc1, cc2 = st.columns([1, 2])  # 발생원인(코드) / 발생원인 상세
+            with cc1:
+                cause_code = st.selectbox(
+                    "발생원인 *", cause_opts, index=0, key="nm_f_cause_code", width=200,
+                    format_func=lambda c: "— 선택 —" if c == "" else f"{_CAUSE_LABELS.get(c, c)} ({c})",
                 )
-                wc1, wc2 = st.columns(2)  # 작업내용 / 작업현장 상황설명
-                with wc1:
-                    work_content = st.text_area("작업내용 *", height=90, key="nm_f_work_content",
-                                                placeholder="어떤 작업을 하고 있었는지")
-                with wc2:
-                    site_description = st.text_area("작업현장 상황설명 *", height=90,
-                                                    key="nm_f_site_description",
-                                                    placeholder="현장 상황 · 주변 환경")
-                countermeasure = st.text_area("예방대책 *", height=90, key="nm_f_countermeasure",
-                                              placeholder="재발을 막기 위한 제안 대책")
+            with cc2:
+                cause_detail = st.text_input("발생원인 상세 *", max_chars=200,
+                                             key="nm_f_cause_detail",
+                                             placeholder="원인을 구체적으로")
 
-                # ── 하단 제출 바(임시 저장 없음 — 현재 앱 미지원, 거짓 어포던스 금지) ──
-                st.markdown(
-                    "<div class='nm-submitbar'><span class='hint'>제출 후 상태는 "
-                    "<b>제출됨(SUBMITTED)</b>이 됩니다. 사진(선택)은 아래 03에서 첨부합니다.</span></div>",
-                    unsafe_allow_html=True,
-                )
-                submitted = erp.form_submit("제안서 제출", disabled=not can_submit)
+            # ── 02 · 상황 기술 ──
+            _section("02", "상황 기술")
+            incident_content = st.text_area(
+                "사고내용 *", height=120, key="nm_f_incident_content",
+                placeholder="무슨 일이 있었는지(아차사고 상황)를 구체적으로 적어 주세요",
+            )
+            wc1, wc2 = st.columns(2)  # 작업내용 / 작업현장 상황설명
+            with wc1:
+                work_content = st.text_area("작업내용 *", height=90, key="nm_f_work_content",
+                                            placeholder="어떤 작업을 하고 있었는지")
+            with wc2:
+                site_description = st.text_area("작업현장 상황설명 *", height=90,
+                                                key="nm_f_site_description",
+                                                placeholder="현장 상황 · 주변 환경")
+            countermeasure = st.text_area("예방대책 *", height=90, key="nm_f_countermeasure",
+                                          placeholder="재발을 막기 위한 제안 대책")
 
-            # 03 · 사진 첨부 — st.form 밖(반응형 상호작용). 제출 성공 후 db API 로 첨부한다.
+            # ── 하단 제출 바(임시 저장 없음 — 현재 앱 미지원, 거짓 어포던스 금지) ──
+            st.markdown(
+                "<div class='nm-submitbar'><span class='hint'>제출 후 상태는 "
+                "<b>제출됨(SUBMITTED)</b>이 됩니다. 사진(선택)은 아래 03에서 첨부합니다.</span></div>",
+                unsafe_allow_html=True,
+            )
+            submitted = st.button("제안서 제출", type="primary", disabled=not can_submit,
+                                  key="nm_submit_btn")
+
+            # 03 · 사진 첨부 — 반응형 상호작용. 제출 성공 후 db API 로 첨부한다.
             _render_photo_stage()
         with check_col:
             st.markdown(_checklist_html(), unsafe_allow_html=True)
