@@ -77,6 +77,25 @@ def _grade_mark(grade, empty: str = "없음") -> str:
         return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
     return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
 
+
+# §1-A 상세 메타 어휘 — 평가·개선조치 상세와 통일한다(최종 QA Low): 카드성 보더 박스
+# (erp.metadata_strip) 대신 10.5px 모노 오버라인 라벨 + 13.5px 값을 박스 없이 flex 로 나열한다.
+# 작은 라벨 색은 #6b665d(캔버스 위 ≥5:1) — §A-2 대비 규칙 준수.
+_META_FAINT = "#6b665d"
+_META_MONO = "'IBM Plex Mono', monospace"
+
+
+def _meta_cell(label: str, value: str, is_html: bool = False) -> str:
+    """상세 메타 한 셀(라벨 오버라인 위 / 값 아래) — 박스 없음. ``is_html`` 이면 값을 그대로
+    쓴다(status_badge_html·grade_mark_html 등 신뢰 HTML), 아니면 escape 한 평문."""
+    v = value if is_html else escape(str(value if value not in (None, "") else "-"))
+    return (
+        "<div style='display:flex;flex-direction:column;gap:3px;min-width:0;'>"
+        f"<span style='font-size:10.5px;letter-spacing:0.08em;color:{_META_FAINT};"
+        f"font-family:{_META_MONO};'>{escape(label)}</span>"
+        f"<span style='font-size:13.5px;color:{TOKENS['ink']};line-height:1.35;'>{v}</span></div>"
+    )
+
 _DISPLAY_COLUMNS = [
     "보고번호", "작업명", "신고자", "소속", "발생일",
     "제안등급", "확정등급", "상태", "원인",
@@ -275,21 +294,26 @@ def _render_result_detail(df: pd.DataFrame) -> None:
     if status == "REJECTED" and _clean(report.get("rejection_reason")):
         banner("warn", f"반려 사유: {_clean(report.get('rejection_reason'))}")
 
-    # ── 읽기 메타 스트립(§3.2 상시 노출) + 핵심 내용(작업명·사고내용, 전폭) ──
-    #    형식 분리(§3.1): 상태=pill / 등급=grade_mark(셰브런+색텍스트) / 발생원인=평문. ──
+    # ── 읽기 메타(§1-A: 라벨 모노 오버라인 + 값, 박스 없이 flex 나열 — 평가·개선조치 상세와
+    #    통일). 형식 분리(§3.1): 상태=pill / 등급=grade_mark(셰브런+색텍스트) / 발생원인=평문. ──
     status_badge = erp.status_badge_html(
         _STATUS_LABEL.get(status, status or "-"),
         _STATUS_COLOR.get(status, TOKENS["ink-3"]),
     )
-    erp.metadata_strip([
-        ("상태", status_badge, "html"),
-        ("신고자", name_of.get(emp, emp) or "-"),
-        ("소속", dept_of.get(dept, dept) or "-"),
-        ("발생일", _clean(report.get("incident_date")) or "-"),
-        ("제안등급", _grade_mark(report.get("proposed_grade"), empty="없음"), "html"),
-        ("확정등급", _grade_mark(report.get("confirmed_grade"), empty="미정"), "html"),
-        ("발생원인", _CAUSE_LABEL.get(cause, cause) or "-"),
+    meta_cells = "".join([
+        _meta_cell("상태", status_badge, is_html=True),
+        _meta_cell("신고자", name_of.get(emp, emp) or "-"),
+        _meta_cell("소속", dept_of.get(dept, dept) or "-"),
+        _meta_cell("발생일", _clean(report.get("incident_date")) or "-"),
+        _meta_cell("제안등급", _grade_mark(report.get("proposed_grade"), empty="없음"), is_html=True),
+        _meta_cell("확정등급", _grade_mark(report.get("confirmed_grade"), empty="미정"), is_html=True),
+        _meta_cell("발생원인", _CAUSE_LABEL.get(cause, cause) or "-"),
     ])
+    st.markdown(
+        "<div style='display:flex;flex-wrap:wrap;gap:12px 26px;padding:2px 0 8px;'>"
+        f"{meta_cells}</div>",
+        unsafe_allow_html=True,
+    )
     erp.field_block("작업명", _clean(report.get("work_name")))
     erp.field_block("사고내용", _clean(report.get("incident_content")))
 
