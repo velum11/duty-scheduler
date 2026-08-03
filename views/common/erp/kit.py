@@ -266,26 +266,42 @@ def _render_widget(page_id: str, f: Field):
 
 
 def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3,
-                    submit: tuple[str, str] | None = None):
-    """§1-E 필터 줄(dc isUsers 참조) — 라벨 상단 정렬(12.5/500) + 입력 아래, cols 개/행.
+                    submit: tuple[str, str] | None = None, content_fit: bool = False):
+    """§1-E 필터 줄(dc isUsers 참조) — 라벨 상단 정렬(12.5/500) + 입력 아래.
 
-    카드 박스가 아니라 헤어라인+여백만(§0-5 카드 금지). 각 필드는 ``[라벨(위)/widget(아래)]``
-    한 열이며, 한 행에 cols 개 나열한다. 반환 ``{field.key: value}``.
+    카드 박스가 아니라 헤어라인+여백만(§0-5 카드 금지). 반환 ``{field.key: value}``.
 
-    ``submit=(label, key)`` 를 주면 필터 줄 우측에 primary 버튼([조회] 등)을 같은 블록 안에
-    인라인으로 렌더하고 ``(values, clicked)`` 튜플을 반환한다(미지정이면 dict 반환 — 기존
-    호출부 무변경). 컨트롤 폭은 ``Field.width`` 로 내용 맞춤한다."""
+    레이아웃 2모드:
+      - 기본(``content_fit=False``): 한 행에 cols 개, ``st.columns([1]*cols)`` 등폭 열(종전 동작).
+      - ``content_fit=True`` (U4·§0.6 "컨트롤 폭 내용 맞춤"): 가로 flex 로 흘려 짧은 코드값
+        셀렉트(연도·월·상태·등급 등)는 **내용 맞춤 폭**(Field.width), 검색 text 인풋만 신축한다.
+        cols 는 무시하고 좁아지면 자연 wrap. 소비 화면이 명시적으로 opt-in 할 때만 쓴다
+        (기본 False 라 기존 소비 화면은 무영향).
+
+    ``submit=(label, key)`` 를 주면 필터 줄 우측에 primary 버튼([조회] 등)을 인라인 렌더하고
+    ``(values, clicked)`` 튜플을 반환한다(미지정이면 dict 반환)."""
     values: dict = {}
     clicked = False
     with st.container(key=f"erpcond_{page_id}"):
-        for start in range(0, len(fields), cols):
-            row = fields[start:start + cols]
-            slots = st.columns([1] * cols, vertical_alignment="top")
-            for j, f in enumerate(row):
-                with slots[j]:
-                    st.markdown(f"<div class='erp-lbl'>{f.label}</div>",
-                                unsafe_allow_html=True)
-                    values[f.key] = _render_widget(page_id, f)
+        if content_fit:
+            with st.container(key=f"erpcondfit_{page_id}", horizontal=True,
+                              gap="medium", vertical_alignment="bottom"):
+                for f in fields:
+                    # text(검색)만 신축, 나머지(짧은 코드값 select·date)는 내용 맞춤 폭.
+                    cell_w = "stretch" if f.kind == "text" else "content"
+                    with st.container(key=f"erpcf_{page_id}_{f.key}", width=cell_w):
+                        st.markdown(f"<div class='erp-lbl'>{f.label}</div>",
+                                    unsafe_allow_html=True)
+                        values[f.key] = _render_widget(page_id, f)
+        else:
+            for start in range(0, len(fields), cols):
+                row = fields[start:start + cols]
+                slots = st.columns([1] * cols, vertical_alignment="top")
+                for j, f in enumerate(row):
+                    with slots[j]:
+                        st.markdown(f"<div class='erp-lbl'>{f.label}</div>",
+                                    unsafe_allow_html=True)
+                        values[f.key] = _render_widget(page_id, f)
         if submit is not None:
             slabel, skey = submit
             with st.container(key=f"erpcond_submit_{page_id}"):

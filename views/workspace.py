@@ -112,6 +112,21 @@ def run_query(page_id: str, clicked: bool, params: dict):
     return st.session_state.get(key)
 
 
+def seed_query_once(page_id: str, params: dict) -> None:
+    """세션 최초 1회 기본 조건을 심어 진입 즉시 데이터가 로드되게 한다(U3 — 빈 안내 패널 해소).
+
+    '최초 1회'만 심으며(매 rerun 자동조회가 아님), 이후 [조회]가 명시적으로 덮어쓴다. 조회만으로
+    데이터를 쓰지 않으므로(읽기 전용) 자동 '읽기' 조회는 계약 위반이 아니다. 이미 조회 이력이
+    있으면(세션 키 존재) 심지 않는다."""
+    key = f"q_{page_id}"
+    seed_key = f"q_{page_id}__seeded"
+    if st.session_state.get(seed_key):
+        return
+    st.session_state[seed_key] = True
+    if key not in st.session_state:
+        st.session_state[key] = params
+
+
 def grid_height(nrows: int) -> int:
     return min(38 * nrows + 40, 560)
 
@@ -876,14 +891,14 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         cur_dept = user["dept_code"]
         dept_field = erp.Field(
             key="d", label="부서", kind="select",
-            options=[user["dept_code"]], disabled=True,
+            options=[user["dept_code"]], disabled=True, width=220,
             format_func=lambda c: dept_names.get(c, c),
         )
     else:
         cur_dept = st.session_state.get(d_key, ALL)
         dept_field = erp.Field(
             key="d", label="부서", kind="select",
-            options=[ALL] + list(dept_names),
+            options=[ALL] + list(dept_names), width=220,
             format_func=lambda c: dept_names.get(c, c),
         )
     team_rows = teams[teams["dept_code"] == cur_dept] if cur_dept != ALL else teams.iloc[0:0]
@@ -896,31 +911,32 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         # 키트는 항등 폴백을 쓰므로 non-str 옵션에는 항상 format_func 를 명시해야
         # 한다 — 키트 자체는 손대지 않고 호출부에서 회피). str(int) 는 원래
         # selectbox 가 보여주던 "2026" 표시와 동일하다.
-        erp.Field(key="y", label="연도", kind="select", options=years, format_func=str),
+        # U4 content-fit: 짧은 코드값 select 는 내용 맞춤 폭, 검색(사번/성명) text 만 신축.
+        erp.Field(key="y", label="연도", kind="select", options=years, format_func=str, width=110),
         erp.Field(key="m", label="월", kind="select", options=list(range(1, 13)),
-                  format_func=lambda m: f"{m}월"),
+                  format_func=lambda m: f"{m}월", width=100),
         dept_field,
-        erp.Field(key="t", label="조", kind="select",
+        erp.Field(key="t", label="조", kind="select", width=150,
                   options=[ALL] + list(team_names), format_func=lambda c: team_names.get(c, c)),
         erp.Field(key="kw", label="사번 또는 성명", kind="text"),
     ]
-    # 조건 줄 우측 [조회] 인라인(§1-E, condition_panel submit). 헤어라인은 condition_panel 소유.
-    v, clicked = erp.condition_panel(page_id, fields, cols=3, submit=("조회", f"{page_id}_go"))
+    # 조건 줄 우측 [조회] 인라인(§1-E). U4: content_fit=True 로 짧은 select 는 내용 맞춤 폭·검색만 신축.
+    v, clicked = erp.condition_panel(page_id, fields, content_fit=True, submit=("조회", f"{page_id}_go"))
     if clicked:
         st.session_state[_rg_key] = st.session_state.get(_rg_key, 0) + 1
     refresh_gen = st.session_state.get(_rg_key, 0)
 
-    q = run_query(
-        page_id,
-        clicked,
-        {
-            "year": v["y"],
-            "month": v["m"],
-            "dept": v["d"],
-            "team": v["t"],
-            "keyword": str(v["kw"] or "").strip(),
-        },
-    )
+    params = {
+        "year": v["y"],
+        "month": v["m"],
+        "dept": v["d"],
+        "team": v["t"],
+        "keyword": str(v["kw"] or "").strip(),
+    }
+    # U3: 진입 시 세션 최초 1회 기본 조건(당월·범위 전체)으로 자동 조회 seed — 매 rerun 자동조회가
+    # 아니라 최초 1회만, 이후 [조회]가 명시 갱신. 빈 안내 패널 대신 즉시 데이터가 보인다.
+    seed_query_once(page_id, params)
+    q = run_query(page_id, clicked, params)
     if not q:
         ui.empty_state("조회 조건을 선택한 후 조회하세요.", head="월별 근무표")
         return
