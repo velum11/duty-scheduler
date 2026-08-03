@@ -406,19 +406,21 @@ def render(user: dict) -> None:
             countermeasure = st.text_area("예방대책 *", height=90, key="nm_f_countermeasure",
                                           placeholder="재발을 막기 위한 제안 대책")
 
-            # ── 하단 제출 바(임시 저장 없음 — 현재 앱 미지원, 거짓 어포던스 금지) ──
+            # 03 · 사진 첨부 — 본문은 01→02→03(사진)으로 자연 종결(U2). 반응형 상호작용,
+            # 제출 성공 후 db API 로 첨부한다.
+            _render_photo_stage()
+        with check_col:
+            # 체크리스트 + 그 하단에 제출(U2): [제안서 제출]을 본문 중간이 아니라 우측 CHECKLIST
+            # 패널 하단에 둔다. 좁은 폭(≤900px)에선 CHECKLIST 열이 본문(…03 사진) 아래로 wrap 되어
+            # 제출 버튼이 최하단에 온다. 제출 로직·검증·스테이징-후-첨부 계약은 불변.
+            st.markdown(_checklist_html(), unsafe_allow_html=True)
             st.markdown(
                 "<div class='nm-submitbar'><span class='hint'>제출 후 상태는 "
-                "<b>제출됨(SUBMITTED)</b>이 됩니다. 사진(선택)은 아래 03에서 첨부합니다.</span></div>",
+                "<b>제출됨(SUBMITTED)</b>이 됩니다.</span></div>",
                 unsafe_allow_html=True,
             )
             submitted = st.button("제안서 제출", type="primary", disabled=not can_submit,
-                                  key="nm_submit_btn")
-
-            # 03 · 사진 첨부 — 반응형 상호작용. 제출 성공 후 db API 로 첨부한다.
-            _render_photo_stage()
-        with check_col:
-            st.markdown(_checklist_html(), unsafe_allow_html=True)
+                                  key="nm_submit_btn", width="stretch")
 
     if not submitted:
         return

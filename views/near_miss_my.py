@@ -35,6 +35,7 @@ from modules import auth, db, photo_storage, ui
 from views import workspace
 from views.common import erp, scaffold
 from views.common.photo_paths import normalize_photo_paths
+from views.common.photos import render_photo_thumbs
 from views.master import banner
 from views.master.lifecycle import Readiness, ReadinessState
 
@@ -98,8 +99,8 @@ _MINE_CSS = f"""
 [class*="__open"] button::after {{ content:"\\02C5"; margin-left:auto; padding-left:10px; color:{_ACCENT}; font-size:17px; }}
 [class*="__open"] button {{ background:{_ACCENT_TINT} !important; }}
 [class*="__open"] button:hover {{ background:#fbe9dc !important; }}
-/* 펼친 영역 수정/취소 버튼 — 히트영역 34px */
-[class*="st-key-nm_my_editbtn_"] button, [class*="st-key-nm_my_cancel_"] button {{
+/* 펼친 영역 '내용 수정' 버튼 — 히트영역 34px (U8: 제출 취소 버튼 제거로 셀렉터 단일화) */
+[class*="st-key-nm_my_editbtn_"] button {{
   min-height:34px !important; border-radius:8px !important; font-size:13px !important; }}
 </style>
 """
@@ -409,16 +410,11 @@ def _render_my_photos(report: dict, status: str) -> None:
         unsafe_allow_html=True,
     )
     if paths:
-        cols = st.columns(3)
-        for i, path in enumerate(paths):
-            with cols[i % 3]:
-                url = db.get_near_miss_photo_url(path)
-                if url:
-                    st.image(url, width="stretch")
-                else:
-                    st.caption("사진을 불러올 수 없습니다.")
-                if editable and st.button("삭제", key=f"nm_my_photodel_{rid}_{i}", width="stretch"):
-                    _delete_my_photo(rid, path)
+        # U5 공용 헬퍼 — 소유자+SUBMITTED 면 각 셀에 삭제 버튼(delete_cb), 아니면 읽기 전용.
+        render_photo_thumbs(
+            paths, key_prefix=f"nm_my_photo_{rid}",
+            delete_cb=(lambda p: _delete_my_photo(rid, p)) if editable else None,
+        )
 
     if not editable:
         return
@@ -522,12 +518,12 @@ def _render_edit_entry(user: dict, report: dict, status: str) -> None:
 
     rid = str(report.get("id"))
     edit_key = f"nm_my_edit_open_{rid}"
-    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
-        if st.button("내용 수정", key=f"nm_my_editbtn_{rid}", type="secondary"):
-            st.session_state[edit_key] = not bool(st.session_state.get(edit_key, False))
-            st.rerun()
-        st.button("제출 취소", key=f"nm_my_cancel_{rid}", disabled=True,
-                  help="제출 취소는 후속 반영 예정입니다.", type="secondary")
+    # U8: '제출 취소' 자리표시자(항상 비활성) 버튼을 제거한다 — 상시 비활성 버튼은 거짓 어포던스다.
+    # 제출 취소 계약(SUBMITTED 회수→DRAFT/삭제 등 상태전이·권한·감사)이 확정되면 그때 파사드
+    # (예: withdraw_near_miss_report)와 함께 실 배선한다(현재는 계약 미확정이라 UI 미노출).
+    if st.button("내용 수정", key=f"nm_my_editbtn_{rid}", type="secondary"):
+        st.session_state[edit_key] = not bool(st.session_state.get(edit_key, False))
+        st.rerun()
     if st.session_state.get(edit_key):
         _render_edit_form(user, report)
 

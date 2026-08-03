@@ -275,14 +275,15 @@ def render(user: dict) -> None:
     # 않도록 별도 try 로 감싸 users 기본값으로 안전하게 되돌린다.
     dept_code = str(user.get("dept_code", "") or "")
     team_code = str(user.get("team_code", "") or "")
+    snapshot_failed = False  # U6: 편성 스냅샷 조회 실패 시 폴백 사실을 표면화(무음 금지)
     try:
         assignment = db.get_month_assignments(year, month, str(user["emp_no"]).strip())
         if not assignment.empty:
             snap = assignment.iloc[0]
             dept_code = str(snap["dept_code"]).strip() or dept_code
             team_code = str(snap["team_code"]).strip()  # NULL 조 → "" 그대로(조 없음 표시)
-    except Exception:
-        pass  # 편성 조회 실패 → users 현재 소속으로 표시 (근무 달력은 정상)
+    except Exception:  # noqa: BLE001 — 편성 조회 실패 → users 현재 소속으로 표시(근무 달력은 정상)
+        snapshot_failed = True
     dept = db.dept_name(dept_code)
     team = db.team_name(dept_code, team_code)
 
@@ -293,6 +294,8 @@ def render(user: dict) -> None:
     _month_navigation(year, month)
     groups = _group_counts(rows, work_type_df) if not rows.empty else []
     st.markdown(_header_html(user, dept, team, groups), unsafe_allow_html=True)
+    if snapshot_failed:
+        st.caption("⚠ 편성 정보를 불러오지 못해 소속을 현재 정보로 표시합니다(달력은 정상).")
     if rows.empty:
         st.caption("해당 월에 저장된 근무내역이 없습니다.")
     st.markdown(_calendar_html(rows, year, month, work_types, display_of, color_of), unsafe_allow_html=True)

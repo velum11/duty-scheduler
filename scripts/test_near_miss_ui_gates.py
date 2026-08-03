@@ -33,6 +33,8 @@ from views import near_miss_improvement as nmi  # noqa: E402
 from views import near_miss_my as nmy  # noqa: E402
 from views import near_miss_stats as nms  # noqa: E402
 from views import near_miss_submit as nmsub  # noqa: E402
+from views import near_miss_view as nmv  # noqa: E402
+from views import workspace as wsp  # noqa: E402
 
 PASS = 0
 FAIL: list[str] = []
@@ -186,7 +188,13 @@ check("작업 버튼(조치 저장·제출)은 can_work 게이트", "if can_work
 check("확인·재조치·종결은 can_review 게이트", "if can_review" in act_src)
 check("배정 저장은 can_assign 기반", "배정 저장" in act_src and "can_assign" in act_src)
 form_src = inspect.getsource(nmi._render_capa_form)
-check("배정필드는 can_assign 읽기전용", "disabled=not can_assign" in form_src)
+# U6: 배정 필드는 can_assign 이 아니거나 사용자 목록 조회 실패 시 잠근다(assign_disabled).
+# 의도(배정은 can_assign 만) 보존 + 조회 실패 시 추가 잠금.
+check("배정필드는 can_assign(+조회실패) 읽기전용",
+      "assign_disabled = (not can_assign) or users_failed" in form_src
+      and "disabled=assign_disabled" in form_src)
+check("사용자 목록 조회 실패는 배정 잠금+오류 배너로 표면화(U6)",
+      "users_failed" in form_src and 'banner("danger"' in form_src)
 check("작업필드는 can_work 읽기전용", "disabled=not can_work" in form_src)
 close_src = inspect.getsource(nmi._render_close)
 check("보고서 종결 라벨 존재", '"보고서 종결"' in close_src)
@@ -282,6 +290,31 @@ check("검토착수/보완요청/반려는 등급 무관(현행 게이트 유지
 check("케이스 전환 시 이전 등급 선택 초기화(_EVAL_ACTIVE_KEY)",
       "_EVAL_ACTIVE_KEY" in eval_src and "grade_key, None" in eval_src)
 check("등급 목록 db 파생(하드코딩 금지)", "list(db.NEAR_MISS_GRADES)" in eval_src)
+
+
+# ===== 11) 수정 라운드 3 (U2·U3·U5·U8) =====
+print("수정 라운드 3 — 등록 제출 위치·조회 seed·평가 사진 뷰어·제출취소 제거")
+sub_src = inspect.getsource(nmsub.render)
+# U2: [제안서 제출]은 본문(01→02→03 사진) 뒤 CHECKLIST 열 하단에 온다 — 소스상 사진 스테이징
+# 렌더가 제출 버튼보다 먼저 온다(본문이 03 으로 자연 종결, 제출은 우측 패널 하단).
+check("U2 제출 버튼이 사진 섹션(03) 뒤(소스 순서: _render_photo_stage < 제안서 제출 버튼)",
+      sub_src.index("_render_photo_stage(") < sub_src.index('st.button("제안서 제출"'))
+check("U2 체크리스트 뒤 제출(check_col 에 _checklist_html 후 제출 버튼)",
+      sub_src.index("_checklist_html()") < sub_src.index('st.button("제안서 제출"'))
+# U3: 조회 진입 seed(최근 90일) — 빈 안내 패널 대신 즉시 데이터.
+view_src = inspect.getsource(nmv.render)
+cond_src = inspect.getsource(nmv._collect_conditions)
+check("U3 near_miss_view 진입 seed(seed_query_once)", "seed_query_once" in view_src)
+check("U3 기간 셀렉트에 '최근 90일' 기본 옵션", '"최근 90일"' in cond_src)
+check("U3 seed_query_once 헬퍼 존재(workspace)", hasattr(wsp, "seed_query_once"))
+# U5: 평가 상세 사진 뷰어 실구현(자리표시 제거).
+eval_detail = inspect.getsource(nme._render_detail)
+check("U5 평가 상세 사진 뷰어 실구현(render_photo_thumbs)", "render_photo_thumbs" in eval_detail)
+check("U5 '뷰어 미구현' 자리표시 문구 제거", "뷰어 미구현" not in eval_detail)
+# U8: '제출 취소' 자리표시 버튼 제거.
+entry_src = inspect.getsource(nmy._render_edit_entry)
+check("U8 '제출 취소' 비활성 버튼 제거(버튼·키 부재)",
+      'st.button("제출 취소"' not in entry_src and "nm_my_cancel" not in entry_src)
 
 
 print()

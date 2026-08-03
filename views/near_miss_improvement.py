@@ -608,12 +608,15 @@ def _detail_read_html(report: dict, imp, status: str) -> str:
     return head + body_blocks
 
 
-def _user_options() -> tuple[list[str], dict]:
-    """활성 사용자 select 옵션(빈 항목 포함) + emp_no→라벨 사전."""
+def _user_options() -> tuple[list[str], dict, bool]:
+    """활성 사용자 select 옵션(빈 항목 포함) + emp_no→라벨 사전 + 조회실패 플래그(U6).
+
+    조회 실패를 빈 옵션으로 무음 처리하지 않는다 — ``load_failed=True`` 를 함께 돌려 호출부가
+    오류 배너 + 배정 필드 잠금으로 표면화하게 한다(잘못된 배정 저장 위험 차단)."""
     try:
         df = db.get_users()
-    except Exception:
-        return [""], {"": "— 선택 —"}
+    except Exception:  # noqa: BLE001 — 사용자 목록 조회 실패(배정 옵션 구성 불가).
+        return [""], {"": "— 선택 —"}, True
     labels: dict = {"": "— 선택 —"}
     options = [""]
     if df is not None and not df.empty:
@@ -626,7 +629,7 @@ def _user_options() -> tuple[list[str], dict]:
             name = str(r.get("name") or "").strip()
             labels[emp] = f"{name}({emp})" if name else emp
             options.append(emp)
-    return options, labels
+    return options, labels, False
 
 
 def _select_index(options: list[str], value) -> int:
@@ -645,8 +648,15 @@ def _render_capa_form(selected_id, imp, readiness: ReadinessState,
     if imp and confirm_status == "REJECTED" and str(imp.get("revision_note") or "").strip():
         banner("warn", f"재조치 요청 사유: {str(imp.get('revision_note')).strip()}")
 
-    options, labels = _user_options()
+    options, labels, users_failed = _user_options()
     fmt = lambda emp: labels.get(emp, emp)  # noqa: E731
+
+    # U6: 사용자 목록 조회 실패는 무음(빈 옵션)으로 삼키지 않고 오류 배너 + 배정 필드 잠금으로
+    # 표면화한다(옵션이 비어 잘못된 배정을 저장하는 위험 차단). can_assign 이어도 잠근다.
+    if users_failed:
+        banner("danger", "사용자 목록을 불러오지 못해 담당자·확인자를 배정할 수 없습니다. "
+                         "데이터 연결 상태를 확인하고 새로고침하세요.")
+    assign_disabled = (not can_assign) or users_failed
 
     if not can_assign:
         st.caption("담당자·확인자 배정은 평가자·관리자만 변경할 수 있습니다.")
@@ -655,13 +665,13 @@ def _render_capa_form(selected_id, imp, readiness: ReadinessState,
             "조치 담당자", options,
             index=_select_index(options, imp.get("assignee_emp_no") if imp else ""),
             format_func=fmt, key=f"nm_impr_assignee_{selected_id}",
-            disabled=not can_assign, width=240,
+            disabled=assign_disabled, width=240,
         )
         confirmer = st.selectbox(
             "조치 확인자", options,
             index=_select_index(options, imp.get("designated_confirmer_emp_no") if imp else ""),
             format_func=fmt, key=f"nm_impr_confirmer_{selected_id}",
-            disabled=not can_assign, width=240,
+            disabled=assign_disabled, width=240,
         )
         due_raw = str(imp.get("due_date") or "").strip() if imp else ""
         try:

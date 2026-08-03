@@ -33,6 +33,8 @@ import streamlit as st
 
 from modules import auth, db
 from views.common import erp, scaffold
+from views.common.photo_paths import normalize_photo_paths
+from views.common.photos import render_photo_thumbs
 from views.master import (
     DraftState,
     Readiness,
@@ -479,13 +481,13 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
         evaluate = st.button("평가확정", key=f"nm_act_eval_{selected_id}",
                              disabled=eval_disabled, help=eval_help, type="primary")
 
-    # ── 참조성 첨부(사진)만 접힘 — 판단 컨텍스트(서술)는 위에 상시 노출(뷰어 미구현 자리표시). ──
-    photos = report.get("photo_paths") or []
-    with st.expander(f"첨부 사진 ({len(photos)}건)", expanded=False):
-        st.caption(
-            f"첨부 사진 {len(photos)}건 (뷰어 미구현 — 자리표시)" if photos
-            else "첨부된 사진이 없습니다."
-        )
+    # ── 참조성 첨부(사진) — U5: 자리표시자 제거, 서명 URL 썸네일 뷰어 실구현(읽기 전용). ──
+    photos = normalize_photo_paths(report.get("photo_paths"))
+    with st.expander(f"첨부 사진 ({len(photos)}건)", expanded=bool(photos)):
+        if photos:
+            render_photo_thumbs(photos, key_prefix=f"nmeval_thumb_{selected_id}")
+        else:
+            st.caption("첨부된 사진이 없습니다.")
 
     grade = st.session_state.get(grade_key, cur_grade)
     if review:

@@ -27,6 +27,7 @@ from modules import db, ui
 from views import near_miss_pdf, workspace
 from views.common import erp
 from views.common.photo_paths import normalize_photo_paths
+from views.common.photos import render_photo_thumbs
 from views.master import TOKENS, banner, sheet_head
 from views.master.lifecycle import Readiness, ReadinessState
 
@@ -157,8 +158,11 @@ def render(user: dict) -> None:
         # 필터/조회로 결과 집합이 바뀌면 이전 선택을 해제한다(stale 상세 방지).
         st.session_state.pop(_SEL_KEY, None)
 
+    # U3: 진입 시 세션 최초 1회 기본 조건(최근 90일)으로 자동 조회 seed — 빈 안내 패널 대신 즉시
+    # 데이터가 보인다. 최초 1회만이며 이후 [조회]가 명시 갱신한다(매 rerun 자동조회 아님).
+    workspace.seed_query_once(_PAGE_ID, q)
     saved = workspace.run_query(_PAGE_ID, clicked, q)
-    if saved is None:
+    if saved is None:  # seed 이후엔 도달하지 않음(방어적 유지)
         ui.empty_state("조회 조건을 지정하고 [조회]를 눌러 아차사고 보고서를 확인하세요.", head="아차사고 조회")
         return
 
@@ -268,12 +272,17 @@ def _render_result_detail(df: pd.DataFrame) -> None:
     report = match.iloc[0].to_dict()
 
     # 신고자 이름·부서명 라벨링(부가 정보) — 조회 실패로 상세 전체를 막지 않고 코드로 폴백한다.
+    # U6: 폴백을 무음으로 삼키지 않고 인라인 경고로 표면화한다(코드값 폴백은 유지).
+    meta_load_failed = False
     try:
         users = db.get_users()
         depts = db.get_departments()
-    except Exception:
+    except Exception:  # noqa: BLE001 — 부가 라벨 조회 실패(상세 본문은 계속 렌더).
         users = pd.DataFrame()
         depts = pd.DataFrame()
+        meta_load_failed = True
+    if meta_load_failed:
+        banner("warn", "일부 표시 정보(신고자·부서명)를 불러오지 못했습니다. 코드값으로 표시합니다.")
     name_of = {str(r["emp_no"]): str(r["name"]) for _, r in users.iterrows()} if not users.empty else {}
     dept_of = {str(r["dept_code"]): str(r["dept_name"]) for _, r in depts.iterrows()} if not depts.empty else {}
 
@@ -380,14 +389,7 @@ def _render_view_photos(photo_paths) -> None:
     if not paths:
         return
     _photo_overline(len(paths))
-    cols = st.columns(3)
-    for i, path in enumerate(paths):
-        with cols[i % 3]:
-            url = db.get_near_miss_photo_url(path)
-            if url:
-                st.image(url, width="stretch")
-            else:
-                st.caption("사진을 불러올 수 없습니다.")
+    render_photo_thumbs(paths, key_prefix="nmv_thumb")  # U5 공용 헬퍼(읽기 전용)
 
 
 def _all_dept_names() -> dict:
@@ -431,7 +433,8 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
     필드 key 는 기존 위젯 key suffix 와 동일하게 유지해 세션 상태를 보존한다
     (period_on/from/to/dept/grade/status/cause). 기간 미지정 시 날짜 필드는 비활성.
     """
-    # 기간 지정 = 체크박스 대신 select(전체/기간 지정) — 정돈된 필터 어휘(피드백 #3).
+    # 기간 select — 기본 '최근 90일'(U3: 진입 즉시 bounded 조회로 '조회를 누르세요' 빈 패널 해소).
+    # '기간 지정' 선택 시에만 날짜 2필드를 렌더하고, '전체'는 전 기간(date 파라미터 생략).
     period_on = st.session_state.get(f"{_PAGE_ID}_period_mode") == "기간 지정"
 
     if scope == "scoped":
@@ -453,7 +456,7 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
     # 5필드는 한 줄에 우선 배치(flex-wrap — 좁아지면 자연 wrap).
     fields: list[erp.Field] = [
         erp.Field(key="period_mode", label="기간", kind="select", width=150,
-                  options=["전체", "기간 지정"]),
+                  options=["최근 90일", "전체", "기간 지정"]),
     ]
     if period_on:
         fields += [
@@ -474,19 +477,31 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
                   options=[workspace.ALL] + list(db.NEAR_MISS_CAUSE_CODES),
                   format_func=lambda v: _CAUSE_LABEL.get(v, v) if v != workspace.ALL else v),
     ]
-    # [조회]를 필터 줄 우측에 인라인(오렌지)으로 — 별도 박스 분리 제거(피드백 #3).
-    v, clicked = erp.condition_panel(_PAGE_ID, fields, cols=5,
+    # [조회]를 필터 줄 우측에 인라인(오렌지)으로. U4: content_fit=True 로 짧은 코드값 select 는
+    # 내용 맞춤 폭(값 길이 비례)으로 흘리고 좁아지면 자연 wrap(§0.6).
+    v, clicked = erp.condition_panel(_PAGE_ID, fields, content_fit=True,
                                      submit=("조회", f"{_PAGE_ID}_go"))
 
-    on = v["period_mode"] == "기간 지정"
+    mode = v["period_mode"]
+    if mode == "최근 90일":
+        date_from = (date.today() - timedelta(days=90)).isoformat()
+        date_to = date.today().isoformat()
+        period_active = True
+    elif mode == "기간 지정":
+        date_from = v["from"].isoformat() if "from" in v else ""
+        date_to = v["to"].isoformat() if "to" in v else ""
+        period_active = True
+    else:  # 전체 — 전 기간(date 파라미터 생략)
+        date_from = date_to = ""
+        period_active = False
     q = {
         "dept": v["dept"],
         "grade": v["grade"],
         "status": v["status"],
         "cause": v["cause"],
-        "period_on": on,
-        "date_from": v["from"].isoformat() if on and "from" in v else "",
-        "date_to": v["to"].isoformat() if on and "to" in v else "",
+        "period_on": period_active,
+        "date_from": date_from,
+        "date_to": date_to,
     }
     return q, clicked
 
