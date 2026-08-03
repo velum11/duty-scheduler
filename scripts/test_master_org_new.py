@@ -279,8 +279,15 @@ db.save_org_departments_report = lambda merged: _sr.BatchWriteResult(
     saved_keys=["PET"], failed_keys=["MTRL"], error="주입 실패", retryable=True)
 try:
     def _partial_probe():
+        import streamlit as st
         from modules import db as adb
         from views import master_org as mo
+        if st.session_state.get("_pp_done"):
+            # reconcile 후 st.rerun() 재진입: 시트 배너 슬롯이 하는 것처럼 세션 원장을
+            # 소비·표시한다(성공 배너가 rerun 으로 유실되지 않음을 재현).
+            mo._render_saved_ledger(mo._OD)
+            return
+        st.session_state["_pp_done"] = True
         grp = str(adb.get_org_departments().iloc[0]["group_code"])
         grid = mo.build_dept_rows(adb.get_org_departments(group_code=grp)).copy()
         grid["_removed"] = ""
@@ -292,6 +299,10 @@ try:
     check("부분성공 원장에 실패 표기(§22)", "실패" in pp_body)
     check("부분성공은 완전성공으로 단정하지 않음(성공 flash 없음)",
           master_org._OD.flash_key not in at_pp.session_state)
+    check("부분성공 원장을 세션에 보관(reconcile 후 rerun 표시용) 후 소비",
+          master_org._OD.key("save_ledger") not in at_pp.session_state)
+    check("부분성공이 성공분(PET) baseline reconcile — baseline 존재",
+          master_org._OD.key("baseline") in at_pp.session_state)
 finally:
     db.save_org_departments_report = _orig_rep
 
@@ -499,6 +510,135 @@ check("취소: 미저장 draft 보존(편집 유지)",
       rows_c is not None and "임시편집ABC" in set(rows_c["코드명"].astype(str)))
 check("취소: 원 상위(A) 유지 — 저장·오귀속 발생하지 않음",
       lg_c is not None and str(lg_c) == str(atc.session_state["_gA"]))
+
+
+# ===== 8) 부분성공 reconcile 계약(§22, M6) — 범위별 성공만/혼합/전실패 + unknown 미reconcile + 범위격리 =====
+# 성공 자연키 행만 baseline·초안에 reconcile(신규→기존 전환·clean), 실패/미저장 행은
+# draft·dirty 유지, unknown 은 일절 reconcile 하지 않는다. 한 범위 저장이 다른 범위
+# 상태를 건드리지 않음(격리)을 함께 검증한다.
+print("부분성공 reconcile 계약(M6) — 신규행 전환·baseline·dirty 유지·범위격리·unknown 미reconcile")
+
+
+def _reconcile_probe():
+    import pandas as pd
+    import streamlit as st
+    from views import master_org as mo
+
+    class _Res:  # 최소 PersistResult 대체(succeeded/failed/unknown 만 참조).
+        def __init__(self, succeeded=(), failed=(), unknown=False):
+            self.succeeded_keys = list(succeeded)
+            self.failed_keys = list(failed)
+            self.unknown = unknown
+
+    out: dict = {}
+
+    def _clean(prefix):
+        for k in [k for k in list(st.session_state.keys()) if k.startswith(prefix + ":")]:
+            st.session_state.pop(k, None)
+
+    def _grp_live(newg_state="new"):
+        return pd.DataFrame([
+            {"_row_id": "e:PET", "_row_state": "existing", "_sel": False, "코드": "PET",
+             "코드명": "펫새이름", "순서": "1", "비고": "", "사용": True},        # 기존 변경
+            {"_row_id": "n:1", "_row_state": newg_state, "_sel": True, "코드": "NEWG",
+             "코드명": "신규그룹", "순서": "2", "비고": "", "사용": True},         # 신규
+        ])[mo._GROUP_ROW_COLS]
+
+    def _grp_baseline():
+        orig = pd.DataFrame([
+            {"_row_id": "e:PET", "_row_state": "existing", "_sel": False, "코드": "PET",
+             "코드명": "펫옛이름", "순서": "1", "비고": "", "사용": True},  # baseline=옛 이름(변경 유발)
+        ])[mo._GROUP_ROW_COLS]
+        mo._set_baseline(mo._GRP, orig, mo._GROUP_COLS)
+
+    # (a) 그룹 전체 성공: 신규 NEWG → 기존 e:NEWG 전환, 전부 clean.
+    _clean("org_group"); _grp_baseline()
+    mo._reconcile_org_partial(mo._GRP, _grp_live(), _Res(succeeded=["PET", "NEWG"]), mo._GROUP_COLS)
+    rows = mo._GRP.get_rows()
+    newg = rows[rows["코드"] == "NEWG"].iloc[0]
+    out["a_newg_state"] = str(newg["_row_state"])
+    out["a_newg_rid"] = str(newg["_row_id"])
+    out["a_dirty"] = tuple(mo._dirty_counts(mo._GRP, rows, mo._GROUP_COLS))
+
+    # (b) 그룹 혼합: PET 성공(clean)·NEWG 실패(draft 유지, 여전히 신규/dirty).
+    _clean("org_group"); _grp_baseline()
+    mo._reconcile_org_partial(mo._GRP, _grp_live(), _Res(succeeded=["PET"], failed=["NEWG"]), mo._GROUP_COLS)
+    rows = mo._GRP.get_rows()
+    newg = rows[rows["코드"] == "NEWG"].iloc[0]
+    out["b_newg_state"] = str(newg["_row_state"])
+    out["b_newg_rid"] = str(newg["_row_id"])
+    out["b_dirty"] = tuple(mo._dirty_counts(mo._GRP, rows, mo._GROUP_COLS))
+
+    # (c) 그룹 전실패: 아무 것도 reconcile 안 함(신규·변경 모두 dirty 유지).
+    _clean("org_group"); _grp_baseline()
+    mo._reconcile_org_partial(mo._GRP, _grp_live(), _Res(succeeded=[], failed=["PET", "NEWG"]), mo._GROUP_COLS)
+    out["c_dirty"] = tuple(mo._dirty_counts(mo._GRP, _grp_live(), mo._GROUP_COLS))
+    out["c_newg_state"] = str(_grp_live().iloc[1]["_row_state"])
+
+    # (d) 조(복합키) 혼합: owner=PET. 신규 A → e:PET|A 전환(성공), 기존 e:PET|B 실패(유지).
+    _clean("org_unit")
+    ou_orig = pd.DataFrame([
+        {"_row_id": "e:PET|B", "_row_state": "existing", "_sel": False, "코드": "B",
+         "명칭": "B조옛", "유형": "교대", "표시순서": "2", "비고": "", "사용": True},
+    ])[mo._UNIT_ROW_COLS]
+    mo._set_baseline(mo._OU, ou_orig, mo._UNIT_COLS)
+    ou_live = pd.DataFrame([
+        {"_row_id": "e:PET|B", "_row_state": "existing", "_sel": False, "코드": "B",
+         "명칭": "B조새", "유형": "교대", "표시순서": "2", "비고": "", "사용": True},   # 변경(실패)
+        {"_row_id": "n:1", "_row_state": "new", "_sel": True, "코드": "A",
+         "명칭": "A조", "유형": "교대", "표시순서": "1", "비고": "", "사용": True},      # 신규(성공)
+    ])[mo._UNIT_ROW_COLS]
+    mo._reconcile_org_partial(mo._OU, ou_live, _Res(succeeded=[("PET", "A")], failed=[("PET", "B")]),
+                              mo._UNIT_COLS, owner="PET")
+    urows = mo._OU.get_rows()
+    arow = urows[urows["코드"] == "A"].iloc[0]
+    brow = urows[urows["코드"] == "B"].iloc[0]
+    out["d_a_rid"] = str(arow["_row_id"])
+    out["d_a_state"] = str(arow["_row_state"])
+    out["d_b_state"] = str(brow["_row_state"])
+    out["d_dirty"] = tuple(mo._dirty_counts(mo._OU, urows, mo._UNIT_COLS))
+
+    # (e) 범위 격리: _GRP reconcile 이 _OU rows/baseline 을 건드리지 않는다.
+    _clean("org_group"); _clean("org_unit")
+    mo._OU.set_rows(ou_live.copy())
+    mo._set_baseline(mo._OU, ou_orig, mo._UNIT_COLS)
+    ou_nonce_before = mo._OU.nonce()
+    ou_rows_before = mo._OU.get_rows().to_dict("records")
+    _grp_baseline()
+    mo._reconcile_org_partial(mo._GRP, _grp_live(), _Res(succeeded=["PET", "NEWG"]), mo._GROUP_COLS)
+    out["e_ou_rows_same"] = (mo._OU.get_rows().to_dict("records") == ou_rows_before)
+    out["e_ou_nonce_same"] = (mo._OU.nonce() == ou_nonce_before)
+
+    st.session_state["_recon_out"] = out
+
+
+at_r = AppTest.from_function(_reconcile_probe, default_timeout=45).run()
+check("reconcile probe 예외 없음", not at_r.exception)
+_ro = at_r.session_state["_recon_out"] if "_recon_out" in at_r.session_state else {}
+# (a) 전체 성공
+check("(a) 신규 성공행 → 기존 전환(_row_state=existing)", _ro.get("a_newg_state") == "existing")
+check("(a) 신규 성공행 rid = e:{group_code}", _ro.get("a_newg_rid") == "e:NEWG")
+check("(a) 전체 성공 후 dirty 0(신규·변경 모두 clean)", _ro.get("a_dirty") == (0, 0))
+# (b) 혼합
+check("(b) 실패 신규행은 draft 유지(_row_state=new)", _ro.get("b_newg_state") == "new")
+check("(b) 실패 신규행 rid 미전환(n:1 유지)", _ro.get("b_newg_rid") == "n:1")
+check("(b) 성공(PET)만 clean·실패(NEWG)만 dirty → (신규1, 변경0)", _ro.get("b_dirty") == (1, 0))
+# (c) 전실패
+check("(c) 전실패는 아무 것도 전환 안 함(NEWG 여전히 new)", _ro.get("c_newg_state") == "new")
+check("(c) 전실패 후 dirty 유지 (신규1, 변경1)", _ro.get("c_dirty") == (1, 1))
+# (d) 복합키(조)
+check("(d) 복합키 신규 성공행 → e:{dept}|{team} 전환", _ro.get("d_a_rid") == "e:PET|A")
+check("(d) 복합키 신규 성공행 existing 전환", _ro.get("d_a_state") == "existing")
+check("(d) 복합키 실패행(B)은 draft 유지", _ro.get("d_b_state") == "existing" and _ro.get("d_dirty") == (0, 1))
+# (e) 범위 격리
+check("(e) _GRP reconcile 이 _OU rows 를 건드리지 않음", _ro.get("e_ou_rows_same") is True)
+check("(e) _GRP reconcile 이 _OU nonce 를 건드리지 않음", _ro.get("e_ou_nonce_same") is True)
+
+# (f) unknown 은 controller 가 reconcile 하지 않고 원장만 표기(소스 계약).
+check("(f) 3시트 save 가 partial 에서만 reconcile 호출(3건)", src.count("_reconcile_org_partial(_") == 3)
+check("(f) 3시트 save 가 unknown 분기에서 ledger_banner 만(재조회 필요)",
+      src.count('if outcome.status == "unknown":') == 3)
+check("(f) 성공분만 save_ledger 세션 보관 후 rerun(3건)", src.count('.key("save_ledger")] = outcome.result') == 3)
 
 
 print()

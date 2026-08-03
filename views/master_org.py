@@ -606,6 +606,7 @@ def _render_group_sheet(params: dict, readiness: ReadinessState, sel_group: str)
             ratios=_ORG_BAR_RATIOS,
         )
     with banner_slot:
+        _render_saved_ledger(_GRP)  # 직전 partial 저장 원장(성공/실패 칩) 1회 표시
         if pending:
             gate = discard_confirm_bar(_GRP)
             if gate == "discard":
@@ -694,7 +695,14 @@ def _save_groups(grid_df: pd.DataFrame, q: dict) -> None:
     if outcome.status in ("invalid", "failed"):
         _error_banner("그룹을 저장하지 못했습니다.", outcome.errors)
         return
-    if outcome.status in ("partial", "unknown"):
+    if outcome.status == "partial":
+        # §22: 성공 자연키만 reconcile(초안 clean·신규→기존), 실패분 draft 유지. 원장은
+        # 세션에 보관해 rerun 후 시트 배너에서 표시한다.
+        _reconcile_org_partial(_GRP, live, outcome.result, _GROUP_COLS)
+        st.session_state[_GRP.key("save_ledger")] = outcome.result
+        st.rerun()
+    if outcome.status == "unknown":
+        # 결과 불명 — reconcile 하지 않고(재조회 필요) 원장만 표기한다.
         ledger_banner(outcome.result)
         return
     _load_groups(q)
@@ -857,6 +865,7 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
             can_write=can_write, write_disabled_reason=reason, ratios=_ORG_BAR_RATIOS,
         )
     with banner_slot:
+        _render_saved_ledger(_OD)  # 직전 partial 저장 원장(성공/실패 칩) 1회 표시
         if pending:
             gate = discard_confirm_bar(_OD)
             if gate == "discard":
@@ -950,8 +959,13 @@ def _save_depts(grid_df: pd.DataFrame, q: dict, group_code: str) -> None:
     if outcome.status in ("invalid", "failed"):
         _error_banner("부서를 저장하지 못했습니다.", outcome.errors)
         return
-    if outcome.status in ("partial", "unknown"):
-        ledger_banner(outcome.result)
+    if outcome.status == "partial":
+        # §22: 성공 부서코드만 reconcile(신규→기존·baseline clean), 실패분 draft 유지.
+        _reconcile_org_partial(_OD, live, outcome.result, _DEPT_COLS)
+        st.session_state[_OD.key("save_ledger")] = outcome.result
+        st.rerun()
+    if outcome.status == "unknown":
+        ledger_banner(outcome.result)  # 재조회 필요 — reconcile 금지
         return
     _load_depts({**q, "group": owner})  # 방금 저장한(귀속) 그룹으로 재적재
     st.session_state.pop(_OU.query_key, None)  # 부서명 변경을 조 컨텍스트에 반영
@@ -1133,6 +1147,7 @@ def _render_unit_sheet(params: dict, readiness: ReadinessState, dept_code: str, 
             can_write=can_write, write_disabled_reason=reason, ratios=_ORG_BAR_RATIOS,
         )
     with banner_slot:
+        _render_saved_ledger(_OU)  # 직전 partial 저장 원장(성공/실패 칩) 1회 표시
         if pending:
             gate = discard_confirm_bar(_OU)
             if gate == "discard":
@@ -1268,8 +1283,14 @@ def _save_units(grid_df, dept_code: str) -> None:
     if outcome.status in ("invalid", "failed"):
         _error_banner("조를 저장하지 못했습니다.", outcome.errors)
         return
-    if outcome.status in ("partial", "unknown"):
-        ledger_banner(outcome.result)
+    if outcome.status == "partial":
+        # §22: 성공 (부서,조)키만 reconcile(신규→e:{dept}|{team}·baseline clean), 실패분 유지.
+        # 복합키라 적재 시점 소속 부서(owner)를 넘겨 성공 키를 정확히 매칭한다.
+        _reconcile_org_partial(_OU, live, outcome.result, _UNIT_COLS, owner=owner)
+        st.session_state[_OU.key("save_ledger")] = outcome.result
+        st.rerun()
+    if outcome.status == "unknown":
+        ledger_banner(outcome.result)  # 재조회 필요 — reconcile 금지
         return
     _load_units(owner)  # 방금 저장한(귀속) 부서로 재적재
     _OU.set_flash("success", f"조를 저장했습니다. (신규 {counts.get('create', 0)} · 수정 {counts.get('update', 0)})")
@@ -1465,6 +1486,68 @@ def _dirty_counts(state: DraftState, live: pd.DataFrame, data_cols: list[str]) -
         elif rid in base and vals != base[rid]:
             changed_cnt += 1
     return new_cnt, changed_cnt
+
+
+def _reconcile_org_partial(
+    state: DraftState, live: pd.DataFrame, result, data_cols: list[str], *, owner=None,
+) -> None:
+    """부분 성공(partial) 후 **성공 자연키 행만** baseline·초안에 reconcile 한다(§22).
+
+    users 패턴(신규행 e:{key} 전환 + baseline 갱신)을 조직 3시트로 이식한 것이다.
+    work_types 패턴은 신규행 전환이 불완전(_row_state==existing 만 baseline 갱신)해
+    참조만 했다.
+
+    - 성공 행: 신규→기존 전환(``_row_id='e:{code}'`` / 조는 ``'e:{dept}|{team}'``),
+      선택 해제, baseline 을 현재값으로 갱신(``_set_baseline``/``_dirty_counts`` 와 동일
+      튜플 포맷)해 더 이상 dirty 로 보이지 않게 한다.
+    - 실패·미저장 행: draft·dirty·셀 값을 **그대로 유지**(건드리지 않음) — 재시도 대상.
+    - **unknown(재조회 필요)은 이 함수를 호출하지 않는다**(reconcile 금지, 호출부 책임).
+
+    이 함수는 인자 ``state`` 범위의 rows/baseline/nonce **만** 수정한다 — 다른 범위
+    (_GRP/_OD/_OU)의 상태를 일절 건드리지 않아 한 범위 저장이 다른 범위의 dirty/적재를
+    새게 하지 않는다. 자연키: 그룹=group_code, 부서=dept_code, 조=(dept_code, team_code).
+    조는 시트에 부서코드가 없으므로 적재 시점 소속 부서(``owner``)로 복합키를 만든다.
+    """
+    if live is None or getattr(live, "empty", True):
+        return
+    row_cols = ["_row_id", "_row_state", "_sel", *data_cols]
+    composite = owner is not None
+    owner_str = str(owner).strip() if composite else ""
+    saved = set()
+    for k in (getattr(result, "succeeded_keys", None) or []):
+        if isinstance(k, (tuple, list)):
+            saved.add(tuple(str(x).strip() for x in k))
+        else:
+            saved.add(str(k).strip())
+    frame = live[row_cols].copy().reset_index(drop=True)
+    baseline = dict(st.session_state.get(state.key("baseline")) or {})
+    for idx, r in frame.iterrows():
+        code = str(r.get("코드") or "").strip()  # 세 시트 모두 코드 컬럼명은 "코드"
+        if not code:
+            continue
+        key = (owner_str, code) if composite else code
+        if key not in saved:
+            continue  # 실패/미저장 행 — draft·dirty 유지(건드리지 않음)
+        rid = str(r["_row_id"])
+        if str(r["_row_state"]) != "existing":
+            rid = f"e:{owner_str}|{code}" if composite else f"e:{code}"
+            frame.at[idx, "_row_id"] = rid
+            frame.at[idx, "_row_state"] = "existing"
+            frame.at[idx, "_sel"] = False
+        baseline[rid] = tuple(str(r.get(c, "")) for c in data_cols)
+    state.set_rows(frame[row_cols].reset_index(drop=True))
+    st.session_state[state.key("baseline")] = baseline
+    state.bump_nonce()  # 리마운트로 reconcile 된 행(성공=clean·기존, 실패=draft)을 반영
+
+
+def _render_saved_ledger(state: DraftState) -> None:
+    """직전 부분성공 저장의 원장(성공/실패 칩)을 1회 표시한다(reconcile 후 rerun 경로).
+
+    partial 저장은 성공 행을 reconcile 하고 rerun 하므로, 원장은 세션에 보관해 다음
+    런의 시트 배너 슬롯에서 소비한다(성공 배너가 rerun 으로 유실되지 않게 함)."""
+    result = st.session_state.pop(state.key("save_ledger"), None)
+    if result is not None:
+        ledger_banner(result)
 
 
 def _sync_rows(state: DraftState, grid_df: pd.DataFrame, row_cols: list[str]) -> bool:
