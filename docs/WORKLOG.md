@@ -2,6 +2,12 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-08-03 · [인계] 플레이북 개편 대기 — 평가·수정 3라운드 완료 저장
+
+- **화면별 3축 평가 완료**(Codex STATIC + visual-qa 실렌더, 양측 종합 7.7/10 수렴) → Codex 상의로 수정 선별 → 3라운드 반영 완료: H1 공용 그리드 14.5px(`506ffc5`)·H2 CAUSE 라벨(`4de2936`)·M6 조직 부분성공 reconcile(`ffaccd6`)·U1~U8(사이드바 상단 여백·제출 버튼→체크리스트 하단(사용자 지시)·조회/월간 진입 자동조회 seed·셀렉트 content-fit·평가 사진 뷰어·무음폴백 3곳 표면화·대시보드 KPI 제목 직후·제출취소 제거 — `ef29b3a`·`282c969`·`3be628a`). Medium 2건은 앞서 `a85ff8c`. 전 커밋 테스트 그린·push 완료.
+- **대기 상태**: 사용자가 글로벌·프로젝트 PLAYBOOK 및 서브에이전트 역할 개편 중(작업 트리의 `.claude/agents/*` 7종 수정+`code-review.md` 신설·skills 3종·`.orca/PLAYBOOK.md`·CLAUDE.md(8종 체계)·hooks·settings — 전부 사용자 소유 미커밋, 미접촉 보존). **다음 지시까지 신규 dispatch 중단.**
+- 재개 시: 새 PLAYBOOK 재독 → 역할 매핑 갱신(code-review 내장 리뷰 축 포함) → 잔여 결정(실브라우저 sign-off·`feature/supabase-crud` 병합·Codex DEFER 목록은 BACKLOG 참조). 8501=supabase 최종 상태 서빙 중.
+
 ## 2026-07-31 · 아차사고 사진 첨부 + A4 PDF 출력 기능 신설 (병렬 2워커 + Codex 통합감사)
 
 - **사진 첨부**(사용자 요구: 폰 촬영/선택·PC 업로드·3장·압축): data-contract가 저장 계약 구현(`60e42eb` — modules/photo_storage.py 검증(확장자+매직바이트·≤10MB)/압축(최대변 1600·JPEG ≤500KB)/경로 near-miss/{report_id}/{uuid} 주입불가 + db 파사드 upload/get_url(signed URL)/delete 소유자+SUBMITTED 게이트, 테스트 58), **사용자 승인으로 live 버킷 `near-miss-photos`(비공개) 생성 + guarded 스모크 왕복 성공**(보호 플래그 3종, 기존 데이터 미접촉). ui-feature가 UI 연결(`fa69497` — 등록 폼 스테이징-후-첨부(결정게이트 승인)·즉시 검증·썸네일/삭제·3장 차단, 조회/내아차사고 상세 서명URL 썸네일·소유자 편집, 1366/390 왕복 실측).
