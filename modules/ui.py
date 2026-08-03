@@ -237,7 +237,10 @@ section[data-testid="stSidebar"] > div:first-child { width: var(--sb-w) !importa
 /* 기존 «/» 접기 토글 제거 — 접힘(66px 레일)/펼침은 아이콘 버튼 + st.session_state.sb_collapsed 로 제어 */
 div[data-testid="stSidebarHeader"] { display: none !important; }
 div[data-testid="stSidebarContent"] {
-  padding: 0 !important; display: flex; flex-direction: column; height: 100%;
+  /* 상단 여백(U1): 브랜드 블록이 화면 최상단 y=0 에 붙지 않도록 숨 쉴 공간을 준다. 사이드바
+     배경(--sb-col-bg)과 브랜드 배경(--sb-brand-bg)이 동일(#1a1917)이라 이 여백은 이음매 없이
+     채워진다. 펼침/접힘 레일 모두 같은 컨테이너라 함께 보정된다. */
+  padding: 16px 0 0 0 !important; display: flex; flex-direction: column; height: 100%;
 }
 /* 사용자 카드를 맨 아래 고정하기 위한 세로 flex 체인
    (UserContent > 무명 래퍼 > stVerticalBlock > stLayoutWrapper > 컨테이너 구조) */

@@ -84,8 +84,11 @@ def render(user: dict) -> None:
         desc="오늘 근무 현황과 근무표 등록 현황을 확인합니다.",
         breadcrumb="홈 › 대시보드",
     )
-    the_date = _date_nav_bar()
     _inject_board_style()
+    # U7: 지표(KPI) 스트립을 제목·설명 바로 아래로 이동한다 — 값은 데이터에서 파생하므로 슬롯을
+    # 먼저(제목 직후) 확보하고, 날짜 내비는 그 아래에 둔다(값은 준비 후 deferred 로 채움).
+    kpi_slot = st.container()
+    the_date = _date_nav_bar()
 
     # 범위 결정(fail-closed): ADMIN=전체, MANAGER=자기 부서, 부서 미확정 MANAGER=차단.
     scope, manager_dept = _scope_for(user)
@@ -120,8 +123,9 @@ def render(user: dict) -> None:
         st.error("근무 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # §1-F 지표 스트립(제목 바로 아래) — 당일 근무·주간·야간·휴무, 좌측 2px 보더 + 26px 모노.
-    st.markdown(_kpi_strip_html(totals), unsafe_allow_html=True)
+    # §1-F 지표 스트립(제목 바로 아래 슬롯에 deferred 로 채움, U7) — 당일 근무·주간·야간·휴무.
+    with kpi_slot:
+        st.markdown(_kpi_strip_html(totals), unsafe_allow_html=True)
 
     if not board:
         ui.empty_state(
