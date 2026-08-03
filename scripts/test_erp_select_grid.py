@@ -8,7 +8,7 @@
   5) 자연키 반환(_selected_key)·pre-select(selected_key→initialState, 사라지면 해제).
   6) 상세 순수 표시 primitive(status_badge_html/meta_col_html/field_block) escape·도메인무지.
 
-실행: PYTHONUTF8=1 C:\\dev\\duty-scheduler\\.venv\\Scripts\\python.exe scripts/test_erp_select_grid.py
+실행: PYTHONUTF8=1 C:\\dev\\workops\\.venv\\Scripts\\python.exe scripts/test_erp_select_grid.py
 """
 from __future__ import annotations
 

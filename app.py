@@ -1,4 +1,4 @@
-"""생산 근무표 관리 — 진입점 (로그인 게이트 + 역할별 App Shell + 화면 라우팅).
+"""WorkOps(구 생산 근무표 관리) — 진입점 (로그인 게이트 + 역할별 App Shell + 화면 라우팅).
 
 - ADMIN/MANAGER: 좌측 2단 메뉴 App Shell
 - USER: 상단 정보 + 반응형 3개 메뉴 App Shell

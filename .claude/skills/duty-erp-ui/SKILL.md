@@ -1,6 +1,6 @@
 ---
 name: duty-erp-ui
-description: Build, refine, or review duty-scheduler Streamlit ERP screens while preserving domain behavior, dense data-entry usability, and the repository's current screen contracts. Use for any visual, layout, interaction, component, or styling change in views.
+description: Build, refine, or review workops Streamlit ERP screens while preserving domain behavior, dense data-entry usability, and the repository's current screen contracts. Use for any visual, layout, interaction, component, or styling change in views.
 ---
 
 # Duty ERP UI
@@ -45,8 +45,8 @@ from this skill or any external system file.
    desktop ERP interaction targets ≥32×32px (§0.6·§4).
 
 Design output is a structured handoff in conversation/task text (an optional copy may be
-saved under `.orca/artifacts/<task>/` — 2026-07-29 policy; artifacts are reference only,
-never normative). Small copy/menu/CSS-within-token fixes skip Stage 0 entirely.
+saved under `.orca/artifacts/<task>/`; artifacts are reference only, never normative).
+Small copy/menu/CSS-within-token fixes skip Stage 0 entirely.
 
 ## Design and implementation rules
 
@@ -64,7 +64,7 @@ never normative). Small copy/menu/CSS-within-token fixes skip Stage 0 entirely.
 For a structural redesign or when the user cannot judge a text-only proposal:
 
 1. Capture the current rendered behavior and constraints.
-2. Produce a small runnable mockup with representative sample data. Image/static concept mockups are also allowed (2026-07-29 artifact policy — store under `.orca/artifacts/<task>/`); a runnable live mockup remains preferred because the user judges the real render.
+2. Produce a small runnable mockup with representative sample data. Image/static concept mockups are also allowed (store under `.orca/artifacts/<task>/`); a runnable live mockup remains preferred because the user judges the real render.
 3. Obtain user approval before editing the production view.
 4. Implement only the approved direction.
 5. Compare the real rendered screen with the approved concept at the project's baseline viewport and relevant responsive sizes.
@@ -77,3 +77,11 @@ Skip the mockup gate for narrow fixes whose expected result is already unambiguo
 - Use `$pixel-qa` for rendered geometry, overflow, clipping, contrast, and state checks.
 - Confirm sample/mock mode first. Use real backends only under explicit user authorization and with writes disabled unless separately approved.
 - Report preserved behavior, changed behavior, visual checks, and anything not verified.
+
+## History
+
+<details>
+<summary>Policy provenance</summary>
+
+- Artifact policy: optional copies of design handoffs and concept mockups may be stored under `.orca/artifacts/<task>/` (or OS temp) as reference-only material; the authoritative output is always the conversation/task handoff text.
+</details>

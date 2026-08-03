@@ -9,7 +9,7 @@
 의 `db.get_users = lambda *a, **k: fake` 관행을 따름 — near_miss_view 는
 `from modules import db` 로 같은 모듈 객체를 참조하므로 monkeypatch 가 그대로 반영된다).
 
-실행: C:\\dev\\duty-scheduler\\.venv\\Scripts\\python.exe scripts/test_near_miss_view.py
+실행: C:\\dev\\workops\\.venv\\Scripts\\python.exe scripts/test_near_miss_view.py
 """
 from __future__ import annotations
 

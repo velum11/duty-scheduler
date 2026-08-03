@@ -1,6 +1,6 @@
 ---
 name: duty-visual-critique
-description: Qualitative visual design review for implemented duty-scheduler screens in this repository — layout, typography, colour, hierarchy, component consistency, interaction states, responsive quality — judged against "does this look professionally made or developer-made". Preloaded on the duty-scheduler visual-qa agent; complements pixel-qa (quantitative) and never replaces user sign-off. The narrow wording minimizes accidental selection elsewhere.
+description: Qualitative visual design review for implemented workops screens in this repository — layout, typography, colour, hierarchy, component consistency, interaction states, responsive quality — judged against "does this look professionally made or developer-made". Preloaded on the workops visual-qa agent; complements pixel-qa (quantitative) and never replaces user sign-off. The narrow wording minimizes accidental selection elsewhere.
 ---
 
 # Duty Visual Critique — 구현 후 시각 정성 검수
@@ -11,7 +11,7 @@ description: Qualitative visual design review for implemented duty-scheduler scr
 
 구조 출처(보존 이식): jezweb/claude-skills `design-review` — MIT License
 (Copyright (c) 2025 Jeremy Dawes (Jezweb)). 7축 루브릭·심각도 버킷·판정 기준을 차용하고
-duty-scheduler ERP·DLP 맥락으로 재작성했다(원본의 파일 저장·배포 URL 절차는 제거).
+workops ERP·DLP 맥락으로 재작성했다(원본의 파일 저장·배포 URL 절차는 제거).
 라이선스 전문·허가 문구는 저장소 루트 `THIRD_PARTY_NOTICES.md` 참조.
 
 ## 핵심 판정 기준
@@ -47,7 +47,7 @@ duty-scheduler ERP·DLP 맥락으로 재작성했다(원본의 파일 저장·�
 - **Medium** — "다듬어지지 않아 보인다" (어색한 간격·과대 컨트롤·일관성 흠)
 - **Low** — "트집 수준" (미세 간격·보조 요소)
 
-## 평가 입력 (2026-07-29 산출물 정책 개정 반영)
+## 평가 입력
 
 - **라이브 DOM/computed-style 관찰**(Playwright, 기존 DOM QA 레시피) — 수치·구조 증거(1차 근거).
 - **vision 스크린샷** — 캡처·판독·보관 전면 허용. 파일은 `.orca/artifacts/<작업>/` 또는
@@ -67,3 +67,12 @@ duty-scheduler ERP·DLP 맥락으로 재작성했다(원본의 파일 저장·�
 
 X/10 점수화 금지. 최종 시각 승인은 항상 **사용자 실브라우저 sign-off**다 — 이 검수는 그
 게이트를 대체하지 않고 앞서 거른다.
+
+## History
+
+<details>
+<summary>정책 연혁</summary>
+
+- 산출물 정책: vision 스크린샷의 캡처·판독·보관이 허용된다. 파일은 `.orca/artifacts/<작업>/`
+  또는 OS temp에만 두어 소스 트리를 오염시키지 않으며, 정본 보고는 텍스트다.
+</details>

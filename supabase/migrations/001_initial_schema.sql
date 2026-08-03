@@ -1,4 +1,4 @@
--- Initial schema for a clean duty-scheduler Supabase test project.
+-- Initial schema for a clean workops Supabase test project.
 -- Review existing tables before applying this file. It never drops a table or data row.
 
 create table if not exists public.departments (

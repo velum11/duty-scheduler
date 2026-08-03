@@ -1,6 +1,6 @@
 ---
 name: duty-data-contract
-description: Analyze or change duty-scheduler domain models, repositories, validators, authentication, Supabase readiness, and persistence behavior. Use whenever work can affect stored data, identities, relationships, lifecycle states, or sample-versus-live behavior.
+description: Analyze or change workops domain models, repositories, validators, authentication, Supabase readiness, and persistence behavior. Use whenever work can affect stored data, identities, relationships, lifecycle states, or sample-versus-live behavior.
 ---
 
 # Duty Data Contract
@@ -22,7 +22,7 @@ Protect business data before optimizing implementation convenience.
 - Handle partial, stale, missing, and unresolved records explicitly.
 - Respect soft-delete and active/inactive semantics. Do not silently revive, merge, or discard records.
 - Keep sample/mock mode and Supabase mode behaviorally aligned where the project promises parity.
-- Do not infer readiness from a migration filename alone. Inspect the current schema or capability probe through read-only paths.
+- Do not infer readiness from a migration filename alone. Inspect the actual schema or capability probe through read-only paths.
 - Protect write-enabled tests behind the repository's explicit test flags and isolation rules.
 
 ## Change rules

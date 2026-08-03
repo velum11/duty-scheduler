@@ -123,7 +123,7 @@ _KIT_CSS = f"""
 .erp-empty-t {{ font-size: 13px; font-weight: 600; color: {TOKENS['ink-2']}; }}
 .erp-empty-b {{ font-size: 12px; color: {TOKENS['ink-2']}; line-height: 1.4; }}
 /* §1-F/§1-A 지표 타일 스트립(분석 화면 표준·사용자 채택): 좌측 2px 보더 + 26px 모노 값
-   + 라벨 + 모노 오버라인(카드 박스 없음). 요약 수치가 있는 화면 공통 어휘. */
+   + 라벨(카드 박스 없음, 2줄: 라벨 + 값). 요약 수치가 있는 화면 공통 어휘. */
 .erp-metrics {{ display: flex; flex-wrap: wrap; gap: 12px; margin: .3rem 0 1rem; }}
 .erp-metric {{ flex: 1 1 130px; min-width: 0; display: flex; flex-direction: column;
   gap: 4px; padding: 2px 18px; }}
@@ -131,10 +131,8 @@ _KIT_CSS = f"""
 .erp-metric-vrow {{ display: flex; align-items: baseline; gap: 4px; }}
 .erp-metric-val {{ font-size: 26px; font-weight: 600; letter-spacing: -0.03em; color: {TOKENS['ink']}; }}
 .erp-metric-unit {{ font-size: 11.5px; color: #6b665d; }}
-.erp-metric-note {{ font-size: 11px; letter-spacing: .08em; color: #6b665d; }}
-/* 모노 강제(값·오버라인) — Streamlit 이 인라인 font-family 를 제거하므로 0,3,0 규칙으로. */
-.stApp [data-testid="stMarkdownContainer"] .erp-metric-val,
-.stApp [data-testid="stMarkdownContainer"] .erp-metric-note {{
+/* 모노 강제(값) — Streamlit 이 인라인 font-family 를 제거하므로 0,3,0 규칙으로. */
+.stApp [data-testid="stMarkdownContainer"] .erp-metric-val {{
   font-family: 'IBM Plex Mono','Consolas','Menlo',monospace; font-variant-numeric: tabular-nums;
 }}
 /* §1-E 필터 줄(§0-5 카드 금지): 카드 박스 없이 헤어라인+여백만. 하단 헤어라인으로 표와 구획. */
@@ -787,28 +785,28 @@ def status_region(summary: list[tuple[str, str]]) -> None:
 
 
 def metric_strip(items: list[tuple]) -> None:
-    """§1-F/§1-A 지표 타일 스트립(분석 화면 표준) — 좌측 2px 보더 + 26px 모노 값 + 라벨 +
-    모노 오버라인. 제목 바로 아래 첫 블록(§0-4)에 둔다. 요약 수치가 있는 화면 공통 어휘.
+    """§1-F/§1-A 지표 타일 스트립(분석 화면 표준) — 좌측 2px 보더 + 라벨 + 26px 모노 값의
+    2줄 타일. 제목 바로 아래 첫 블록(§0-4)에 둔다. 요약 수치가 있는 화면 공통 어휘.
 
     ``items``: ``[(label, value, unit, note, accent)]`` — accent True 면 오렌지 보더+값.
-    새 지표를 발명하지 않고 기존 데이터 파생 수치만 넘긴다(호출부 책임). CSS 는 _KIT_CSS
-    (screen_frame 주입)가 소유하며 값·오버라인 모노는 0,3,0 규칙으로 강제한다."""
+    ``note``(구 영문 오버라인)는 호환을 위해 튜플에 남겨두지만 더 이상 렌더하지 않는다
+    (라벨과 중복이라 3줄→2줄로 축소). 새 지표를 발명하지 않고 기존 데이터 파생 수치만
+    넘긴다(호출부 책임). CSS 는 _KIT_CSS(screen_frame 주입)가 소유하며 값 모노는
+    0,3,0 규칙으로 강제한다."""
     if not items:
         return
     cells = []
-    for label, value, unit, note, accent in items:
+    for label, value, unit, _note, accent in items:  # _note(영문 오버라인)은 더 이상 렌더하지 않음
         border = "#c2410c" if accent else "#e0dbd2"
         vcolor = "#b4451a" if accent else TOKENS["ink"]
         unit_html = (f"<span class='erp-metric-unit'>{escape(str(unit))}</span>"
                      if unit else "")
-        note_html = (f"<span class='erp-metric-note'>{escape(str(note))}</span>"
-                     if note else "")
         cells.append(
             f"<div class='erp-metric' style='border-left:2px solid {border};'>"
             f"<span class='erp-metric-label'>{escape(str(label))}</span>"
             f"<div class='erp-metric-vrow'>"
             f"<span class='erp-metric-val' style='color:{vcolor};'>{escape(str(value))}</span>"
-            f"{unit_html}</div>{note_html}</div>"
+            f"{unit_html}</div></div>"
         )
     st.markdown(f"<div class='erp-metrics'>{''.join(cells)}</div>",
                 unsafe_allow_html=True)

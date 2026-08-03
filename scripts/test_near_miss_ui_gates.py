@@ -10,7 +10,7 @@
   3) stats(near_miss_stats) — _closure_rate_label 은 CLOSED/(CLOSED+EVALUATED), 0분모 방어('—'),
      명칭은 정확히 '보고서 종결률'('CAPA 종결률' 금지).
 
-실행: PYTHONUTF8=1 C:\\dev\\duty-scheduler\\.venv\\Scripts\\python.exe scripts/test_near_miss_ui_gates.py
+실행: PYTHONUTF8=1 C:\\dev\\workops\\.venv\\Scripts\\python.exe scripts/test_near_miss_ui_gates.py
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
 interface:
   display_name: "Duty Test Selection"
-  short_description: "Focused test selection for duty-scheduler"
+  short_description: "Focused test selection for workops"
   default_prompt: "Use $duty-test-selection to choose and run proportionate verification for these changes."

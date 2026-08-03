@@ -1,4 +1,4 @@
 interface:
   display_name: "Duty Data Contract"
   short_description: "Duty domain and persistence safeguards"
-  default_prompt: "Use $duty-data-contract to analyze or change this duty-scheduler data contract."
+  default_prompt: "Use $duty-data-contract to analyze or change this workops data contract."

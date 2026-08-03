@@ -402,7 +402,7 @@ def _kpi_strip_html(scoped: pd.DataFrame, improvements: dict, load_failed: bool)
 
 def _metric_strip_html(items) -> str:
     cells = []
-    for label, value, unit, note, accent in items:
+    for label, value, unit, _note, accent in items:  # _note(영문 오버라인) 미렌더 — 2줄 타일
         border = _ACCENT if accent else _LINE_SEC
         valcolor = _ACCENT_TEXT if accent else _INK
         val = escape(str(value)) if not isinstance(value, (int, float)) else str(int(value))
@@ -413,8 +413,7 @@ def _metric_strip_html(items) -> str:
             f"<div style='display:flex;align-items:baseline;gap:4px;'>"
             f"<span style='font-family:{_MONO};font-size:26px;font-weight:600;letter-spacing:-0.03em;"
             f"color:{valcolor};'>{val}</span>"
-            f"<span style='font-size:11.5px;color:{_FAINT};'>{escape(unit)}</span></div>"
-            f"<span style='font-size:11px;color:{_FAINT};font-family:{_MONO};'>{escape(note)}</span></div>"
+            f"<span style='font-size:11.5px;color:{_FAINT};'>{escape(unit)}</span></div></div>"
         )
     return f"<div style='display:flex;flex-wrap:wrap;gap:12px;padding:2px 0 14px;'>{''.join(cells)}</div>"
 

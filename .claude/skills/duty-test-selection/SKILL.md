@@ -1,6 +1,6 @@
 ---
 name: duty-test-selection
-description: Select and run proportionate verification for duty-scheduler changes. Use after implementation, during review, or when planning tests so focused contracts cover the affected behavior without unnecessary full regression or unsafe external writes.
+description: Select and run proportionate verification for workops changes. Use after implementation, during review, or when planning tests so focused contracts cover the affected behavior without unnecessary full regression or unsafe external writes.
 ---
 
 # Duty Test Selection

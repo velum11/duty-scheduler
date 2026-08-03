@@ -1,6 +1,6 @@
 # Focused test map
 
-Confirm this map against the current `scripts/test_*.py` inventory before use.
+Confirm this map against the actual `scripts/test_*.py` inventory before use.
 
 | Change area | Primary focused tests |
 | --- | --- |

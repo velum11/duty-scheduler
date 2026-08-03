@@ -2,6 +2,15 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-08-03 · [인계] 조직 개편(blueprint v2) 집행 + WorkOps 개명 — 재부팅 중단점
+
+- **개편 집행 완료(전부 실측 검증, 미커밋)**: ①모델 티어링(recon·visual-qa·contract-qa=sonnet, 호출 시 opus 승격) ②`code-review` 신설(read-only+worktree, 실패클래스 병렬+Coordinator FP필터 — spawn·격리 실측 OK) ③Codex 재정의(비가역 구간 한정: schema/RLS/migration·인증권한·데이터손실·운영쓰기, DESIGN_DECISION+FINAL_INTEGRATED 2단; 일상 diff는 code-review로) ④목업 시안 경쟁(조건부) ⑤전원 maxTurns ⑥integrator/data-contract PreToolUse 차단 hook(**integrator hook이 `git commit --dry-run`까지 차단하는 것 실측**) ⑦QA `isolation: worktree`(HEAD checkout — 미커밋 변경 비가시, CHECKOUT_MISMATCH 규칙 명문화) ⑧depth=1 env. **선행 실측**: `permissionMode: default`는 bypass 부모 아래 프롬프트 복원 못 함(3회 대조실험) → isolation 경로 채택 근거.
+- **공용 정본화**: `C:\dev\agent-config` repo에 글로벌 자산 수용·커밋(`4b6a877`·`28720b3`·`ee1c3bd`). 라이브(`~/.claude`·`~/.orca/lee-mode`)와 내용 동기화됨. **junction 전환 미수행** — classifier 차단으로 `agent-config\scripts\apply-junctions.cmd` 사용자 직접 실행 대기(실행 전까지 글로벌 변경 시 양쪽 동기화 필요).
+- **스킬 정비(2 Owner 병렬)**: eval 6건 신설(erp-ui 2·visual-critique 1·test-selection 2·data-contract 1), 날짜 인라인 7건 제거+History 절, **`paths:` frontmatter는 미지원 판정**(두 Owner 독립 수렴: 공식 레퍼런스 미문서화·실사용 전례 0 — 세션 문서 §3.3 권고 정정). "handoff"→"설계 브리프(design brief)" 개명(C4), full handoff 판별 체크리스트(§5.2)·worktree comment 체크포인트(§8) 추가.
+- **WorkOps 개명**: APP_NAME="WorkOps"·README·app.py docstring·`test_sidebar_ui.py` 명칭 계약 갱신(**ALL PASSED 103**)·에이전트 MD 8종·overlay 제목. **GitHub `velum11/workops` 개명 완료 + 로컬 remote 갱신·ls-remote 검증**. 내부 식별자(`DUTY_*` env·`duty-*` 스킬·쿠키)는 의도적 유지. **로컬 폴더 개명 미완**: 좀비 grep(구 세션 잔존)이 폴더 lock — 재부팅이 해소하므로 재부팅 후 `Rename-Item C:\dev\duty-scheduler workops` → 잔여 경로 참조 정리 순.
+- **Codex 설계 자문(개편 방향 적정성, DESIGN_DECISION·read-only) — 판정 미수신**: 실행 중 재부팅으로 중단됨. **재실행 필요**(질문 5: Codex 축소의 검증체계 영향/sonnet 강등 위험/code-review 중복 원칙 충돌/시안 경쟁 안전성/잔여 갭 최우선). 판정 수신 후 합의 내용을 이 WORKLOG에 기록하기로 사용자와 약속됨.
+- 기타: 8501 sample 서버는 폴더 개명 위해 정지함(직전 인계의 "8501 서빙 중"은 무효). Orca에서 구 프로젝트 등록 제거됨(개명 후 재등록 필요). llm-wiki 관련 지시는 사용자가 취소(해당 repo 무접촉). **이 저장소 미커밋 변경(개편+개명 전체) 커밋은 사용자 승인 대기.** 알려진 잔여 갭: bypass 워커의 절대경로 본체 쓰기(hooks 없는 QA류), sonnet 품질 미실측(2~3건 관찰 권장).
+
 ## 2026-08-03 · [인계] 플레이북 개편 대기 — 평가·수정 3라운드 완료 저장
 
 - **화면별 3축 평가 완료**(Codex STATIC + visual-qa 실렌더, 양측 종합 7.7/10 수렴) → Codex 상의로 수정 선별 → 3라운드 반영 완료: H1 공용 그리드 14.5px(`506ffc5`)·H2 CAUSE 라벨(`4de2936`)·M6 조직 부분성공 reconcile(`ffaccd6`)·U1~U8(사이드바 상단 여백·제출 버튼→체크리스트 하단(사용자 지시)·조회/월간 진입 자동조회 seed·셀렉트 content-fit·평가 사진 뷰어·무음폴백 3곳 표면화·대시보드 KPI 제목 직후·제출취소 제거 — `ef29b3a`·`282c969`·`3be628a`). Medium 2건은 앞서 `a85ff8c`. 전 커밋 테스트 그린·push 완료.

@@ -2,7 +2,7 @@
 
 이 저장소의 `.claude/skills/duty-ux/`, `.claude/skills/duty-visual-critique/`,
 `.claude/skills/duty-erp-ui/`(Stage 0 절)는 아래 MIT 라이선스 프로젝트의 구조·루브릭을
-차용(보존 이식)해 duty-scheduler 맥락으로 재작성한 것입니다. 각 원저작물의 저작권 고지와
+차용(보존 이식)해 workops 맥락으로 재작성한 것입니다. 각 원저작물의 저작권 고지와
 MIT 허가 문구를 아래에 보존합니다.
 
 MIT License 허가 문구(각 저작물 공통):

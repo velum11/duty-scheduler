@@ -14,7 +14,7 @@ SAMPLE_DIR = DATA_DIR / "sample"
 SESSIONS_FILE = ROOT / ".local_sessions.json"  # 로컬 폴백 로그인 세션 (gitignore)
 
 # --- 앱 상수 ---
-APP_NAME = "생산 근무표 관리"
+APP_NAME = "WorkOps"
 SESSION_TTL_DAYS = 30           # 로그인 유지 기간
 COOKIE_NAME = "duty_token"      # 브라우저 쿠키 키
 

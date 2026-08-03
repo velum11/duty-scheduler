@@ -64,9 +64,9 @@ check("사이드바 브랜드에 '생산 근무표' 제거", "생산 근무표" 
 ui_src = inspect.getsource(ui)
 check("ui.py 전체에서 'WORKFORCE' 제거", "WORKFORCE" not in ui_src)
 check("ui.py 에서 부제 클래스 'sb-title-en' 제거", "sb-title-en" not in ui_src)
-# 공식 앱 명칭은 그대로 유지 (확대 변경 금지)
+# 공식 앱 명칭 — 사용자 결정으로 개명 (구 "생산 근무표 관리")
 from modules import config  # noqa: E402
-check("공식 APP_NAME('생산 근무표 관리') 불변", config.APP_NAME == "생산 근무표 관리")
+check("공식 APP_NAME('WorkOps') 일치", config.APP_NAME == "WorkOps")
 
 
 # ===== 2) ADMIN App Shell 렌더 + 버튼 유지 =====
