@@ -56,6 +56,12 @@ _QUEUE_STATUS = "EVALUATED"
 _SUBMIT_LABEL = {"DRAFT": "작성중", "SUBMITTED": "제출됨"}
 _CONFIRM_LABEL = {"PENDING": "확인대기", "CONFIRMED": "확인됨", "REJECTED": "반려"}
 _CONFIRMED = "CONFIRMED"
+# 발생원인 코드→한글 라벨(H2) — 평가/조회 화면과 동일 매핑. 표시 전용이며 DB 코드·필터·저장
+# payload 는 불변(코드값 유지). 미등록 코드는 원문 fallback(라벨 누락이 화면을 깨지 않게).
+_CAUSE_LABEL = {
+    "JAM": "협착", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
+    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "끼임", "ETC": "기타",
+}
 
 # ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴 고정으로 새 색 유입 차단. ──
 _INK = "#1c1a17"          # 본문
@@ -576,7 +582,8 @@ def _detail_read_html(report: dict, imp, status: str) -> str:
 
     cause = str(report.get("cause_code") or "")
     cause_detail = str(report.get("cause_detail") or "")
-    cause_val = cause + (f" · {cause_detail}" if cause_detail else "")
+    cause_label = _CAUSE_LABEL.get(cause, cause)  # 미등록 코드는 원문 fallback(표시 전용)
+    cause_val = cause_label + (f" · {cause_detail}" if cause_detail else "")
     blocks = [
         ("WHAT", "사고 내용", str(report.get("incident_content") or ""), True),
         ("CAUSE", "원인", cause_val, False),

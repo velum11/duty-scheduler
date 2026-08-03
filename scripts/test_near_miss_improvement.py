@@ -1640,8 +1640,33 @@ def test_noop_upsert_preserves_status_supabase() -> None:
         sr.client = orig_client
 
 
+def test_cause_label_display() -> None:
+    """H2: 개선조치 상세의 CAUSE 가 원시 코드가 아니라 한글 라벨로 표기된다(표시 전용).
+
+    JAM→협착 매핑, cause_detail 보존(· 상세), 미등록 코드는 원문 fallback. DB 코드·필터·저장
+    payload 는 불변이며 표시 계층만 라벨링한다."""
+    print("H2: 개선조치 상세 CAUSE 라벨 표기(원시코드 노출 제거)")
+    from views import near_miss_improvement as nmi
+    check("_CAUSE_LABEL JAM→협착", nmi._CAUSE_LABEL.get("JAM") == "협착")
+    check("_CAUSE_LABEL 미등록 코드 fallback(get 기본값)", nmi._CAUSE_LABEL.get("ZZZ", "ZZZ") == "ZZZ")
+    base = {
+        "id": 1, "report_no": "202607-0001", "cause_code": "JAM", "cause_detail": "덮개 미고정",
+        "incident_content": "점검 중 낙하 위험", "countermeasure": "덮개 고정", "work_name": "설비 점검",
+        "confirmed_grade": "B", "reporter_emp_no": "1001", "incident_date": "2026-07-10",
+        "dept_code": "PET1",
+    }
+    html = nmi._detail_read_html(base, None, "EVALUATED")
+    check("CAUSE 값에 '협착' 표기", "협착" in html)
+    check("원시 'JAM' 코드는 CAUSE 값으로 미노출", ">JAM<" not in html)
+    check("cause_detail 보존(· 덮개 미고정)", "덮개 미고정" in html)
+    unreg = dict(base, cause_code="ZZZ", cause_detail="")
+    html2 = nmi._detail_read_html(unreg, None, "EVALUATED")
+    check("미등록 코드는 원문 fallback(ZZZ 표기)", "ZZZ" in html2)
+
+
 def main() -> int:
     for test in (
+        test_cause_label_display,
         test_improvement_schema_probe_three_state,
         test_improvement_read_gate_surfaces_probe_error,
         test_upsert_creates_draft_server_fields,
