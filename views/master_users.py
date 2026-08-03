@@ -1033,8 +1033,9 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str) -> MasterGrid
         "사번": {"width": 128, "minWidth": 104, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY,
                 "cellClassRules": _cell_rules("사번", readonly=_IS_PROTECTED_JS)},
-        # §1-E 본문 14.5~15px — 읽기 컬럼에 cellStyle fontSize 지정(공용 GRID_CSS 13px 오버라이드,
-        # inline > class). 사번/표시순서는 모노 ID라 13.5px 유지.
+        # §1-E·H1 본문 14.5px — 공용 GRID_CSS(.ag-cell)가 이미 14.5px 이며, 아래 읽기 컬럼의
+        # cellStyle fontSize 14.5px 는 동일값 명시(중복이나 무해). 사번/표시순서 등 별도 지정이
+        # 없는 열도 공용 GRID_CSS 14.5px 를 그대로 따른다(더는 13px/13.5px 특례 없음).
         "성명": {"width": 132, "minWidth": 100, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellStyle": {"fontSize": "14.5px"},

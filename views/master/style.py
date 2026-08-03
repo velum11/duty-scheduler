@@ -464,10 +464,16 @@ GRID_CSS: dict[str, dict] = {
     ".ag-header-cell-label": {"justify-content": "center", "font-size": "12.5px",
                               "font-weight": "600", "color": TOKENS["ink-2"]},
     # 기본 셀: 테두리·타이포는 편집 중에도 유지. 레이아웃(flex)만 편집셀에서 제외한다.
+    # 본문 14.5px(§8-6 수용기준·H1) — 헤더(12.5px)는 그대로. 행 높이·수직 패딩은 불변.
     ".ag-cell": {
         "border-right": "1px solid rgba(0,0,0,.06)",
-        "line-height": "normal", "font-size": "13px", "color": TOKENS["ink"],
+        "line-height": "normal", "font-size": "14.5px", "color": TOKENS["ink"],
     },
+    # 편집기·팝업도 본문과 같은 14.5px 로 맞춘다(H1): 텍스트 편집 input · select 표시값 ·
+    # select 드롭다운 항목. 셀 표시값과 편집/선택 타이포가 어긋나 보이지 않게 한다.
+    ".ag-text-field-input": {"font-size": "14.5px"},
+    ".ag-picker-field-display": {"font-size": "14.5px"},
+    ".ag-select-list-item": {"font-size": "14.5px"},
     # 표시(비편집) 셀만 flex 정렬 — 편집 중(.ag-cell-inline-editing)엔 flex 를 걸지 않아
     # 편집 input 이 클리핑되지 않는다(F1). 정렬 클래스(md-c-*)는 이 flex 위에서 동작한다.
     ".ag-cell:not(.ag-cell-inline-editing)": {"display": "flex", "align-items": "center"},
