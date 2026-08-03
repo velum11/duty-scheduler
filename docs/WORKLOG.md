@@ -2,6 +2,37 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-08-04 · [인계] 개명 마무리 + KPI 2줄 카드 + venv 재생성 + Streamlit Cloud 배포 + 모바일 사이드바 수정
+
+- **duty-scheduler→workops 잔여 정리(tracked)**: SKILL 5종 description/본문·`.claude/launch.json`·openai.yaml 3종·`THIRD_PARTY_NOTICES.md`·`001_initial_schema.sql` 주석·test_*.py 실행주석의 프로젝트명 통일. **내부 식별자(`duty-*` 스킬명·`DUTY_*` env·`duty_token` 쿠키)와 기능코드(`duty_date` 등)는 의도적 유지.** 로컬 폴더는 `C:\dev\workops`로 개명 완료. 남은 옛 경로는 **역사물뿐**: `docs/WORKLOG.md`(이 파일 과거기록)·`.orca/temp/*.log`·`.orca/artifacts/**`(비규범, 보존).
+- **KPI 지표 타일 3줄→2줄**: near-miss 타일의 영문 오버라인(TOTAL/DONE 등, 3번째 줄) 제거 — `views/common/erp/kit.py::metric_strip` + `near_miss_evaluate.py`/`near_miss_improvement.py` 로컬 `_metric_strip_html` + `.erp-metric-note` CSS/docstring 정합. 호출부 튜플 `(label,value,unit,note,accent)`은 유지(note만 미렌더=`_note`). near-miss 4화면 일관 적용.
+- **venv 재생성**: `.venv`가 옛 `duty-scheduler` 경로를 내부(activate·pyvenv·.exe 래퍼)에 박고 있어, 정확한 `pip freeze`(81pkg, playwright 1.61 등 requirements.txt에 없는 것 포함) 스냅샷으로 **최종 경로 `.venv`에 직접 재생성**(rename 아님 — 경로 재오염 회피). 검증 후 백업(`.venv_old_ds`·`.venv_new`) 삭제. **`.venv_deploysim`은 미변경**(전용 requirements 부재 → 옛 경로 잔존, gitignore·부차적, 필요시 동일방식 재생성). freeze 스냅샷은 세션 scratchpad에만 있음.
+- **settings.local.json(gitignore)**: `--project-dir` 경로 workops로 갱신 + 죽은 옛세션 temp 스크래치패드 allowlist 5건 제거(`/update-config` 경로). service key 등 비밀은 안전(`.streamlit/secrets.toml`·`.env`·`settings.local.json` 전부 gitignore 확인).
+- **모바일 사이드바 수정(`modules/ui.py`)**: ADMIN/MANAGER "PC 전용" 사이드바 셸이 모바일 비반응형 — 236px가 본문 상시 덮고 네이티브 접기(X) 전역숨김이라 닫기 불가였음(USER 셸은 상단+하단탭이라 무관). 수정=비-USER `initial_sidebar_state` `"expanded"→"auto"`(좁은 화면 자동 접힘) + `_SHELL_CSS`에 `@media(max-width:768px)`로 네이티브 접기 복원. **데스크톱 동작 불변**. 검증: playwright 390px(초기·이동·닫기 covers=false, »열기/X닫기 OK)·1440px 펼침 유지·`test_sidebar_ui` **103 PASS**.
+- **커밋/푸시(사용자 승인)**: `0518efa`(개명정리+KPI+에이전트도구 스냅샷, 40파일) → push, `03dcb6b`(모바일 사이드바 fix, ui.py 단독) → push. 둘 다 `origin/redesign/claude-design-p1` 반영. 커밋엔 비밀·venv·`.orca/temp`·govern/secgap 미포함(선택 스테이징).
+- **Streamlit Cloud 배포**: `kptech-workops.streamlit.app` (share.streamlit.io 웹UI — **CLI/API 배포 없음**, 웹 대시보드 전용, Codex 확인). **배포 브랜치=`redesign/claude-design-p1` → 이 브랜치 push 시 자동 재배포**(그래서 `03dcb6b`도 모바일 반영됨, 사용자 인지 후 선택). 앱은 **비공개(Streamlit 로그인 필요)** — URL 알아도 아무나 접근 불가. Secrets는 앱 **Settings→Secrets**에 TOML로 입력(로컬 `secrets.toml` 내용). **⚠️ supabase 모드로 배포 시 실데이터(사번·성명) → 반드시 Settings→Sharing 뷰어 제한**(개인정보). 배포 당시 data_mode 최종값은 사용자 입력이라 미확인(sample 권장했음).
+
+**세션 종료 시점 열려있는 상태**: 로컬 `localhost:8501` Streamlit(supabase 모드) 백그라운드 실행 중 — 정리 권장. 미커밋 보존물(의도적): `.orca/temp/`·`govern.txt`·`secgap.txt`·`.venv_deploysim/`(gitignore 아님, 커밋에서 선택 제외)·gitignore 로컬(`.venv`·`secrets.toml`·`settings.local.json`).
+
+## 2026-08-03 · [Codex 합의] blueprint v2 방향 감사 + 코디네이터 설계 (재부팅 후 재실행 완료)
+
+재부팅 전 hang(원인: `codex exec`가 stdin EOF 대기 → `< /dev/null`로 해소, 검증됨)됐던 Codex 2건을 재실행해 판정 수신. 결과는 `agent-config` repo에 반영·커밋(`777de6b`).
+
+**Codex#1 — blueprint v2 방향 = "조건부 적절"**
+- Q1 Codex 비가역 전담 = **PASS**(code-review 일상/Codex 2단 분리로 공백 없음)
+- Q2 sonnet 강등 = **CONCERN(P2)** → 반영: PLAYBOOK §3에 Opus 승격 트리거 4개 구체화(인증·권한·데이터·보안 증거 판독/상충 증거·교차 추론/표면 로그로 원인 불명/1회 오판). 강등 품질은 여전히 미실증(2~3건 관찰 권장).
+- Q3 code-review 상시화 = **PASS**(클래스 한정+FP 필터로 중복/인플레이션 없음)
+- Q4 시안 경쟁 = **CONCERN(P2)**: ui-feature의 "본 checkout 비공유"가 선언적 통제뿐(Edit/Write 보유·격리·훅 없음). **미해결 — 사용자 결정 대기.**
+- Q5 = **BLOCKER(P1)**: QA/reviewer가 worktree 있어도 절대경로로 본 checkout 쓰기 가능(실측된 갭). Codex 권고=OS 파일시스템 샌드박스(본 checkout canonical read-only, worktree/tmp만 writable, junction/symlink 탈출 차단). **미해결 — 전역 blast radius라 사용자 결정 대기.**
+- 드리프트 지적 → 반영: lee-coordinator에 `maxTurns` 추가(300), 글로벌 allowlist의 `ux-architect`는 프로젝트 조건부임을 본문에 명시.
+
+**Codex#2 — lee-mode↔orchestration 겹침/코디네이터 설계 = "(c) 소규모 재설계"**
+- 반영: lee-coordinator 본문에 결정론적 **플레인 라우터**(① 플레인 판정[기본=내장 Agent, §5.2 조건 충족 시만 Orca] → ② 확정 → ③ 선택 플레인의 스킬만 호출: Orca에서 orchestration=조율상태 / orca-cli=터미널·worktree·handoff). **preload 금지**(선택이 스킬을 결정, preload가 아님).
+- QD 반영: "never substitute" 금지는 **Orca 플레인 선택 후에만** 적용, §5.1 내장 Agent는 substitution 아님 — PLAYBOOK §5.1 + 코디네이터 본문 양쪽에 가드.
+- QC 반영: 스킬 when-to-use 트리거 — visual-qa(pixel-qa)·integrator(safe-integration) 본문에 추가, recon은 기존 본문("technical-research=증거판정 / agent-reach=채널")으로 충족. 과설계 경계(명령 복제·전수 결정표 금지) 준수.
+
+**미해결(사용자 결정 필요)**: Q5 P1(파일시스템 격리 강제 수단) + Q4 P2(시안 경쟁/ui-feature 쓰기 격리). 둘 다 OS 샌드박스/훅 정책이라 전역 영향 → 승인 전 미적용. 이 갭이 닫히기 전까지 read-only 경계는 "역할 문구+worktree git 격리"까지만 강제됨(bypass 워커의 절대경로 쓰기는 여전히 가능).
+
 ## 2026-08-03 · [인계] 조직 개편(blueprint v2) 집행 + WorkOps 개명 — 재부팅 중단점
 
 - **개편 집행 완료(전부 실측 검증, 미커밋)**: ①모델 티어링(recon·visual-qa·contract-qa=sonnet, 호출 시 opus 승격) ②`code-review` 신설(read-only+worktree, 실패클래스 병렬+Coordinator FP필터 — spawn·격리 실측 OK) ③Codex 재정의(비가역 구간 한정: schema/RLS/migration·인증권한·데이터손실·운영쓰기, DESIGN_DECISION+FINAL_INTEGRATED 2단; 일상 diff는 code-review로) ④목업 시안 경쟁(조건부) ⑤전원 maxTurns ⑥integrator/data-contract PreToolUse 차단 hook(**integrator hook이 `git commit --dry-run`까지 차단하는 것 실측**) ⑦QA `isolation: worktree`(HEAD checkout — 미커밋 변경 비가시, CHECKOUT_MISMATCH 규칙 명문화) ⑧depth=1 env. **선행 실측**: `permissionMode: default`는 bypass 부모 아래 프롬프트 복원 못 함(3회 대조실험) → isolation 경로 채택 근거.
