@@ -479,6 +479,19 @@ div[class*="st-key-hdr_ic_off_"] div.stButton button[disabled] {
   color: var(--ink-3) !important; opacity: 0.45 !important; cursor: not-allowed !important;
   background: transparent !important;
 }
+
+/* ── 모바일(≤768px): PC 전용 사이드바 셸 보정 ──
+   좁은 화면에서 사이드바는 initial_sidebar_state="auto" 로 화면 밖으로 자동 접히고(본문 전폭),
+   좌상단 «»(stSidebarCollapsedControl)로 오버레이 드로어처럼 연다. 단 PC 에선 숨기는
+   네이티브 접기(X, stSidebarHeader)를 모바일에서만 복원해, 연 드로어를 다시 닫을 수 있게 한다
+   (없으면 한 번 열면 본문을 덮은 채 못 닫는 회귀). 데스크톱 동작은 미디어쿼리 밖이라 불변. */
+@media (max-width: 768px) {
+  div[data-testid="stSidebarHeader"] {
+    display: flex !important; justify-content: flex-end;
+    padding: 0.25rem 0.4rem 0 !important;
+  }
+  section[data-testid="stSidebar"] { box-shadow: 2px 0 16px rgba(15, 42, 74, 0.28); }
+}
 </style>
 """
 
@@ -655,7 +668,11 @@ def setup_page() -> None:
         page_title="교대 근무표",
         page_icon=_FAVICON if Path(_FAVICON).exists() else "🏭",
         layout="wide",
-        initial_sidebar_state="collapsed" if role == "USER" else "expanded",
+        # USER=상단/하단 nav 셸(사이드바 미사용) → collapsed. ADMIN/MANAGER=사이드바 셸이지만
+        # "auto" 로 두어 좁은 화면(모바일)에서는 Streamlit 이 자동으로 접어 본문을 가리지 않게 한다
+        # (PC 폭에서는 auto=펼침이라 기존 데스크톱 동작 유지). 모바일 접기/펼치기 컨트롤은
+        # _SHELL_CSS 의 @media 블록에서 복원한다.
+        initial_sidebar_state="collapsed" if role == "USER" else "auto",
     )
     st.markdown(_CSS, unsafe_allow_html=True)
 
