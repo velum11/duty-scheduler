@@ -1,20 +1,27 @@
 """로그인 / 세션 / 쿠키 관리.
 
-- 사번만 입력하는 로그인 (비밀번호 없음, MVP).
+- 사번 + 비밀번호 로그인 (migration 008).
+- 초기 비밀번호는 사번이며(``password_hash IS NULL`` 상태), 최초 로그인 시 변경을
+  강제한다. 사번은 비밀이 아니므로 초기 비밀번호에는 유효기간을 둔다 — 방치된 계정을
+  남이 먼저 선점해 비번을 설정하고 본인을 잠가버리는 창을 닫는다(특히 ADMIN).
 - 로그인 성공 시 랜덤 토큰을 발급해 브라우저 쿠키에 저장 → 새로고침/재접속 시 자동 로그인.
-- Phase 1 폴백: 토큰-세션 매핑을 로컬 JSON 파일(.local_sessions.json)에 저장한다.
-  Phase 5 에서는 login_sessions 테이블로 교체한다.
+- 세션 저장소:
+    * supabase 모드 → ``login_sessions`` 테이블. 원문 토큰이 아니라 sha256 만 저장한다.
+    * sample 모드   → 기존 로컬 JSON 폴백(.local_sessions.json). 로컬 개발 편의 유지.
+  Streamlit Cloud 컨테이너 파일시스템은 휘발성이라, 운영 모드에서 파일 폴백을 쓰면
+  재배포·재시작마다 전원 로그아웃된다. 그래서 테이블이 기본이다.
 
-보안 한계(항상 고지): 타인의 사번을 아는 사람은 그 사람으로 로그인할 수 있다.
-사내 구성원 대상 MVP 로 수용하며, 추후 사번+이름 확인 또는 PIN 으로 강화한다.
+비밀번호 검증·잠금 판정은 전부 이 앱 계층이 한다(DB 는 저장 형태와 상태 정합만 보장).
+앱이 service_role 로 접근하는 현재 구조에서 인증 신뢰경계는 여기다.
 """
+import hashlib
 import json
 import secrets as pysecrets
 from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 
-from modules import config, db
+from modules import config, db, passwords
 
 
 def _now() -> datetime:
@@ -43,15 +50,33 @@ def _save_sessions(data: dict) -> None:
         pass
 
 
+def _token_hash(token: str) -> str:
+    """세션 조회 키 — 원문 토큰의 sha256.
+
+    DB 에는 이 값만 저장한다. 덤프가 유출돼도 그 값으로 세션을 재생할 수 없다
+    (원문은 브라우저 쿠키에만 존재). 비밀번호 해시와 같은 이유다.
+    """
+    return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+
 def _issue_token(emp_no: str) -> str:
     token = pysecrets.token_urlsafe(32)
-    sessions = _load_sessions()
     now = _now()
+    expires = now + timedelta(days=config.SESSION_TTL_DAYS)
+    if db.use_session_table():
+        db.create_login_session(_token_hash(token), str(emp_no), expires.isoformat())
+        # 만료 행 lazy cleanup — 실패해도 로그인을 막지 않는다(정리는 부수 작업).
+        try:
+            db.purge_expired_sessions()
+        except Exception:
+            pass
+        return token
+    sessions = _load_sessions()
     # 만료 세션 lazy cleanup
     sessions = {t: v for t, v in sessions.items() if _parse(v["expires_at"]) > now}
     sessions[token] = {
         "emp_no": str(emp_no),
-        "expires_at": (now + timedelta(days=config.SESSION_TTL_DAYS)).isoformat(),
+        "expires_at": expires.isoformat(),
     }
     _save_sessions(sessions)
     return token
@@ -59,6 +84,14 @@ def _issue_token(emp_no: str) -> str:
 
 def _revoke_token(token: str) -> None:
     if not token:
+        return
+    if db.use_session_table():
+        try:
+            db.revoke_login_session(_token_hash(token), "logout")
+        except Exception:
+            # 로그아웃은 세션 상태·쿠키 정리가 본체다. 원격 폐기 실패가 로그아웃 자체를
+            # 막으면 사용자는 로그아웃도 못 한 채 화면에 갇힌다(호출부가 계속 진행).
+            pass
         return
     sessions = _load_sessions()
     if sessions.pop(token, None) is not None:
@@ -69,14 +102,31 @@ def _validate_token(token: str):
     """토큰이 유효하면 사용자 dict, 아니면 None. 만료 토큰은 정리한다."""
     if not token:
         return None
-    sessions = _load_sessions()
-    rec = sessions.get(token)
-    if not rec:
-        return None
-    if _parse(rec["expires_at"]) <= _now():
-        _revoke_token(token)
-        return None
-    user = db.find_user_by_emp_no(rec["emp_no"])
+    if db.use_session_table():
+        record = db.find_login_session(_token_hash(token))
+        if not record:
+            return None
+        # 폐기(로그아웃·비번 변경·ADMIN 초기화)는 만료와 무관하게 즉시 무효다.
+        if record.get("revoked_at"):
+            return None
+        expires_at = record.get("expires_at")
+        if not expires_at or _parse(str(expires_at)) <= _now():
+            return None
+        emp_no = str(record.get("emp_no") or "")
+        try:
+            db.touch_login_session(_token_hash(token))
+        except Exception:
+            pass  # 마지막 사용 시각은 감사용 부가정보 — 실패가 인증을 막지 않는다.
+    else:
+        sessions = _load_sessions()
+        rec = sessions.get(token)
+        if not rec:
+            return None
+        if _parse(rec["expires_at"]) <= _now():
+            _revoke_token(token)
+            return None
+        emp_no = rec["emp_no"]
+    user = db.find_user_by_emp_no(emp_no)
     if user is None or not user.get("is_active", False):
         return None
     return user
@@ -123,28 +173,169 @@ def _cookie_clear() -> None:
 
 
 # --- 공개 API ---
-def login(emp_no: str):
-    """(user_dict, None) 또는 (None, error_message) 반환."""
+# 자격증명 실패를 사용자에게 알릴 때 쓰는 단일 문구. "사번은 있는데 비번이 틀렸다"와
+# "사번 자체가 없다"를 구분해 알려주면 유효한 사번 목록을 캐낼 수 있으므로 합친다.
+_BAD_CREDENTIALS = "사번 또는 비밀번호가 올바르지 않습니다."
+
+
+def _lock_message(locked_until: datetime) -> str:
+    remaining = max(1, int((locked_until - _now()).total_seconds() // 60) + 1)
+    return f"로그인 시도가 많아 계정이 잠겼습니다. {remaining}분 후 다시 시도하세요."
+
+
+def _register_failure(emp_no: str, credential: dict) -> str:
+    """실패 카운트를 올리고, 임계값을 넘으면 잠근다. 사용자에게 보일 메시지를 반환한다."""
+    count = int(credential.get("failed_login_count") or 0) + 1
+    locked_until = None
+    if count >= config.LOGIN_MAX_FAILURES:
+        locked_until = _now() + timedelta(minutes=config.LOGIN_LOCK_MINUTES)
+        count = 0  # 잠금으로 대체되므로 카운터는 초기화한다(잠금 해제 후 다시 센다).
+    try:
+        db.update_login_failure(
+            emp_no, count, locked_until.isoformat() if locked_until else None
+        )
+    except Exception:
+        # 카운터 기록 실패가 "비번이 틀렸다"는 판정을 뒤집지는 않는다(fail-closed).
+        pass
+    if locked_until is not None:
+        return _lock_message(locked_until)
+    return _BAD_CREDENTIALS
+
+
+def login(emp_no: str, password: str = ""):
+    """(user_dict, None) 또는 (None, error_message) 반환.
+
+    초기 비밀번호(사번)와 설정된 비밀번호를 한 경로에서 처리한다:
+    ``password_hash IS NULL`` 이면 아직 비번을 설정하지 않은 계정이라 입력값을 사번과
+    비교하고, 그렇지 않으면 저장된 해시로 검증한다. 어느 쪽이든 성공 후
+    ``must_change_password`` 가 참이면 호출부가 비번 변경 화면으로 보낸다.
+    """
     emp_no = str(emp_no or "").strip()
     if not emp_no:
         return None, "사번을 입력하세요."
+    if not password:
+        return None, "비밀번호를 입력하세요."
+
+    # 스키마 미적용이면 로그인을 거부한다(fail-closed). 비번 없는 예전 동작으로 조용히
+    # 되돌아가면, 마이그레이션 누락을 모른 채 "비번이 켜졌다"고 믿고 운영에 들어간다.
+    if not db.password_auth_ready():
+        return None, (
+            "비밀번호 인증 스키마(008)가 아직 적용되지 않아 로그인할 수 없습니다. "
+            "관리자에게 문의하세요."
+        )
+
     # 사번 조회는 trim + 대소문자 무시(find_user_by_emp_no). 세션/토큰에는
     # 입력값이 아니라 DB 의 정규 emp_no 를 저장해 대소문자 표기 흔들림을 막는다.
     user = db.find_user_by_emp_no(emp_no)
     if user is None or not user.get("is_active", False):
-        return None, "등록되지 않은 사번입니다. 관리자에게 문의하세요."
-    token = _issue_token(user.get("emp_no", emp_no))
+        return None, _BAD_CREDENTIALS
+    canonical = str(user.get("emp_no", emp_no))
+
+    credential = db.get_user_credential(canonical)
+    if credential is None:
+        return None, _BAD_CREDENTIALS
+
+    locked_raw = credential.get("locked_until")
+    if locked_raw:
+        locked_until = _parse(str(locked_raw))
+        if locked_until > _now():
+            return None, _lock_message(locked_until)
+
+    stored = credential.get("password_hash")
+    if stored:
+        verified = passwords.verify_password(password, str(stored))
+    else:
+        # 비번 미설정 = 사번이 초기 비밀번호. 유효기간이 지났으면 ADMIN 초기화를 받아야 한다.
+        expires_raw = credential.get("initial_password_expires_at")
+        if expires_raw and _parse(str(expires_raw)) <= _now():
+            return None, (
+                "초기 비밀번호 사용 기간이 지났습니다. 관리자에게 초기화를 요청하세요."
+            )
+        verified = passwords.matches_employee_number(password, canonical)
+
+    if not verified:
+        return None, _register_failure(canonical, credential)
+
+    try:
+        db.clear_login_failure(canonical)
+    except Exception:
+        pass  # 성공 판정은 이미 끝났다. 카운터 초기화 실패가 로그인을 막지 않는다.
+
+    token = _issue_token(canonical)
     st.session_state.pop("nav_page", None)
     st.session_state.user = user
     st.session_state.auth_token = token
+    # 해시가 없으면(초기 비밀번호) 플래그와 무관하게 변경을 강제한다 — 플래그가 어떤
+    # 경로로든 꺼져 있어도 사번을 비번으로 쓰는 상태로 서비스에 들어가지 못하게 한다.
+    st.session_state.must_change_password = (
+        not stored or _as_bool(credential.get("must_change_password", True))
+    )
     _cookie_set(token)
     return user, None
+
+
+def needs_password_change() -> bool:
+    """현재 로그인 사용자가 비밀번호를 바꾸기 전인가(라우팅 게이트)."""
+    if not st.session_state.get("user"):
+        return False
+    return bool(st.session_state.get("must_change_password", False))
+
+
+def change_password(current_password: str, new_password: str, confirm_password: str):
+    """로그인 사용자의 비밀번호를 변경한다. (True, None) 또는 (False, error_message).
+
+    성공 시 그 사용자의 **다른 모든 세션을 폐기**하고 현재 세션에는 새 토큰을 발급한다 —
+    비번을 바꿔도 예전 쿠키가 계속 유효하면 자격증명 교체의 의미가 없다.
+    """
+    user = st.session_state.get("user")
+    if not user:
+        return False, "로그인 상태가 아닙니다."
+    canonical = str(user.get("emp_no") or "").strip()
+    if not canonical:
+        return False, "사용자 사번을 확인할 수 없습니다."
+
+    credential = db.get_user_credential(canonical)
+    if credential is None:
+        return False, "사용자 자격증명을 찾을 수 없습니다."
+
+    # 현재 비밀번호 확인 — 자리를 비운 사이 남이 비번을 바꿔버리는 것을 막는다.
+    stored = credential.get("password_hash")
+    if stored:
+        current_ok = passwords.verify_password(current_password, str(stored))
+    else:
+        current_ok = passwords.matches_employee_number(current_password, canonical)
+    if not current_ok:
+        return False, "현재 비밀번호가 올바르지 않습니다."
+
+    if new_password != confirm_password:
+        return False, "새 비밀번호가 서로 일치하지 않습니다."
+    policy_error = passwords.validate_new_password(new_password, canonical)
+    if policy_error:
+        return False, policy_error
+    if new_password == current_password:
+        return False, "현재 비밀번호와 다른 비밀번호를 사용하세요."
+
+    db.set_user_password(canonical, passwords.hash_password(new_password))
+
+    # 기존 세션 전부 폐기 → 현재 세션에 새 토큰 재발급(본인은 로그아웃되지 않는다).
+    old_token = st.session_state.get("auth_token")
+    try:
+        db.revoke_user_sessions(canonical, "password_change")
+    except Exception:
+        pass
+    if not db.use_session_table() and old_token:
+        _revoke_token(old_token)
+    token = _issue_token(canonical)
+    st.session_state.auth_token = token
+    st.session_state.must_change_password = False
+    _cookie_set(token)
+    return True, None
 
 
 def logout() -> None:
     _revoke_token(st.session_state.get("auth_token"))
     _cookie_clear()
-    for k in ("user", "auth_token", "nav_page"):
+    for k in ("user", "auth_token", "nav_page", "must_change_password"):
         st.session_state.pop(k, None)
     # 화면별 저장 조회조건(run_query 의 q_* — 예: q_schedule_view/q_schedule_edit)을
     # 지운다. 이전 사용자의 조회범위(부서 등)가 로그인 간 잔존해 다음 사용자에게
@@ -167,7 +358,30 @@ def get_current_user():
     if user:
         st.session_state.user = user
         st.session_state.auth_token = token
+        # 쿠키 자동 로그인도 강제변경 게이트를 그대로 받는다. 이 값을 세우지 않으면
+        # 변경 화면에서 새로고침하는 것만으로 게이트를 지나칠 수 있다(fail-closed).
+        st.session_state.must_change_password = _must_change_for(user)
     return user
+
+
+def _must_change_for(user) -> bool:
+    """자격증명을 다시 읽어 강제변경 여부를 판정한다. 읽기 실패는 True 로 접는다.
+
+    쿠키 자동 로그인 경로에서 쓴다. 판정을 못 하면 "바꿔야 한다"로 보내는 쪽이 안전하다 —
+    비번 미설정 계정을 일반 화면에 들여보내는 것보다 변경 화면을 한 번 더 보는 편이 낫다.
+    """
+    emp_no = str((user or {}).get("emp_no") or "").strip()
+    if not emp_no:
+        return True
+    try:
+        credential = db.get_user_credential(emp_no)
+    except Exception:
+        return True
+    if credential is None:
+        return True
+    return (not credential.get("password_hash")) or _as_bool(
+        credential.get("must_change_password", True)
+    )
 
 
 # --- 능력(권한) 헬퍼 — 아차사고 평가 (migration 006) ---

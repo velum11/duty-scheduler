@@ -91,7 +91,13 @@ lsrc = inspect.getsource(auth.login)
 check("auth.login: 입력 trim", ".strip()" in lsrc)
 check("auth.login: find_user_by_emp_no 단일 호출", lsrc.count("db.find_user_by_emp_no(") == 1)
 check("auth.login: 토큰에 정규 emp_no(user) 사용", 'user.get("emp_no"' in lsrc)
-check("auth.login: 실패 시 오류 메시지 반환", "등록되지 않은 사번" in lsrc)
+check("auth.login: 실패 시 오류 메시지 반환", "_BAD_CREDENTIALS" in lsrc)
+# 사용자 열거 방지: "사번이 없다"와 "비번이 틀렸다"를 구분해 알려주면 유효 사번을 캐낼 수
+# 있으므로, 두 경로 모두 같은 문구(_BAD_CREDENTIALS)를 돌려준다.
+check("auth.login: 미등록 사번과 비번 오류를 같은 문구로 응답(사용자 열거 방지)",
+      "등록되지 않은 사번" not in lsrc
+      and lsrc.count("_BAD_CREDENTIALS") >= 2
+      and "_BAD_CREDENTIALS" in inspect.getsource(auth._register_failure))
 
 # 4) login 화면: Enter/버튼 동일 단일 폼 경로
 login_src = (ROOT / "views" / "login.py").read_text(encoding="utf-8")

@@ -3088,6 +3088,196 @@ def find_user_by_emp_no(emp_no: str, *, use_cache: bool = True):
     return record
 
 
+# =========================================================================
+# 비밀번호 자격증명 · 로그인 세션 파사드 (migration 008)
+#
+# 이 파사드의 모든 함수는 **사번(emp_no)** 을 식별자로 받는다 — sample 모드에는 DB id 가
+# 없기 때문이다. supabase 구현이 내부에서 사번 → id 를 해석한다.
+#
+# 자격증명은 USER_COLUMNS/get_users 계약에 넣지 않는다. 그 DataFrame 은 화면까지
+# 흘러가므로, 해시가 거기 실리면 어느 화면에서든 노출될 수 있다.
+#
+# sample 모드: 자격증명을 st.session_state 에만 둔다(프로세스 수명). 로컬 디스크에
+#   비밀번호 파일을 만들지 않으며, 재시작하면 초기 상태(사번이 곧 비번)로 돌아간다.
+#   개발 편의로는 충분하고, 관리해야 할 로컬 비밀이 늘지 않는다.
+# =========================================================================
+_SAMPLE_CRED_KEY = "_sample_credentials"
+
+
+def _sample_credentials() -> dict:
+    import streamlit as _st
+
+    if _SAMPLE_CRED_KEY not in _st.session_state:
+        _st.session_state[_SAMPLE_CRED_KEY] = {}
+    return _st.session_state[_SAMPLE_CRED_KEY]
+
+
+def _sample_credential_default(emp_no: str) -> dict:
+    """sample 모드의 초기 자격증명 상태 — 비번 미설정(사번이 곧 비번)."""
+    return {
+        "id": None,
+        "emp_no": str(emp_no),
+        "password_hash": None,
+        "password_set_at": None,
+        "must_change_password": True,
+        "initial_password_expires_at": None,
+        "failed_login_count": 0,
+        "locked_until": None,
+    }
+
+
+def password_auth_ready(*, force: bool = False) -> bool:
+    """비밀번호 인증 스키마(008)를 쓸 수 있는가.
+
+    sample 모드는 세션 상태를 쓰므로 항상 True. supabase 모드는 실제 컬럼·테이블
+    존재를 프로브한다 — 미적용이면 auth 가 로그인을 **거부**한다(fail-closed).
+    스키마가 없다고 비번 없는 예전 동작으로 되돌아가면, 마이그레이션 누락을 모른 채
+    "비번이 켜졌다"고 믿고 운영에 들어가는 사고가 난다.
+    """
+    if is_sample_mode():
+        return True
+    return supabase_repository.password_auth_ready(force=force)
+
+
+def get_user_credential(emp_no: str) -> dict | None:
+    """정규 사번의 자격증명 dict. 없으면 None.
+
+    ``emp_no`` 는 find_user_by_emp_no 가 해석한 DB 원본 사번이어야 한다.
+    """
+    if not str(emp_no or "").strip():
+        return None
+    if is_sample_mode():
+        store = _sample_credentials()
+        key = str(emp_no)
+        if key not in store:
+            store[key] = _sample_credential_default(key)
+        return dict(store[key])
+    return supabase_repository.get_user_credential(emp_no)
+
+
+def _sample_update_credential(emp_no: str, changes: dict) -> None:
+    store = _sample_credentials()
+    key = str(emp_no)
+    record = store.get(key) or _sample_credential_default(key)
+    record.update(changes)
+    store[key] = record
+
+
+def set_user_password(emp_no: str, password_hash: str) -> None:
+    """사용자가 스스로 비번을 설정했다. 강제변경·잠금·초기비번 만료를 함께 해제한다."""
+    now_iso = _utc_now_iso()
+    if is_sample_mode():
+        _sample_update_credential(emp_no, {
+            "password_hash": str(password_hash),
+            "password_set_at": now_iso,
+            "must_change_password": False,
+            "initial_password_expires_at": None,
+            "failed_login_count": 0,
+            "locked_until": None,
+        })
+        return
+    credential = supabase_repository.get_user_credential(emp_no)
+    if not credential:
+        raise ValueError(f"비밀번호를 설정할 사용자를 찾을 수 없습니다: {emp_no}")
+    supabase_repository.set_user_password(credential["id"], password_hash)
+
+
+def reset_user_password(emp_no: str, *, valid_days: int | None = None) -> None:
+    """ADMIN 초기화: 비번을 지워 사번이 다시 초기 비번이 되게 하고 강제변경을 켠다.
+
+    ``valid_days`` 가 주어지면 그만큼 뒤를 초기 비번 만료 시각으로 둔다(기본
+    config.INITIAL_PASSWORD_VALID_DAYS). 활성 세션은 호출부가 함께 폐기한다.
+    """
+    days = config.INITIAL_PASSWORD_VALID_DAYS if valid_days is None else valid_days
+    expires = None
+    if days and days > 0:
+        from datetime import datetime, timedelta, timezone
+
+        expires = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    if is_sample_mode():
+        _sample_update_credential(emp_no, {
+            "password_hash": None,
+            "password_set_at": None,
+            "must_change_password": True,
+            "initial_password_expires_at": expires,
+            "failed_login_count": 0,
+            "locked_until": None,
+        })
+        return
+    credential = supabase_repository.get_user_credential(emp_no)
+    if not credential:
+        raise ValueError(f"비밀번호를 초기화할 사용자를 찾을 수 없습니다: {emp_no}")
+    supabase_repository.reset_user_password(credential["id"], expires)
+
+
+def update_login_failure(emp_no: str, failed_count: int, locked_until: str | None) -> None:
+    """로그인 실패 카운트·잠금 시각을 기록한다."""
+    if is_sample_mode():
+        _sample_update_credential(emp_no, {
+            "failed_login_count": max(0, int(failed_count)),
+            "locked_until": locked_until,
+        })
+        return
+    credential = supabase_repository.get_user_credential(emp_no)
+    if credential:
+        supabase_repository.update_login_failure(
+            credential["id"], failed_count, locked_until
+        )
+
+
+def clear_login_failure(emp_no: str) -> None:
+    """로그인 성공 시 실패 카운트·잠금을 초기화한다."""
+    update_login_failure(emp_no, 0, None)
+
+
+def _utc_now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+# --- 로그인 세션 ---
+# sample 모드는 기존 로컬 JSON 폴백(auth._load_sessions)을 그대로 쓴다 — 로컬 개발에서
+# 앱 재시작 후에도 로그인이 유지되는 편의를 깨지 않는다. supabase 모드만 테이블을 쓴다.
+def use_session_table() -> bool:
+    """세션을 DB 테이블에 저장하는가(supabase 모드 + 008 적용)."""
+    return (not is_sample_mode()) and password_auth_ready()
+
+
+def create_login_session(token_hash: str, emp_no: str, expires_at: str) -> None:
+    credential = supabase_repository.get_user_credential(emp_no)
+    if not credential:
+        raise ValueError(f"세션을 만들 사용자를 찾을 수 없습니다: {emp_no}")
+    supabase_repository.create_login_session(
+        token_hash, credential["id"], credential["emp_no"], expires_at
+    )
+
+
+def find_login_session(token_hash: str) -> dict | None:
+    return supabase_repository.find_login_session(token_hash)
+
+
+def touch_login_session(token_hash: str) -> None:
+    supabase_repository.touch_login_session(token_hash)
+
+
+def revoke_login_session(token_hash: str, reason: str = "logout") -> None:
+    supabase_repository.revoke_login_session(token_hash, reason)
+
+
+def revoke_user_sessions(emp_no: str, reason: str = "password_change") -> None:
+    """한 사용자의 활성 세션을 모두 폐기한다(비번 변경·초기화 시)."""
+    if is_sample_mode():
+        return
+    credential = supabase_repository.get_user_credential(emp_no)
+    if credential:
+        supabase_repository.revoke_user_sessions(credential["id"], reason)
+
+
+def purge_expired_sessions() -> None:
+    supabase_repository.purge_expired_sessions()
+
+
 def dept_name(dept_code: str) -> str:
     df = get_departments()
     if df.empty:

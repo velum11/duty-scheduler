@@ -12,7 +12,7 @@ from modules import auth, db, nav, ui
 ui.setup_page()
 
 from views import (
-    dashboard, login, my_schedule,
+    dashboard, login, my_schedule, password_change,
     schedule_edit, schedule_view,
     master_users, master_departments, master_teams, master_org, master_work_types,
     near_miss_submit, near_miss_my, near_miss_evaluate, near_miss_improvement,
@@ -89,6 +89,12 @@ def main() -> None:
         # 로그인 게이트
         if not user:
             login.render()
+            return
+
+        # 비밀번호 강제변경 게이트 — app_shell(네비게이션) 앞에 둔다. 사이드바가 그려진
+        # 뒤에 막으면 그 자체가 우회 경로가 된다.
+        if auth.needs_password_change():
+            password_change.render(forced=True)
             return
 
         role = str(user.get("role", "")).strip().upper()

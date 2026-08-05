@@ -18,6 +18,14 @@ APP_NAME = "WorkOps"
 SESSION_TTL_DAYS = 30           # 로그인 유지 기간
 COOKIE_NAME = "duty_token"      # 브라우저 쿠키 키
 
+# --- 비밀번호 인증 (migration 008) ---
+# 초기 비밀번호는 사번이며 최초 로그인 시 변경을 강제한다. 사번은 비밀이 아니므로
+# 방치된 계정을 남이 선점하지 못하도록 초기 비밀번호에 유효기간을 둔다(특히 ADMIN).
+INITIAL_PASSWORD_VALID_DAYS = 7
+# 연속 실패 잠금 — 사용자가 실제 비번을 설정한 뒤의 무차별 대입을 늦춘다.
+LOGIN_MAX_FAILURES = 5
+LOGIN_LOCK_MINUTES = 10
+
 ROLES = ("USER", "MANAGER", "ADMIN")
 
 DATA_MODES = ("sample", "supabase")

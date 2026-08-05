@@ -35,7 +35,7 @@ import pandas as pd
 import streamlit as st
 from st_aggrid import JsCode
 
-from modules import db, nav
+from modules import auth, config, db, nav
 from views.common import erp
 from views.master import (
     ADD,
@@ -1009,6 +1009,59 @@ def render(user: dict) -> None:
         _add_row(state, grid_df)
     if _normalize(state, grid_df):
         st.rerun()
+
+    # ---- 비밀번호 초기화 (ADMIN 전용) ----
+    _render_password_reset(user, existing)
+
+
+def _render_password_reset(user: dict, existing: pd.DataFrame) -> None:
+    """ADMIN 이 사용자 비밀번호를 초기화한다 — 비번을 지워 사번이 다시 초기 비번이 되게 한다.
+
+    그리드 저장 경로와 완전히 분리한다: 자격증명은 USER_COLUMNS 계약에 없고, 실수로
+    일괄 저장에 섞이면 안 되는 값이다. 초기화하면 그 사용자의 활성 세션도 모두 끊는다.
+    """
+    if not auth.is_admin(user):
+        return
+    if existing.empty:
+        return
+
+    with st.expander("비밀번호 초기화", expanded=False):
+        st.caption(
+            f"선택한 사용자의 비밀번호를 지웁니다. 초기 비밀번호는 다시 **사번**이 되고, "
+            f"{config.INITIAL_PASSWORD_VALID_DAYS}일 안에 로그인해 새 비밀번호를 설정해야 합니다. "
+            "진행 중인 로그인 세션은 모두 해제됩니다."
+        )
+        options = [
+            f"{r['emp_no']} · {r['name']}"
+            for _, r in existing.iterrows()
+            if str(r.get("emp_no") or "").strip()
+        ]
+        if not options:
+            return
+        picked = st.selectbox(
+            "대상 사용자", options, key=f"{PAGE_ID}__pwreset_target"
+        )
+        target_emp = str(picked).split(" · ", 1)[0].strip()
+
+        confirm = st.checkbox(
+            f"{picked} 의 비밀번호를 초기화합니다.",
+            key=f"{PAGE_ID}__pwreset_confirm",
+        )
+        if st.button(
+            "초기화 실행",
+            key=f"{PAGE_ID}__pwreset_run",
+            type="primary",
+            disabled=not confirm,
+        ):
+            try:
+                db.reset_user_password(target_emp)
+                db.revoke_user_sessions(target_emp, "admin_reset")
+            except Exception as exc:
+                st.error(f"비밀번호 초기화에 실패했습니다: {exc}")
+            else:
+                st.success(
+                    f"{picked} 의 비밀번호를 초기화했습니다. 초기 비밀번호는 사번입니다."
+                )
 
 
 def _cell_rules(field: str, readonly: str | None = None) -> dict:

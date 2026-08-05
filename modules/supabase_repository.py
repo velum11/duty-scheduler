@@ -2742,3 +2742,215 @@ def get_near_miss_revision_request(report_id) -> dict | None:
         "revision_requested_by_emp_no": emp_by_id.get(str(by_id), "") if by_id is not None else "",
         "revision_requested_at": str(row.get("revision_requested_at") or "") or None,
     }
+
+
+# =========================================================================
+# 비밀번호 인증 · 로그인 세션 (migration 008)
+#
+# users 의 비번 컬럼은 USER_COLUMNS 계약(get_users)에 넣지 않는다 — 그 계약은 화면·
+# 테스트가 고정하고 있고, 자격증명이 일반 조회 DataFrame 을 타고 화면까지 흘러가서는
+# 안 된다. 자격증명은 항상 이 전용 경로로만 읽고, 30초 읽기 캐시를 타지 않는다.
+# =========================================================================
+LOGIN_SESSIONS_TABLE = "login_sessions"
+
+_PASSWORD_AUTH_READY: bool | None = None
+
+
+def _utc_now_iso() -> str:
+    """현재 UTC 시각의 ISO 문자열. 세션·자격증명 타임스탬프의 단일 생성 지점."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def reset_password_auth_readiness() -> None:
+    """008 적용 여부 프로브 캐시를 비운다(마이그레이션 적용 직후 호출)."""
+    global _PASSWORD_AUTH_READY
+    _PASSWORD_AUTH_READY = None
+
+
+def password_auth_ready(*, force: bool = False) -> bool:
+    """migration 008(비번 컬럼 + login_sessions)이 적용됐는가.
+
+    컬럼 부재만 False 로 접고, 그 밖의 오류(네트워크·권한)는 그대로 전파한다 —
+    일시 장애를 '스키마 미적용'으로 오인해 인증 경로를 바꾸지 않기 위해서다.
+    """
+    global _PASSWORD_AUTH_READY
+    if _PASSWORD_AUTH_READY is not None and not force:
+        return _PASSWORD_AUTH_READY
+    try:
+        _execute(
+            client().table("users").select("password_hash,must_change_password").limit(1),
+            "조회",
+            "users",
+        )
+        _execute(
+            client().table(LOGIN_SESSIONS_TABLE).select("token_hash").limit(1),
+            "조회",
+            LOGIN_SESSIONS_TABLE,
+        )
+    except Exception as exc:
+        if is_missing_column_error(exc) or _is_missing_table_error(exc):
+            _PASSWORD_AUTH_READY = False
+            return False
+        raise
+    _PASSWORD_AUTH_READY = True
+    return True
+
+
+def _is_missing_table_error(exc: Exception) -> bool:
+    """예외가 '테이블 없음'(42P01 / PGRST205)인지. login_sessions 미생성 판정용."""
+    text = repr(exc)
+    return "42P01" in text or "PGRST205" in text or "does not exist" in text
+
+
+_CREDENTIAL_COLUMNS = (
+    "id,emp_no,is_active,role,password_hash,password_set_at,must_change_password,"
+    "initial_password_expires_at,failed_login_count,locked_until"
+)
+
+
+def get_user_credential(emp_no: str) -> dict | None:
+    """정규 사번으로 자격증명 1건을 읽는다. 없으면 None.
+
+    ``emp_no`` 는 db.find_user_by_emp_no 가 이미 해석한 **DB 원본 사번**이어야 한다
+    (여기서 대소문자 무시 검색을 다시 하지 않는다 — ilike 는 %/_ 를 와일드카드로
+    해석해 사번에 그런 문자가 있으면 다른 계정을 집는다).
+    """
+    rows = _select_all(
+        "users",
+        _CREDENTIAL_COLUMNS,
+        lambda query: query.eq("emp_no", str(emp_no)).limit(1),
+    )
+    return rows[0] if rows else None
+
+
+def set_user_password(user_id: int, password_hash: str) -> None:
+    """사용자가 스스로 비번을 설정했다. 강제변경·잠금·초기비번 만료를 모두 해제한다."""
+    payload = {
+        "password_hash": str(password_hash),
+        "password_set_at": _utc_now_iso(),
+        "must_change_password": False,
+        "initial_password_expires_at": None,
+        "failed_login_count": 0,
+        "locked_until": None,
+    }
+    _execute(
+        client().table("users").update(payload).eq("id", int(user_id)),
+        "수정",
+        "users",
+    )
+
+
+def reset_user_password(user_id: int, initial_expires_at: str | None) -> None:
+    """ADMIN 초기화: 비번을 지우고(=사번이 초기 비번) 강제변경 상태로 되돌린다."""
+    payload = {
+        "password_hash": None,
+        "password_set_at": None,
+        "must_change_password": True,
+        "initial_password_expires_at": initial_expires_at,
+        "failed_login_count": 0,
+        "locked_until": None,
+    }
+    _execute(
+        client().table("users").update(payload).eq("id", int(user_id)),
+        "수정",
+        "users",
+    )
+
+
+def update_login_failure(user_id: int, failed_count: int, locked_until: str | None) -> None:
+    """로그인 실패 카운트·잠금 시각을 기록한다."""
+    _execute(
+        client().table("users").update({
+            "failed_login_count": max(0, int(failed_count)),
+            "locked_until": locked_until,
+        }).eq("id", int(user_id)),
+        "수정",
+        "users",
+    )
+
+
+def clear_login_failure(user_id: int) -> None:
+    """로그인 성공 시 실패 카운트·잠금을 초기화한다."""
+    update_login_failure(user_id, 0, None)
+
+
+# --- 로그인 세션 ---
+def create_login_session(
+    token_hash: str, user_id: int, emp_no: str, expires_at: str
+) -> None:
+    """세션 1건을 만든다. 원문 토큰이 아니라 해시만 저장한다.
+
+    INSERT 는 비멱등이라 일시 오류를 재시도하지 않는다(_execute retry_transient=False) —
+    중복 세션 행을 만드느니 실패시키고 재로그인하게 한다.
+    """
+    _execute(
+        client().table(LOGIN_SESSIONS_TABLE).insert({
+            "token_hash": str(token_hash),
+            "user_id": int(user_id),
+            "emp_no": str(emp_no),
+            "expires_at": str(expires_at),
+        }),
+        "생성",
+        LOGIN_SESSIONS_TABLE,
+        retry_transient=False,
+    )
+
+
+def find_login_session(token_hash: str) -> dict | None:
+    """토큰 해시로 세션 1건을 읽는다. 폐기·만료 판정은 호출부(auth)가 한다."""
+    rows = _select_all(
+        LOGIN_SESSIONS_TABLE,
+        "token_hash,user_id,emp_no,issued_at,expires_at,last_seen_at,revoked_at",
+        lambda query: query.eq("token_hash", str(token_hash)).limit(1),
+    )
+    return rows[0] if rows else None
+
+
+def touch_login_session(token_hash: str) -> None:
+    """마지막 사용 시각을 갱신한다(감사용). 실패해도 로그인 자체를 막지 않는다."""
+    _execute(
+        client().table(LOGIN_SESSIONS_TABLE)
+        .update({"last_seen_at": _utc_now_iso()})
+        .eq("token_hash", str(token_hash)),
+        "수정",
+        LOGIN_SESSIONS_TABLE,
+    )
+
+
+def revoke_login_session(token_hash: str, reason: str = "logout") -> None:
+    """세션 1건을 폐기한다(로그아웃). 이미 폐기된 행은 그대로 둔다."""
+    _execute(
+        client().table(LOGIN_SESSIONS_TABLE)
+        .update({"revoked_at": _utc_now_iso(), "revoked_reason": str(reason)})
+        .eq("token_hash", str(token_hash))
+        .is_("revoked_at", "null"),
+        "수정",
+        LOGIN_SESSIONS_TABLE,
+    )
+
+
+def revoke_user_sessions(user_id: int, reason: str = "password_change") -> None:
+    """한 사용자의 활성 세션을 모두 폐기한다.
+
+    비번 변경·ADMIN 초기화 시 호출한다 — 비번을 바꿔도 예전 쿠키가 계속 살아있으면
+    자격증명 교체의 의미가 사라진다.
+    """
+    _execute(
+        client().table(LOGIN_SESSIONS_TABLE)
+        .update({"revoked_at": _utc_now_iso(), "revoked_reason": str(reason)})
+        .eq("user_id", int(user_id))
+        .is_("revoked_at", "null"),
+        "수정",
+        LOGIN_SESSIONS_TABLE,
+    )
+
+
+def purge_expired_sessions() -> None:
+    """만료된 세션 행을 삭제한다(lazy cleanup). 폐기 이력은 만료와 함께 정리된다."""
+    _execute(
+        client().table(LOGIN_SESSIONS_TABLE).delete().lt("expires_at", _utc_now_iso()),
+        "삭제",
+        LOGIN_SESSIONS_TABLE,
+    )
