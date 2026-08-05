@@ -22,7 +22,7 @@ page-composition design must precede any implementation.
 **Expected behavior (observable)**
 - [ ] Reads required context before proposing structure: `AGENTS.md`, `CLAUDE.md`,
       relevant `DESIGN.md` sections, and `views/common/scaffold.py::ARCHETYPES`.
-- [ ] Produces a Stage 0 handoff in conversation/task text covering all six steps: intent
+- [ ] Produces a Stage 0 design brief in conversation/task text covering all six steps: intent
       (3 questions), single focal point, declared §0.6 density targets, reuse of existing
       widgets/kit, per-component checkpoint, and interactive states.
 - [ ] Names one focal point for the view (the primary review verb), not several.
@@ -30,7 +30,7 @@ page-composition design must precede any implementation.
       panel ≤96px) rather than vague adjectives like "clean" or "modern".
 - [ ] Proposes reusing the neutral scaffold / `views/common/erp/` kit before any one-off
       widget or local CSS; if the kit lacks a capability, proposes a kit extension.
-- [ ] Obtains user approval (or a runnable/static mockup) before editing a production view.
+- [ ] For a design change, presents 3 side-by-side mockup variants and obtains the user's selection before editing a production view (2 for smaller direction choices; variants skipped only for copy/token/exact-spec fixes).
 - [ ] Does not touch product code, run migrations, or use live writes.
 
 **Fail criteria**

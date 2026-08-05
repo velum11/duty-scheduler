@@ -68,7 +68,7 @@ workops ERP 맥락으로 재작성했다. 라이선스 전문·허가 문구는 
 
 ## 산출 형식 (Must/Should/Nice)
 
-결과는 메시지/handoff 텍스트가 정본이다(사본을 `.orca/artifacts/<작업>/`에 남겨도 된다).
+결과는 메시지/design brief 텍스트가 정본이다(사본을 `.orca/artifacts/<작업>/`에 남겨도 된다). "handoff"로 부르지 않는다 — Orca에서 handoff는 소유권 이전이다.
 다음 구조로:
 
 ```
@@ -97,5 +97,5 @@ workops ERP 맥락으로 재작성했다. 라이선스 전문·허가 문구는 
 <summary>정책 연혁</summary>
 
 - 산출물 정책: 검토 결과의 사본과 보조 스크린샷을 `.orca/artifacts/<작업>/`(또는 OS temp)에
-  둘 수 있다 — 비밀·개인정보·실데이터 미포함이 조건이며, 정본은 항상 메시지/handoff 텍스트다.
+  둘 수 있다 — 비밀·개인정보·실데이터 미포함이 조건이며, 정본은 항상 메시지/design brief 텍스트다.
 </details>

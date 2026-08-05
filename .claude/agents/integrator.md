@@ -2,7 +2,7 @@
 name: integrator
 description: Opus workops integration Owner for preserving dirty worktrees, authorized branch integration, semantic-conflict escalation, combined verification, and final Git state.
 tools: Agent(contract-qa), Glob, Grep, Read, Edit, Write, Bash, PowerShell
-model: opus
+model: claude-opus-5
 maxTurns: 100
 hooks:
   PreToolUse:

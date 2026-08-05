@@ -2,7 +2,7 @@
 name: ux-architect
 description: Upstream design advisor for workops UI_CENTRIC structural work. Produces the pre-implementation page-composition design and UX self-review as a structured conversational design brief. Advisory only — never implements, never edits files.
 tools: Glob, Grep, Read, Bash, PowerShell
-model: opus
+model: claude-opus-5
 isolation: worktree
 maxTurns: 75
 skills:

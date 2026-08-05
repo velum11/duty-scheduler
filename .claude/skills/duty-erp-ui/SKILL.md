@@ -44,8 +44,9 @@ from this skill or any external system file.
    interactive element; tabular-nums for dynamic numbers; hit targets — USER/touch 44px,
    desktop ERP interaction targets ≥32×32px (§0.6·§4).
 
-Design output is a structured handoff in conversation/task text (an optional copy may be
-saved under `.orca/artifacts/<task>/`; artifacts are reference only, never normative).
+Design output is a structured design brief in conversation/task text (an optional copy may be
+saved under `.orca/artifacts/<task>/`; artifacts are reference only, never normative). Never
+call this deliverable a "handoff" — in Orca, handoff means ownership transfer.
 Small copy/menu/CSS-within-token fixes skip Stage 0 entirely.
 
 ## Design and implementation rules
@@ -61,15 +62,15 @@ Small copy/menu/CSS-within-token fixes skip Stage 0 entirely.
 
 ## Visual-change workflow
 
-For a structural redesign or when the user cannot judge a text-only proposal:
+For a design change to an existing screen's visuals, layout, or structure:
 
 1. Capture the current rendered behavior and constraints.
-2. Produce a small runnable mockup with representative sample data. Image/static concept mockups are also allowed (store under `.orca/artifacts/<task>/`); a runnable live mockup remains preferred because the user judges the real render.
-3. Obtain user approval before editing the production view.
-4. Implement only the approved direction.
-5. Compare the real rendered screen with the approved concept at the project's baseline viewport and relevant responsive sizes.
+2. Produce **3 side-by-side mockup variants** with representative sample data — data, approved elements, and functional contracts stay byte-for-byte fixed; diverge form only. Each variant is an isolated artifact (`.orca/artifacts/<task>/variant-N/` or a sample-mode render) that never share-edits the main checkout. Runnable live mockups are preferred; image/static concept mockups are allowed.
+3. Present the variants and obtain the user's selection before editing the production view.
+4. Implement only the selected variant, as a single Owner.
+5. Compare the real rendered screen with the selected concept at the project's baseline viewport and relevant responsive sizes.
 
-Skip the mockup gate for narrow fixes whose expected result is already unambiguous.
+Use 2 variants for smaller changes that still leave a direction choice. Skip variants entirely and act directly for copy/menu wording, single color/token fixes within §0.6, permission-unchanged route wiring, single-control alignment, or when the user already specified the exact result.
 
 ## Verification
 
@@ -83,5 +84,5 @@ Skip the mockup gate for narrow fixes whose expected result is already unambiguo
 <details>
 <summary>Policy provenance</summary>
 
-- Artifact policy: optional copies of design handoffs and concept mockups may be stored under `.orca/artifacts/<task>/` (or OS temp) as reference-only material; the authoritative output is always the conversation/task handoff text.
+- Artifact policy: optional copies of design briefs and concept mockups may be stored under `.orca/artifacts/<task>/` (or OS temp) as reference-only material; the authoritative output is always the conversation/task design-brief text.
 </details>

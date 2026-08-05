@@ -2,7 +2,7 @@
 name: code-review
 description: Read-only workops independent code reviewer for a specified diff or commit range, covering logic, boundary, API-misuse, and authorization failure classes with evidence-tagged findings.
 tools: Glob, Grep, Read, Bash, PowerShell
-model: opus
+model: claude-opus-5
 isolation: worktree
 maxTurns: 75
 ---

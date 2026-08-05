@@ -1,9 +1,15 @@
 ---
 name: recon
 description: Read-only workops investigation lead for routes, call paths, shared UI impact, data facades, dependency behavior, and primary-source technical research.
-tools: Glob, Grep, Read, WebSearch, WebFetch, ToolSearch, mcp__exa__web_search_exa, mcp__exa__web_fetch_exa
+tools: Glob, Grep, Read, Bash, WebSearch, WebFetch, ToolSearch, mcp__exa__web_search_exa, mcp__exa__web_fetch_exa
 model: sonnet
 maxTurns: 75
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/recon-readonly.sh"'
 skills:
   - technical-research
   - agent-reach
@@ -27,7 +33,7 @@ You are the workops read-only research lead. Do not edit or execute product code
 
 ## Channels you can actually reach
 
-You have **no shell**. Use `agent-reach` to choose the channel, then execute through your own read-only tools:
+Your `Bash` is an **observation-only shell**: local `git` reads (`status`/`diff`/`log`/`show`/`branch`/`rev-parse`) and version/dependency queries. A PreToolUse hook blocks file writes, git-history changes, installs, migrations, and uploads — use `Read`/`Glob`/`Grep` for file contents. For **external** research use the web tools below, not shell `curl`/`gh`/`yt-dlp`. Use `agent-reach` to choose the channel, then execute through these read-only tools:
 
 | Need | Tool |
 |---|---|
@@ -39,7 +45,7 @@ You have **no shell**. Use `agent-reach` to choose the channel, then execute thr
 
 Some of these are deferred: load them with `ToolSearch` (for example `select:mcp__exa__web_search_exa,WebFetch`) before the first call. `ToolSearch` can only surface tools already in this allowlist, so it never widens your read-only boundary.
 
-Ignore the `agent-reach doctor --json` step in SKILL.md and never try `mcporter`, `gh`, `curl`, or `yt-dlp` — you have no tool that can execute them, and retrying wastes the dispatch.
+Ignore the `agent-reach doctor --json` step in SKILL.md. Do not use shell `mcporter`, `gh`, `curl`, or `yt-dlp` for web fetching — the read-only hook blocks uploads, and your web tools are the designed path; retrying shell fetches wastes the dispatch.
 
 Login-gated channels (Twitter/X, Reddit, 小红书, Facebook, Instagram, LinkedIn, 雪球) have no usable backend in this environment. Report them as unavailable rather than attempting them.
 

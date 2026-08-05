@@ -2,7 +2,7 @@
 name: data-contract
 description: Opus workops data contract Owner for repository, Supabase capability, validation, authentication, authorization, reference integrity, and sample/live parity.
 tools: Agent(recon, contract-qa, data-contract), Glob, Grep, Read, Edit, Write, Bash, PowerShell
-model: opus
+model: claude-opus-5
 maxTurns: 150
 hooks:
   PreToolUse:

@@ -14,6 +14,35 @@
 
 **세션 종료 시점 열려있는 상태**: 로컬 `localhost:8501` Streamlit(supabase 모드) 백그라운드 실행 중 — 정리 권장. 미커밋 보존물(의도적): `.orca/temp/`·`govern.txt`·`secgap.txt`·`.venv_deploysim/`(gitignore 아님, 커밋에서 선택 제외)·gitignore 로컬(`.venv`·`secrets.toml`·`settings.local.json`).
 
+## 2026-08-04 · [인계] 코디네이터 설계 확정 + 전 프로젝트 MD 감사 + opus 5 고정 + /lee-mode 바인딩
+
+**agent-config 정본: 커밋 완료 + GitHub 푸시 완료** → `velum11/agent-config`(private, master). 이제 글로벌 lee-mode 룰이 버전관리·원격 백업됨. 라이브(`~/.claude`·`~/.orca/lee-mode`)와 내용 동기화 상태(junction은 아직 미적용 — 추후 글로벌 변경 시 수동 동기화 필요, `scripts/apply-junctions.cmd` 사용자 실행 대기).
+
+**이 세션 반영 내역(agent-config 커밋됨/푸시됨):**
+- **코디네이터 플레인 라우터(Codex#2 = c)**: lee-coordinator 본문에 `플레인 판정→확정→선택 플레인 스킬만 호출` 결정론 규칙. 기본 내장 Agent, Orca는 §5.2 조건일 때만, orchestration=조율/orca-cli=터미널·worktree·handoff. preload 금지. QD 가드: "never substitute"는 Orca 선택 후에만(내장 Agent는 정상 기본) — PLAYBOOK §5.1 + 코디네이터 양쪽.
+- **Codex#1 감사 = "조건부 적절"** 반영: Q2(sonnet 강등 모호) → §3에 Opus 승격 트리거 4개 구체화. 드리프트 → lee-coordinator maxTurns:300·ux-architect 프로젝트 조건부 명시.
+- **opus 티어 → `claude-opus-5` 고정**: bare `opus` 별칭이 4.8로 해석되는 문제. ui-feature·data-contract·integrator·code-review(+workops ux-architect) frontmatter model 명시. PLAYBOOK §1.2/§3도 갱신. sonnet·fable은 사용자 설정 유지.
+- **`/lee-mode` → lee-coordinator 에이전트+Fable 바인딩(B→A)**: 명령 frontmatter에 `agent: lee-coordinator` + `model: fable` 추가. 이제 어느 프로젝트든 `/lee-mode`가 Fable 코디네이터로 실행(effort high=전역 settings 상속). **미검증**: `agent:` 필드가 세션 인라인 전환인지 fork인지 실측 안 함 — 다음에 `/lee-mode` 실제 호출로 (a)모델 Fable 여부 (b)감독 연속성 확인 필요. fork면 `model: fable`만 남기고 `agent:` 제거가 폴백.
+- **디자인 변경 = 시안 3개 먼저→선택→1개 구현**(이전 세션 도입분 유지). 예외: 문구·토큰·정확지정.
+
+**전 프로젝트 MD/스킬 감사(recon 4명 병렬 + Codex 메타검수 "신뢰도 높음"):**
+- **R1/R2 (workops 스킬 정합화, 미커밋)**: duty-erp-ui·duty-ux SKILL/EVALS의 "handoff"→"design brief", 단일 목업 서술→시안 3개로 수정. `.claude/skills/duty-erp-ui/{SKILL.md,evals/EVALS.md}`·`duty-ux/SKILL.md`.
+- **D1 (recon 관찰용 셸, 커밋됨 글로벌 / 미커밋 workops)**: Codex "recon Bash 전무=실제 능력 저해" → recon에 Bash + `recon-readonly.sh` PreToolUse hook(git read·버전 조회만 통과, 쓰기·설치·마이그레이션·업로드 차단, self-test 검증). 글로벌+workops 양쪽 hook 배치.
+- **D2 (prospect-research/AGENTS.md, 미커밋)**: Codex "prospect만 ORCA 실사용이라 실이슈" → 최소 안전 어댑터 신설(정본 포인터 + 바이패스 모델 의존 승인게이트). raw-material·partner-vetting은 독립운영이라 무방(강제 생성 안 함).
+- **R4 (agent-config, 커밋됨)**: README duty-scheduler→workops·특화 8종, defect schema role enum 현행화. **llm-wiki 경로는 사용자 지시로 원상 유지**(위키 재배치 별건). 위키(wikis/*) 전부 무접촉.
+- 오탐 필터: agent-config에 WorkOps 0건(정상), wikis의 lee-mode 미준수/handoff(별개 도메인). F4(hook 집행) = integrator hook이 `git commit --dry-run` 차단하는 것 라이브 실측으로 확인 — 단 Codex 권고대로 회귀조건(런타임 버전 2.1.218·bypass 부모·subagent spawn·exit code 2 + read-only 대조군) 명시 필요, 범용 보장으로 확대 금지.
+
+**과다제약 가설(사용자: 미검증) → Codex 판정**: 전체 과다제약 아님. recon만 국소 과다제약(D1로 해소). frontend-design 금지·code-review 노이즈 금지는 정당. read-only 산문 반복은 과다"서술"(D3 압축은 선택). 원칙: "비가역·외부 위험이나 관측된 오탐을 줄이는 최소 제약만 유지, 안전 이득 없이 증거수집 막는 제약은 푼다."
+
+**미해결·다음 세션 할 일 (우선순위):**
+1. **workops 대규모 미커밋 커밋+푸시 승인** — blueprint v2 전체 + WorkOps 개명 + R1/R2 + D1(recon) + opus-5 pin + 스킬 정합화가 전부 미커밋. push=Streamlit 배포이므로 사용자 명시 승인 필요. (`git status`로 범위 확인)
+2. **prospect-research/AGENTS.md 커밋** (그 repo, 미커밋).
+3. **`/lee-mode` agent 바인딩 실측** (fork vs 인라인 — 위 참조).
+4. **Q5 (P1, 미해결)**: QA/reviewer의 절대경로 본 checkout 쓰기 갭 — Codex 권고 OS 파일시스템 샌드박스(전역 blast radius라 사용자 결정 대기). Q4(P2) 시안 격리 집행도 동반.
+5. junction 전환(`agent-config\scripts\apply-junctions.cmd` 사용자 실행), IME 리포트 제출(`agent-config/docs/orca-hangul-ime-regression-20260803.md`), D3 산문압축/D4 eval backfill(낮음).
+
+**환경 메모**: 한글 IME 잘림 = 오늘 Orca 업데이트 회귀(Claude 7/29 무변경). 긴 한글은 붙여넣기 권장. Codex 실행은 반드시 `codex exec ... < /dev/null`(stdin EOF, 안 그러면 hang). settings.json model=claude-opus-5·effortLevel=high·env depth=1.
+
 ## 2026-08-03 · [Codex 합의] blueprint v2 방향 감사 + 코디네이터 설계 (재부팅 후 재실행 완료)
 
 재부팅 전 hang(원인: `codex exec`가 stdin EOF 대기 → `< /dev/null`로 해소, 검증됨)됐던 Codex 2건을 재실행해 판정 수신. 결과는 `agent-config` repo에 반영·커밋(`777de6b`).
