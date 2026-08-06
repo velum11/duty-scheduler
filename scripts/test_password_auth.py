@@ -173,6 +173,65 @@ user, err = auth.login("1003", "1003")
 check("변경 후: 예전 초기 비밀번호(사번)는 거부", user is None)
 
 # =========================================================================
+# 6b) 한시적 고정 비밀번호 예외 (사용자 지시 2026-08-05)
+#     config.FIXED_PASSWORD_ACCOUNTS 가 단일 SoT 여야 한다 — 비우면 예외가 전부 사라진다.
+# =========================================================================
+orig_fixed = dict(config.FIXED_PASSWORD_ACCOUNTS)
+try:
+    # sample 사번 1001(ADMIN 역할)을 예외로 등재해 동작을 검증한다.
+    config.FIXED_PASSWORD_ACCOUNTS.clear()
+    config.FIXED_PASSWORD_ACCOUNTS["1001"] = "FIXEDPW"
+
+    reset_state()
+    user, err = auth.login("1001", "FIXEDPW")
+    check("고정예외: 고정 비밀번호로 로그인 성공", user is not None and err is None)
+    check("고정예외: 강제변경이 걸리지 않는다", auth.needs_password_change() is False)
+
+    ok, err = auth.change_password("FIXEDPW", "abcd1234", "abcd1234")
+    check("고정예외: 비밀번호 변경 거부", ok is False and "고정" in str(err))
+
+    reset_state()
+    user, err = auth.login("1001", "1001")
+    check("고정예외: 초기 비번(사번)은 더 이상 통하지 않는다", user is None)
+
+    # 정확 일치 계약: 대소문자만 다른 사번은 예외에 걸리지 않는다.
+    # (실 DB 에 'ADMIN' 활성 / 'admin' 비활성이 공존하므로 casefold 매칭은 위험하다.)
+    # 고정 예외는 스키마 게이트보다 앞에 있어야 한다 — 008 미적용 환경에서도 지정
+    # 관리자가 들어올 수 있게 하는 것이 이 예외의 목적이다.
+    login_body = inspect.getsource(auth.login)
+    check("고정예외: 스키마 fail-closed 게이트보다 앞에서 판정한다",
+          login_body.index("fixed_password_for(") < login_body.index("password_auth_ready()"))
+    check("고정예외: 자격증명 컬럼을 읽지 않는 경로",
+          login_body.index("fixed_password_for(") < login_body.index("get_user_credential("))
+
+    check("고정예외: 정확 일치 — 대소문자 다른 사번은 예외 아님",
+          auth.fixed_password_for("1001") == "FIXEDPW"
+          and auth.fixed_password_for("1002") is None)
+    config.FIXED_PASSWORD_ACCOUNTS.clear()
+    config.FIXED_PASSWORD_ACCOUNTS["ADMIN"] = "ADMIN"
+    check("고정예외: 'ADMIN' 등재 시 'admin' 은 예외에서 제외",
+          auth.fixed_password_for("ADMIN") == "ADMIN"
+          and auth.fixed_password_for("admin") is None)
+
+    # 예외를 비우면 흔적 없이 일반 정책으로 복귀해야 한다(제거 가능성 검증).
+    config.FIXED_PASSWORD_ACCOUNTS.clear()
+    check("고정예외: dict 를 비우면 예외가 사라진다",
+          auth.fixed_password_for("1001") is None
+          and auth.fixed_password_for("ADMIN") is None)
+    reset_state()
+    # 4) 에서 1001 의 초기비번 만료를 과거로 세팅했으므로 되돌린다(픽스처 격리).
+    db._sample_update_credential("1001", {"initial_password_expires_at": None})
+    user, err = auth.login("1001", "1001")
+    check("고정예외 해제 후: 초기 비번(사번) 경로가 되살아난다",
+          user is not None and auth.needs_password_change() is True)
+finally:
+    config.FIXED_PASSWORD_ACCOUNTS.clear()
+    config.FIXED_PASSWORD_ACCOUNTS.update(orig_fixed)
+
+check("고정예외: 현재 등재는 활성 관리자 사번 'ADMIN' 하나뿐(한시적)",
+      config.FIXED_PASSWORD_ACCOUNTS == {"ADMIN": "ADMIN"})
+
+# =========================================================================
 # 7) 정적 계약: fail-closed·게이트 배치·세션 해시 저장
 # =========================================================================
 login_src = inspect.getsource(auth.login)

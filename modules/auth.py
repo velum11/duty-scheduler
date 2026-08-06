@@ -15,6 +15,7 @@
 앱이 service_role 로 접근하는 현재 구조에서 인증 신뢰경계는 여기다.
 """
 import hashlib
+import hmac
 import json
 import secrets as pysecrets
 from datetime import datetime, timedelta, timezone
@@ -178,6 +179,20 @@ def _cookie_clear() -> None:
 _BAD_CREDENTIALS = "사번 또는 비밀번호가 올바르지 않습니다."
 
 
+def fixed_password_for(emp_no: str) -> str | None:
+    """정규 사번이 한시적 고정 비밀번호 예외 대상이면 그 고정값, 아니면 None.
+
+    비교는 **정확 일치**다(trim 만, casefold 아님). 이 DB 에는 대소문자만 다른
+    'ADMIN'/'admin' 이 별개 계정으로 존재하므로, casefold 로 맞추면 의도하지 않은
+    계정까지 예외가 된다 — 인가 *부여* 판정에 정확 일치를 쓰는 _emp_exact_match 와
+    같은 근거다.
+    """
+    key = str(emp_no or "").strip()
+    if not key:
+        return None
+    return config.FIXED_PASSWORD_ACCOUNTS.get(key)
+
+
 def _lock_message(locked_until: datetime) -> str:
     remaining = max(1, int((locked_until - _now()).total_seconds() // 60) + 1)
     return f"로그인 시도가 많아 계정이 잠겼습니다. {remaining}분 후 다시 시도하세요."
@@ -216,6 +231,30 @@ def login(emp_no: str, password: str = ""):
     if not password:
         return None, "비밀번호를 입력하세요."
 
+    # 사번 조회는 trim + 대소문자 무시(find_user_by_emp_no). 세션/토큰에는
+    # 입력값이 아니라 DB 의 정규 emp_no 를 저장해 대소문자 표기 흔들림을 막는다.
+    user = db.find_user_by_emp_no(emp_no)
+    if user is None or not user.get("is_active", False):
+        return None, _BAD_CREDENTIALS
+    canonical = str(user.get("emp_no", emp_no))
+
+    # 한시적 고정 비밀번호 예외 — 등재 계정은 고정값으로만 로그인하고 강제변경을 면제한다.
+    # 스키마 게이트보다 **앞**에 둔다: 008 미적용 환경에서도 지정 관리자는 들어올 수 있어야
+    # 한다는 것이 이 예외의 목적이기 때문이다(자격증명 컬럼을 아예 읽지 않는 경로).
+    # 그 대가로 이 계정에 한해 fail-closed 가드가 뚫린다 — config 의 등재를 지우면
+    # 예외와 함께 가드도 원상복구된다.
+    fixed = fixed_password_for(canonical)
+    if fixed is not None:
+        if not hmac.compare_digest(str(password), str(fixed)):
+            return None, _BAD_CREDENTIALS
+        token = _issue_token(canonical)
+        st.session_state.pop("nav_page", None)
+        st.session_state.user = user
+        st.session_state.auth_token = token
+        st.session_state.must_change_password = False
+        _cookie_set(token)
+        return user, None
+
     # 스키마 미적용이면 로그인을 거부한다(fail-closed). 비번 없는 예전 동작으로 조용히
     # 되돌아가면, 마이그레이션 누락을 모른 채 "비번이 켜졌다"고 믿고 운영에 들어간다.
     if not db.password_auth_ready():
@@ -223,13 +262,6 @@ def login(emp_no: str, password: str = ""):
             "비밀번호 인증 스키마(008)가 아직 적용되지 않아 로그인할 수 없습니다. "
             "관리자에게 문의하세요."
         )
-
-    # 사번 조회는 trim + 대소문자 무시(find_user_by_emp_no). 세션/토큰에는
-    # 입력값이 아니라 DB 의 정규 emp_no 를 저장해 대소문자 표기 흔들림을 막는다.
-    user = db.find_user_by_emp_no(emp_no)
-    if user is None or not user.get("is_active", False):
-        return None, _BAD_CREDENTIALS
-    canonical = str(user.get("emp_no", emp_no))
 
     credential = db.get_user_credential(canonical)
     if credential is None:
@@ -293,6 +325,13 @@ def change_password(current_password: str, new_password: str, confirm_password: 
     canonical = str(user.get("emp_no") or "").strip()
     if not canonical:
         return False, "사용자 사번을 확인할 수 없습니다."
+
+    # 고정 비밀번호 예외 계정은 변경을 거부한다 — 바꿔봐야 고정값이 계속 통하므로
+    # "바꿨다"는 잘못된 안심만 남는다. 예외를 풀려면 config 에서 등재를 지운다.
+    if fixed_password_for(canonical) is not None:
+        return False, (
+            "이 계정은 관리자 지시로 비밀번호가 한시적으로 고정되어 있어 변경할 수 없습니다."
+        )
 
     credential = db.get_user_credential(canonical)
     if credential is None:
@@ -373,6 +412,8 @@ def _must_change_for(user) -> bool:
     emp_no = str((user or {}).get("emp_no") or "").strip()
     if not emp_no:
         return True
+    if fixed_password_for(emp_no) is not None:
+        return False  # 고정 비밀번호 예외 계정은 강제변경 대상이 아니다.
     try:
         credential = db.get_user_credential(emp_no)
     except Exception:
