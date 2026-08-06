@@ -2,6 +2,43 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-08-05 · [인계] 베타 준비 보안 1단계 — 비밀번호 인증 + 서버측 세션(008 DRAFT) + 계정 소유권 방향 확정
+
+**사용자 결정(이번 세션):**
+- **비밀번호 인증 도입.** 초기 비번=사번, 최초 로그인 시 변경 강제. 그 위에 내가 제안해 승인된 완충 2건: 초기비번 **유효기간 7일**(사번은 비밀이 아니라 방치 계정 선점 위험 — 특히 ADMIN), ADMIN 계정 우선 로그인.
+- **계정 소유권**: Supabase·Streamlit → **회사 계정**, GitHub → **개인 유지**. 근거 정리 = Supabase는 실직원 개인정보 보유(이전비용이 아니라 처리자 문제, 팩트데이터 넣기 전이 가장 쌈) > Streamlit은 **service_role 키가 Secrets에 있어** 계정 보유자가 DB 마스터키를 읽음 > GitHub은 쌓이는 데이터·과금 없어 이전 불필요. 단 **개인 private repo + 회사 Streamlit 계정 = 회사 GitHub 사용자를 collaborator로 초대 필요**(운영상 1단계 추가). 나중에 옮길 땐 Settings→Transfer ownership이 issue/PR/리다이렉트까지 보존.
+- **ADMIN 계정 비번을 당분간 `ADMIN`으로 고정**(사번 하나만, 아래 참조).
+
+**구현(커밋됨):** `e116d8b`(에이전트 opus-5 고정 + recon 훅 + 시안3개 정합화) → `1e71d9b`(비번 인증). 둘 다 push, `88b5b3e`(미push였던 것) 동반 반영.
+- `supabase/migrations/008_password_auth.sql` **DRAFT·미적용** — users 비번 컬럼 6개 + `login_sessions`. **기존 행의 값을 한 줄도 쓰지 않음**(컬럼 추가·기본값뿐). 007 규약 준수(guarded DDL·스키마 assertion·RLS enable/policy 없음).
+- `modules/passwords.py` 신설 — **표준 라이브러리 `hashlib.scrypt`**(n=2^14). bcrypt/argon2를 안 써서 **requirements 무변경 = Streamlit Cloud 빌드 표면 안 늘어남**. 저장형식 자기서술적(`scrypt$n$r$p$salt$hash`)이라 파라미터 올려도 기존 해시 검증됨.
+- `login_sessions`는 **원문 토큰이 아니라 sha256만 저장**(덤프 유출돼도 세션 재생 불가). 기존 `.local_sessions.json`은 sample 모드 폴백으로만 유지 — Cloud 컨테이너 FS가 휘발성이라 재배포마다 전원 로그아웃되던 문제 해소.
+- **자격증명은 USER_COLUMNS/`get_users` 계약에서 분리**(화면으로 흘러가면 안 됨). 전용 경로 + 캐시 우회.
+- 강제변경 게이트는 **`app_shell`(네비게이션) 앞**에 배치 — 사이드바 그린 뒤 막으면 그게 우회로. **쿠키 자동로그인도 동일 게이트**(`_must_change_for`, 판정 실패 시 True로 접음).
+- 미등록 사번과 오답 비번을 **같은 문구**로 응답(사용자 열거 방지) — 기존 "등록되지 않은 사번" 문구가 이 때문에 바뀜, `test_login_auth` 계약도 갱신.
+- 비번 변경·ADMIN 초기화 시 해당 사용자 **세션 전체 폐기**. ADMIN 초기화 UI는 사용자관리 화면 하단 expander(그리드 저장경로와 분리).
+- 연속 5회 실패 → 10분 잠금. `views/password_change.py` 신설(§0 화면표준 제외목록에 `login`과 같은 범주로 사유 명시 등재).
+
+**⚠️ 배포본 현재 상태 — 로그인 차단.** push=`kptech-workops.streamlit.app` 자동 재배포인데 **008 미적용**이라 supabase 모드 로그인이 fail-closed로 전부 막힘("비밀번호 인증 스키마(008)가 아직 적용되지 않아…"). **의도한 안전방향 실패**이고 데이터 위험 없음. 순서가 뒤집힌 것(원칙: 008 적용 → 코드 push). 복구하려면 008 적용 필요하나, **앞서 정한 순서대로면 회사 Supabase 프로젝트에 001~008을 한 번에 적용하는 게 맞고 개인 테스트 프로젝트에 지금 적용하는 건 배포본을 잠시 살리는 것 외 실익 없음** — 사용자 판단 대기.
+
+**ADMIN 고정 비밀번호 예외 (미커밋, 한시적):** `config.FIXED_PASSWORD_ACCOUNTS = {"ADMIN": "ADMIN"}` **단일 SoT**. 등재 계정은 고정값으로만 로그인·강제변경 면제·**비번 변경 거부**(바꿔도 고정값이 통해 잘못된 안심만 남음). **매칭은 정확 일치**(trim만, casefold 아님) — 실DB에 `ADMIN`(활성)/`admin`(비활성)이 공존해 casefold면 의도 밖 계정까지 걸림. 실측: `admin` 입력은 비활성 계정이 아니라 **활성 `ADMIN`으로 정규화**되는 기존 계약 동작(버그 아님). **이 예외는 008 스키마 게이트보다 앞에서 판정**한다 — 008 미적용에서도 지정 관리자가 들어오게 하는 게 목적이라 자격증명 컬럼을 아예 안 읽음. **대가: 이 계정에 한해 fail-closed 가드가 뚫림.** dict를 비우면 예외·가드 모두 원복(테스트로 고정).
+- 실DB 실측 확인: `password_auth_ready=False`, `ADMIN/ADMIN` 성공(강제변경 없음), `ADMIN/wrong` 거부.
+- **베타 오픈 전 반드시 이 dict를 비울 것.**
+
+**검증:** `test_password_auth` 신규 **51 PASS**, `test_login_auth` 30, `test_screen_scaffold` 100, `test_master_unified` 199, `test_sidebar_ui` 103, `test_master_and_views`/`test_erp_select_grid`/`test_cache_invalidation` 등 focused 전부 통과. compileall·`git diff --check` 통과. **브라우저 클릭 확인은 미수행**(헤드리스 auth 경로 실측으로 대체).
+
+**미해결·다음 할 일 (우선순위):**
+1. **GitHub Private 전환** — repo가 **아직 PUBLIC**(`velum11/workops`). 자격증명 유출은 없음(과거 revision 전수 스캔 확인) but 조직구조·화면·업무규칙·이제 인증구조까지 공개. 사용자 계정 권한.
+2. **회사 Supabase 조직 확보 요청** — 리드타임 있음. 확보 후 001~008 적용 → 그다음 팩트데이터.
+3. **008 적용 위치 결정**(개인 테스트 프로젝트 임시 적용 vs 회사 프로젝트 대기) — 배포본 로그인 복구와 직결.
+4. **ADMIN 고정 예외 제거**(베타 전 필수) + 이번 미커밋분(`config.py`·`auth.py`·`test_password_auth.py`) 커밋 승인.
+5. `docs/database.md`·`BACKLOG.md`에 008 미반영 — 적용 승인 단계에서 동반 갱신.
+6. 엑셀 마이그레이션 템플릿(`.orca/artifacts/beta-migration/workops_마이그레이션_템플릿.xlsx`, 7시트) 사용자 작성 대기 → 받으면 **읽기전용 검증 후 "추가 N/수정 M" 보고, 승인 전 DB 무쓰기**.
+7. `passwords.needs_rehash()` **의도적 미배선** — 로그인 시 조용히 재해싱하면 `set_user_password`가 `must_change_password`까지 꺼서 강제변경이 샘. scrypt 파라미터 올릴 때 전용 경로로 붙일 것.
+8. 이전 세션 이월: prospect-research/AGENTS.md 커밋, Q5(QA/reviewer 절대경로 쓰기 갭), junction 전환.
+
+**환경 메모**: 로컬 `localhost:8501` **supabase 모드** 실행 중. **사용자 선호(2026-08-05 확정): 포트 열어달라는 요청은 sample이 아니라 supabase 연동 모드가 기본.** supabase로 못 띄울 사유가 있으면 임의 sample 폴백 금지, 사유 보고 후 판단 요청. 미커밋 보존물(의도적): `.orca/temp/`·`govern.txt`(웹 아티클)·`secgap.txt`(웹 아티클)·`.venv_deploysim/`.
+
 ## 2026-08-04 · [인계] 개명 마무리 + KPI 2줄 카드 + venv 재생성 + Streamlit Cloud 배포 + 모바일 사이드바 수정
 
 - **duty-scheduler→workops 잔여 정리(tracked)**: SKILL 5종 description/본문·`.claude/launch.json`·openai.yaml 3종·`THIRD_PARTY_NOTICES.md`·`001_initial_schema.sql` 주석·test_*.py 실행주석의 프로젝트명 통일. **내부 식별자(`duty-*` 스킬명·`DUTY_*` env·`duty_token` 쿠키)와 기능코드(`duty_date` 등)는 의도적 유지.** 로컬 폴더는 `C:\dev\workops`로 개명 완료. 남은 옛 경로는 **역사물뿐**: `docs/WORKLOG.md`(이 파일 과거기록)·`.orca/temp/*.log`·`.orca/artifacts/**`(비규범, 보존).
