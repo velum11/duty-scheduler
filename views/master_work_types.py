@@ -407,11 +407,14 @@ def render(user: dict) -> None:
         PAGE_ID,
         [
             erp.Field(key="active", label="사용 여부", kind="select", options=_STATUS,
-                     widget_key=state.key("f_active")),
+                     widget_key=state.key("f_active"), width=150),
             erp.Field(key="search", label="검색", kind="text",
                      widget_key=state.key("f_search"), placeholder="코드·명칭·약칭 검색"),
         ],
-        cols=2,
+        # §0.6 컨트롤 폭 내용 맞춤 — cols=2 등폭은 3지선다 select 를 580px(1440 기준)까지
+        # 늘려 조건 줄이 화면 폭을 삼켰다. 짧은 코드값 select 는 내용 맞춤, 검색만 신축
+        # (월간 근무표·근무표 편성과 동일 패턴).
+        content_fit=True,
     )
     params = {"active": cond["active"], "search": str(cond["search"]).strip()}
 
@@ -487,6 +490,10 @@ def render(user: dict) -> None:
         _act(cd, DELETE, "삭제")
         _act(cs, SAVE, "저장", primary=True)
         _act(cr, REFRESH, "새로고침")
+
+    # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)에 **같은 활성 규칙**을 발행한다 —
+    # 클릭은 같은 page-scoped flag 를 쏘므로 실행 경로·확인 게이트는 하나다.
+    master.header_actions_from_specs(PAGE_ID, specs)
 
     # ---- 배너(표 위 슬롯, 단일 우선순위: 삭제확인 > 폐기확인 > 저장원장/오류 > flash) ----
     with banner_slot:

@@ -61,6 +61,7 @@ from views.master import (
     dirty_total,
     discard_confirm_bar,
     grid_bool,
+    header_actions_from_specs,
     ledger_banner,
     live_rows,
     master_grid_height,
@@ -895,23 +896,25 @@ def render(user: dict) -> None:
         PAGE_ID,
         [
             erp.Field(key="active", label="재직 여부", kind="select", options=_STATUS,
-                     widget_key=_F_ACTIVE),
+                     widget_key=_F_ACTIVE, width=130),
             erp.Field(
                 key="dept", label="부서", kind="select",
                 options=[_ALL] + list(dept_names),
                 format_func=lambda c: "전체 부서" if c == _ALL else dept_names.get(c, c),
-                widget_key=_F_DEPT,
+                widget_key=_F_DEPT, width=220,
             ),
             erp.Field(
                 key="role", label="권한", kind="select",
                 options=[_ALL] + list(_ROLE_TO_LABEL),
                 format_func=lambda c: "전체 권한" if c == _ALL else _ROLE_TO_LABEL.get(c, c),
-                widget_key=_F_ROLE,
+                widget_key=_F_ROLE, width=150,
             ),
             erp.Field(key="search", label="검색", kind="text",
                      widget_key=_F_SEARCH, placeholder="사번·성명 검색"),
         ],
-        cols=4,  # §1-E 4열 필터(재직/부서/권한/검색)
+        # §0.6 컨트롤 폭 내용 맞춤 — cols=4 등폭은 3~4지선다 select 를 285px(1440 기준)로
+        # 늘렸다. 짧은 코드값 select 는 내용 맞춤, 검색만 신축(기준정보 3화면 동일).
+        content_fit=True,
     )
     # §1-E: 필터 줄 → 헤어라인 → (건수 행 + 표)
     st.markdown("<div style='border-top:1px solid #e0dbd2;margin:2px 0 8px;'></div>",
@@ -1017,6 +1020,11 @@ def render(user: dict) -> None:
         _act(cd, DELETE, "삭제")
         _act(cs, SAVE, "저장", primary=True)
         _act(cr, REFRESH, "새로고침")
+
+    # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)에 **같은 활성 규칙**을 발행한다 —
+    # 클릭은 같은 page-scoped flag 를 쏘므로 실행 경로·확인 게이트는 하나다(두 진입점,
+    # 한 경로). specs 를 그대로 쓰기 때문에 헤더와 인페이지의 활성/사유가 갈릴 수 없다.
+    header_actions_from_specs(PAGE_ID, specs)
 
     # ---- 배너(우선순위: 삭제 확인 > 폐기 확인 > 결과 원장 > 오류 > flash) ----
     with banner_slot:

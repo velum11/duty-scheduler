@@ -824,7 +824,13 @@ def test_month_view_top_actions() -> None:
     i_dl = src.find("st.download_button")
     i_grid = src.find("erp.read_grid(")
     check("엑셀 다운로드가 표(read_grid)보다 위에서 렌더", 0 <= i_dl < i_grid)
-    check("다운로드가 컨텍스트 줄 우측 컬럼에 위치", "ctx_col, dl_col = st.columns(" in src)
+    # 2026-08-07 개선 라운드: st.columns([1,0.22]) → horizontal container + 내용맞춤 버튼
+    # (좁은 폭에서 버튼 라벨 2줄 접힘 해결). 포함 관계로 검증한다 — 다운로드 버튼이
+    # sv_ctxrow 컨테이너 블록 **안**에 있어야 통과(밖으로 나가면 회귀로 잡힘).
+    i_row = src.find('st.container(key="sv_ctxrow", horizontal=True')
+    i_grid2 = src.find("erp.read_grid(", i_row if i_row >= 0 else 0)
+    check("다운로드가 컨텍스트 줄(horizontal container) 블록 안에 위치",
+          0 <= i_row < i_dl < i_grid2 and 'width="content"' in src[i_row:i_grid2])
     check("표 아래 하단 액션 블록 제거", "하단 액션 — 다운로드" not in src)
 
     # (3) CSV 내보내기 계약 불변(원본 grid·인코딩·파일명·mime·위젯 key).

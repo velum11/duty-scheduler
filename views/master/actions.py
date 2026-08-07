@@ -156,6 +156,27 @@ def page_action_specs(
     ]
 
 
+def header_actions_from_specs(page_id: str, specs: list[dict]) -> None:
+    """상단 52px 헤더 아이콘의 음영/사유를 인페이지 액션 스펙 그대로 발행한다.
+
+    ``page_id`` 는 **nav 화면 id**(``modules/ui._PAGE_HEADER_ACTIONS`` 의 키)다 — 조직
+    관리처럼 DraftState page_id(``org_dept``)와 화면 id(``master_org``)가 다른 화면이
+    있어 호출부가 명시한다. ``specs`` 는 :func:`page_action_specs` 반환값(또는 동일
+    계약의 리스트)이며, role 이 곧 헤더 아이콘 이름(add/delete/save/refresh)이다.
+
+    헤더 아이콘 클릭은 인페이지 버튼과 **같은 page-scoped flag** 를 쏘므로(진입점만 둘,
+    실행 경로는 하나) 여기서 활성/사유까지 같은 원천으로 맞춰 두 컨트롤이 어긋나지 않게
+    한다. import 는 함수 안에서 한다 — ``views.master`` 는 표현 프리미티브 계층이라
+    모듈 로드 시점에 앱 셸(``modules.ui``)에 의존하지 않는 편이 안전하다.
+    """
+    from modules import ui as _ui
+
+    _ui.publish_header_actions(page_id, {
+        s["role"]: (bool(s.get("disabled")), s.get("help"))
+        for s in specs if s.get("role") in ("add", "delete", "save", "refresh")
+    })
+
+
 def take_actions(state: DraftState) -> dict[str, bool]:
     """표준 4액션 flag 를 한 번에 소비해 dict 로 반환한다(controller 편의)."""
     return {

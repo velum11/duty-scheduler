@@ -86,9 +86,19 @@ _ROSTER_CSS = f"""
 .se-legend .lab {{ font-size:11px; letter-spacing:.1em; color:{_FAINT}; font-family:{_MONO}; margin-right:4px; }}
 .se-leg {{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:{_INK}; }}
 .se-leg .sw {{ width:11px; height:11px; border-radius:3px; flex:0 0 auto; }}
-.se-dirty {{ text-align:right; color:{_ACCENT_TEXT}; font-size:12.5px; font-weight:600; margin-top:6px; }}
+/* 미저장 변경 표시 — 0건은 '알릴 것 없음'이라 중립(ink-2·normal), 1건 이상일 때만
+   액센트+굵게로 주의를 끈다. 종전엔 0건도 오렌지 굵게라 상시 경고처럼 읽혔다. */
+.se-dirty {{ text-align:right; color:{_INK2}; font-size:12.5px; font-weight:400; margin-top:6px; }}
+.se-dirty.on {{ color:{_ACCENT_TEXT}; font-weight:600; }}
 </style>
 """
+
+
+# '조'(근무조) 열 입력 안내 — 자유 입력 + 한 글자 자동 보정 규칙(normalize_shift_group)을
+# 헤더 툴팁 1줄로만 노출한다. 문구는 이 상수 한 곳이 원천이다.
+_SHIFT_HINT = "직접 입력 · 한 글자만 쓰면 저장 시 '조'가 붙습니다 (A → A조)"
+# (빈 셀 placeholder 렌더러는 폐기 — 복사 시 placeholder 문구가 실데이터로 붙여넣어질 수
+#  있어(code-review P2) 헤더 툴팁·하단 힌트 줄만 남긴다.)
 
 
 def _active_ordered() -> list[tuple[str, str, str]]:
@@ -172,7 +182,8 @@ def _context_html(q: dict, dept_name: str, team_name: str,
         f"<span>인원 <span class='num'>{n_people}</span></span>"
         f"<span>입력 <span class='num'>{filled}</span></span>"
         f"<span>미입력 <span class='num'>{empty}</span></span>"
-        f"<span class='op'>더블클릭 편집 · 숫자키 1~9·0 입력 · 방향키 이동 · Ctrl+V 붙여넣기</span></div>"
+        f"<span class='op'>더블클릭 편집 · 숫자키 1~9·0 입력 · 방향키 이동 · Ctrl+V 붙여넣기"
+        f" · 조 열 직접 입력(A → A조)</span></div>"
     )
 
 
@@ -270,7 +281,7 @@ def render(user: dict) -> None:
         dept_field = erp.Field(
             key="d", label="부서", kind="select",
             options=[user["dept_code"]], format_func=lambda c: dept_names.get(c, c),
-            disabled=True, widget_key="se_d",
+            disabled=True, widget_key="se_d", width=220,
         )
     else:
         # 부서→조 종속 옵션: 조 Field 를 만들기 전에 "현재" 부서 선택을 세션 상태에서
@@ -281,7 +292,7 @@ def render(user: dict) -> None:
             key="d", label="부서", kind="select",
             options=[_ALL] + list(dept_names),
             format_func=lambda c: "전체 부서" if c == _ALL else dept_names.get(c, c),
-            widget_key="se_d",
+            widget_key="se_d", width=220,
         )
     # 부서=전체면 조는 '전체'만(특정 부서 종속 조 목록 없음). 특정 부서면 그 부서 조 + 전체.
     if cur_dept == _ALL:
@@ -295,21 +306,25 @@ def render(user: dict) -> None:
         # 그대로 protobuf 문자열 필드에 넣어 TypeError 를 낸다(workspace.schedule_screen 과
         # 동일 회피 — 키트 자체는 손대지 않는다). str(int) 는 기존 selectbox 표시와 동일.
         erp.Field(key="y", label="연도", kind="select", options=years, format_func=str,
-                  widget_key="se_y"),
+                  widget_key="se_y", width=110),
         erp.Field(key="m", label="월", kind="select", options=list(range(1, 13)),
-                  format_func=lambda m: f"{m}월", widget_key="se_m"),
+                  format_func=lambda m: f"{m}월", widget_key="se_m", width=100),
         dept_field,
         erp.Field(key="t", label="조", kind="select", options=[_ALL] + list(team_names),
                   format_func=lambda c: "전체 조" if c == _ALL else team_names.get(c, c),
-                  widget_key="se_t"),
+                  widget_key="se_t", width=150),
     ]
-    v = erp.condition_panel("se", fields, cols=4)
+    # §0.6 컨트롤 폭 내용 맞춤 — cols=4 등폭은 연도(4자리)·월 select 까지 285px(1440 기준)
+    # 로 늘려 조건 줄이 화면 폭을 삼켰다. 같은 조건(연/월/부서/조)을 쓰는 월간 근무표와
+    # 동일한 content_fit 배치로 맞춘다(조회 계약·위젯 key 무변경).
+    v = erp.condition_panel("se", fields, content_fit=True)
     year, month, dept, team = v["y"], v["m"], v["d"], v["t"]
 
     # 액션은 상단 52px 헤더 아이콘 4종(추가·새로고침·삭제·저장)이 소유한다(피드백 #1,
     # 부속서 A-5 단일 범위 화면). 페이지 본문의 4단추는 제거했고, 헤더 아이콘 클릭이 기존
     # flag(se_*_req)를 발화한다(ui._PAGE_HEADER_ACTIONS). 삭제·저장 음영은 아래에서 세션
-    # (hdr_dis_delete/save)에 저장해 헤더가 읽는다(선택·dirty 변화는 rerun 주기 내 반영).
+    # (page 스코프 hdr_state — ui.publish_header_actions)로 발행해 헤더가 읽는다
+    # (선택·dirty 변화는 rerun 주기 내 반영).
     # 필터 하단 헤어라인은 condition_panel(§1-E)이 소유한다.
     clicked = st.session_state.pop("se_go_req", False)
     show_flash("schedule_edit")
@@ -365,8 +380,14 @@ def render(user: dict) -> None:
                 "cellStyle": {"fontSize": "14.5px"}},
         "부서": {"pinned": "left", "width": 116, "minWidth": 96, "cellClass": "md-c-left",
                 "cellStyle": {"fontSize": "14.5px"}},
+        # '조'(근무조)는 기준정보 조회가 아니라 자유 입력이며 한 글자만 치면 저장 시
+        # 'A' → 'A조' 로 보정된다(normalize_shift_group). 안내는 헤더 툴팁 + 하단 힌트
+        # 줄로만 한다 — 빈 셀 placeholder 렌더러는 두지 않는다: 셀 복사가 브라우저
+        # 네이티브 텍스트 선택이라 placeholder 문구('직접 입력')가 복사→붙여넣기로
+        # 실데이터가 되어 저장될 수 있다(code-review P2, 자유 입력이라 검증도 안 걸림).
         "조": {"pinned": "left", "width": 88, "minWidth": 72, "cellClass": "md-c-left",
-              "cellStyle": {"fontSize": "14.5px"}},
+              "cellStyle": {"fontSize": "14.5px"},
+              "headerTooltip": _SHIFT_HINT},
     }
     # 날짜 셀 색상 — work_types 기준정보 hex 를 약칭/코드에 매핑(도메인 SoT, 하드코딩 금지).
     day_style = JsCode(
@@ -403,7 +424,9 @@ def render(user: dict) -> None:
             select_all_header=True,  # 표시 중인 기존 행만 대상 (신규 행 제외)
             # 셀 높이 30px(§1-C). 클릭 순환 제거(피드백) → suppressClickEdit 해제해 더블클릭
             # 편집기·직접 타이핑을 복원한다. 숫자키·방향키·Ctrl+V 는 그대로 유지.
-            extra_grid_options={"rowHeight": 30},
+            # enableBrowserTooltips: '조' 열 headerTooltip 을 AG Grid 자체 tooltip 컴포넌트
+            # (별도 모듈 등록 필요)가 아니라 브라우저 기본 title 로 렌더해 항상 뜨게 한다.
+            extra_grid_options={"rowHeight": 30, "enableBrowserTooltips": True},
         )
 
     # 구조 변경(− 제거/붙여넣기 신규 행) + 사번 자동 조회를 권위 상태로 동기화
@@ -459,12 +482,19 @@ def render(user: dict) -> None:
     # ── 하단: 범례(근무형태 색) + 미저장 변경 N건 ──
     st.markdown(_legend_html(active), unsafe_allow_html=True)
     changed = _change_count(live, day_cols, st.session_state.get("se_orig_cells", {}), n_del)
-    st.markdown(f"<div class='se-dirty'>미저장 변경 {changed}건</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='se-dirty{' on' if changed else ''}'>미저장 변경 {changed}건</div>",
+        unsafe_allow_html=True,
+    )
 
-    # ── 헤더 아이콘 음영 상태를 세션에 저장(다음 rerun 의 헤더가 읽음) — 삭제는 선택 0,
-    #    저장은 dirty 0 일 때 음영. 기본 True(음영·안전)로, 값이 준비된 뒤 갱신한다. ──
-    st.session_state["hdr_dis_delete"] = (n_sel == 0)
-    st.session_state["hdr_dis_save"] = (not dirty)
+    # ── 헤더 아이콘 음영 상태를 화면 스코프로 발행(다음 rerun 의 헤더가 읽음) — 삭제는
+    #    선택 0, 저장은 dirty 0 일 때 음영. 사유 문구는 tooltip 으로 함께 노출한다. ──
+    ui.publish_header_actions("schedule_edit", {
+        "add": (False, None),
+        "refresh": (False, None),
+        "delete": (n_sel == 0, "삭제할 기존 행을 먼저 선택하세요" if n_sel == 0 else None),
+        "save": (not dirty, "저장할 변경이 없습니다" if not dirty else None),
+    })
 
     # 헤더 아이콘이 발화한 플래그 처리 (최신 live 기준) — 실행 경로·확인 게이트 불변.
     if st.session_state.pop("se_save_req", False):

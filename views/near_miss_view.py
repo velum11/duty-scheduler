@@ -136,8 +136,8 @@ def render(user: dict) -> None:
     # 고정하고 있어 남겨두되(과거 스코프 동작 보존), render 는 더 이상 호출하지 않는다.
     _readiness().banner()
     # 헤더 인쇄 아이콘 기본 음영(상세 미선택). 유효 상세가 렌더되면 _render_result_detail 이
-    # hdr_dis_print=False 로 활성화한다(다음 rerun 헤더 반영 — 1-rerun 지연 수용).
-    st.session_state["hdr_dis_print"] = True
+    # 활성으로 다시 발행한다(다음 rerun 헤더 반영 — 1-rerun 지연 수용).
+    ui.publish_header_actions("near_miss_view", {"print": (True, "보고서를 먼저 선택하세요")})
     # §0-4: 지표는 제목 바로 아래 첫 블록. 값은 조회 결과(df)에서 파생하므로 슬롯을 먼저
     # 확보하고(필터 위) 결과 준비 후 채운다(deferred). 조회 전/빈 결과면 비운다.
     metric_slot = st.container()
@@ -339,7 +339,8 @@ def _render_result_detail(df: pd.DataFrame) -> None:
     _render_view_photos(report.get("photo_paths"))
 
     # ── A4 세로 PDF 출력 — 상세 다운로드 버튼(발견성) + 헤더 인쇄 아이콘 트리거(자동 다운로드). ──
-    st.session_state["hdr_dis_print"] = False  # 유효 상세 표시 중 → 인쇄 활성(헤더가 다음 rerun 반영)
+    # 유효 상세 표시 중 → 인쇄 활성(헤더가 다음 rerun 반영)
+    ui.publish_header_actions("near_miss_view", {"print": (False, None)})
     pdf_data = near_miss_pdf.report_to_pdf_data(
         report,
         reporter=name_of.get(emp, emp) or "-",

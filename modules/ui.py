@@ -989,34 +989,75 @@ _HEADER_ICONS = [
 # 단일 범위 화면(부속서 A-5 활성 허용)에서 헤더 아이콘이 실작동하는 페이지 매핑.
 # {page: {icon(role): 세션 플래그 키}} — 헤더 아이콘 클릭이 그 화면의 기존 flag 계약을
 # 발화하고(action_requester 와 동일 의미), 화면 render 가 소비한다(실행 경로·확인 게이트 불변).
-# 삭제·저장의 음영은 화면이 매 렌더 세션에 저장하는 hdr_dis_{role}(기본 True=음영, 안전)로 판정.
+# 기준정보 3화면은 views/master 의 page-scoped flag(`{page_id}:action:{name}`)를 그대로
+# 쏜다 — 인페이지 액션바 버튼(on_click=state.action_requester)과 **같은 플래그**라 저장·
+# 삭제 확인 게이트·재적재 경로가 한 벌로 유지된다(두 진입점, 한 실행 경로).
+# 조직 관리는 2026-08-07 단일 시트(부서, DraftState "org_dept") 전환으로 단일 범위 화면이다.
 _PAGE_HEADER_ACTIONS = {
     "schedule_edit": {
         "add": "se_add_req", "refresh": "se_go_req",
         "delete": "se_del_req", "save": "se_save_req",
     },
+    "master_users": {
+        "add": "master_users:action:add", "delete": "master_users:action:delete",
+        "save": "master_users:action:save", "refresh": "master_users:action:refresh",
+    },
+    "master_work_types": {
+        "add": "master_work_types:action:add", "delete": "master_work_types:action:delete",
+        "save": "master_work_types:action:save", "refresh": "master_work_types:action:refresh",
+    },
+    "master_org": {
+        "add": "org_dept:action:add", "delete": "org_dept:action:delete",
+        "save": "org_dept:action:save", "refresh": "org_dept:action:refresh",
+    },
     # 아차사고 조회: 상세 선택 시 인쇄(=PDF 생성·다운로드) 활성. add/delete/save 는 READ 라 미매핑(음영).
     "near_miss_view": {"print": "nmv_print_req"},
 }
-# 대상 유무(선택·dirty)에 따라 음영이 갱신되는 아이콘 — 화면이 hdr_dis_{icon} 를 세션에 저장.
-# add·refresh 는 항상 활성(대상 무관).
-_HDR_DISABLEABLE = ("delete", "save", "print")
+# 대상 유무(선택·dirty·쓰기가능)에 따라 음영이 갱신되는 아이콘과 그 **미발행 기본값**.
+# True=화면이 아직 상태를 발행하지 않았으면 음영(안전측). add 는 대상이 필요 없는 액션이라
+# 기본 활성이지만, 화면이 쓰기 차단(readiness/폐기 게이트)을 발행하면 그 값이 이긴다.
+# 전부 True(음영) = fail-closed 대칭 — 화면이 publish_header_actions 를 아직 발행하지
+# 않은 첫 렌더에서 add 만 활성이면 NOT_READY 등 쓰기 게이트를 한 렌더 우회한다
+# (code-review P3). 발행 즉시 화면별 실상태로 덮인다.
+_HDR_DEFAULT_DISABLED = {"delete": True, "save": True, "print": True, "add": True}
+_HDR_STATE_PREFIX = "hdr_state:"
+
+
+def publish_header_actions(page: str, states: dict) -> None:
+    """화면이 상단 52px 헤더 아이콘의 음영/사유를 발행한다 — {icon: (disabled, help)}.
+
+    **page 로 스코프**한다(구 전역 ``hdr_dis_{icon}`` 대체): 전역 키는 화면을 옮긴 첫
+    렌더에서 헤더가 이전 화면의 값을 읽어 다른 화면의 선택/변경 상태로 음영을 그리는
+    누수가 있었다(헤더는 본문보다 먼저 렌더된다). page 스코프면 그 화면이 아직 한 번도
+    발행하지 않은 동안에만 :data:`_HDR_DEFAULT_DISABLED` 기본값이 쓰인다.
+
+    화면은 인페이지 액션바와 **같은 활성 규칙**(``views/master.page_action_specs`` 등)의
+    결과를 그대로 넘겨야 한다 — 두 진입점의 활성/사유가 갈리면 그 자체가 불일치다.
+    """
+    st.session_state[_HDR_STATE_PREFIX + str(page)] = {
+        str(icon): (bool(disabled), help_text)
+        for icon, (disabled, help_text) in dict(states).items()
+    }
 
 
 def _hdr_icon_state(page: str, icon: str, default_active: bool):
-    """헤더 아이콘 한 개의 (active, enabled, on_click) 을 페이지별로 계산한다.
+    """헤더 아이콘 한 개의 (active, enabled, on_click, help) 을 페이지별로 계산한다.
 
-    페이지 매핑에 role 이 있으면 실작동(클릭=세션 플래그). 삭제·저장·인쇄는 hdr_dis_{role}
-    (기본 True=음영·안전)로 음영. 그 외 화면은 기존 기본(새로고침만 활성=rerun, 나머지 음영)."""
+    페이지 매핑에 role 이 있으면 실작동(클릭=세션 플래그). 음영/사유는 화면이
+    :func:`publish_header_actions` 로 발행한 값을 쓰고, 미발행이면
+    :data:`_HDR_DEFAULT_DISABLED` 기본값(안전측)을 쓴다. 그 외 화면은 기존 기본
+    (새로고침만 활성=rerun, 나머지 음영)."""
     flag = _PAGE_HEADER_ACTIONS.get(page, {}).get(icon)
     if flag is not None:
-        enabled = True
-        if icon in _HDR_DISABLEABLE:
-            enabled = not bool(st.session_state.get(f"hdr_dis_{icon}", True))
-        return True, enabled, (lambda f=flag: st.session_state.update({f: True}))
+        published = st.session_state.get(_HDR_STATE_PREFIX + str(page)) or {}
+        if icon in published:
+            disabled, help_text = published[icon]
+        else:
+            disabled, help_text = _HDR_DEFAULT_DISABLED.get(icon, False), None
+        return True, not disabled, (lambda f=flag: st.session_state.update({f: True})), help_text
     if icon == "refresh":  # 기본 새로고침(그 외 화면) — 클릭=rerun
-        return True, True, None
-    return False, False, None
+        return True, True, None, None
+    return False, False, None, None
 
 
 def _breadcrumb_header(user: dict, page: str) -> None:
@@ -1048,12 +1089,14 @@ def _breadcrumb_header(user: dict, page: str) -> None:
             st.markdown(conn_html, unsafe_allow_html=True)
             for label, icon, default_active in _HEADER_ICONS:
                 # 상시 노출 + 음영: 활성이지만 비활성(삭제/저장 대상 없음)이면 음영(disabled).
-                active, enabled, on_click = _hdr_icon_state(page, icon, default_active)
+                active, enabled, on_click, reason = _hdr_icon_state(page, icon, default_active)
                 slot = "on" if (active and enabled) else "off"
                 if not active:
                     tip = f"{label} — 이 화면에서는 사용하지 않습니다"
                 elif enabled:
                     tip = label
+                elif reason:  # 화면이 발행한 사유(인페이지 액션바 tooltip 과 동일 문구)
+                    tip = f"{label} — {reason}"
                 elif icon == "delete":
                     tip = f"{label} — 삭제할 행을 먼저 선택하세요"
                 elif icon == "save":

@@ -245,10 +245,13 @@ _PAGE_CSS = """
 /* 지오메트리는 밴드 툴(.st-key-ms_band_live) 과 동일 규격으로 맞춘다(콤팩트 툴 계열
    통일 — 조직 관리 인페이지 액션바가 남은 유일한 실사용처, 2026-07-26). 색상 규칙은
    아래 §8 원 규칙(주요/보조/위험)을 그대로 유지하며 크기·모양만 조정한다. */
+/* 높이는 히트영역 하한(≥32px)을 지킨다 — 1.8rem(=25.2px, html 14px 기준)은 실측에서
+   저장·삭제 같은 쓰기 액션이 32px 하한을 밑돌아 오클릭 위험이 있었다(ADOPTION_SPEC
+   불변 '히트영역 ≥32px'). 2.3rem=32.2px 로 올리고 나머지 형태(패딩·radius·굵기)는 유지. */
 [class*="__save"] div.stButton button,
 [class*="__del"]:not([class*="__del_"]) div.stButton button,
 [class*="__add"] div.stButton button,
-[class*="__refresh"] div.stButton button { min-height:1.8rem; height:1.8rem; padding:0 .58rem; border-radius:4px;
+[class*="__refresh"] div.stButton button { min-height:2.3rem; height:2.3rem; padding:0 .58rem; border-radius:4px;
   font-size:.78rem; font-weight:600; white-space:nowrap; gap:.26rem; line-height:1; }
 [class*="__save"] div.stButton button [data-testid="stIconMaterial"],
 [class*="__del"]:not([class*="__del_"]) div.stButton button [data-testid="stIconMaterial"],
@@ -367,7 +370,9 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 .ms-panel { font-size:.94rem; font-weight:700; color:var(--ms-ink); margin:.2rem 0 .1rem; }
 .ms-panel small { font-weight:500; color:var(--ms-ink-2); }
 /* §20 상태 스트립(푸터) */
-.ms-count { font-size:.76rem; color:var(--ms-ink-2); margin:.4rem 0 0; }
+/* 하단 상태 스트립 — 아래에 이어지는 안내 캡션(st.caption)과 2px 간격으로 붙어 한 덩어리로
+   읽혔다(사용자 관리 실측). 아래 여백을 줘 '집계'와 '안내'를 분리한다. */
+.ms-count { font-size:.76rem; color:var(--ms-ink-2); margin:.4rem 0 .35rem; }
 .ms-count b { color:var(--ms-ink); font-weight:600; }
 /* §21/§22 배너 — 좌측 상태 바 + 아이콘 + 텍스트(색만으로 구분 금지) */
 .ms-banner { display:flex; align-items:flex-start; gap:.5rem; padding:.55rem .7rem; border-radius:8px;

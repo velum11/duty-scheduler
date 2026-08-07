@@ -64,6 +64,7 @@ from views.master.actions import (
     count_strip,
     dirty_total,
     discard_confirm_bar,
+    header_actions_from_specs,
     master_action_bar,
     page_action_specs,
     take_actions,
@@ -367,7 +368,8 @@ __all__ = [
     "MasterGridSpec", "render_master_grid", "live_rows", "grid_bool",
     "master_grid_height", "CORE_META", "VIEW_META", "META_COLUMNS",
     # actions
-    "master_action_bar", "page_action_specs", "BandToolbar", "icon_toolbar_specs",
+    "master_action_bar", "page_action_specs", "header_actions_from_specs",
+    "BandToolbar", "icon_toolbar_specs",
     "take_actions", "count_strip", "dirty_total",
     "discard_confirm_bar", "confirm_bar",
     "ADD", "ADD_GROUP", "DELETE", "SAVE", "REFRESH",

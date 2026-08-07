@@ -32,6 +32,15 @@ _SV_CSS = """
 .sv-ctx .loc { font-weight:600; color:#1c1a17; }
 .sv-ctx .num { font-family:'IBM Plex Mono',monospace; font-weight:600; color:#1c1a17; }
 .sv-ctx .sep { color:#a09a90; margin:0 2px; }
+/* 컨텍스트 줄 + [엑셀 다운로드] 한 줄 — 버튼은 내용 맞춤(줄바꿈 금지), 컨텍스트만 신축.
+   좁은 폭에서 컨텍스트가 먼저 wrap 되고 버튼 라벨은 온전히 남는다(겹침·2줄 방지). */
+.st-key-sv_ctxrow { align-items:center; flex-wrap:nowrap !important; }
+/* 컨텍스트 markdown(직계 첫 자식)이 잔여 폭을 흡수하고 내부에서 wrap 한다 —
+   modules/ui.py::_breadcrumb_header 의 hdr_row 와 동일 패턴(검증된 참조). */
+.st-key-sv_ctxrow > div:first-child { flex:1 1 auto; min-width:0; }
+.st-key-sv_ctxdl { flex:0 0 auto; }
+.st-key-sv_ctxdl button { white-space:nowrap; }
+.st-key-sv_ctxrow .sv-ctx { margin:0; }
 .st-key-sv_gridwrap [data-testid="stCustomComponentV1"],
 .st-key-sv_gridwrap div[data-testid="stAgGrid"] {
   border:1px solid #cfc8bd; border-radius:8px; overflow:hidden; background:#ffffff;
@@ -902,10 +911,24 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         dept_field = erp.Field(
             key="d", label="부서", kind="select",
             options=[ALL] + list(dept_names), width=220,
-            format_func=lambda c: dept_names.get(c, c),
+            # '(전체)' 센티널은 라벨을 명시한다(근무표 편성 화면과 동일 표기) — 원값
+            # 그대로 노출하면 코드 같은 괄호 문자열이 부서명 자리에 섞여 읽힌다.
+            format_func=lambda c: "전체 부서" if c == ALL else dept_names.get(c, c),
         )
-    team_rows = teams[teams["dept_code"] == cur_dept] if cur_dept != ALL else teams.iloc[0:0]
-    team_names = {r["team_code"]: r["team_name"] for _, r in team_rows.iterrows()}
+    # 조 옵션은 '대상 월의 실제 조 축'에서 만든다 — 조 축이 shift_group_code 로 옮겨간 뒤
+    # teams 마스터만 보면 실DB(teams 0행)에서 옵션이 '(전체)'뿐이 되고, 부서=(전체) 에서는
+    # 종전 코드가 옵션을 통째로 비웠다. 연/월 위젯 값은 세션 키에서 선-조회한다(부서와 동일
+    # 패턴) — 위젯 렌더 순서와 무관하게 같은 rerun 에서 옵션이 갱신된다.
+    team_names = _team_filter_options(
+        int(st.session_state.get(y_key, today.year)),
+        int(st.session_state.get(m_key, today.month)),
+        cur_dept, teams,
+    )
+    # 옵션 집합이 바뀌어 이전 선택이 사라졌으면 '(전체)'로 되돌린다(위젯 생성 전이라
+    # 세션 키 수정이 허용된다). 없어진 조가 조건에 남아 결과가 0건이 되는 혼선을 막는다.
+    t_key = f"{page_id}_t"
+    if st.session_state.get(t_key) not in ([ALL] + list(team_names)):
+        st.session_state.pop(t_key, None)
 
     fields = [
         # format_func=str 명시: 키트 select 기본 포맷터(lambda x: x)는 항등함수라
@@ -920,7 +943,8 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
                   format_func=lambda m: f"{m}월", width=100),
         dept_field,
         erp.Field(key="t", label="조", kind="select", width=150,
-                  options=[ALL] + list(team_names), format_func=lambda c: team_names.get(c, c)),
+                  options=[ALL] + list(team_names),
+                  format_func=lambda c: "전체 조" if c == ALL else team_names.get(c, c)),
         erp.Field(key="kw", label="사번 또는 성명", kind="text"),
     ]
     # 조건 줄 우측 [조회] 인라인(§1-E). U4: content_fit=True 로 짧은 select 는 내용 맞춤 폭·검색만 신축.
@@ -999,22 +1023,28 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         # (CSV 스키마·파일명·데이터는 불변 — 위치와 폭만 바뀐다).
         wt = _work_types_map_from_df(wt_df)
         n_work = sum(1 for c in month_rows["work_type_code"] if wt.get(c, {}).get("is_work"))
-        ctx_col, dl_col = st.columns([1, 0.22], vertical_alignment="center")
-        with ctx_col:
+        # 컨텍스트 줄 + [엑셀 다운로드] 한 줄 배치. 종전 st.columns([1,0.22]) 는 버튼 폭이
+        # 화면 폭에 비례해 줄어들어 좁은 폭에서 라벨이 2줄로 접히고(실측 ≤880px 에서 버튼
+        # 48px 2줄) 컨텍스트 줄과 세로로 엉켰다. 버튼은 내용 맞춤(content) 으로 고정하고
+        # 컨텍스트 줄만 신축시켜, 좁아지면 컨텍스트가 먼저 wrap 되고 버튼은 온전히 남는다
+        # (§0.6 컨트롤 폭 내용 맞춤 — condition_panel content_fit 과 같은 패턴).
+        with st.container(key="sv_ctxrow", horizontal=True, gap="small",
+                          vertical_alignment="center"):
             st.markdown(
-                _view_context_html(q, dept_names, team_names, len(grid), len(month_rows), n_work),
+                _view_context_html(q, dept_names, team_names,
+                                   len(grid), len(month_rows), n_work),
                 unsafe_allow_html=True,
             )
-        with dl_col:
-            st.download_button(
-                "엑셀 다운로드",
-                grid.to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"근무표_{q['year']}-{q['month']:02d}.csv",
-                mime="text/csv",
-                key=f"{page_id}_dl",
-                icon=":material/download:",
-                width="stretch",
-            )
+            with st.container(key="sv_ctxdl", width="content"):
+                st.download_button(
+                    "엑셀 다운로드",
+                    grid.to_csv(index=False).encode("utf-8-sig"),
+                    file_name=f"근무표_{q['year']}-{q['month']:02d}.csv",
+                    mime="text/csv",
+                    key=f"{page_id}_dl",
+                    icon=":material/download:",
+                    width="content",
+                )
 
         # primary — 월간 근무표(근무 약칭 + 지정 색상, 읽기 전용).
         day_cols = [c for c in grid.columns if c[0].isdigit()]
@@ -1082,6 +1112,59 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         fingerprint=_fp, height=360,
         prepare=_cold_load, render=_render_body,
     )
+
+
+def team_filter_options(assigns: pd.DataFrame | None, teams: pd.DataFrame | None,
+                        dept: str) -> dict:
+    """조 필터 옵션 {값: 표시라벨} — 대상 월 편성 스냅샷의 조 축을 우선 원천으로 만든다(순수).
+
+    조 축이 ``teams``(운영단위 마스터)에서 ``schedule_assignments.shift_group_code``
+    (근무표 편성 직접입력)로 옮겨간 뒤, teams 마스터만 보는 옵션 소스는 실DB(teams 0행)
+    에서 '(전체)' 하나만 남고 부서=(전체) 에서는 아예 비어 조 필터가 무력화됐다. 그래서
+    옵션을 다음 3원천의 합집합으로 만든다 — 필터 매칭 로직(_eff_team/_eff_shift 양축)은
+    그대로 두고 **옵션 소스만** 바꾼다:
+
+      1. 스냅샷 근무조(``shift_group_code``) — 신 축. 값이 곧 표시 라벨이다.
+      2. 스냅샷 운영단위(``team_code``) — 레거시 축(과거 월 편성). 라벨은 teams 마스터의
+         조명, 없으면 코드 그대로.
+      3. teams 마스터의 조 — 편성이 아직 없는 월에도 기존 조로 좁혀볼 수 있게 유지한다
+         (부서=(전체) 면 전 부서의 조. 종전 코드는 이 경우 옵션을 통째로 비웠다).
+
+    ``dept`` 가 ``ALL`` 이 아니면 스냅샷은 그 부서 편성 행만, teams 는 그 부서 조만 본다.
+    반환 순서는 정렬 고정(표시 흔들림 방지)이며, 값은 매칭 축과 같은 원본 문자열이다.
+    """
+    options: dict[str, str] = {}
+    labels: dict[str, str] = {}
+    if teams is not None and not teams.empty:
+        for _, t in teams.iterrows():
+            code = _clean(t.get("team_code"))
+            if not code:
+                continue
+            labels.setdefault(code, _clean(t.get("team_name")) or code)
+            if dept == ALL or _clean(t.get("dept_code")) == dept:
+                options[code] = labels[code]
+    if assigns is not None and not assigns.empty:
+        for _, a in assigns.iterrows():
+            if dept != ALL and _clean(a.get("dept_code")) != dept:
+                continue
+            shift = _clean(a.get("shift_group_code"))
+            if shift:
+                options.setdefault(shift, shift)
+            team = _clean(a.get("team_code"))
+            if team:
+                options.setdefault(team, labels.get(team, team))
+    return {code: options[code] for code in sorted(options)}
+
+
+def _team_filter_options(year: int, month: int, dept: str, teams: pd.DataFrame) -> dict:
+    """:func:`team_filter_options` 의 조회 래퍼 — 대상 월 편성 스냅샷을 읽어 넘긴다.
+
+    ``db.get_month_assignments`` 는 supabase 모드에서 30초 캐시(``modules/db``)라 같은
+    렌더 안의 재조회는 네트워크를 다시 치지 않는다. 조회 실패(네트워크·권한)는 여기서
+    삼키지 않고 그대로 올린다 — 옵션이 조용히 빈 상태로 위장되면 사용자가 '조 없음'을
+    데이터 사실로 오독한다(모듈 계약: 오류를 sample/빈 결과로 숨기지 않는다).
+    """
+    return team_filter_options(db.get_month_assignments(int(year), int(month)), teams, dept)
 
 
 def _clean(value) -> str:
@@ -1180,12 +1263,15 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
 
     if q["dept"] != ALL:
         users = users[users["_eff_dept"] == q["dept"]]
-        if q["team"] != ALL:
-            # 조 필터는 신 축(근무조 직접입력)과 레거시 축(운영단위) 어느 쪽이든 매치한다
-            # — 과거 월(team_code 편성)과 새 편성(shift_group_code)이 한 화면에 공존한다.
-            users = users[
-                (users["_eff_team"] == q["team"]) | (users["_eff_shift"] == q["team"])
-            ]
+    if q["team"] != ALL:
+        # 조 필터는 신 축(근무조 직접입력)과 레거시 축(운영단위) 어느 쪽이든 매치한다
+        # — 과거 월(team_code 편성)과 새 편성(shift_group_code)이 한 화면에 공존한다.
+        # 부서 분기 **밖**이다(code-review P1): 조 축은 부서 독립 자유 텍스트라
+        # 부서=(전체)에서도 적용돼야 하며, 안 그러면 옵션은 뜨는데 필터가 무력화되어
+        # 컨텍스트 줄·CSV 가 적용되지 않은 조건을 단언하게 된다.
+        users = users[
+            (users["_eff_team"] == q["team"]) | (users["_eff_shift"] == q["team"])
+        ]
     keyword = str(q.get("keyword", "")).strip()
     if keyword:
         emp_match = users["emp_no"].astype(str).str.contains(

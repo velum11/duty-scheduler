@@ -65,12 +65,14 @@ from views.master import (
     drilldown_context,
     empty_state,
     grid_bool,
+    header_actions_from_specs,
     icon_toolbar_specs,
     ledger_banner,
     live_rows,
     master_action_bar,
     master_grid_height,
     mode_badge_html,
+    page_action_specs,
     render_master_grid,
     run_save,
     sheet_head,
@@ -93,11 +95,12 @@ _PROBE_ERROR_MSG = "조직 스키마 상태 확인 실패 — 재확인이 필�
 
 _SYSTEM_CODES = {"ADMIN"}  # 화면 보호 대상(코드수정·미사용·삭제 차단)
 
-# 조직 3시트 전용 액션바 비율 — 공통 기본값 (1.5,1.3,1.4,3.2,1.6) 은 넓은 단일 컬럼
-# 화면(사용자·근무형태)용이라 우측 스페이서(3.2)가 크다. 좁은 3열 시트에서는 그 여백이
-# 4버튼을 밀어 '새로고침' 등이 잘리므로, 스페이서를 줄여 4버튼에 폭을 돌려준다(좌 3버튼
-# ·우 새로고침 그룹핑은 작은 스페이서로 유지 — 타 화면과 배치 일관성 보존).
-_ORG_BAR_RATIOS = (1.28, 1.0, 1.12, 0.2, 1.42)
+# 조직 액션바 비율 — [행 추가][삭제][저장] · 스페이서 · [새로고침].
+# 구 값 (1.28,1.0,1.12,0.2,1.42) 은 시트가 화면의 1/3 폭이던 3분할 시절 값이라, 2026-08-07
+# 단일 시트(전폭) 전환 뒤에는 스페이서(0.2)가 거의 없어 버튼이 1440px 에서 220~315px 로
+# 부풀었다(실측). 사용자·근무형태 관리의 액션 열 비율(1.15/1.05/1.35/1.15)과 같은
+# 스케일로 되돌려 세 화면 버튼 폭을 통일한다(≈130px @1440).
+_ORG_BAR_RATIOS = (1.15, 1.05, 1.35, 5.15, 1.15)
 
 # 공통 컬럼(그룹·부서 시트). field 명이 곧 표시 헤더다.
 _GROUP_COLS = ["코드", "코드명", "순서", "비고", "사용"]
@@ -251,11 +254,12 @@ def render(user: dict) -> None:
         "org",
         [
             erp.Field(key="active", label="사용 여부", kind="select", options=_STATUS,
-                     widget_key="og_active"),
+                     widget_key="og_active", width=150),
             erp.Field(key="search", label="검색", kind="text",
                      widget_key="og_search", placeholder="코드·명칭 검색"),
         ],
-        cols=2,
+        # §0.6 컨트롤 폭 내용 맞춤 — 기준정보 3화면 동일(근무형태 관리와 같은 설정).
+        content_fit=True,
     )
     filt = {"active": cond["active"], "search": str(cond["search"]).strip()}
 
@@ -277,6 +281,13 @@ def render(user: dict) -> None:
             _plan_dept_delete(dept_grid, d_params)
         if _OD.take_action(SAVE):
             _save_depts(dept_grid, d_params)
+    elif dept_grid is not None:
+        # 폐기 확인 게이트가 떠 있는 동안 들어온 쓰기 의도는 **소비하지 않고 버린다**.
+        # 종전에는 소비도 하지 않아 flag 가 세션에 남았고, 게이트를 해소한 다음 rerun 에서
+        # 뒤늦게 발화할 수 있었다(사용자가 누른 적 없는 시점의 저장·삭제). 게이트 중에는
+        # 두 진입점(인페이지 버튼·헤더 아이콘) 모두 음영이라 정상 경로에서는 설 수 없는
+        # 상태지만, 음영 판정이 1 rerun 늦게 반영되는 구간을 fail-closed 로 막는다.
+        _OD.clear_actions(ADD, DELETE, SAVE)
 
     if dept_grid is not None and _sync_rows(_OD, dept_grid, _DEPT_ROW_COLS):
         st.rerun()
@@ -491,9 +502,12 @@ def _summary_chips(rows: pd.DataFrame, params: dict) -> None:
             right += chip_html(f"사용 안 함 {off}", "mute")
     if not left and not right:
         return
+    # 위 시트 헤더(.ms-sheet-head 하단 패딩)와 아래 액션바 사이에 실제 여백을 준다 —
+    # 구 margin(.1rem/.2rem)은 헤더 패딩과 3px 겹치고 액션바와는 0px 로 붙어, 칩 줄이
+    # 두 블록 사이에 끼인 것처럼 읽혔다(실측 t313–329, 헤더 b316, 바 t329).
     st.markdown(
         "<div style='display:flex;justify-content:space-between;align-items:center;"
-        "gap:.5rem;margin:.1rem 0 .2rem'>"
+        "gap:.5rem;margin:.35rem 0 .45rem'>"
         f"<div style='display:flex;gap:.3rem;flex-wrap:wrap'>{left}</div>"
         f"<div style='display:flex;gap:.3rem;flex:0 0 auto'>{right}</div></div>",
         unsafe_allow_html=True,
@@ -848,6 +862,14 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str 
             _OD, sel_count=sel_count, dirty_total=total,
             can_write=can_write, write_disabled_reason=reason, ratios=_ORG_BAR_RATIOS,
         )
+    # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)에 **인페이지 액션바와 같은 규칙**을
+    # 발행한다. page_action_specs 는 master_action_bar 와 동일 규칙의 순수 계산이라 두
+    # 진입점의 활성/사유가 갈릴 수 없다. 헤더 화면 id 는 nav 기준 'master_org'(DraftState
+    # page_id 'org_dept' 와 다름 — 단일 시트 전환 후에도 화면 id 는 그대로다).
+    header_actions_from_specs("master_org", page_action_specs(
+        sel_count=sel_count, dirty_total=total,
+        can_write=can_write, write_disabled_reason=reason,
+    ))
     with banner_slot:
         _render_saved_ledger(_OD)  # 직전 partial 저장 원장(성공/실패 칩) 1회 표시
         if pending:
