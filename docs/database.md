@@ -113,6 +113,8 @@ organization_groups
 
 users ── work_schedules
 work_types ── work_schedules
+users ─< user_capabilities (on delete cascade — 담당 부여는 계정 종속 파생)
+users ─< user_emails (on delete cascade — 수신처는 계정 종속 파생)
 
 near_miss_reports
 ├─ reporter_user_id  → users (on delete restrict)
@@ -134,6 +136,7 @@ near_miss_reports
 | `007_near_miss_improvement.sql` | `near_miss_improvements`(CAPA, report 1:1) | guarded DDL, no-drop | 2026-08-07 테스트 프로젝트 live 확인 — 테이블 존재(적용됨) |
 | `008_password_auth.sql` | `users` 비밀번호 컬럼 6개 + `login_sessions` | guarded DDL, 기존 행 값 무기록, RLS enable(policyless) | DRAFT — **미적용**(2026-08-07 live 확인: `users.password_hash` 없음·`login_sessions` 없음). 적용 전까지 로그인은 고정 예외 계정만 가능 |
 | `009_org_category_and_tenure.sql` | `departments.major_category/minor_category` + `users.hire_date/resign_date` + 대분류 그룹명 백필 | guarded DDL, no-drop(teams·organization_groups 보존), 빈 값에만 백필 | 2026-08-07 테스트 프로젝트 **적용·검증**(컬럼 존재 + 백필 결과 확인). 회사 계정 이전 시 새 프로젝트에 재적용 필요 |
+| `010_capabilities_and_emails.sql` | `user_capabilities`(담당 권한 M:N) + `user_emails`(복수 수신 이메일, 업무 scope, `lower(email)` 유니크) | guarded DDL, no-drop, 행 무기록, RLS enable(policyless). 담당 신설은 migration 없이 앱 코드(`config.CAPABILITIES`) 등록만으로 확장 | 2026-08-07 테스트 프로젝트 **적용·왕복 검증**(부여/회수·대소문자 중복 차단·수신자 계산). recon 우수사례 조사(OWASP·Django·Discourse 선례) 반영 설계 |
 
 위의 환경 상태는 마지막 검증 기록입니다. 새로운 세션에서 적용 또는 미적용을 단정하기 전에 반드시 live schema를 다시 확인합니다.
 

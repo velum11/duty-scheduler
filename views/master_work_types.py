@@ -388,8 +388,8 @@ def render(user: dict) -> None:
     state = DraftState(PAGE_ID)
 
     # §1-E 표형(구조 교체) — 아이콘 밴드 제거(§0-3, 6단계와 동일). 실기능 액션(행 추가·삭제·
-    # 저장·새로고침)은 건수 행 우측으로 이전(동일 flag 계약). 색·약칭·시간/HEX 검증·참조 확인 후
-    # 비활성화 우선·미리보기 계약은 전부 보존.
+    # 저장·새로고침)은 건수 행 우측으로 이전(동일 flag 계약 — 사용자 관리와 같은 배치).
+    # 색·약칭·시간/HEX 검증·참조 확인 후 비활성화 우선 계약은 전부 보존.
     _WT_DESC = "근무형태(코드·명칭·약칭·색상)를 표에서 직접 편집하고 [저장]으로 일괄 반영합니다."
     erp.screen_frame(
         SCREEN_ARCHETYPE,
@@ -397,7 +397,7 @@ def render(user: dict) -> None:
         desc=_WT_DESC,
         breadcrumb="기준정보 › 근무형태 관리",
     )
-    st.markdown(_EXTRA_CSS, unsafe_allow_html=True)  # 미리보기·오류 목록 보조 스타일(항상 주입)
+    st.markdown(_EXTRA_CSS, unsafe_allow_html=True)  # 저장 오류 목록 보조 스타일(항상 주입)
     st.markdown(_WT_CROW_CSS, unsafe_allow_html=True)
 
     # ---- 조건 패널(우측 인라인 라벨, KP-standard) — 위젯 key 는 기존 DraftState 스코프
@@ -421,8 +421,12 @@ def render(user: dict) -> None:
         _load_editor(state, params)
     # CONFIRM → banner_slot 폐기 확인 바에서 처리 / KEEP → 현재 draft 유지
 
-    # §1-E: 필터 줄 → 미리보기 스와치(우측, deferred=live 색·약칭) → 헤어라인 → 건수 행 → 표.
-    preview_slot = st.container()   # 미리보기(근무형태 색·약칭) — live 색으로 그리드 뒤 채움
+    # §1-E: 필터 줄 → 헤어라인 → 건수 행 → 표 (사용자 관리와 동일 골격).
+    # 별도 '근무표 색·약칭 미리보기' 스와치 줄은 제거했다(2026-08-07 사용자 요구 —
+    # 같은 색·약칭이 스와치 줄·색상 열·약칭 열에 3중으로 반복돼 화면이 산만했다).
+    # 색 미리보기 계약은 **셀 단위**로 유지된다: 색상 열(_COLOR_RENDERER)의 스와치+HEX,
+    # 약칭 열(_SHORT_LABEL_RENDERER)의 근무형태 색 chip(근무표 배지와 동일 어휘·명도 기반
+    # 텍스트색). 색 편집(피커/HEX 양방향)·검증(#RRGGBB·중복 경고) 계약은 불변이다.
     st.markdown("<div style='border-top:1px solid #e0dbd2;margin:2px 0 8px;'></div>",
                 unsafe_allow_html=True)
     count_row_slot = st.container()  # 건수 행(근무형태 + 건수 pill + 사용/미사용 + 우측 액션) — deferred
@@ -448,10 +452,6 @@ def render(user: dict) -> None:
     dtotal = dirty_total(new_count, changed_count)
     state.set_dirty(dtotal > 0)
     st.session_state[state.key(_LAST_COUNTS)] = (new_count, changed_count, sel_count)
-
-    # 미리보기 스와치(live 색·약칭) 채움 — 근무표/대시보드 미리보기 계약 보존(§150).
-    with preview_slot:
-        _render_preview(live)
 
     # ---- §1-E 건수 행 채움(deferred) — 근무형태 + 건수 pill + 사용/미사용 + 우측 행 추가·삭제·
     #      저장·새로고침. 활성/사유/라벨은 page_action_specs(인페이지 규칙 그대로), 클릭은 동일
@@ -1048,107 +1048,13 @@ def _normalize_hex(value: str):
     return None
 
 
-def _text_on(color: str) -> str:
-    """solid 배경색 ``#RRGGBB`` 위에서 4.5:1 이상을 보장하는 텍스트색(흰/검) 선택.
-
-    WCAG 상대명도를 계산해 흰색(#FFFFFF)과 순수 검정(#000000) 중 대비가 큰 쪽을 고른다.
-    두 후보의 대비 최댓값은 배경 명도 전 구간에서 ≈4.58:1 이상이라 본문 대비를 항상 만족한다
-    (미리보기 배지 저대비 §8 보수). 어두운 쪽을 #111 등으로 완화하면 크로스오버 근처에서
-    4.5 밑으로 떨어지므로 순수 검정을 사용한다.
-    """
-    try:
-        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
-    except (ValueError, IndexError):
-        return "#FFFFFF"
-
-    def _lin(v: int) -> float:
-        c = v / 255
-        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-
-    lum = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
-    contrast_white = 1.05 / (lum + 0.05)
-    contrast_black = (lum + 0.05) / 0.05
-    return "#FFFFFF" if contrast_white >= contrast_black else "#000000"
-
-
 # ---------------------------------------------------------------------------
-# 근무표 미리보기 — color/약칭 단일 기준이 근무표·대시보드·개인 화면 색을 구동함을 시연.
+# 보조 스타일 — 저장 오류 목록/흡수 안내. (구 '근무표 색·약칭 미리보기' 스와치 줄과
+# 그 CSS(.ms-preview/.ms-sw*)는 2026-08-07 제거 — 색 미리보기는 색상 열 스와치 +
+# 약칭 열 색 chip 의 셀 단위로만 유지한다.)
 # ---------------------------------------------------------------------------
-_PREVIEW_CAP = 40  # 미리보기 스와치 상한(초과분은 '외 N개' 표식으로 알린다)
-
-
-def _preview_html(live: pd.DataFrame) -> str:
-    """근무표/대시보드 색·약칭 미리보기 HTML(순수, DESIGN.md §150 계약) — 조밀 한 줄.
-
-    색상 스와치 + 약칭이 근무표·대시보드·개인 화면에 그대로 적용됨을 미리 보인다.
-    편집 그리드와 겹치는 명칭·시간은 반복하지 않고 계약 정보(색·약칭)만 조밀하게 노출한다.
-    약칭 셀은 근무표 렌더처럼 근무형태 색을 입혀(틴트 배경+색 텍스트) 적용 결과를 시연한다.
-    약칭이 비면 코드로 대체한다(색은 코드에 귀속). 표시 대상이 상한을 넘으면 마지막에
-    '외 N개' 표식(전체 건수 tooltip)을 붙여 잘림을 알린다. 대상이 없으면 빈 문자열.
-    """
-    if live is None or live.empty:
-        return ""
-    sws, total = [], 0
-    for _, row in live.iterrows():
-        if not grid_bool(row.get("사용")):
-            continue
-        color = _normalize_hex(str(row.get("색상") or ""))
-        if not color:
-            continue
-        code = str(row.get("코드") or "").strip()
-        label = str(row.get("약칭") or "").strip() or code
-        if not label:
-            continue
-        total += 1
-        if len(sws) >= _PREVIEW_CAP:
-            continue  # 계속 세되(전체 건수), 렌더는 상한까지만
-        name = str(row.get("명칭") or "").strip()
-        title = " · ".join(x for x in (code, name) if x) or label
-        # 실제 근무표 배지(.duty-badge)처럼 solid 색 배경으로 시연하되, 텍스트색은 배경
-        # 명도에 따라 흰/검을 자동 선택해 밝은 색에서도 4.5:1 이상을 보장한다(§8 대비 보수).
-        sws.append(
-            f"<span class='ms-sw' title='{style.escape(title)}'>"
-            f"<span class='c' style='background:{color};color:{_text_on(color)};'>"
-            f"{style.escape(label)}</span>"
-            f"</span>"
-        )
-    if not sws:
-        return ""
-    shown = len(sws)
-    more = total - shown
-    if more > 0:
-        sws.append(
-            f"<span class='ms-sw more' title='전체 {total}개 중 {shown}개 표시 · {more}개 더 있음'>"
-            f"<span class='c'>외 {more}개</span></span>"
-        )
-    return (
-        "<div class='ms-preview'>"
-        "<span class='ms-preview-t'>근무표 색·약칭 미리보기</span>"
-        f"<span class='ms-sws'>{''.join(sws)}</span></div>"
-    )
-
-
-def _render_preview(live: pd.DataFrame) -> None:
-    html = _preview_html(live)
-    if html:
-        st.markdown(html, unsafe_allow_html=True)
-
-
 _EXTRA_CSS = """
 <style>
-/* §1-E: 미리보기는 카드 아님 — 인라인 스와치 스트립(배경·테두리 제거, 헤어라인 컨텍스트). */
-.ms-preview { margin:.1rem 0 0; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;
-  background:transparent; border:none; border-radius:0; padding:0; }
-.ms-preview-t { flex:0 0 auto; font-family:'IBM Plex Mono',monospace; font-size:.62rem;
-  font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:#6b665d; }
-.ms-sws { display:flex; flex-wrap:wrap; gap:.26rem; }
-.ms-sw { display:inline-flex; align-items:center; padding:.12rem; flex:0 0 auto;
-  background:var(--ms-surface-2); border:1px solid var(--ms-line); border-radius:5px; }
-.ms-sw .c { font-size:.7rem; font-weight:700; line-height:1; padding:.14rem .4rem;
-  border-radius:4px; font-variant-numeric:tabular-nums; letter-spacing:.01em;
-  border:1px solid rgba(0,0,0,.12); }
-.ms-sw.more { border-style:dashed; }
-.ms-sw.more .c { color:var(--ms-ink-3); font-weight:600; padding:.12rem .2rem; }
 .ms-errlist { margin:.25rem 0 0; padding-left:1.1rem; font-size:.76rem; color:var(--ms-ink-2); }
 .ms-absorb { color:var(--ms-ink-2); font-size:.72rem; margin-top:.3rem; }
 </style>

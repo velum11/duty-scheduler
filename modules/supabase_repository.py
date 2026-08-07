@@ -3078,3 +3078,147 @@ def purge_expired_sessions() -> None:
         "삭제",
         LOGIN_SESSIONS_TABLE,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 업무별 담당 권한 + 알림 이메일 (migration 010: user_capabilities / user_emails)
+# ─────────────────────────────────────────────────────────────────────────────
+# 파사드(db)는 emp_no 자연키로 호출한다. 010 미적용 환경에서도 조회가 죽지 않도록
+# capability probe 로 분기한다(009 org_category_ready 와 같은 패턴).
+_CAPS_READY: bool | None = None
+_CAPS_NOT_READY_MESSAGE = (
+    "담당 권한·이메일 스키마가 아직 준비되지 않아 저장할 수 없습니다. "
+    "해당 스키마를 적용한 뒤 다시 시도하세요."
+)
+
+
+def capabilities_ready() -> bool:
+    """010 스키마(user_capabilities/user_emails) 사용 가능 여부(1회 probe 후 캐시)."""
+    global _CAPS_READY
+    if _CAPS_READY is None:
+        try:
+            client().table("user_capabilities").select("id").limit(1).execute()
+            client().table("user_emails").select("id").limit(1).execute()
+            _CAPS_READY = True
+        except Exception:
+            _CAPS_READY = False
+    return _CAPS_READY
+
+
+def reset_capabilities_readiness() -> None:
+    global _CAPS_READY
+    _CAPS_READY = None
+
+
+def _user_id_of(emp_no: str) -> int:
+    rows = _select_all("users", "id,emp_no", lambda q: q.eq("emp_no", str(emp_no).strip()))
+    if not rows:
+        raise SupabaseDataError(f"사용자를 찾을 수 없습니다: {emp_no}")
+    return int(rows[0]["id"])
+
+
+def get_user_capabilities(emp_no: str) -> list[str]:
+    """부여된 capability 코드 목록(정렬). 010 미적용이면 빈 목록."""
+    if not capabilities_ready():
+        return []
+    uid = _user_id_of(emp_no)
+    rows = _select_all("user_capabilities", "capability", lambda q: q.eq("user_id", uid))
+    return sorted({str(r["capability"]).strip() for r in rows})
+
+
+def set_user_capabilities(emp_no: str, caps: list[str], *, actor_emp_no: str = "") -> None:
+    """capability 부여 목록을 통째로 맞춘다(diff insert/delete — 회수는 행 삭제)."""
+    if not capabilities_ready():
+        raise SupabaseDataError(_CAPS_NOT_READY_MESSAGE)
+    wanted = {str(c).strip() for c in caps if str(c).strip()}
+    unknown = wanted - set(config.CAPABILITIES)
+    if unknown:
+        raise SupabaseDataError("알 수 없는 담당 코드: " + ", ".join(sorted(unknown)))
+    uid = _user_id_of(emp_no)
+    current = {
+        str(r["capability"]).strip()
+        for r in _select_all("user_capabilities", "capability", lambda q: q.eq("user_id", uid))
+    }
+    to_add = sorted(wanted - current)
+    to_del = sorted(current - wanted)
+    if to_add:
+        _execute(
+            client().table("user_capabilities").insert([
+                {"user_id": uid, "capability": c, "created_by": actor_emp_no or None}
+                for c in to_add
+            ]),
+            "insert", "user_capabilities",
+        )
+    for c in to_del:
+        _execute(
+            client().table("user_capabilities").delete().eq("user_id", uid).eq("capability", c),
+            "delete", "user_capabilities",
+        )
+
+
+def get_user_emails(emp_no: str) -> list[dict]:
+    """알림 이메일 목록 [{email, scope}] (scope→email 정렬). 010 미적용이면 빈 목록."""
+    if not capabilities_ready():
+        return []
+    uid = _user_id_of(emp_no)
+    rows = _select_all("user_emails", "email,scope", lambda q: q.eq("user_id", uid))
+    return sorted(
+        ({"email": str(r["email"]).strip(), "scope": str(r["scope"]).strip()} for r in rows),
+        key=lambda r: (r["scope"], r["email"]),
+    )
+
+
+def set_user_emails(emp_no: str, rows: list[dict], *, actor_emp_no: str = "") -> None:
+    """알림 이메일을 통째로 교체한다(사용자 단위 delete+insert).
+
+    검증: 형식(간이), scope ∈ {ALL} ∪ CAPABILITIES, 소문자 정규화 후 (scope,email)
+    중복 제거. DB 의 lower(email) 유니크 인덱스가 최종 방어선이다.
+    """
+    if not capabilities_ready():
+        raise SupabaseDataError(_CAPS_NOT_READY_MESSAGE)
+    valid_scopes = {config.EMAIL_SCOPE_ALL} | set(config.CAPABILITIES)
+    cleaned: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows or []:
+        email = str(row.get("email") or "").strip().lower()  # 저장 정규화(소문자)
+        scope = str(row.get("scope") or config.EMAIL_SCOPE_ALL).strip().upper()
+        if not email:
+            continue
+        if "@" not in email or "." not in email.split("@")[-1]:
+            raise SupabaseDataError(f"이메일 형식이 올바르지 않습니다: {email}")
+        if scope not in valid_scopes:
+            raise SupabaseDataError(f"알 수 없는 수신 범위: {scope}")
+        key = (scope, email)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append({"email": email, "scope": scope})
+    uid = _user_id_of(emp_no)
+    _execute(client().table("user_emails").delete().eq("user_id", uid), "delete", "user_emails")
+    if cleaned:
+        _execute(
+            client().table("user_emails").insert([
+                {"user_id": uid, "created_by": actor_emp_no or None, **r} for r in cleaned
+            ]),
+            "insert", "user_emails",
+        )
+
+
+def notification_recipients(capability: str) -> list[str]:
+    """해당 업무 담당자들의 수신 이메일 집합(중복 제거·정렬).
+
+    수신자 = capability 보유자들의 user_emails 중 scope ∈ {ALL, capability}.
+    비어 있으면 빈 목록 — 발송 계층(mailer)이 secrets fallback 등 후속을 결정한다.
+    """
+    if not capabilities_ready():
+        return []
+    cap = str(capability).strip()
+    holders = _select_all("user_capabilities", "user_id", lambda q: q.eq("capability", cap))
+    ids = sorted({int(r["user_id"]) for r in holders})
+    if not ids:
+        return []
+    rows = _select_all(
+        "user_emails", "user_id,email,scope",
+        lambda q: q.in_("user_id", ids).in_("scope", [config.EMAIL_SCOPE_ALL, cap]),
+    )
+    return sorted({str(r["email"]).strip().lower() for r in rows})

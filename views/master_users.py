@@ -1047,6 +1047,83 @@ def render(user: dict) -> None:
     # ---- 비밀번호 초기화 (ADMIN 전용) ----
     _render_password_reset(user, existing)
 
+    # ---- 담당 권한·알림 이메일 (ADMIN 전용, migration 010) ----
+    _render_capability_editor(user, existing)
+
+
+def _render_capability_editor(user: dict, existing: pd.DataFrame) -> None:
+    """ADMIN 이 사용자별 담당 권한(capability)과 알림 수신 이메일을 편집한다.
+
+    그리드 저장 경로와 완전히 분리한다 — 담당·이메일은 USER_COLUMNS 계약에 없는
+    M:N 파생 데이터라 일괄 저장에 섞이면 안 된다(비밀번호 초기화 expander 와 동일 원칙).
+    이메일은 복수·업무별 수신 범위(전체/특정 담당)를 지원한다: 같은 사람이 업무마다
+    다른 주소(1개 또는 여러 개)를 받을 수 있다.
+    """
+    if not auth.is_admin(user):
+        return
+    if existing.empty or not config.CAPABILITIES:
+        return
+    ready = db.capabilities_ready()
+
+    with st.expander("담당 권한·알림 이메일", expanded=False):
+        if not ready:
+            st.warning("담당 권한 스키마가 아직 준비되지 않아 조회·저장할 수 없습니다.")
+            return
+        st.caption(
+            "업무별 담당(숙소관리·업무요청 등)을 지정하고, 접수·상태·결과 알림을 받을 "
+            "이메일을 등록합니다. 이메일은 여러 개 등록할 수 있고, 수신 범위를 '전체'로 "
+            "두면 모든 담당 업무의 알림을, 특정 담당으로 두면 그 업무만 받습니다."
+        )
+        options = [
+            f"{r['emp_no']} · {r['name']}"
+            for _, r in existing.iterrows()
+            if str(r.get("emp_no") or "").strip()
+        ]
+        if not options:
+            return
+        picked = st.selectbox("대상 사용자", options, key=f"{PAGE_ID}__cap_target")
+        target_emp = str(picked).split(" · ", 1)[0].strip()
+
+        cap_labels = {code: label for code, label in config.CAPABILITIES.items()}
+        current_caps = db.get_user_capabilities(target_emp)
+        sel_caps = st.multiselect(
+            "담당 권한", options=list(cap_labels),
+            default=[c for c in current_caps if c in cap_labels],
+            format_func=lambda c: f"{cap_labels[c]} ({c})",
+            key=f"{PAGE_ID}__cap_sel_{target_emp}",
+        )
+
+        scope_label = {config.EMAIL_SCOPE_ALL: "전체"} | cap_labels
+        current_emails = db.get_user_emails(target_emp)
+        email_frame = pd.DataFrame(
+            current_emails or [], columns=["email", "scope"]
+        ).rename(columns={"email": "이메일", "scope": "수신 범위"})
+        edited = st.data_editor(
+            email_frame, num_rows="dynamic", width="stretch",
+            column_config={
+                "이메일": st.column_config.TextColumn("이메일", width="large"),
+                "수신 범위": st.column_config.SelectboxColumn(
+                    "수신 범위", options=list(scope_label),
+                    format_func=lambda s: scope_label.get(s, s), default=config.EMAIL_SCOPE_ALL,
+                ),
+            },
+            key=f"{PAGE_ID}__cap_emails_{target_emp}",
+        )
+
+        if st.button("담당·이메일 저장", key=f"{PAGE_ID}__cap_save", type="primary"):
+            try:
+                actor = str(user.get("emp_no") or "")
+                db.set_user_capabilities(target_emp, sel_caps, actor_emp_no=actor)
+                rows = [
+                    {"email": r.get("이메일"), "scope": r.get("수신 범위")}
+                    for _, r in edited.iterrows()
+                ]
+                db.set_user_emails(target_emp, rows, actor_emp_no=actor)
+            except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
+                st.error(f"저장하지 못했습니다: {exc}")
+            else:
+                st.success("담당 권한과 알림 이메일을 저장했습니다.")
+
 
 def _render_password_reset(user: dict, existing: pd.DataFrame) -> None:
     """ADMIN 이 사용자 비밀번호를 초기화한다 — 비번을 지워 사번이 다시 초기 비번이 되게 한다.

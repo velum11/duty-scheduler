@@ -54,6 +54,36 @@ _GRID_MIN_PX = 132     # 0~1행에서도 헤더+빈 상태 오버레이가 답�
 _GRID_MAX_PX = 460     # 다수 행: 이 이상은 그리드 내부에서 스크롤
 
 
+# ---------------------------------------------------------------------------
+# 셀 텍스트 선택·복사 (전 그리드 공통 단일 원천)
+# ---------------------------------------------------------------------------
+# 문제: AG Grid 는 기본값 ``enableCellTextSelection=false`` 에서 셀에 ``user-select:none``
+# 을 걸어 셀 안의 글자를 드래그 선택할 수 없고, 클립보드 모듈은 Enterprise 전용이라
+# Community 에서는 Ctrl+C 도 동작하지 않는다 → "화면에서 입력값을 복사할 수 없다".
+#
+# 해법(표시 계층 2옵션, 데이터·편집 계약 무변경):
+#   - ``enableCellTextSelection``: 셀 텍스트 드래그 선택을 허용한다. AG Grid 34 는 이 값이
+#     참이면 자체 Ctrl+C 처리(onCtrlAndC)를 건너뛰어 **브라우저 기본 복사**에 양보한다.
+#   - ``ensureDomOrder``: 셀/행 DOM 순서를 화면 순서와 일치시켜 여러 셀에 걸친 선택을
+#     복사했을 때 순서가 뒤섞이지 않게 한다(부수효과: 행 애니메이션 비활성 — 밀집 ERP
+#     표에서는 오히려 바람직).
+#
+# 편집·붙여넣기·행선택과의 충돌이 없는 이유:
+#   - 셀 편집은 더블클릭/Enter 로 에디터 input 이 열리고 그 input 이 포커스를 가지므로
+#     텍스트 선택 허용과 무관하다(``singleClickEdit=False`` 유지).
+#   - 범위 붙여넣기(paste.py)는 document 의 paste 이벤트 + ``api.getFocusedCell()`` 기반이며
+#     편집 중/IME 조합 중을 먼저 양보한다 — 선택 가능 여부는 이 경로에 관여하지 않는다.
+#   - 행 선택(_action 열 체크박스 · select_grid 의 네이티브 rowSelection)은 클릭 이벤트로
+#     처리되며 텍스트 선택과 별개 경로다.
+#
+# read/select 키트(``views/common/erp/kit.py``)와 편성 그리드(``views/workspace.py``)가
+# 같은 값을 쓰도록 여기 한 곳에서만 정의한다(리터럴 중복 금지).
+CELL_COPY_OPTIONS: dict = {
+    "enableCellTextSelection": True,
+    "ensureDomOrder": True,
+}
+
+
 def master_grid_height(nrows: int) -> int:
     """헤더+실제 행 수에 맞춘 동적 높이(≈132~460px).
 
@@ -370,6 +400,8 @@ def _build_grid_options(spec: MasterGridSpec) -> dict:
         "onCellClicked": _ROW_ACTION_CLICK,
         "onCellKeyDown": _ROW_ACTION_KEYDOWN,
         "rowClassRules": rules,
+        # 셀 텍스트 선택·복사(편집/붙여넣기/행선택 무영향) — CELL_COPY_OPTIONS 주석 참조.
+        **CELL_COPY_OPTIONS,
     }
     # paste/IME/commit handshake 옵션(onGridReady 포함) 병합.
     paste.apply_paste_options(options, _paste_uid(spec))

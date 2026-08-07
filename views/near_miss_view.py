@@ -480,7 +480,8 @@ def _collect_conditions(scope: str, manager_dept: str | None, dept_names: dict) 
     # [조회]를 필터 줄 우측에 인라인(오렌지)으로. U4: content_fit=True 로 짧은 코드값 select 는
     # 내용 맞춤 폭(값 길이 비례)으로 흘리고 좁아지면 자연 wrap(§0.6).
     v, clicked = erp.condition_panel(_PAGE_ID, fields, content_fit=True,
-                                     submit=("조회", f"{_PAGE_ID}_go"))
+                                     submit=("조회", f"{_PAGE_ID}_go"),
+                                     submit_icon=":material/search:")  # 조회 아이콘 앱 전체 통일(2026-08-07)
 
     mode = v["period_mode"]
     if mode == "최근 90일":

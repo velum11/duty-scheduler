@@ -44,6 +44,21 @@ FIXED_PASSWORD_ACCOUNTS: dict[str, str] = {
 
 ROLES = ("USER", "MANAGER", "ADMIN")
 
+# ── 업무별 담당 권한(capability) — migration 010 user_capabilities ─────────────
+# role(계층 3종)과 직교하는 담당 능력. 담당 신설은 여기 코드 등록만으로 끝난다
+# (migration 불필요 — user_capabilities 는 M:N 행 테이블). 코드 의미는 앱이 소유하며
+# DB 는 형식만 검증한다. nav 의 CAP_* 게이트(예: CAP_EVALUATE_NEAR_MISS)와 같은
+# 개념 축이지만, nav 토큰은 판정 함수가 계산하고 이 목록은 **저장되는 부여 코드**다.
+CAPABILITIES: dict[str, str] = {
+    "LODGING_OFFICER": "숙소관리 담당",
+    "WORK_REQUEST_OFFICER": "업무요청 담당",
+}
+
+# user_emails.scope 의 전 업무 예약어 — capability 코드로 절대 등록 금지
+# (recon 2026-08-07: 코드 공간과 예약어 혼동 방지).
+EMAIL_SCOPE_ALL = "ALL"
+assert EMAIL_SCOPE_ALL not in CAPABILITIES, "ALL 은 scope 예약어 — capability 로 쓸 수 없음"
+
 DATA_MODES = ("sample", "supabase")
 
 

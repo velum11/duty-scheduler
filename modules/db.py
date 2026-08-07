@@ -3366,6 +3366,91 @@ def purge_expired_sessions() -> None:
     supabase_repository.purge_expired_sessions()
 
 
+# ─── 업무별 담당 권한 + 알림 이메일 (migration 010) — emp_no 파사드 ───────────
+# sample 모드는 세션 스토어로 동형 제공(실DB 무접촉). supabase 모드는 010 probe 로
+# 분기해 미적용 환경에서 조회는 빈 값, 저장은 명확한 오류를 낸다.
+_CAPS_STORE = "_sample_capabilities"   # {emp_no: set[str]}
+_EMAILS_STORE = "_sample_user_emails"  # {emp_no: list[{"email","scope"}]}
+
+
+def capabilities_ready() -> bool:
+    if is_sample_mode():
+        return True
+    return supabase_repository.capabilities_ready()
+
+
+def get_user_capabilities(emp_no: str) -> list[str]:
+    emp = str(emp_no).strip()
+    if is_sample_mode():
+        return sorted(st.session_state.get(_CAPS_STORE, {}).get(emp, set()))
+    return supabase_repository.get_user_capabilities(emp)
+
+
+def set_user_capabilities(emp_no: str, caps: list[str], *, actor_emp_no: str = "") -> None:
+    emp = str(emp_no).strip()
+    wanted = {str(c).strip() for c in caps if str(c).strip()}
+    unknown = wanted - set(config.CAPABILITIES)
+    if unknown:
+        raise ValueError("알 수 없는 담당 코드: " + ", ".join(sorted(unknown)))
+    if is_sample_mode():
+        store = st.session_state.setdefault(_CAPS_STORE, {})
+        store[emp] = set(wanted)
+        return
+    supabase_repository.set_user_capabilities(emp, sorted(wanted), actor_emp_no=actor_emp_no)
+
+
+def has_capability(emp_no: str, capability: str) -> bool:
+    """담당 여부 판정 — 화면·게이트는 이 함수만 쓴다(저장소 직접 조회 금지)."""
+    return str(capability).strip() in get_user_capabilities(emp_no)
+
+
+def get_user_emails(emp_no: str) -> list[dict]:
+    emp = str(emp_no).strip()
+    if is_sample_mode():
+        return [dict(r) for r in st.session_state.get(_EMAILS_STORE, {}).get(emp, [])]
+    return supabase_repository.get_user_emails(emp)
+
+
+def set_user_emails(emp_no: str, rows: list[dict], *, actor_emp_no: str = "") -> None:
+    emp = str(emp_no).strip()
+    valid_scopes = {config.EMAIL_SCOPE_ALL} | set(config.CAPABILITIES)
+    cleaned, seen = [], set()
+    for row in rows or []:
+        email = str(row.get("email") or "").strip().lower()  # 소문자 정규화(저장 계약)
+        scope = str(row.get("scope") or config.EMAIL_SCOPE_ALL).strip().upper()
+        if not email:
+            continue
+        if "@" not in email or "." not in email.split("@")[-1]:
+            raise ValueError(f"이메일 형식이 올바르지 않습니다: {email}")
+        if scope not in valid_scopes:
+            raise ValueError(f"알 수 없는 수신 범위: {scope}")
+        if (scope, email) in seen:
+            continue
+        seen.add((scope, email))
+        cleaned.append({"email": email, "scope": scope})
+    if is_sample_mode():
+        st.session_state.setdefault(_EMAILS_STORE, {})[emp] = cleaned
+        return
+    supabase_repository.set_user_emails(emp, cleaned, actor_emp_no=actor_emp_no)
+
+
+def notification_recipients(capability: str) -> list[str]:
+    """해당 업무 담당자들의 수신 이메일(중복 제거·정렬). 발송 fallback 은 mailer 소관."""
+    cap = str(capability).strip()
+    if is_sample_mode():
+        caps_store = st.session_state.get(_CAPS_STORE, {})
+        emails_store = st.session_state.get(_EMAILS_STORE, {})
+        out = set()
+        for emp, caps in caps_store.items():
+            if cap not in caps:
+                continue
+            for r in emails_store.get(emp, []):
+                if r.get("scope") in (config.EMAIL_SCOPE_ALL, cap):
+                    out.add(str(r.get("email") or "").lower())
+        return sorted(e for e in out if e)
+    return supabase_repository.notification_recipients(cap)
+
+
 def dept_name(dept_code: str) -> str:
     df = get_departments()
     if df.empty:

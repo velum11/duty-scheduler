@@ -157,7 +157,9 @@ _ORG_PAGE_CSS = """
 .st-key-org_group__sheet, .st-key-org_dept__sheet, .st-key-org_unit__sheet {
   background:transparent !important; border:none !important; border-radius:0 !important;
   box-shadow:none !important; padding:.2rem .9rem .1rem !important; }
-.st-key-org_dept__sheet, .st-key-org_unit__sheet {
+/* 단일 시트 전환(2026-08-07) — 부서 시트는 더 이상 2열이 아니므로 좌측 헤어라인을 걷는다.
+   (조 시트 규칙은 미라우팅 보존 코드용으로만 남김) */
+.st-key-org_unit__sheet {
   border-left:1px solid #cfc8bd !important; }
 /* 잠긴(상위 미선택) 하위 시트 — dashed 카드 제거, 세로 헤어라인만 유지 + 디엠퍼시스 */
 .st-key-org_dept__sheet.ms-sheet-locked, .st-key-org_unit__sheet.ms-sheet-locked {
@@ -405,6 +407,31 @@ def _code_name_config() -> dict:
                 "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
         "비고": {"flex": 1.1, "minWidth": 38, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
         "사용": {"flex": 0, "width": 42, "minWidth": 36, "maxWidth": 64,
+                "cellClass": "md-c-center", "editable": _EDIT_UNLESS_PROTECTED},
+    }
+
+
+def _dept_col_config() -> dict:
+    """부서 단일 시트(전폭) 컬럼 설정 — 2026-08-07 단일 시트 전환 후 전용.
+
+    구 3분할 시절 초협폭 설정(_code_name_config, 코드 54px 등)은 1/3 폭 시트용이라
+    전폭에서는 8~9자리 부서코드가 잘리고 비율이 무너진다. 대분류/중분류(009)를
+    포함해 전폭 기준으로 다시 잡는다 — 명칭·분류는 flex, 수치·토글은 고정폭.
+    """
+    return {
+        "대분류": {"flex": 0.9, "minWidth": 110, "cellClass": "md-c-left",
+                 "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
+        "중분류": {"flex": 0.9, "minWidth": 110, "cellClass": "md-c-left",
+                 "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
+        "코드": {"flex": 0, "width": 112, "minWidth": 96, "cellClass": "md-c-left",
+                "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
+        "코드명": {"flex": 1.3, "minWidth": 150, "cellClass": "md-c-left",
+                 "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
+        "순서": {"flex": 0, "width": 72, "minWidth": 56, "maxWidth": 96,
+                "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
+        "비고": {"flex": 1.0, "minWidth": 120, "cellClass": "md-c-left",
+                "editable": _EDIT_UNLESS_PROTECTED},
+        "사용": {"flex": 0, "width": 72, "minWidth": 60, "maxWidth": 90,
                 "cellClass": "md-c-center", "editable": _EDIT_UNLESS_PROTECTED},
     }
 
@@ -803,7 +830,7 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str 
 
     spec = MasterGridSpec(
         page_id=_OD.page_id, columns=_DEPT_GRID_COLUMNS, order=_DEPT_COLS,
-        col_config=_code_name_config(), select_all=True, include_linked_rows=True,
+        col_config=_dept_col_config(), select_all=True, include_linked_rows=True,
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
     grid_df = render_master_grid(spec, _dept_display(rows, sel_dept), key=_OD.grid_key(suffix=group_code))

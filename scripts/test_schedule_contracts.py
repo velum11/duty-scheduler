@@ -795,6 +795,56 @@ def test_schedule_view_manager_scope_enforced() -> None:
               len(set(grid2["부서"].astype(str))) >= 2)
 
 
+def test_month_view_top_actions() -> None:
+    """월간 근무표 상단 액션 정리(2026-08-07 사용자 요구).
+
+    - 조회 액션은 **돋보기 아이콘**으로 통일한다(상단 52px 헤더의 새로고침=원형 화살표와
+      의미가 섞이지 않게).
+    - 화면 버튼은 상단(조건 줄·컨텍스트 줄)에 모은다: 표 아래 전폭 [엑셀 다운로드] 를
+      컨텍스트 줄 우측으로 올린다.
+    - 조회 게이트(run_query)·엑셀 CSV 계약(원본 grid·utf-8-sig·파일명·mime)은 불변.
+    """
+    print("월간 근무표 상단 액션 — 조회=돋보기 아이콘 · 다운로드 상단 이전 · CSV 계약 불변")
+    import inspect
+    from streamlit.testing.v1 import AppTest
+    from views import workspace
+    from views.common.erp import kit
+
+    src = inspect.getsource(workspace.schedule_screen)
+
+    # (1) 조회 버튼 = 돋보기 아이콘(키트 submit_icon 경로).
+    check("조회 제출 버튼에 돋보기 아이콘 지정", 'submit_icon=":material/search:"' in src)
+    check("조회 라벨·키 계약 유지", 'submit=("조회", f"{page_id}_go")' in src)
+    kit_src = inspect.getsource(kit.condition_panel)
+    check("키트 condition_panel 이 submit_icon 을 버튼 icon 으로 전달", "icon=submit_icon" in kit_src)
+    check("submit_icon 기본값 None(기존 호출부 무영향)",
+          inspect.signature(kit.condition_panel).parameters["submit_icon"].default is None)
+
+    # (2) 다운로드는 표 위(컨텍스트 줄)에서 렌더된다 — 표 아래 전폭 버튼 아님.
+    i_dl = src.find("st.download_button")
+    i_grid = src.find("erp.read_grid(")
+    check("엑셀 다운로드가 표(read_grid)보다 위에서 렌더", 0 <= i_dl < i_grid)
+    check("다운로드가 컨텍스트 줄 우측 컬럼에 위치", "ctx_col, dl_col = st.columns(" in src)
+    check("표 아래 하단 액션 블록 제거", "하단 액션 — 다운로드" not in src)
+
+    # (3) CSV 내보내기 계약 불변(원본 grid·인코딩·파일명·mime·위젯 key).
+    check("다운로드 원본은 표시 부가 없는 grid",
+          "grid.to_csv(index=False).encode(\"utf-8-sig\")" in src)
+    check("파일명 계약 유지(근무표_YYYY-MM.csv)",
+          'file_name=f"근무표_{q[\'year\']}-{q[\'month\']:02d}.csv"' in src)
+    check("mime/키 계약 유지", 'mime="text/csv"' in src and 'key=f"{page_id}_dl"' in src)
+
+    # (4) 실렌더: 조회·다운로드 컨트롤이 실제로 존재하고 예외가 없다.
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
+    at.session_state["user"] = {"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"}
+    at.session_state["nav_page"] = "schedule_view"
+    at.run()
+    check("월간 근무표 렌더 예외 없음", not at.exception)
+    check("조회 버튼 렌더", any(b.label == "조회" for b in at.button))
+    check("엑셀 다운로드 컨트롤 렌더",
+          any(d.label == "엑셀 다운로드" for d in at.get("download_button")))
+
+
 def main() -> int:
     for test in (
         test_normalize_schedule_month,
@@ -812,6 +862,7 @@ def main() -> int:
         test_month_grid_snapshot,
         test_retired_employee_month_display,
         test_schedule_view_manager_scope_enforced,
+        test_month_view_top_actions,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")

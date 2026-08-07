@@ -19,6 +19,7 @@ from st_aggrid import AgGrid, DataReturnMode
 
 from views.common import scaffold
 from views.master import style
+from views.master.grid import CELL_COPY_OPTIONS
 
 TOKENS = style.TOKENS
 
@@ -264,7 +265,8 @@ def _render_widget(page_id: str, f: Field):
 
 
 def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3,
-                    submit: tuple[str, str] | None = None, content_fit: bool = False):
+                    submit: tuple[str, str] | None = None, content_fit: bool = False,
+                    submit_icon: str | None = None):
     """§1-E 필터 줄(dc isUsers 참조) — 라벨 상단 정렬(12.5/500) + 입력 아래.
 
     카드 박스가 아니라 헤어라인+여백만(§0-5 카드 금지). 반환 ``{field.key: value}``.
@@ -277,7 +279,11 @@ def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3,
         (기본 False 라 기존 소비 화면은 무영향).
 
     ``submit=(label, key)`` 를 주면 필터 줄 우측에 primary 버튼([조회] 등)을 인라인 렌더하고
-    ``(values, clicked)`` 튜플을 반환한다(미지정이면 dict 반환)."""
+    ``(values, clicked)`` 튜플을 반환한다(미지정이면 dict 반환).
+
+    ``submit_icon`` 은 그 제출 버튼의 Material 아이콘(예: ``":material/search:"``)이다.
+    조회 액션에 돋보기 아이콘을 붙여 상단 헤더의 새로고침(원형 화살표)과 의미가 섞이지
+    않게 한다. 기본 ``None`` 이면 종전처럼 라벨만 렌더한다(기존 호출부 무영향)."""
     values: dict = {}
     clicked = False
     with st.container(key=f"erpcond_{page_id}"):
@@ -305,7 +311,8 @@ def condition_panel(page_id: str, fields: list[Field], *, cols: int = 3,
             with st.container(key=f"erpcond_submit_{page_id}"):
                 bcols = st.columns([1, 0.26], vertical_alignment="center")
                 with bcols[1]:
-                    clicked = st.button(slabel, key=skey, type="primary", width="stretch")
+                    clicked = st.button(slabel, key=skey, type="primary", width="stretch",
+                                        icon=submit_icon)
     if submit is None:
         return values
     return values, clicked
@@ -525,6 +532,25 @@ def _build_read_coldefs(cols: list[str], hidden: list[str],
     return coldefs, custom
 
 
+def _build_read_gridoptions(coldefs: list[dict]) -> dict:
+    """READ 그리드의 최종 gridOptions(AgGrid 마운트 없이 순수 구성).
+
+    :func:`read_grid` 가 그대로 넘기는 값이며, 셀 텍스트 선택·복사 옵션
+    (:data:`~views.master.grid.CELL_COPY_OPTIONS`)이 실제 최종 옵션에 실리는지를
+    단위 테스트가 이 반환값으로 고정한다(편집 자산은 여전히 없음 — §0.5).
+    """
+    return {
+        "columnDefs": coldefs,
+        "defaultColDef": {"resizable": True, "sortable": False, "filter": False},
+        "rowHeight": _READ_ROW_PX, "headerHeight": _READ_HEADER_PX,
+        "suppressRowClickSelection": True,
+        "suppressDragLeaveHidesColumns": True,
+        "overlayNoRowsTemplate": _NO_ROWS,
+        # 읽기 표에서도 셀 값을 드래그 선택해 복사할 수 있어야 한다(전 화면 공통).
+        **CELL_COPY_OPTIONS,
+    }
+
+
 def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
               color_rules: dict[str, dict[str, str]] | None = None,
               col_config: dict[str, dict] | None = None,
@@ -553,14 +579,7 @@ def read_grid(df: pd.DataFrame, *, columns: list[str] | None = None, key: str,
     frame = _prepare_read_frame(df, cols, hidden)
     coldefs, custom = _build_read_coldefs(cols, hidden, color_rules, col_config, row_rules)
 
-    options = {
-        "columnDefs": coldefs,
-        "defaultColDef": {"resizable": True, "sortable": False, "filter": False},
-        "rowHeight": _READ_ROW_PX, "headerHeight": _READ_HEADER_PX,
-        "suppressRowClickSelection": True,
-        "suppressDragLeaveHidesColumns": True,
-        "overlayNoRowsTemplate": _NO_ROWS,
-    }
+    options = _build_read_gridoptions(coldefs)
     h = height if height is not None else read_grid_height(len(frame))
     view = frame[cols + hidden]
 
@@ -687,6 +706,8 @@ def _build_select_gridoptions(df: pd.DataFrame, *, key_field: str,
         "suppressRowClickSelection": False,
         "rowMultiSelectWithClick": False,
         "suppressRowDeselection": True,
+        # 셀 텍스트 선택·복사. 행 선택은 클릭 이벤트 경로라 영향 없다(단일 선택 계약 유지).
+        **CELL_COPY_OPTIONS,
     }
     if pre_selected:
         # AG Grid setSelectionState 는 initialState.rowSelection 을 **node.id 문자열 집합**

@@ -18,6 +18,7 @@ from st_aggrid import AgGrid, DataReturnMode, GridOptionsBuilder, JsCode
 
 from modules import db, nav, ui
 from views.common import erp
+from views.master.grid import CELL_COPY_OPTIONS
 
 ALL = "(전체)"
 
@@ -661,6 +662,8 @@ def selectable_master_grid(
         "onCellClicked": _ROW_ACTION_CLICK,
         "onCellKeyDown": _ROW_ACTION_KEYDOWN,
         # 자동 빈 행 추가는 쓰지 않는다 — 신규 행은 [＋ 행 추가]/붙여넣기로만 생성.
+        # 셀 텍스트 선택·복사(편집·범위 붙여넣기 무영향) — views/master/grid.py 단일 원천.
+        **CELL_COPY_OPTIONS,
     }
     if extra_grid_options:
         grid_options.update(extra_grid_options)
@@ -921,7 +924,11 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         erp.Field(key="kw", label="사번 또는 성명", kind="text"),
     ]
     # 조건 줄 우측 [조회] 인라인(§1-E). U4: content_fit=True 로 짧은 select 는 내용 맞춤 폭·검색만 신축.
-    v, clicked = erp.condition_panel(page_id, fields, content_fit=True, submit=("조회", f"{page_id}_go"))
+    # 아이콘은 조회(돋보기) — 상단 52px 헤더의 새로고침(원형 화살표)과 의미를 구분한다
+    # (이 버튼이 이 화면의 유일한 조회 액션이며, 조회 세대값을 올려 재적재를 태운다).
+    v, clicked = erp.condition_panel(page_id, fields, content_fit=True,
+                                     submit=("조회", f"{page_id}_go"),
+                                     submit_icon=":material/search:")
     if clicked:
         st.session_state[_rg_key] = st.session_state.get(_rg_key, 0) + 1
     refresh_gen = st.session_state.get(_rg_key, 0)
@@ -987,12 +994,27 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
             return
 
         # §1-C 컨텍스트 라인 — YYYY-MM · 부서 · 조 · 인원·근무·실근무·휴무(모노 수치).
+        # 화면 버튼은 상단(조건 줄·컨텍스트 줄)에 모은다: 조회는 조건 줄 우측 [조회],
+        # 내보내기는 이 컨텍스트 줄 우측 [엑셀 다운로드]. 표 아래 전폭 버튼은 두지 않는다
+        # (CSV 스키마·파일명·데이터는 불변 — 위치와 폭만 바뀐다).
         wt = _work_types_map_from_df(wt_df)
         n_work = sum(1 for c in month_rows["work_type_code"] if wt.get(c, {}).get("is_work"))
-        st.markdown(
-            _view_context_html(q, dept_names, team_names, len(grid), len(month_rows), n_work),
-            unsafe_allow_html=True,
-        )
+        ctx_col, dl_col = st.columns([1, 0.22], vertical_alignment="center")
+        with ctx_col:
+            st.markdown(
+                _view_context_html(q, dept_names, team_names, len(grid), len(month_rows), n_work),
+                unsafe_allow_html=True,
+            )
+        with dl_col:
+            st.download_button(
+                "엑셀 다운로드",
+                grid.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"근무표_{q['year']}-{q['month']:02d}.csv",
+                mime="text/csv",
+                key=f"{page_id}_dl",
+                icon=":material/download:",
+                width="stretch",
+            )
 
         # primary — 월간 근무표(근무 약칭 + 지정 색상, 읽기 전용).
         day_cols = [c for c in grid.columns if c[0].isdigit()]
@@ -1049,16 +1071,6 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
             ui.panel_head("직원별 근무형태 집계")
             agg = _build_agg(grid, month_rows, wt, display_of)
             erp.read_grid(agg, key=f"{page_id}_agg", skeleton=False)
-
-        # 하단 액션 — 다운로드(원본 grid, 상태/색 부가 없이 그대로 — CSV 스키마 불변).
-        st.download_button(
-            "엑셀 다운로드",
-            grid.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"근무표_{q['year']}-{q['month']:02d}.csv",
-            mime="text/csv",
-            key=f"{page_id}_dl",
-            width="stretch",
-        )
 
     _ndays = calendar.monthrange(int(q["year"]), int(q["month"]))[1]
     # fingerprint = 조회조건 q + 새로고침 세대값. q 가 같으면(같은 데이터) 재전환하지 않아

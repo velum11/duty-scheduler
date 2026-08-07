@@ -209,30 +209,57 @@ def test_unified_redesign_features() -> None:
           0 <= render_src.find("count_row_slot = st.container()") < render_src.find("render_master_grid(spec"))
 
 
-# ===== 1-5) 미리보기 색·약칭 계약 (DESIGN.md §150) =====
+# ===== 1-5) 색 미리보기 = 셀 단위 계약 (2026-08-07 사용자 요구로 별도 스와치 줄 폐지) =====
+# 구 계약: 그리드 위 '근무표 색·약칭 미리보기' 스와치 줄(_preview_html/_PREVIEW_CAP).
+# 같은 색·약칭이 스와치 줄·색상 열·약칭 열에 3중으로 반복돼 화면이 산만하다는 사용자
+# 지적으로 스와치 줄을 제거했다. 미리보기 **계약 자체는 셀 단위로 이전**된다 — 색상 열의
+# 스와치+대문자 HEX, 약칭 열의 근무형태 색 chip(근무표 배지와 같은 solid 색 + 명도 기반
+# 텍스트색). 아래 검사는 그 이전된 계약과 '스와치 줄이 되살아나지 않음'을 함께 고정한다.
 def test_preview_color_short_label_contract() -> None:
-    print("미리보기 색·약칭 계약(DESIGN.md §150) — 색 스와치 + 약칭, 명칭·시간 중복 없음")
+    print("색 미리보기 = 셀 단위(색상 열 스와치 + 약칭 열 색 chip) · 별도 스와치 줄 없음")
     import inspect
     from views import master_work_types as m
-    src = inspect.getsource(m._preview_html)
-    # 계약 정보: 색상 배지 + 약칭이 반드시 노출된다.
-    check("미리보기 라벨은 약칭 우선(계약 정보)", 'row.get("약칭")' in src)
-    # 실제 근무표 배지(.duty-badge)처럼 solid 근무형태 색 배경으로 시연한다.
-    check("미리보기 배지에 solid 근무형태 색 배경", "background:{color};" in src)
-    # §8 대비 보수: 텍스트색은 배경 명도 기반 자동 선택(구 방식 {color}22 틴트/풀컬러 폐기).
-    check("배지 텍스트색은 명도기반 자동 선택(_text_on)", "_text_on(color)" in src)
-    check("구 저대비 틴트({color}22) 미사용", "{color}22" not in src)
-    check("미리보기 계약 제목(색·약칭)", "색·약칭" in src)
-    # 밀도: 편집 그리드와 겹치는 명칭·시간 pill 반복은 하지 않는다(과다 세로 제거).
-    check("명칭·시간 중복 pill 미노출", "class='nm'" not in src and "class='tm'" not in src)
-    check("조밀 스트립 스타일 유지(.ms-sw)", ".ms-sw" in m._EXTRA_CSS)
+
+    # (1) 별도 미리보기 줄이 되살아나지 않는다(화면·CSS 양쪽).
+    render_src = inspect.getsource(m.render)
+    check("별도 미리보기 스와치 줄 미렌더(preview_slot 없음)", "preview_slot" not in render_src)
+    check("_preview_html/_render_preview 심볼 없음",
+          not hasattr(m, "_preview_html") and not hasattr(m, "_render_preview"))
+    check("미리보기 스트립 CSS 제거(.ms-preview/.ms-sw)",
+          ".ms-preview" not in m._EXTRA_CSS and ".ms-sw" not in m._EXTRA_CSS)
+    check("저장 오류 배너 CSS 는 유지(.ms-errlist/.ms-absorb)",
+          ".ms-errlist" in m._EXTRA_CSS and ".ms-absorb" in m._EXTRA_CSS)
+
+    # (2) 색상 열 = 스와치 + 대문자 HEX(유효하지 않으면 해치) — 셀 안 미리보기.
+    color_src = str(m._COLOR_RENDERER.js_code)
+    check("색상 셀에 스와치 렌더", "sw.style.background = v" in color_src)
+    check("색상 셀 유효성 해치 표시", "repeating-linear-gradient" in color_src)
+    check("색상 열에 렌더러·에디터 주입",
+          m._COL_WIDTHS["색상"].get("cellRenderer") is m._COLOR_RENDERER
+          and m._COL_WIDTHS["색상"].get("cellEditor") is m._COLOR_EDITOR)
+
+    # (3) 약칭 열 = 근무형태 색 chip(근무표 배지와 동일 어휘) — 색·약칭 적용 결과 시연.
+    label_src = str(m._SHORT_LABEL_RENDERER.js_code)
+    check("약칭 chip 이 DB 색을 solid 배경으로 적용", "t.style.background = hex" in label_src)
+    check("약칭 chip 텍스트색은 명도기반 자동 선택(_textOn)", "this._textOn(hex)" in label_src)
+    check("약칭 chip 은 pill 형태(borderRadius 999)", "999px" in label_src)
+    check("색이 없으면 평문 폴백(색 없는 행도 표시)", "else if (!val)" in label_src)
 
 
-# ===== 1-5c) 미리보기 배지 대비 계약 (DESIGN §8 시각 게이트 → 지속 계약) =====
+# ===== 1-5c) 셀 색 chip 대비 계약 (DESIGN §8 시각 게이트 → 지속 계약) =====
 def test_preview_badge_contrast_contract() -> None:
-    print("미리보기 배지 대비(DESIGN §8) — 명도기반 자동 텍스트색이 본문 4.5:1을 보장")
+    print("약칭 색 chip 대비(DESIGN §8) — 명도기반 자동 텍스트색이 본문 4.5:1을 보장")
+    import re
     from views import master_work_types as m
 
+    # 셀 렌더러(JS)의 _textOn 이 WCAG 상대명도 공식으로 흰/검을 고르는지 구조 고정.
+    src = str(m._SHORT_LABEL_RENDERER.js_code)
+    check("상대명도 계수 0.2126/0.7152/0.0722 사용",
+          "0.2126" in src and "0.7152" in src and "0.0722" in src)
+    check("sRGB 선형화 임계(0.03928)·감마(2.4) 사용", "0.03928" in src and "2.4" in src)
+    check("흰/검 두 후보만 반환", "'#ffffff'" in src and "'#000000'" in src)
+
+    # 동일 공식을 파이썬으로 재현해 표본 팔레트에서 4.5:1 이상을 실제 수치로 확인한다.
     def _lin(v: int) -> float:
         c = v / 255
         return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
@@ -241,56 +268,24 @@ def test_preview_badge_contrast_contract() -> None:
         r, g, b = int(hexc[1:3], 16), int(hexc[3:5], 16), int(hexc[5:7], 16)
         return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
 
+    def _text_on(hexc: str) -> str:  # JS _textOn 과 동일 판정
+        lum = _lum(hexc)
+        return "#ffffff" if (1.05 / (lum + 0.05)) >= ((lum + 0.05) / 0.05) else "#000000"
+
     def _ratio(fg: str, bg: str) -> float:
         a, b = _lum(fg), _lum(bg)
         hi, lo = max(a, b), min(a, b)
         return (hi + 0.05) / (lo + 0.05)
 
-    # 자동 선택 텍스트색은 흰/검 중 하나이며, 배경 대비 4.5:1 이상을 항상 만족한다.
-    check("_text_on 은 흰색 또는 순수 검정만 반환", set(
-        m._text_on(c) for c in ("#000000", "#FFFFFF", "#1E6FD9", "#E8862E", "#9AA0A6")
-    ) <= {"#FFFFFF", "#000000"})
-
-    # 실측에서 미달했던 색 + 극단/경계색을 포함한 표본에서 4.5:1 보장.
+    check("JS 판정식이 흰/검 크로스오버 그대로",
+          bool(re.search(r"\(1\.05 / \(L \+ 0\.05\)\) >= \(\(L \+ 0\.05\) / 0\.05\)", src)))
     palette = [
         "#1E6FD9", "#7B4FD8", "#9A7BE3", "#5A3DB8", "#E8862E", "#B4541B",
         "#9AA0A6", "#2E9E5B", "#D64596", "#12A5A5", "#FFFFFF", "#000000",
         "#808080", "#2B2B2B", "#7F7F7F", "#C0C0C0",
     ]
-    worst = min(_ratio(m._text_on(c), c) for c in palette)
-    check(f"표본 전체 배지 대비 ≥ 4.5:1 (최저 {worst:.2f})", worst >= 4.5)
-
-
-def _wt_rows(n: int):
-    """미리보기 대상 자격(사용·유효색·약칭)을 갖춘 n개 행 프레임."""
-    return _meta([
-        {"코드": f"C{i}", "명칭": f"근무{i}", "분류": "주간", "약칭": f"약{i}", "시작": "",
-         "종료": "", "색상": "#1E6FD9", "실근무": True, "특근수당": False, "설명": "",
-         "표시순서": str(i), "사용": True}
-        for i in range(n)
-    ])
-
-
-# ===== 1-5b) 미리보기 상한 초과 잘림 안내 (P3) =====
-def test_preview_truncation_notice() -> None:
-    print("미리보기 상한 초과 '외 N개' 표식(P3) — 상한 이하면 표식 없음")
-    from views import master_work_types as m
-    cap = m._PREVIEW_CAP
-    # 상한 이하: 표식 없음.
-    html_small = m._preview_html(_wt_rows(cap - 5))
-    check("상한 이하면 스와치 렌더", html_small.count("class='ms-sw'") == cap - 5)
-    check("상한 이하면 '외' 잘림 표식 없음", "외 " not in html_small and "ms-sw more" not in html_small)
-    # 정확히 상한: 표식 없음(잘림 아님).
-    html_exact = m._preview_html(_wt_rows(cap))
-    check("정확히 상한이면 잘림 표식 없음", "ms-sw more" not in html_exact)
-    # 상한 초과: 상한개 렌더 + '외 N개' 표식 + 전체 건수 tooltip.
-    over = cap + 7
-    html_big = m._preview_html(_wt_rows(over))
-    check("상한 초과 시 렌더는 상한까지만", html_big.count("class='ms-sw'") == cap)
-    check("상한 초과 시 '외 N개' 표식 추가", f"외 {over - cap}개" in html_big and "ms-sw more" in html_big)
-    check("잘림 표식 tooltip에 전체 건수 노출", f"전체 {over}개 중 {cap}개 표시" in html_big)
-    # 대상 없음: 빈 문자열.
-    check("미리보기 대상 없으면 빈 문자열", m._preview_html(_wt_rows(0)) == "")
+    worst = min(_ratio(_text_on(c), c) for c in palette)
+    check(f"표본 전체 chip 대비 ≥ 4.5:1 (최저 {worst:.2f})", worst >= 4.5)
 
 
 # ===== 1-6) 자연키(코드) 저장행 잠금 계약 (org/users 동일) =====
@@ -440,7 +435,6 @@ def main() -> int:
         test_unified_redesign_features,
         test_preview_color_short_label_contract,
         test_preview_badge_contrast_contract,
-        test_preview_truncation_notice,
         test_code_natural_key_locked,
         test_partial_success_ledger_wiring,
         test_delete_error_handling,
