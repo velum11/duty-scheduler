@@ -14,8 +14,11 @@
 화면 표시 원칙:
 - 부서는 부서명(중복 시 코드 병기)으로 표시하고 저장 시 dept_code 로 변환한다. 부서 셀에는
   소속 그룹명을 보조 라벨로 병기해 표시순서가 어느 그룹 범위에서 검증되는지 알린다.
-- 조는 조코드가 아니라 조명(team_name)으로 표시하고, 저장 시 (부서, 조명)을 team_code 로
-  변환한다. 조 드롭다운은 선택한 부서에 속한 조만 보인다(부서 종속). 조명은 관계 키가 아니다.
+- 조(운영단위) 편집 칼럼은 2026-08-07 제거 — A/B/C 근무조는 기준정보가 아니라 근무편성표에서
+  직접 입력한다. 기존 행의 team_code 는 _save 가 저장 직전 권위 스토어에서 백필해 보존한다
+  (그리드가 spec.order+META 외 컬럼을 잘라내므로 숨김 컬럼 왕복은 불가).
+- 입사일/퇴사일(009)은 자유 타이핑 후 저장 시 정규화한다. 퇴사일이 지난 계정은 로그인이
+  차단되고 편성 명단에서 숨겨진다(판정 소유: db.is_resigned).
 - 권한은 관리자/조장/조원으로 표시하고, 저장 시 ADMIN/MANAGER/USER 로 변환한다. DB 저장값과
   권한 분기 코드는 기존 값을 유지한다.
 
@@ -35,7 +38,7 @@ import pandas as pd
 import streamlit as st
 from st_aggrid import JsCode
 
-from modules import auth, config, db, nav
+from modules import auth, config, db, nav, supabase_repository
 from views.common import erp
 from views.master import (
     ADD,
@@ -79,14 +82,20 @@ _LABEL_TO_ROLE = {label: role for role, label in _ROLE_TO_LABEL.items()}
 _STATUS = ["전체", "재직", "퇴직"]
 # 표시순서: 부서그룹 안에서의 직원 출력 순서 (users.display_order, 빈 값=미지정).
 # 같은 부서그룹의 활성 사용자끼리 중복 금지 — 부서가 아니라 그룹 기준으로 검증한다.
-_USER_COLS = ["사번", "성명", "부서", "조", "직급", "권한", "표시순서", "재직"]
+# 조(운영단위) 칼럼은 2026-08-07 사용자 결정으로 제거됐다 — A/B/C조는 기준정보가 아니라
+# 근무편성표에서 직접 입력한다(schedule_assignments.shift_group_code).
+# 입사일/퇴사일은 migration 009. 퇴사일이 지나면 로그인 차단 + 편성 명단에서 숨긴다.
+_USER_COLS = ["사번", "성명", "부서", "직급", "권한", "입사일", "퇴사일", "표시순서", "재직"]
+# 기존 조(운영단위) 배정은 그리드로 왕복시키지 않는다 — 공용 그리드는 spec.order+META
+# 컬럼만 통과시키므로 숨김 컬럼은 잘려 나간다. 보존은 _save 의 스토어 백필이 담당한다.
 _ROW_COLS = ["_row_id", "_row_state", "_sel", *_USER_COLS]
 _GRID_COLUMNS = {
-    "사번": "text", "성명": "text", "부서": "text", "조": "text",
-    "직급": "text", "권한": "text", "표시순서": "text", "재직": "bool",
+    "사번": "text", "성명": "text", "부서": "text",
+    "직급": "text", "권한": "text", "입사일": "text", "퇴사일": "text",
+    "표시순서": "text", "재직": "bool",
 }
 # validate 가 필수/참조를 확인하는 텍스트 필드(재직/표시순서 제외) — 완전 빈 행 판별과 동일.
-_CONTENT_COLS = ["사번", "성명", "부서", "조", "직급"]
+_CONTENT_COLS = ["사번", "성명", "부서", "직급"]
 
 # 편집 게이트(JsCode predicate) — org 화면과 동일 계약(master_org.py _EDIT_NEW_ONLY /
 # _EDIT_UNLESS_PROTECTED). 자연키(사번)는 신규행만 편집(저장행 잠금), 보호행(_protected)은
@@ -171,6 +180,11 @@ def _order_text(value) -> str:
     except (TypeError, ValueError):
         return ""
     return "" if order is None else str(order)
+
+
+def _date_text(value) -> str:
+    """저장소 날짜 → 편집기 표시 문자열 ('' = 미지정)."""
+    return supabase_repository._clean_date(value) or ""
 
 
 def _role_resolver() -> dict[str, str]:
@@ -265,12 +279,11 @@ def _scan(live, dept_resolver, team_resolve):
         emp_no = str(row.get("사번") or "").strip()
         name = str(row.get("성명") or "").strip()
         dept_value = str(row.get("부서") or "").strip()
-        team_value = str(row.get("조") or "").strip()
         position = str(row.get("직급") or "").strip()
         role = role_resolver.get(str(row.get("권한") or "").strip(), "")
         dept_code = dept_resolver.get(dept_value, "")
 
-        if not any([emp_no, name, dept_value, team_value, position]):
+        if not any([emp_no, name, dept_value, position]):
             continue
 
         tag = f"{i}행" + (f"({emp_no})" if emp_no else "")
@@ -284,20 +297,25 @@ def _scan(live, dept_resolver, team_resolve):
             errors.append(f"{tag}: 부서를 선택하세요.")
             mark(rid, "부서", "부서를 선택하세요.")
 
+        # 조(운영단위) 편집은 화면에서 제거됐다(2026-08-07). 여기서는 항상 빈 값으로 두고,
+        # 기존 배정의 보존은 _save 가 저장 직전 권위 스토어에서 백필한다(그리드가 숨김
+        # 컬럼을 잘라내므로 행 데이터로는 보존할 수 없다).
         team_code = ""
-        if team_value and dept_code:
-            resolved = team_resolve.get((dept_code, team_value))
-            if resolved is None and (dept_code, team_value) in team_resolve:
-                errors.append(f"{tag}: 조명이 부서 내에서 중복되어 특정할 수 없습니다: {team_value}")
-                mark(rid, "조", f"부서 내 조명이 중복됩니다: {team_value}")
-            elif resolved is None:
-                errors.append(f"{tag}: 선택한 부서에 없는 조입니다: {team_value}")
-                mark(rid, "조", f"선택한 부서에 없는 조입니다: {team_value}")
-            else:
-                team_code = resolved
-        elif team_value and not dept_code:
-            errors.append(f"{tag}: 조를 확인하려면 먼저 부서를 선택하세요.")
-            mark(rid, "조", "소속 부서를 먼저 선택하세요.")
+
+        # 입사일/퇴사일 — 자유 타이핑이라 형식 정규화 후 순서 정합만 본다.
+        hire_raw = str(row.get("입사일") or "").strip()
+        resign_raw = str(row.get("퇴사일") or "").strip()
+        hire_date = supabase_repository._clean_date(hire_raw)
+        resign_date = supabase_repository._clean_date(resign_raw)
+        if hire_raw and hire_date is None:
+            errors.append(f"{tag}: 입사일 형식을 읽을 수 없습니다. (입력값: {hire_raw})")
+            mark(rid, "입사일", "YYYY-MM-DD 형식으로 입력하세요.")
+        if resign_raw and resign_date is None:
+            errors.append(f"{tag}: 퇴사일 형식을 읽을 수 없습니다. (입력값: {resign_raw})")
+            mark(rid, "퇴사일", "YYYY-MM-DD 형식으로 입력하세요.")
+        if hire_date and resign_date and resign_date < hire_date:
+            errors.append(f"{tag}: 퇴사일이 입사일보다 앞설 수 없습니다.")
+            mark(rid, "퇴사일", "입사일보다 앞설 수 없습니다.")
 
         if role not in _ROLE_TO_LABEL:
             errors.append(f"{tag}: 권한을 선택하세요. (관리자/조장/조원)")
@@ -325,6 +343,8 @@ def _scan(live, dept_resolver, team_resolve):
             "role": role,
             "is_active": grid_bool(row.get("재직")),
             "display_order": display_order,
+            "hire_date": hire_date,
+            "resign_date": resign_date,
         })
     return records, errors, cell_errors
 
@@ -646,9 +666,10 @@ def _load_editor(state: DraftState, q: dict, dept_names: dict, team_display: dic
             "사번": df["emp_no"].fillna("").astype("string"),
             "성명": df["name"].fillna("").astype("string"),
             "부서": df["dept_code"].map(labels).fillna("").astype("string"),
-            "조": [team_display.get((str(d), str(t)), str(t or "")) for d, t in zip(df["dept_code"], df["team_code"])],
             "직급": df["position"].fillna("").astype("string"),
             "권한": df["role"].map(_ROLE_TO_LABEL).fillna("").astype("string"),
+            "입사일": [_date_text(v) for v in df.get("hire_date", pd.Series([None] * len(df)))],
+            "퇴사일": [_date_text(v) for v in df.get("resign_date", pd.Series([None] * len(df)))],
             "표시순서": [_order_text(v) for v in df.get("display_order", pd.Series([None] * len(df)))],
             "재직": df["is_active"].fillna(True).astype(bool),
         })[_ROW_COLS]
@@ -761,6 +782,19 @@ def _save(state, grid_df, q, dept_names, team_resolve, team_display, ready: bool
     live = live_rows(grid_df)
     records, row_errors, cell_errors = _scan(live, _dept_resolver(dept_names), team_resolve)
 
+    # 운영단위(team) 배정 보존 — 화면에 조 편집 칸이 없으므로(2026-08-07) 기존 사용자의
+    # team_code 를 권위 스토어에서 되살려 실어 보낸다. 그리드는 spec.order+META 컬럼만
+    # 왕복시키므로 숨김 컬럼으로는 보존할 수 없다(저장 시 전원 team_id 소거 사고 방지 —
+    # 2026-08-07 code-review P1). 신규 사번은 빈 값(미배정) 그대로 둔다.
+    if records:
+        stored_team = {
+            str(r["emp_no"]).strip(): str(r["team_code"] or "").strip()
+            for _, r in db.get_users().iterrows()
+        }
+        for rec in records:
+            if not str(rec.get("team_code") or "").strip():
+                rec["team_code"] = stored_team.get(rec["emp_no"], "")
+
     # display_order 004 게이트 — 화면 방어(저장소 upsert_users 와 이중 방어).
     if not ready:
         blocked = [
@@ -831,9 +865,9 @@ def render(user: dict) -> None:
     dept_labels = _dept_labels(dept_names)
     group_of = db.dept_group_map()
 
-    # 부서 라벨 → 그룹명 보조 라벨(부서명과 다를 때만), 부서 라벨 → 소속 조명 목록(부서 종속).
+    # 부서 라벨 → 그룹명 보조 라벨(부서명과 다를 때만). 조 편집 칼럼은 2026-08-07 제거
+    # (근무조는 편성표 직접입력) — _dept_team_options/_team_editor_params 는 미배선.
     hint_json = json.dumps(_group_hints(group_of, dept_names, dept_labels), ensure_ascii=False)
-    teams_json = json.dumps(_dept_team_options(teams, dept_labels), ensure_ascii=False)
 
     readiness = _readiness()
     st.markdown(_MU_CSS, unsafe_allow_html=True)
@@ -921,7 +955,7 @@ def render(user: dict) -> None:
     disp["_error"] = ids.map(lambda i: json.dumps(err_cells.get(i, {}), ensure_ascii=False) if err_cells.get(i) else "")
     disp["_dirty_fields"] = ids.map(lambda i: json.dumps(prev_dirty.get(i, []), ensure_ascii=False) if prev_dirty.get(i) else "")
 
-    spec = _grid_spec(state, hint_json, teams_json)
+    spec = _grid_spec(state, hint_json)
     grid_df = render_master_grid(spec, disp, key=state.grid_key())
 
     # ---- 건수/변경 계산(그리드 반환 = 현재 편집 상태) ----
@@ -1077,7 +1111,8 @@ def _cell_rules(field: str, readonly: str | None = None) -> dict:
     return rules
 
 
-def _grid_spec(state: DraftState, hint_json: str, teams_json: str) -> MasterGridSpec:
+def _grid_spec(state: DraftState, hint_json: str, teams_json: str = "") -> MasterGridSpec:
+    # teams_json 은 조 편집 칼럼 제거(2026-08-07)로 미사용 — 교차 테스트 시그니처 호환용.
     # 데이터셀 편집 게이트: 사번(자연키)=신규행만, 그 외=보호행만 잠금(일반 저장행 편집 유지).
     # 읽기전용 시각(ms-cell-readonly)은 각 컬럼의 잠금 조건과 동일 식으로 켠다.
     col_config = {
@@ -1101,12 +1136,6 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str) -> MasterGrid
                 "cellEditorParams": {"values": _dept_option_values(state)},
                 "cellRenderer": _dept_renderer(hint_json),
                 "cellClassRules": _cell_rules("부서", readonly=_IS_PROTECTED_JS)},
-        "조": {"width": 130, "minWidth": 96, "cellClass": "md-c-left ms-cell-select",
-              "editable": _EDIT_UNLESS_PROTECTED,
-              "cellStyle": {"fontSize": "14.5px"},
-              "cellEditor": "agSelectCellEditor",
-              "cellEditorParams": _team_editor_params(teams_json),
-              "cellClassRules": _cell_rules("조", readonly=_IS_PROTECTED_JS)},
         "직급": {"width": 96, "minWidth": 72, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellStyle": {"fontSize": "14.5px"},
@@ -1118,6 +1147,14 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str) -> MasterGrid
                 "cellEditorParams": {"values": list(_LABEL_TO_ROLE)},
                 "cellRenderer": _ROLE_PILL_RENDERER,
                 "cellClassRules": _cell_rules("권한", readonly=_IS_PROTECTED_JS)},
+        # 입사일/퇴사일(009) — 자유 타이핑(YYYY-MM-DD 등), 저장 시 _clean_date 로 정규화.
+        # 퇴사일이 지나면 로그인 차단 + 편성 명단 숨김(판정은 db.is_resigned).
+        "입사일": {"width": 112, "minWidth": 96, "cellClass": "md-c-center ms-num",
+                "editable": _EDIT_UNLESS_PROTECTED,
+                "cellClassRules": _cell_rules("입사일", readonly=_IS_PROTECTED_JS)},
+        "퇴사일": {"width": 112, "minWidth": 96, "cellClass": "md-c-center ms-num",
+                "editable": _EDIT_UNLESS_PROTECTED,
+                "cellClassRules": _cell_rules("퇴사일", readonly=_IS_PROTECTED_JS)},
         "표시순서": {"width": 92, "minWidth": 72, "maxWidth": 120, "cellClass": "md-c-center ms-num",
                  "editable": _EDIT_UNLESS_PROTECTED,
                  "cellClassRules": _cell_rules("표시순서", readonly=_IS_PROTECTED_JS)},

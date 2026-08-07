@@ -97,14 +97,16 @@ def _screen_teams_menu():
     master_teams.render(db.find_user_by_emp_no("1001"))
 
 
+# 2026-08-07: 그룹·조(운영단위) 시트 폐지 — 조직 관리는 부서 단일 시트만 표시한다
+# (계층은 부서의 대분류/중분류 텍스트 2단). 그룹/조 시트 표시 검증은 계약에서 제거.
 for label, fn in (("부서 관리", _screen_departments_menu), ("조 관리", _screen_teams_menu)):
     at = AppTest.from_function(fn, default_timeout=45).run()
     check(f"{label} 메뉴 렌더 예외 없음", not at.exception)
     body = " ".join(str(m.value) for m in at.markdown)
     check(f"{label} 메뉴가 조직 관리 화면을 표시", "조직 관리" in body)
-    check(f"{label} 그룹 시트 표시", "<span class='t'>그룹</span>" in body)
     check(f"{label} 부서 시트 표시", "<span class='t'>부서</span>" in body)
-    check(f"{label} 조 시트 표시", "<span class='t'>조</span>" in body)
+    check(f"{label} 그룹 시트 미표시(단일 시트 계약)", "<span class='t'>그룹</span>" not in body)
+    check(f"{label} 조 시트 미표시(단일 시트 계약)", "<span class='t'>조</span>" not in body)
 
 
 # ===== 2) 평면 편집 행 모델 (계층 부모행 없음) =====
@@ -293,20 +295,22 @@ print("상위 전환 중 저장 오귀속 방지 — 부서(그룹)·조(부서)
 
 
 def _dept_misbind_probe():
+    # 2026-08-07 단일 시트 전환 후 이 프로브의 의미: 저장 호출에 group_code 를 어떤
+    # 값으로 넘기든(구 API 오사용 포함) **행의 기존 그룹 귀속이 변하지 않는다**.
     import streamlit as st
     from modules import db as adb
     from views import master_org as mo
-    counts = adb.get_org_departments().groupby("group_code").size()
-    gA = str(counts.index[0])
-    groups = adb.get_org_groups(is_active=True)
-    gB = next(str(g) for g in groups["group_code"].astype(str) if g != gA)
-    mo._load_depts({"active": "전체", "search": "", "group": gA})   # loaded_group = A
+    mo._load_depts({"active": "전체", "search": ""})                 # 단일 시트 — 전건 적재
     grid = mo._OD.get_rows().copy(); grid["_removed"] = ""
     tgt = str(grid.iloc[0]["코드"])
+    store = adb.get_org_departments()
+    gA = str(store[store["dept_code"] == tgt].iloc[0]["group_code"])  # 행0의 실제 귀속
+    groups = adb.get_org_groups(is_active=True)
+    gB = next(str(g) for g in groups["group_code"].astype(str) if g != gA)
     grid.loc[grid.index[0], "코드명"] = "변경됨XYZ"                  # 실제 편집
     before_b = set(adb.get_org_departments(group_code=gB)["dept_code"].astype(str))
-    try:                                                            # 상위가 B 로 바뀐 척 저장 시도
-        mo._save_depts(grid, {"active": "전체", "search": "", "group": gB}, gB)
+    try:                                                            # 구 API 로 B 귀속을 시도해도
+        mo._save_depts(grid, {"active": "전체", "search": ""}, gB)
     except BaseException:
         pass
     after = adb.get_org_departments()

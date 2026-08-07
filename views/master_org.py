@@ -1,24 +1,27 @@
-"""기준정보 — 조직 관리: 가로 3시트 [그룹][부서][조] 드릴다운 화면.
+"""기준정보 — 조직 관리: 부서 단일 시트 + 계층 텍스트 2단(대분류/중분류).
 
 부서 관리·조 관리 메뉴는 모두 이 화면을 연다 (사이드바 메뉴 구조는 무변경).
-데이터 계층(migration 004)은 그룹(organization_groups) → 부서(departments.group_id)
-→ 조(teams.department_id)를 전부 group_code/dept_code(내부 FK)로 조회·저장한다.
-이 화면은 트리 UI 를 쓰지 않고, 세 개의 독립 시트를 가로로 배치해 상위 시트의 **행을
-직접 클릭**하면 하위 시트가 열리는 마스터-디테일 드릴다운으로 구성한다(별도 상위 선택
-selectbox/드롭다운 없음). 상위→하위로 진행되는 활성 체인은 단계 배지·커넥터·비선택 하위
-디엠퍼시스로 시각화한다.
 
-각 시트는 공통 컬럼(코드 / 코드명 / 순서 / 비고 / 사용)을 가지며, 조 시트만 유형
-(교대=SHIFT / 일반=GENERAL)을 추가한다. 세 시트는 각각 독립 저장 계약을 가진다:
-  - 그룹 시트 = ``org_group``(_GRP), 부서 시트 = ``org_dept``(_OD),
-    조 시트 = ``org_unit``(_OU). page-scoped DraftState 로 편집 상태를 고립한다.
-  - 상위(그룹/부서)의 저장된 행을 클릭하면 그 상위가 선택된다 — 미저장 상위 행에는
-    하위를 추가할 수 없다(저장 후 존재하는 행만 클릭 드릴다운 대상이 됨).
-  - 상위 미선택이면 하위 시트를 잠근다(sheet_locked + 모든 write control 비활성).
-  - 상위 선택을 바꿀 때 하위에 미저장 draft 가 있으면 폐기/계속 게이트를 태운다.
+2026-08-07 사용자 결정으로 그룹·조(운영단위) 시트를 폐지했다: A/B/C 교대조는 기준정보가
+아니라 근무편성표에서 직접 입력하고(schedule_assignments.shift_group_code), 조직 계층은
+부서 행의 **대분류/중분류 자유 텍스트 2단**(migration 009)으로 사람이 직접 입력한다.
+현장 조직은 담당/부/팀/파트 깊이가 부서마다 달라 고정 관계 모델(그룹 FK 드릴다운)이
+매번 재구성을 강요했기 때문이다. organization_groups·teams 테이블과 데이터는 보존되며
+(009 는 drop 하지 않음), 기존 group_id 귀속은 저장 시 그대로 유지된다(_save_depts 의
+스토어 백필 — 화면이 그룹을 편집하지도, 지우지도 않는다).
+
+부서 시트 계약:
+  - 컬럼: 대분류 / 중분류 / 코드 / 코드명 / 순서 / 비고 / 사용. 중분류는 대분류 없이
+    쓸 수 없다(DB departments_minor_requires_major 와 동일 규칙을 저장 전 검증).
+  - page-scoped DraftState = ``org_dept``(_OD). dirty draft 상태에서 필터를 바꾸면
+    폐기/계속 게이트를 태운다.
   - 저장된 코드는 수정 불가(신규 등록 시에만 입력), 저장 실패 시 draft 를 보존한다.
   - 저장 전 신규행 삭제 = 즉시 제거, 저장행 삭제 = 참조 확인 후 미사용/삭제.
-  - ADMIN 그룹·부서는 코드수정·미사용처리 등 화면 보호(_protected).
+  - ADMIN 부서는 코드수정·미사용처리 등 화면 보호(_protected).
+
+그룹(_GRP)·조(_OU) 시트의 함수·CSS 는 소스에 보존되어 있으나 render() 에서 호출되지
+않는다 — 교차 화면 테스트가 참조하는 순수 함수(build_*_rows/_validate_* 등)와 되돌림
+가능성 때문이다. 완전 제거 시점은 BACKLOG 에서 추적한다.
 
 공통 기반 패키지(``views/master``)의 계약(DraftState/MasterGridSpec/run_save/
 ReadinessState/master_action_bar/ledger_banner/sheet_head/sheet_locked/
@@ -101,9 +104,14 @@ _GROUP_COLS = ["코드", "코드명", "순서", "비고", "사용"]
 _GROUP_ROW_COLS = ["_row_id", "_row_state", "_sel", *_GROUP_COLS]
 _GROUP_GRID_COLUMNS = {"코드": "text", "코드명": "text", "순서": "text", "비고": "text", "사용": "bool"}
 
-_DEPT_COLS = ["코드", "코드명", "순서", "비고", "사용"]
+# 부서 시트 — 대분류/중분류는 사람이 직접 입력하는 조직 계층 2단(migration 009).
+# 그룹 시트 폐지(2026-08-07 사용자 결정)로 계층 표현이 이 두 칸으로 넘어왔다.
+_DEPT_COLS = ["대분류", "중분류", "코드", "코드명", "순서", "비고", "사용"]
 _DEPT_ROW_COLS = ["_row_id", "_row_state", "_sel", *_DEPT_COLS]
-_DEPT_GRID_COLUMNS = {"코드": "text", "코드명": "text", "순서": "text", "비고": "text", "사용": "bool"}
+_DEPT_GRID_COLUMNS = {
+    "대분류": "text", "중분류": "text", "코드": "text", "코드명": "text",
+    "순서": "text", "비고": "text", "사용": "bool",
+}
 
 # 조 시트 — field 명은 교차 화면 테스트가 참조하는 ``_validate_units`` 의 키(명칭/표시순서)를
 # 유지하고, 표시 헤더만 다른 시트와 통일(코드명/순서)한다. 유형 컬럼이 추가된다.
@@ -215,7 +223,7 @@ _DRILL_CLICK = JsCode(
 
 
 def render(user: dict) -> None:
-    _ORG_DESC = "그룹 → 부서 → 조(운영단위)를 가로 3단 시트로 관리합니다. 상위를 선택하면 하위가 열립니다."
+    _ORG_DESC = "부서를 대분류·중분류로 묶어 관리합니다. 계층 두 칸은 직접 입력합니다."
     # §1-E 표형(구조 교체) — 아이콘 밴드 제거(§0-3, 6단계와 동일). 추가·삭제·저장·새로고침은
     # 각 시트(그룹·부서·조)가 자기 인페이지 액션바로 소유(3독립 저장 계약)하므로 밴드가 필요
     # 없었다 — 밴드만 제거하고 시트별 액션바·저장 경로는 전부 보존.
@@ -235,9 +243,7 @@ def render(user: dict) -> None:
             st.rerun()
 
     # 새로고침 의도는 렌더 시작에서 소비(재적재 판단). 나머지 액션은 그리드 렌더 뒤 소비.
-    refresh_group = _GRP.take_action(REFRESH)
     refresh_dept = _OD.take_action(REFRESH)
-    refresh_unit = _OU.take_action(REFRESH)
 
     cond = erp.condition_panel(
         "org",
@@ -251,87 +257,26 @@ def render(user: dict) -> None:
     )
     filt = {"active": cond["active"], "search": str(cond["search"]).strip()}
 
-    # 드릴다운 선택 상태 — 상단 selectbox 없이 표 안의 행 클릭으로만 정한다. 선택은 안정
-    # 코드키(group_code/dept_code)로 session_state 에 보관하고, 저장된 행이 사라지면 해제한다.
-    group_code, group_name = _resolve_group_selection()
-    dept_code, dept_name = _resolve_dept_selection(group_code)
-    drilldown_context([("그룹", group_name or None), ("부서", dept_name or None), ("조", None)])
-
-    # 그룹 로드(필터 변경/새로고침/최초). dirty draft 는 폐기 확인 게이트를 탄다.
-    g_params = dict(filt)
-    if _GRP.resolve_reload(g_params, refresh=refresh_group, dirty=_GRP.is_dirty()) == RELOAD:
-        st.session_state.pop(_GRP.delete_plan_key, None)
-        _load_groups(g_params)
-
-    # 부서 로드(선택 그룹 종속). 권위 컨텍스트 키는 persisted group_code.
-    d_params = {**filt, "group": group_code}
-    if group_code and _OD.resolve_reload(d_params, refresh=refresh_dept, dirty=_OD.is_dirty()) == RELOAD:
+    # 부서 로드(필터 변경/새로고침/최초). dirty draft 는 폐기 확인 게이트를 탄다.
+    d_params = dict(filt)
+    if _OD.resolve_reload(d_params, refresh=refresh_dept, dirty=_OD.is_dirty()) == RELOAD:
         st.session_state.pop(_OD.delete_plan_key, None)
         _load_depts(d_params)
 
-    # 조 로드(선택 부서 종속). 권위 컨텍스트 키는 persisted dept_code.
-    t_params = {**filt, "dept": dept_code}
-    if dept_code and _OU.resolve_reload(t_params, refresh=refresh_unit, dirty=_OU.is_dirty()) == RELOAD:
-        st.session_state.pop(_OU.delete_plan_key, None)
-        _load_units(dept_code, filt)
-
     with st.container(key="org__sheets"):
-        c_grp, c_dept, c_unit = st.columns(3, gap="medium")
-        with c_grp:
-            with st.container(key="org_group__sheet"):
-                grp_grid = _render_group_sheet(g_params, readiness, group_code)
-        with c_dept:
-            with st.container(key="org_dept__sheet"):
-                dept_grid = _render_dept_sheet(d_params, readiness, group_code, group_name, dept_code)
-        with c_unit:
-            with st.container(key="org_unit__sheet"):
-                unit_grid = _render_unit_sheet(t_params, readiness, dept_code, dept_name)
-
-    # 행 클릭 드릴다운 — 그룹/부서 표에서 클릭된(=_linked) 상위를 읽어 선택을 갱신한다.
-    # 그룹 변경 시 부서·조 선택을 함께 초기화하고, 부서 변경 시 조(하위 표)가 재적재된다.
-    # 클릭이 없거나 이미 선택된 행이면 picked == 현재 선택이라 재실행이 없다(무한 루프 없음).
-    picked_group = _picked_code(grp_grid)
-    if picked_group is not None and picked_group != group_code:
-        st.session_state["og_group_sel"] = picked_group
-        st.session_state.pop("og_dept_sel", None)  # 상위(그룹) 변경 → 부서·조 선택 초기화
-        st.rerun()
-    if dept_grid is not None:
-        picked_dept = _picked_code(dept_grid)
-        if picked_dept is not None and picked_dept != dept_code:
-            st.session_state["og_dept_sel"] = picked_dept  # 부서 변경 → 조 표 재적재
-            st.rerun()
+        with st.container(key="org_dept__sheet"):
+            dept_grid = _render_dept_sheet(d_params, readiness)
 
     # 버튼 클릭 처리 (최신 grid 데이터 기준 — 시트 렌더 이후, page-scoped flag).
-    if _GRP.take_action(ADD):
-        _add_group_row(grp_grid)
-    if _GRP.take_action(DELETE):
-        _plan_group_delete(grp_grid)
-    if _GRP.take_action(SAVE):
-        _save_groups(grp_grid, g_params)
-    # 상위 전환 중 폐기 게이트가 열려 있으면(자식 draft + 상위 선택 변경) 하위 write 를
-    # 처리하지 않는다 — 아직 렌더된 옛 행이 새 상위에 오귀속되는 것을 원천 차단한다.
-    # (게이트는 시트에서 discard/취소로만 해소되며, 그동안 add/삭제/저장 버튼도 비활성이다.)
-    if group_code and dept_grid is not None and not _OD.has_pending_reload():
+    if dept_grid is not None and not _OD.has_pending_reload():
         if _OD.take_action(ADD):
-            _add_dept_row(dept_grid, group_code)
+            _add_dept_row(dept_grid)
         if _OD.take_action(DELETE):
             _plan_dept_delete(dept_grid, d_params)
         if _OD.take_action(SAVE):
-            _save_depts(dept_grid, d_params, group_code)
-    if dept_code and unit_grid is not None and not _OU.has_pending_reload():
-        if _OU.take_action(ADD):
-            _add_unit_row(unit_grid, dept_code)
-        if _OU.take_action(DELETE):
-            _plan_unit_delete(unit_grid, dept_code)
-        if _OU.take_action(SAVE):
-            _save_units(unit_grid, dept_code)
+            _save_depts(dept_grid, d_params)
 
-    changed = _sync_rows(_GRP, grp_grid, _GROUP_ROW_COLS)
-    if dept_grid is not None:
-        changed = _sync_rows(_OD, dept_grid, _DEPT_ROW_COLS) or changed
-    if unit_grid is not None:
-        changed = _sync_rows(_OU, unit_grid, _UNIT_ROW_COLS) or changed
-    if changed:
+    if dept_grid is not None and _sync_rows(_OD, dept_grid, _DEPT_ROW_COLS):
         st.rerun()
 
 
@@ -528,7 +473,13 @@ def _summary_chips(rows: pd.DataFrame, params: dict) -> None:
     )
 
 
-# ---------- 그룹 시트 ----------
+# ---------- 그룹 시트 (2026-08-07 이후 라우팅되지 않음) ----------
+# 사용자 결정으로 그룹·운영단위 시트는 화면에서 제거됐다(계층은 부서의 대분류/중분류가
+# 대신한다). 아래 그룹/조 시트 함수들은 render() 에서 호출되지 않지만 남겨둔다:
+#   * organization_groups·teams 테이블과 데이터는 그대로 살아 있다(009 가 drop 하지 않음).
+#   * build_group_rows/build_team_rows/_validate_units/_unit_structure_errors/
+#     _group_structure_errors/_save_units 등은 교차 화면 회귀 테스트가 직접 참조한다.
+# 시트를 되살릴 계획이 확정적으로 없어지면 이 블록과 해당 테스트를 함께 제거한다.
 def build_group_rows(df: pd.DataFrame) -> pd.DataFrame:
     """organization_groups 프레임 → 그룹 시트 편집 행. 정렬: 순서 → 코드."""
     if df is None or df.empty:
@@ -782,10 +733,19 @@ def build_dept_rows(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=_DEPT_ROW_COLS)
     frame = df.copy()
     frame["_o"] = pd.to_numeric(frame["sort_order"], errors="coerce").fillna(0).astype("int64")
-    frame = frame.sort_values(["_o", "dept_code"]).reset_index(drop=True)
+    # 계층이 눈으로 읽히도록 대분류 → 중분류 → 순서 → 코드로 묶어 정렬한다.
+    for col in ("major_category", "minor_category"):
+        if col not in frame:
+            frame[col] = ""
+        frame[col] = frame[col].fillna("").astype(str)
+    frame = frame.sort_values(
+        ["major_category", "minor_category", "_o", "dept_code"]
+    ).reset_index(drop=True)
     rows = pd.DataFrame({
         "_row_id": "e:" + frame["dept_code"].astype(str),
         "_row_state": "existing", "_sel": False,
+        "대분류": frame["major_category"].astype("string"),
+        "중분류": frame["minor_category"].astype("string"),
         "코드": frame["dept_code"].fillna("").astype("string"),
         "코드명": frame["dept_name"].fillna("").astype("string"),
         "순서": frame["_o"].astype(str).astype("string"),
@@ -796,7 +756,8 @@ def build_dept_rows(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _load_depts(q: dict) -> None:
-    df = db.get_org_departments(group_code=q.get("group"))
+    # 그룹 시트 폐지 후 부서는 단일 시트라 그룹으로 좁히지 않고 전건을 적재한다.
+    df = db.get_org_departments()
     df = _apply_filter(df, q, "dept_code", "dept_name")
     rows = build_dept_rows(df)
     _OD.set_rows(rows)
@@ -821,22 +782,19 @@ def _dept_display(rows: pd.DataFrame, sel_dept: str) -> pd.DataFrame:
     return frame
 
 
-def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
-                       group_name: str, sel_dept: str):
-    show_flash(_OD)
-    if not group_code:
-        sheet_head("부서", locked=True)
-        sheet_locked("그룹을 먼저 선택하세요", "그룹을 선택하면 해당 그룹의 부서만 조회·등록됩니다.")
-        _locked_action_bar(_OD, readiness)
-        return None
+def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str = "",
+                       group_name: str = "", sel_dept: str = ""):
+    """부서 단일 시트. 그룹/운영단위 시트 폐지(2026-08-07)로 드릴다운 상위가 없다.
 
-    # 상위(그룹) 전환 중 미저장 draft 폐기 게이트. 해소 전까지 pending 이 유지되며,
-    # 그동안 이 시트의 write(행추가·삭제·저장)를 비활성해 옛 행 오귀속을 차단한다(§17).
-    # 게이트 배너 렌더는 표준 순서대로 액션바 뒤 banner_slot 에서 한다.
+    group_code/group_name/sel_dept 는 교차 화면 테스트가 참조하는 시그니처라 선택
+    인자로 보존한다 — 현재 화면 경로에서는 모두 빈 값으로 호출된다.
+    """
+    show_flash(_OD)
+    # 미저장 draft 폐기 게이트(필터 변경 등). 해소 전까지 write 를 비활성한다(§17).
     pending = _OD.has_pending_reload()
     plan = st.session_state.get(_OD.delete_plan_key)
     rows = _OD.get_rows()
-    sheet_head("부서", count=_existing_count(rows), context=group_name)
+    sheet_head("부서", count=_existing_count(rows), context=group_name or None)
 
     # 표준 순서(users/worktype 통일): 요약칩 → __bar 액션바 → 확인/결과 배너 → 그리드.
     _summary_chips(rows, params)
@@ -846,7 +804,6 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
     spec = MasterGridSpec(
         page_id=_OD.page_id, columns=_DEPT_GRID_COLUMNS, order=_DEPT_COLS,
         col_config=_code_name_config(), select_all=True, include_linked_rows=True,
-        grid_options={"onCellClicked": _DRILL_CLICK},  # 행 클릭 → 부서 드릴다운 선택
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
     grid_df = render_master_grid(spec, _dept_display(rows, sel_dept), key=_OD.grid_key(suffix=group_code))
@@ -882,10 +839,11 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str,
     return grid_df
 
 
-def _add_dept_row(grid_df: pd.DataFrame, group_code: str) -> None:
+def _add_dept_row(grid_df: pd.DataFrame, group_code: str = "") -> None:
     live = live_rows(grid_df)
     row = {
         "_row_id": _OD.next_rid(), "_row_state": "new", "_sel": False,
+        "대분류": "", "중분류": "",
         "코드": "", "코드명": "", "순서": str(_next_order(live)), "비고": "", "사용": True,
     }
     _OD.set_rows(pd.concat([live[_DEPT_ROW_COLS], pd.DataFrame([row])], ignore_index=True)[_DEPT_ROW_COLS])
@@ -893,21 +851,32 @@ def _add_dept_row(grid_df: pd.DataFrame, group_code: str) -> None:
     st.rerun()
 
 
-def _validate_depts(live: pd.DataFrame, group_code: str):
-    """부서 시트 → departments 레코드 + 행 검증. 신규·기존 모두 선택 그룹에 귀속."""
+def _validate_depts(live: pd.DataFrame, group_code: str = ""):
+    """부서 시트 → departments 레코드 + 행 검증.
+
+    ``group_code`` 는 그룹 시트 폐지(2026-08-07) 후 화면에서 쓰지 않지만, 교차 화면
+    회귀 테스트가 참조하는 시그니처라 선택 인자로 보존한다. 값을 주면 그대로 실어
+    보내고(프로그램 경로에서 그룹 귀속을 유지할 수 있다), 빈 값이면 저장 계층이
+    group_id 키 자체를 payload 에서 빼 기존 귀속을 보존한다.
+    """
     records, errors = [], []
     gcode = str(group_code).strip()
     for i, (_, row) in enumerate(live.iterrows(), start=1):
         code = str(row.get("코드") or "").strip()
         name = str(row.get("코드명") or "").strip()
         order_raw = str(row.get("순서") or "").strip()
-        if not any([code, name]):
+        major = str(row.get("대분류") or "").strip()
+        minor = str(row.get("중분류") or "").strip()
+        if not any([code, name, major, minor]):
             continue
         tag = f"{i}행" + (f"({code})" if code else "")
         if not code:
             errors.append(f"{i}행: 부서코드를 입력하세요.")
         if not name:
             errors.append(f"{tag}: 부서명을 입력하세요.")
+        # 중간층만 떠 있는 계층은 트리로 성립하지 않는다(DB departments_minor_requires_major).
+        if minor and not major:
+            errors.append(f"{tag}: 중분류를 쓰려면 대분류를 먼저 입력하세요.")
         order_val = 0
         if order_raw:
             try:
@@ -916,13 +885,14 @@ def _validate_depts(live: pd.DataFrame, group_code: str):
                 errors.append(f"{tag}: 순서는 숫자여야 합니다.")
         records.append({
             "dept_code": code, "dept_name": name, "group_code": gcode,
+            "major_category": major, "minor_category": minor,
             "description": str(row.get("비고") or "").strip(), "sort_order": order_val,
             "is_active": grid_bool(row.get("사용")),
         })
     return records, errors
 
 
-def _save_depts(grid_df: pd.DataFrame, q: dict, group_code: str) -> None:
+def _save_depts(grid_df: pd.DataFrame, q: dict, group_code: str = "") -> None:
     readiness = _readiness()
     if not readiness.write_enabled:
         banner("danger" if readiness.state is Readiness.PROBE_ERROR else "warn", readiness.message)
@@ -930,12 +900,21 @@ def _save_depts(grid_df: pd.DataFrame, q: dict, group_code: str) -> None:
     live = live_rows(grid_df)
     store = db.get_org_departments()
     counts: dict[str, int] = {}
-    # 귀속 그룹은 현재 selectbox 값(group_code)이 아니라 이 행들이 적재된 시점의 그룹으로
-    # 바인딩한다. 상위 전환 중이라도(게이트가 처리 전) 옛 행이 새 그룹에 오귀속되지 않는다.
-    owner = str(st.session_state.get(_OD.key("loaded_group"), group_code) or group_code)
 
     def _validate():
-        return _validate_depts(live, owner)
+        # 그룹 시트 폐지 후 이 화면은 그룹 귀속을 편집하지 않는다. 호출 인자(group_code)로
+        # 일괄 재귀속하지도 않는다 — 구 드릴다운의 loaded_group 바인딩과 같은 이유(전 행
+        # 오귀속 사고 방지)다. 대신 기존 행의 group_code 를 스토어 값으로 되살려, 스토어
+        # 병합·payload 어느 경로에서도 기존 귀속이 빈 값으로 지워지지 않게 보존한다.
+        records, errors = _validate_depts(live, "")
+        if records and not store.empty:
+            stored_group = dict(zip(
+                store["dept_code"].astype(str), store["group_code"].astype(str),
+            ))
+            for rec in records:
+                if not str(rec.get("group_code") or "").strip():
+                    rec["group_code"] = stored_group.get(rec["dept_code"], "")
+        return records, errors
 
     def _build(records):
         merged, dup, n_c, n_u, _n_d = db.upsert_records(
@@ -967,8 +946,7 @@ def _save_depts(grid_df: pd.DataFrame, q: dict, group_code: str) -> None:
     if outcome.status == "unknown":
         ledger_banner(outcome.result)  # 재조회 필요 — reconcile 금지
         return
-    _load_depts({**q, "group": owner})  # 방금 저장한(귀속) 그룹으로 재적재
-    st.session_state.pop(_OU.query_key, None)  # 부서명 변경을 조 컨텍스트에 반영
+    _load_depts(q)  # 단일 시트 — 전건 재적재
     _OD.set_flash("success", f"부서를 저장했습니다. (신규 {counts.get('create', 0)} · 수정 {counts.get('update', 0)})")
     st.rerun()
 

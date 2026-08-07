@@ -512,6 +512,24 @@ def classify_save_targets(live_emps, deleted_emps):
     return sorted(dele - live), sorted(dele & live)
 
 
+def normalize_shift_group(text) -> str:
+    """근무조 자유 입력 정규화 (순수). ``A`` → ``A조``, ``b`` → ``B조``, 빈 값 → ``''``.
+
+    2026-08-07 사용자 결정으로 A/B/C조는 기준정보(teams)가 아니라 편성표에서 직접
+    입력한다. 한 글자만 치면 '조'를 붙여주되, **자동 부착은 한 글자 입력에만** 적용한다 —
+    '주간'을 '주간조'로 바꾸는 식의 오지랖을 막기 위해서다. 이미 '조'로 끝나면 그대로 둔다.
+    """
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    if len(value) == 1 and value.isalnum():
+        return f"{value.upper()}조"
+    # 'a조' 처럼 영문 한 글자 + 조 인 경우만 대문자로 맞춘다(표기 흔들림 방지).
+    if len(value) == 2 and value.endswith("조") and value[0].isascii() and value[0].isalpha():
+        return f"{value[0].upper()}조"
+    return value
+
+
 def should_save_assignment(state, cur_dept_code, cur_team_code, loaded) -> bool:
     """이 행의 부서·조 편성을 schedule_assignments 에 저장(upsert)해야 하는가 (순수).
 
@@ -525,7 +543,11 @@ def should_save_assignment(state, cur_dept_code, cur_team_code, loaded) -> bool:
         return bool(str(cur_dept_code or "").strip())
     if loaded is None:
         return False
-    return (str(cur_dept_code or ""), str(cur_team_code or "")) != (str(loaded[0]), str(loaded[1]))
+    # 스냅샷은 (부서, 조, 근무조) 3-튜플이다. 화면의 '조' 축이 team_code 에서
+    # shift_group_code 로 옮겨갔으므로 비교 대상도 근무조다. 2-튜플(구 계약)이 들어오면
+    # 종전대로 team_code 와 비교한다 — 기존 회귀 테스트를 그대로 통과시키기 위해서다.
+    prev_shift = str(loaded[2] if len(loaded) > 2 else loaded[1])
+    return (str(cur_dept_code or ""), str(cur_team_code or "")) != (str(loaded[0]), prev_shift)
 
 
 def _build_users_map(users: pd.DataFrame) -> dict:
@@ -549,7 +571,7 @@ def _users_by_emp() -> dict:
     """
     cached = st.session_state.get("se_users_map")
     if cached is None:
-        cached = _build_users_map(db.get_users())
+        cached = _build_users_map(db.get_users(include_resigned=False))
         st.session_state["se_users_map"] = cached
     return cached
 
@@ -606,9 +628,8 @@ def _sync_rows(grid_df: pd.DataFrame, row_cols: list) -> bool:
             if not str(row.get("부서") or "").strip():
                 live.at[idx, "부서"] = db.dept_name(master["dept_code"])
                 changed = True
-            if not str(row.get("조") or "").strip() and str(master["team_code"]).strip():
-                live.at[idx, "조"] = db.team_name(master["dept_code"], master["team_code"])
-                changed = True
+            # '조'(근무조)는 자동 채움하지 않는다 — 2026-08-07 결정으로 이 칸은 운영단위가
+            # 아니라 자유 입력 근무조이며, users 마스터에는 대응 값이 없다.
 
     # 값 편집도 매 rerun 권위 상태에 반영한다 (구조 변경이 없으면 remount 는 하지 않음
     # — 그리드가 이미 최신 값을 보여주고 있고, feed 재전송은 클릭 rerun 을 삼킬 수 있다).
@@ -759,7 +780,7 @@ def _load_grid(q: dict) -> None:
     day_cols = [c for c, _ in days]
     row_cols = _META + _FIXED + day_cols
 
-    users = db.get_users()
+    users = db.get_users(include_resigned=False)  # 퇴사자는 편성 명단에서 제외
     st.session_state["se_users_map"] = _build_users_map(users)  # 조회 시점 캐시 갱신
     # 부서·조 '전체'(_ALL)면 해당 필터를 생략한다(다부서/조 표시). 재직자만 대상.
     mask = users["is_active"]
@@ -767,7 +788,9 @@ def _load_grid(q: dict) -> None:
         mask = mask & (users["dept_code"] == q["dept"])
     if q.get("team") != _ALL:
         mask = mask & (users["team_code"] == q["team"])
-    scope = users[mask].sort_values("emp_no")
+    # 정렬: 그룹순서 → 표시순서(display_order, 근태표 등록 순서) → 사번.
+    # 사번 단독 정렬에서 전환(2026-08-07 사용자 요구 — 파일 등록 순서 유지).
+    scope = db.sort_users_for_display(users[mask])
     emp_nos = [str(e).strip() for e in scope["emp_no"]]
 
     scheds = db.get_month_schedules(emp_nos, q["year"], q["month"]) if emp_nos else pd.DataFrame(
@@ -789,17 +812,19 @@ def _load_grid(q: dict) -> None:
         emp = str(u["emp_no"]).strip()
         if emp not in with_rows:
             continue  # 저장된 행이 있는 직원만 표시 (전체 자동 나열 금지)
-        dept_code, team_code = snaps.get(
-            emp, (str(u["dept_code"]).strip(), str(u["team_code"]).strip())
+        # 과거 편성이 없으면 users 현재 소속을 표시용 fallback 으로만 쓴다(자동 저장 금지).
+        # 근무조는 fallback 대상이 아니다 — 마스터에 없는 값이라 빈 칸에서 시작한다.
+        dept_code, team_code, shift_code = snaps.get(
+            emp, (str(u["dept_code"]).strip(), str(u["team_code"]).strip(), "")
         )
         rid = f"e:{emp}"
-        orig_assign[rid] = (dept_code, team_code)
+        orig_assign[rid] = (dept_code, team_code, shift_code)
         row = {
             "_row_id": rid, "_row_state": "existing", "_sel": False,
             "사번": emp,
             "성명": str(u["name"]),
             "부서": db.dept_name(dept_code),
-            "조": db.team_name(dept_code, team_code),
+            "조": shift_code,
         }
         for col, iso in days:
             code = lookup.get((emp, iso), "")
@@ -851,13 +876,16 @@ def _assignment_snapshots(q: dict, emp_nos: list) -> dict:
     cache = st.session_state.get("se_assign_cache", {})
     for (mk, emp), value in cache.items():
         if mk == month_key:
-            snaps[emp] = (value["dept_code"], value["team_code"])
+            snaps[emp] = (
+                value["dept_code"], value["team_code"], value.get("shift_group_code", ""),
+            )
     if emp_nos:
         try:
             assigns = db.get_month_assignments(q["year"], q["month"], emp_nos)
             for _, r in assigns.iterrows():
                 snaps[str(r["emp_no"]).strip()] = (
                     str(r["dept_code"]).strip(), str(r["team_code"]).strip(),
+                    str(r.get("shift_group_code") or "").strip(),
                 )
         except Exception:
             pass  # 002 이전에는 테이블이 없다 — 세션 스냅샷/마스터 기본값 사용
@@ -946,19 +974,18 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
                 else:
                     errors.append(f"{i}행({emp}): 존재하지 않는 부서입니다: {dept_txt}")
 
-            team_code = ""
-            if dept_code is not None and team_txt:
-                in_dept = teams[teams["dept_code"].astype(str).str.strip() == dept_code]
-                by_code = in_dept[in_dept["team_code"].astype(str).str.strip() == team_txt]
-                by_name = in_dept[in_dept["team_name"].astype(str).str.strip() == team_txt]
-                if not by_code.empty:
-                    team_code = team_txt
-                elif len(by_name) == 1:
-                    team_code = str(by_name.iloc[0]["team_code"]).strip()
-                elif len(by_name) > 1:
-                    errors.append(f"{i}행({emp}): 조명 '{team_txt}'이(가) 같은 부서에 중복됩니다.")
-                else:
-                    errors.append(f"{i}행({emp}): 선택한 부서에 없는 조입니다: {team_txt}")
+            # '조'는 기준정보 조회가 아니라 자유 입력이다(2026-08-07 결정). 마스터에 없는
+            # 값이라고 막지 않으며, 한 글자 입력만 'A' → 'A조'로 보정한다.
+            shift_code = normalize_shift_group(team_txt)
+            # team_code(운영단위)는 이 화면에서 더 이상 편집하지 않는다 — 로드 스냅샷 값을
+            # 그대로 실어 보내 과거 배정을 보존한다. 단 **부서를 바꾼 행은 빈 값**으로
+            # 해제한다: 팀은 부서 소속이라 옛 부서의 팀 코드를 새 부서에 실으면 검증
+            # ("선택한 부서에 없는 팀")이 저장 전체를 영구 차단한다(code-review P1).
+            loaded_snap = orig_assign.get(str(row.get("_row_id", "")))
+            team_code = str(loaded_snap[1]) if loaded_snap and len(loaded_snap) > 1 else ""
+            if team_code and loaded_snap and dept_code is not None \
+                    and str(loaded_snap[0]).strip() != str(dept_code).strip():
+                team_code = ""
 
             # 편성 저장 여부 결정 (§편성 저장 조건):
             #  - 신규 직원·월 행 → 저장(새 편성)
@@ -968,14 +995,14 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
             state = str(row.get("_row_state") or "new")
             loaded = orig_assign.get(str(row.get("_row_id", "")))
             if dept_code is not None and should_save_assignment(
-                state, dept_code, team_code, loaded
+                state, dept_code, shift_code, loaded
             ):
                 assign_rows.append({
                     "emp_no": emp,
                     "schedule_month": (q["year"], q["month"]),
                     "dept_code": dept_code,
                     "team_code": team_code,
-                    "shift_group_code": "",  # 근무조 입력은 아직 없음 (NULL 허용)
+                    "shift_group_code": shift_code,
                 })
 
             rid = str(row.get("_row_id", ""))
@@ -1042,6 +1069,7 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
         for rec in assign_rows:
             cache[(month_key, rec["emp_no"])] = {
                 "dept_code": rec["dept_code"], "team_code": rec["team_code"],
+                "shift_group_code": rec["shift_group_code"],
             }
 
     # 4~6) 근무 저장 — 삭제 → 교체 → upsert 순. Repository 가 이 저장 payload 의 각

@@ -130,9 +130,14 @@ near_miss_reports
 | `002_schedule_assignments.sql` | `shift_groups`, `schedule_assignments`, 근무 연결 컬럼 | DDL 전용, 자동 백필 없음 | 2026-07-16 적용·종단 확인 |
 | `003_org_structure.sql` | 조직 그룹(→004로 대체됨)·운영단위 유형·사용자 표시순서 | guarded DDL + 제한적 안전 백필 | 2026-07-20 기준 미적용 — 그룹 컬럼(`department_group`/`group_sort_order`)은 004가 대체. `unit_type`/`display_order`는 004가 호환용으로 재추가하므로 003 미적용 상태에서도 앱은 정상 동작 |
 | `004_org_groups.sql` | `organization_groups` 1급 테이블 신설 + `departments.group_id` FK + 무손실 백필(경로 B) | guarded DDL + 무손실 백필, 003의 그룹 컬럼 모델 대체 | 2026-07-22 테스트 프로젝트 read-only probe 확인. 앱 코드(`modules/db.py`·`supabase_repository.py`·조직/사용자/근무형태/대시보드 화면)는 004를 권위로 전면 전환 완료 — 프로덕션 live schema 적용 여부는 세션별 read-only 확인 필요 |
-| `006_near_miss.sql` | `near_miss_reports` 테이블 신설 + `users.is_safety_officer` 컬럼 | guarded DDL, no-drop, RLS enable(policyless) | DRAFT — **미적용**. 실행·원격 write는 독립 Codex 감사 + 사용자 승인 게이트 이후. 005는 004 후속 정리(§7)로 예약되어 있어 번호를 건너뜀 |
+| `006_near_miss.sql` | `near_miss_reports` 테이블 신설 + `users.is_safety_officer` 컬럼 | guarded DDL, no-drop, RLS enable(policyless) | 2026-08-07 테스트 프로젝트 live 확인 — `near_miss_reports` 존재(적용됨). 005는 004 후속 정리(§7)로 예약되어 있어 번호를 건너뜀 |
+| `007_near_miss_improvement.sql` | `near_miss_improvements`(CAPA, report 1:1) | guarded DDL, no-drop | 2026-08-07 테스트 프로젝트 live 확인 — 테이블 존재(적용됨) |
+| `008_password_auth.sql` | `users` 비밀번호 컬럼 6개 + `login_sessions` | guarded DDL, 기존 행 값 무기록, RLS enable(policyless) | DRAFT — **미적용**(2026-08-07 live 확인: `users.password_hash` 없음·`login_sessions` 없음). 적용 전까지 로그인은 고정 예외 계정만 가능 |
+| `009_org_category_and_tenure.sql` | `departments.major_category/minor_category` + `users.hire_date/resign_date` + 대분류 그룹명 백필 | guarded DDL, no-drop(teams·organization_groups 보존), 빈 값에만 백필 | 2026-08-07 테스트 프로젝트 **적용·검증**(컬럼 존재 + 백필 결과 확인). 회사 계정 이전 시 새 프로젝트에 재적용 필요 |
 
 위의 환경 상태는 마지막 검증 기록입니다. 새로운 세션에서 적용 또는 미적용을 단정하기 전에 반드시 live schema를 다시 확인합니다.
+
+**009 이후의 조직 모델(2026-08-07 제품 결정)**: 화면 계층의 정본은 부서의 `major_category`/`minor_category` 자유 텍스트 2단이다. `organization_groups`·`departments.group_id`·`teams`는 **휴면 보존**된다 — drop 하지 않았고 앱 저장 경로는 기존 귀속 값을 지우지 않지만, 화면 편집 경로가 없다. A/B/C 근무조는 `teams`(운영단위)가 아니라 `schedule_assignments.shift_group_code`(자유 텍스트 스냅샷)에 저장된다.
 
 ## 5. Migration 안전 규칙
 

@@ -1085,7 +1085,7 @@ def _clean(value) -> str:
 
 
 def _month_assignment_snapshot(year: int, month: int) -> dict:
-    """대상 월의 부서·조 편성 스냅샷 {emp_no: (dept_code, team_code)}.
+    """대상 월의 부서·조 편성 스냅샷 {emp_no: (dept_code, team_code, shift_group_code)}.
 
     영속 저장(schedule_assignments — 직원·월 편성 1건)을 조회한다. 스냅샷은 근무표
     작성 당시의 소속을 보존하므로, 과거 월을 조회할 때 인사이동 이후의 현재 소속이
@@ -1105,7 +1105,10 @@ def _month_assignment_snapshot(year: int, month: int) -> dict:
     for _, r in assigns.iterrows():
         emp = _clean(r.get("emp_no"))
         if emp:
-            snaps[emp] = (_clean(r.get("dept_code")), _clean(r.get("team_code")))
+            snaps[emp] = (
+                _clean(r.get("dept_code")), _clean(r.get("team_code")),
+                _clean(r.get("shift_group_code")),
+            )
     return snaps
 
 
@@ -1118,15 +1121,21 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     인사이동한 직원이 현재 소속으로 오분류되지 않게 한다. 날짜 셀은 내부 코드가 아니라
     근무형태 약칭(display_of)으로 표시한다.
 
-    재직자는 항상 포함한다. 퇴직(비활성) 직원은 해당 월에 저장된 근무 기록이 있는
-    경우에만 포함한다(requirements.md §5 조회·§7 소프트 삭제=참조 보존의 취지 —
-    과거 편성 이력은 조회 가능해야 하되, 기록 없는 퇴직자를 위한 빈 행은 만들지
-    않는다). 포함된 퇴직자는 성명에 RETIRED_LABEL 을 덧붙여 표시한다.
+    재직자는 항상 포함한다. 퇴직(비활성)·퇴사일 경과 직원은 해당 월에 저장된 근무
+    기록이 있는 경우에만 포함한다(requirements.md §5 조회·§7 소프트 삭제=참조 보존의
+    취지 — 과거 기록 조회는 유지하되, 기록 없는 퇴직·퇴사자를 위한 빈 행은 만들지
+    않는다). 포함된 퇴직·퇴사자는 성명에 RETIRED_LABEL 을 덧붙여 표시한다.
+
+    퇴사자를 get_users(include_resigned=False)로 아예 빼면 과거 월의 저장된 근무까지
+    조회에서 사라진다(2026-08-07 code-review P1) — 그래서 여기서는 전체를 조회한 뒤
+    퇴사자를 '비활성과 같은 부류'(기록 있는 월에만 표시)로 접는다.
     """
     display_of = display_of or {}
     users = db.get_users()
 
-    active_mask = users["is_active"].astype(bool)
+    resigned_mask = users["resign_date"].map(db.is_resigned) if "resign_date" in users.columns \
+        else pd.Series(False, index=users.index)
+    active_mask = users["is_active"].astype(bool) & ~resigned_mask
     inactive_emp_nos = set(
         users.loc[~active_mask, "emp_no"].astype(str).str.strip()
     )
@@ -1137,27 +1146,34 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     )
     retired_with_records = inactive_emp_nos & emp_with_records
 
+    users["_eff_active"] = active_mask  # 재직 = is_active AND 퇴사일 미경과
     keep_mask = active_mask | all_emp_nos.isin(retired_with_records)
     users = users[keep_mask].copy()
-    users["_retired"] = ~users["is_active"].astype(bool)
+    users["_retired"] = ~users["_eff_active"].astype(bool)
 
     # 스냅샷 우선으로 '그 당시 부서/조'를 해석한다(없으면 현재 소속 폴백).
     snaps = _month_assignment_snapshot(q["year"], q["month"])
-    eff_depts, eff_teams = [], []
+    eff_depts, eff_teams, eff_shifts = [], [], []
     for _, u in users.iterrows():
         emp = _clean(u.get("emp_no"))
-        dept_code, team_code = snaps.get(
-            emp, (_clean(u.get("dept_code")), _clean(u.get("team_code")))
+        dept_code, team_code, shift_code = snaps.get(
+            emp, (_clean(u.get("dept_code")), _clean(u.get("team_code")), "")
         )
         eff_depts.append(dept_code)
         eff_teams.append(team_code)
+        eff_shifts.append(shift_code)
     users["_eff_dept"] = eff_depts
     users["_eff_team"] = eff_teams
+    users["_eff_shift"] = eff_shifts
 
     if q["dept"] != ALL:
         users = users[users["_eff_dept"] == q["dept"]]
         if q["team"] != ALL:
-            users = users[users["_eff_team"] == q["team"]]
+            # 조 필터는 신 축(근무조 직접입력)과 레거시 축(운영단위) 어느 쪽이든 매치한다
+            # — 과거 월(team_code 편성)과 새 편성(shift_group_code)이 한 화면에 공존한다.
+            users = users[
+                (users["_eff_team"] == q["team"]) | (users["_eff_shift"] == q["team"])
+            ]
     keyword = str(q.get("keyword", "")).strip()
     if keyword:
         emp_match = users["emp_no"].astype(str).str.contains(
@@ -1167,7 +1183,19 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
             keyword, case=False, na=False, regex=False,
         )
         users = users[emp_match | name_match]
-    users = users.sort_values(["_eff_dept", "_eff_team", "emp_no"])
+    # 정렬: 부서 → 표시순서(display_order, 근태표 등록 순서·NULL 뒤) → 조 → 사번
+    # (2026-08-07 사용자 요구 — 파일 등록 순서 유지).
+    _orders = []
+    for value in users.get("display_order", pd.Series([None] * len(users))):
+        try:
+            _orders.append(db.normalize_display_order(value))
+        except (TypeError, ValueError):
+            _orders.append(None)
+    users["_d_null"] = [1 if o is None else 0 for o in _orders]
+    users["_d_order"] = [0 if o is None else o for o in _orders]
+    users = users.sort_values(
+        ["_eff_dept", "_d_null", "_d_order", "_eff_shift", "_eff_team", "emp_no"]
+    )
 
     kept_emp_nos = set(users["emp_no"].astype(str).str.strip())
     scheds = (
@@ -1200,11 +1228,13 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
         name = u["name"]
         if bool(u.get("_retired")):
             name = f"{name}{RETIRED_LABEL}"
+        # 조 표시: 신 축(근무조 스냅샷 텍스트)이 있으면 그것, 없으면 레거시 운영단위명.
+        shift_code = _clean(u.get("_eff_shift"))
         row = {
             "사번": u["emp_no"],
             "성명": name,
             "부서": dept_name_by_code.get(dept_code, dept_code),
-            "조": (
+            "조": shift_code or (
                 team_name_by_key.get((dept_code, team_code), team_code)
                 if team_code
                 else ""

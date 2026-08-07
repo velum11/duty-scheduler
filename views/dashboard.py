@@ -107,7 +107,7 @@ def render(user: dict) -> None:
     # — 최초 근무 조회만 감싸면 보드 구성 중 데이터소스 오류가 화면 전체 예외가 된다.
     try:
         day_rows = db.get_day_schedules(the_date)
-        users = db.get_users()
+        users = db.get_users(include_resigned=False)  # 퇴사자는 현황 집계에서 제외
         wt = db.work_types_map()
         display_of, color_of = _display_maps()
         # 스냅샷 소속: 해당 월 편성이 있으면 그 당시 부서/조로 그룹핑, 없으면 현재

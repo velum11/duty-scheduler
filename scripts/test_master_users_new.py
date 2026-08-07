@@ -64,17 +64,28 @@ _T0_CODE = str(_T0_ROWS.iloc[0]["team_code"]) if not _T0_ROWS.empty else ""
 # 1) 표시↔코드 변환 + 검증 (records/errors)
 # ---------------------------------------------------------------------------
 def test_transform_ok():
+    # 2026-08-07: 조 편집 칼럼 제거 — _scan 은 team_code 를 항상 빈 값으로 두고,
+    # 기존 배정의 보존은 _save 가 저장 직전 권위 스토어에서 백필한다(그리드가
+    # spec.order+META 외 컬럼을 잘라내므로 행 데이터 왕복로는 보존 불가).
     recs, errs = mu._validate(_live([
         {"_row_id": "n:1", "_row_state": "new", "_sel": False,
-         "사번": "TESTU1", "성명": "홍길동", "부서": _D0_LABEL, "조": _T0_NAME,
-         "직급": "사원", "권한": "관리자", "표시순서": "", "재직": True},
+         "사번": "TESTU1", "성명": "홍길동", "부서": _D0_LABEL,
+         "직급": "사원", "권한": "관리자", "입사일": "2024-01-02", "퇴사일": "",
+         "표시순서": "", "재직": True},
     ]), _DEPT_RESOLVER, _TEAM_RESOLVE)
     check("권한 관리자→ADMIN", bool(recs) and recs[0]["role"] == "ADMIN")
     check("부서 표시명→dept_code", recs[0]["dept_code"] == str(_D0))
-    check("조명→team_code", recs[0]["team_code"] == _T0_CODE)
+    check("_scan 은 team_code 를 만들지 않음(빈 값)", recs[0]["team_code"] == "")
+    check("입사일 정규화 저장·빈 퇴사일 NULL",
+          recs[0]["hire_date"] == "2024-01-02" and recs[0]["resign_date"] is None)
     check("정상 행 오류 없음", not errs)
     check("records 계약 키 완전", set(recs[0]) == {
-        "emp_no", "name", "dept_code", "team_code", "position", "role", "is_active", "display_order"})
+        "emp_no", "name", "dept_code", "team_code", "position", "role", "is_active",
+        "display_order", "hire_date", "resign_date"})
+    # 보존 계약: _save 가 저장 직전 스토어 백필로 team_code 를 되살린다(소스 계약).
+    save_src = inspect.getsource(mu._save)
+    check("_save 가 기존 team_code 스토어 백필 수행",
+          "stored_team" in save_src and 'rec["team_code"] = stored_team.get' in save_src)
 
 
 def test_role_variants():
@@ -101,21 +112,27 @@ def test_empty_team_and_skip():
     check("완전 빈 행 skip", len(recs2) == 0)
 
 
-def test_team_dept_binding():
-    other = _TEAMS[_TEAMS["dept_code"].astype(str) != str(_D0)]
-    if other.empty:
-        check("타 부서 조 차단(부서 1개라 스킵)", True)
-        return
-    other_name = str(other.iloc[0]["team_name"])
-    if other_name in set(_T0_ROWS["team_name"].astype(str)):
-        check("타 부서 조 차단(공통 조명이라 스킵)", True)
-        return
+def test_tenure_validation():
+    """입사일/퇴사일(009) 검증 — 형식 오류·순서 위반이 셀 마커로 매핑된다."""
     _r, errs, cells = mu._scan(_live([
         {"_row_id": "e:X", "_row_state": "existing", "_sel": False, "사번": "X", "성명": "엑스",
-         "부서": _D0_LABEL, "조": other_name, "직급": "", "권한": "조원", "표시순서": "", "재직": True},
+         "부서": _D0_LABEL, "직급": "", "권한": "조원",
+         "입사일": "엉터리", "퇴사일": "", "표시순서": "", "재직": True},
+        {"_row_id": "e:Y", "_row_state": "existing", "_sel": False, "사번": "Y", "성명": "와이",
+         "부서": _D0_LABEL, "직급": "", "권한": "조원",
+         "입사일": "2024-05-01", "퇴사일": "2024-01-01", "표시순서": "", "재직": True},
     ]), _DEPT_RESOLVER, _TEAM_RESOLVE)
-    check("타 부서 조 차단('없는 조')", any("없는 조" in e for e in errs))
-    check("조 오류가 셀 마커로 매핑", cells.get("e:X", {}).get("조") is not None)
+    check("입사일 형식 오류 차단", any("입사일 형식" in e for e in errs))
+    check("입사일 오류가 셀 마커로 매핑", cells.get("e:X", {}).get("입사일") is not None)
+    check("퇴사일<입사일 차단", any("앞설 수 없습니다" in e for e in errs))
+    check("퇴사일 오류가 셀 마커로 매핑", cells.get("e:Y", {}).get("퇴사일") is not None)
+    recs, errs2, _ = mu._scan(_live([
+        {"_row_id": "e:Z", "_row_state": "existing", "_sel": False, "사번": "Z", "성명": "지",
+         "부서": _D0_LABEL, "직급": "", "권한": "조원",
+         "입사일": "2024.01.02", "퇴사일": "20240301", "표시순서": "", "재직": True},
+    ]), _DEPT_RESOLVER, _TEAM_RESOLVE)
+    check("구분자 변형(점·무구분)도 ISO 로 정규화",
+          not errs2 and recs[0]["hire_date"] == "2024-01-02" and recs[0]["resign_date"] == "2024-03-01")
 
 
 def test_display_order_parse():
@@ -296,8 +313,8 @@ def test_editable_gate():
     sabun_ed = cc["사번"]["editable"].js_code
     check("사번 editable=신규행만", "_row_state === 'new'" in sabun_ed)
 
-    # 데이터셀(성명/부서/조/직급/권한/표시순서/재직): 보호행만 잠금, 일반 저장행 편집 유지.
-    for c in ("성명", "부서", "조", "직급", "권한", "표시순서", "재직"):
+    # 데이터셀(성명/부서/직급/권한/입사일/퇴사일/표시순서/재직): 보호행만 잠금, 일반 저장행 편집 유지.
+    for c in ("성명", "부서", "직급", "권한", "입사일", "퇴사일", "표시순서", "재직"):
         ed = cc[c]["editable"].js_code
         check(f"{c} editable=보호행만 잠금", "_protected" in ed and "function(p)" in ed)
 
@@ -366,10 +383,12 @@ def _reconcile_app():
     from views.master import state as _state
     s = _state.DraftState("recon_test")
     rows = _pd.DataFrame([
-        {"_row_id": "e:1", "_row_state": "existing", "_sel": False, "사번": "1", "성명": "가",
-         "부서": "D", "조": "", "직급": "", "권한": "조원", "표시순서": "1", "재직": True},
-        {"_row_id": "n:1", "_row_state": "new", "_sel": False, "사번": "NEW1", "성명": "신",
-         "부서": "D", "조": "", "직급": "", "권한": "조원", "표시순서": "", "재직": True},
+        {"_row_id": "e:1", "_row_state": "existing", "_sel": False, "_team_code": "", "사번": "1",
+         "성명": "가", "부서": "D", "직급": "", "권한": "조원",
+         "입사일": "", "퇴사일": "", "표시순서": "1", "재직": True},
+        {"_row_id": "n:1", "_row_state": "new", "_sel": False, "_team_code": "", "사번": "NEW1",
+         "성명": "신", "부서": "D", "직급": "", "권한": "조원",
+         "입사일": "", "퇴사일": "", "표시순서": "", "재직": True},
     ])
     _st.session_state[s.key("baseline")] = _mu._baseline_of(rows)
     _mu._reconcile_partial(s, rows, ["1", "NEW1"])  # 성공 자연키: 기존1 + 신규 NEW1
@@ -490,7 +509,7 @@ def main():
     test_transform_ok()
     test_role_variants()
     test_empty_team_and_skip()
-    test_team_dept_binding()
+    test_tenure_validation()
     test_display_order_parse()
     test_cell_error_mapping()
     test_dependent_team_options()

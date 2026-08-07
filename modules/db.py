@@ -77,7 +77,7 @@ READINESS_PROBE_ERROR = supabase_repository.READINESS_PROBE_ERROR
 # display_order: 부서그룹 안에서의 직원 표시순서 (migration 003, NULL=미지정).
 USER_COLUMNS = [
     "emp_no", "name", "dept_code", "team_code", "position", "role", "is_active",
-    "display_order",
+    "display_order", "hire_date", "resign_date",
 ]
 
 # 화면이 사용하는 부서 컬럼 (id 는 파사드 내부 매핑에만 사용).
@@ -92,8 +92,12 @@ TEAM_COLUMNS = ["dept_code", "team_code", "team_name", "sort_order", "is_active"
 # 부서는 group_code(내부적으로 group_id FK)로 그룹에 귀속된다. 조는 dept_code(내부적으로
 # department_id FK)로 부서에 귀속된다. 003 잔재(department_group/group_sort_order)는 폐기.
 ORG_GROUP_COLUMNS = ["group_code", "group_name", "sort_order", "description", "is_active"]
+# major_category/minor_category: 사람이 직접 입력하는 조직 계층 2단 (migration 009).
+# 그룹 시트 폐지(2026-08-07 사용자 결정)로 계층 표현의 주역이 group_code 에서 이 둘로
+# 넘어왔다. group_code 는 계약에 남겨두되 화면에서 편집하지 않는다 — 기존 값 보존용.
 ORG_DEPT_COLUMNS = [
-    "dept_code", "dept_name", "group_code", "description", "sort_order", "is_active",
+    "dept_code", "dept_name", "group_code", "major_category", "minor_category",
+    "description", "sort_order", "is_active",
 ]
 ORG_TEAM_COLUMNS = [
     "dept_code", "team_code", "team_name", "unit_type", "description", "sort_order", "is_active",
@@ -617,6 +621,9 @@ def reset_org_schema_cache() -> None:
     '스키마 재확인' 동작) 이 경로를 쓴다. sample 모드는 캐시가 없어 no-op."""
     if not is_sample_mode():
         supabase_repository.reset_org_readiness()
+        # 009(부서 분류·재직기간) probe 도 함께 재확인한다 — 앱이 009 적용 전에 기동한
+        # 경우 이 경로 없이는 프로세스 재시작 전까지 폴백 분기에 갇힌다.
+        supabase_repository.reset_org_category_readiness()
         # readiness 가 바뀌면 조직 조회의 분기(폴백↔완전 조직 뷰)가 달라지므로 관련
         # 읽기·매핑 캐시를 함께 비워 다음 렌더가 새 분기로 재조회하게 한다.
         _invalidate_all()
@@ -672,6 +679,11 @@ def _org_dept_view(store: pd.DataFrame) -> pd.DataFrame:
     blank = gc == ""
     frame["group_code"] = gc
     frame.loc[blank, "group_code"] = frame.loc[blank, "dept_code"].astype(str)
+    # 조직 계층 2단(009). 레거시 스토어에 없으면 빈 문자열 = 미분류로 시작한다.
+    for col in ("major_category", "minor_category"):
+        if col not in frame.columns:
+            frame[col] = ""
+        frame[col] = frame[col].fillna("").astype(str)
     return frame[ORG_DEPT_COLUMNS].reset_index(drop=True)
 
 
@@ -809,6 +821,8 @@ def get_org_departments(
         df = _fetch_departments().copy()
         df["group_code"] = ""
         df["description"] = ""
+        df["major_category"] = ""
+        df["minor_category"] = ""
     if group_code is not None and not df.empty:
         df = df[df["group_code"].astype(str).str.strip() == str(group_code).strip()]
     if is_active is not None and not df.empty:
@@ -1044,31 +1058,57 @@ def _base_users() -> pd.DataFrame:
     df["team_code"] = df["team_id"].astype(str).map(_team_code_by_id()).fillna("")
     if "display_order" not in df.columns:  # 샘플 CSV 미보유 → NULL(미지정)로 시작
         df["display_order"] = None
+    for col in ("hire_date", "resign_date"):  # 재직기간(009)도 샘플 CSV 미보유 → NULL
+        if col not in df.columns:
+            df[col] = None
     return df[USER_COLUMNS].reset_index(drop=True)
+
+
+def is_resigned(resign_date, today: date | None = None) -> bool:
+    """퇴사일이 기준일(기본 오늘)을 지났는지. 빈 값·해석 불가는 재직으로 본다.
+
+    "해석 불가 → 재직"은 의도적이다. 날짜를 못 읽었다고 재직자를 명단에서 지우거나
+    로그인을 막는 쪽이 훨씬 나쁜 오작동이다(fail-open 이 맞는 드문 자리).
+    퇴사일 당일은 아직 재직으로 본다 — 마지막 근무일이 명단에서 사라지면 안 된다.
+    """
+    parsed = supabase_repository._clean_date(resign_date)
+    if not parsed:
+        return False
+    try:
+        return date.fromisoformat(parsed) < (today or date.today())
+    except ValueError:
+        return False
 
 
 def get_users(
     dept_code: str | None = None,
     team_code: str | None = None,
     is_active: bool | None = None,
+    include_resigned: bool = True,
 ) -> pd.DataFrame:
     """사용자 목록(USER_COLUMNS).
 
     로컬 샘플 모드에서는 세션 편집 결과(save_users)를 우선 반환하므로,
     사용자 관리 화면에서 저장한 내용이 다른 화면에도 그대로 반영된다.
-    Phase 5(Supabase)에서는 이 분기를 실제 조회로 교체한다.
+
+    ``include_resigned=False`` 면 퇴사일이 지난 직원을 제외한다(근무표 편성·조회 명단용).
+    기본값이 True 인 이유: 사용자 관리 화면은 퇴사자를 봐야 되돌릴 수 있고, 아차사고 등
+    과거 기록 화면은 퇴사자 이름을 계속 해석해야 한다.
     """
     if is_sample_mode():
         if _USERS_STORE not in st.session_state:
             st.session_state[_USERS_STORE] = _base_users()
-        return _empty_contract(st.session_state[_USERS_STORE].copy(), USER_COLUMNS)
-    df = _fetch_users()
-    if dept_code is not None:
-        df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
-    if team_code is not None:
-        df = df[df["team_code"].astype(str) == str(team_code).strip()]
-    if is_active is not None:
-        df = df[df["is_active"].astype(bool) == bool(is_active)]
+        df = st.session_state[_USERS_STORE].copy()
+    else:
+        df = _fetch_users()
+        if dept_code is not None:
+            df = df[df["dept_code"].astype(str) == str(dept_code).strip()]
+        if team_code is not None:
+            df = df[df["team_code"].astype(str) == str(team_code).strip()]
+        if is_active is not None:
+            df = df[df["is_active"].astype(bool) == bool(is_active)]
+    if not include_resigned and not df.empty and "resign_date" in df.columns:
+        df = df[~df["resign_date"].map(is_resigned)]
     return _empty_contract(df.reset_index(drop=True), USER_COLUMNS)
 
 
@@ -1649,10 +1689,49 @@ def _near_miss_frame(rows) -> pd.DataFrame:
     })
 
 
+# sample 모드 아차사고 시드 — 화면 확인용 가상 사례(세션 스토어 최초 접근 시 1회).
+# 상태 흐름(제출→검토→평가→종결)별 1건씩 두어 큐·조회·통계 화면이 빈 화면이 아니게 한다.
+# 인물·부서는 data/sample 의 가상 기준정보만 사용한다.
+_NEAR_MISS_SEED = [
+    {"id": "NM-S1", "report_no": "202607-0001", "status": "CLOSED",
+     "work_name": "원료 투입", "work_content": "PET 원료 포대 투입 작업",
+     "incident_content": "호이스트로 포대 인양 중 결속이 풀려 바닥으로 낙하, 작업자 1m 옆 통과",
+     "countermeasure": "결속 상태 2인 상호 확인 후 인양, 인양 구간 하부 출입 통제",
+     "site_description": "원료 투입장 호이스트 하부",
+     "proposed_grade": "B", "confirmed_grade": "A",
+     "cause_code": "DROP", "cause_detail": "결속 불량", "incident_date": "2026-07-03",
+     "reporter_emp_no": "1005", "evaluator_emp_no": "1001", "dept_code": "PET2",
+     "photo_paths": [], "rejection_reason": "", "evaluated_at": "2026-07-04T09:00:00+00:00",
+     "is_active": True},
+    {"id": "NM-S2", "report_no": "202607-0002", "status": "EVALUATED",
+     "work_name": "설비 청소", "work_content": "압출기 주변 바닥 청소",
+     "incident_content": "냉각수 누수로 바닥이 젖어 있어 이동 중 미끄러질 뻔함",
+     "countermeasure": "누수 구간 즉시 보수 요청, 미끄럼 주의 표지 설치",
+     "site_description": "1층 압출기 3호기 옆 통로",
+     "proposed_grade": "C", "confirmed_grade": "C",
+     "cause_code": "SLIP", "cause_detail": "바닥 수분", "incident_date": "2026-07-21",
+     "reporter_emp_no": "1003", "evaluator_emp_no": "1001", "dept_code": "PET1",
+     "photo_paths": [], "rejection_reason": "", "evaluated_at": "2026-07-22T02:30:00+00:00",
+     "is_active": True},
+    {"id": "NM-S3", "report_no": "202608-0001", "status": "SUBMITTED",
+     "work_name": "제품 적재", "work_content": "완제품 팔레트 지게차 적재",
+     "incident_content": "적재 중 팔레트 모서리가 선반 기둥에 충돌해 제품 일부 흔들림",
+     "countermeasure": "적재 구역 유도선 재도색, 후진 시 유도자 배치",
+     "site_description": "완제품 창고 3열 선반",
+     "proposed_grade": "D", "confirmed_grade": None,
+     "cause_code": "HIT", "cause_detail": "시야 미확보", "incident_date": "2026-08-05",
+     "reporter_emp_no": "1004", "evaluator_emp_no": None, "dept_code": "PET1",
+     "photo_paths": [], "rejection_reason": "", "evaluated_at": None,
+     "is_active": True},
+]
+
+
 def _near_miss_store() -> pd.DataFrame:
-    """sample 모드 아차사고 backing store(세션 유지, 실DB 미변경)."""
+    """sample 모드 아차사고 backing store(세션 유지, 실DB 미변경). 최초 접근 시 시드 주입."""
     if _NEAR_MISS_STORE not in st.session_state:
-        st.session_state[_NEAR_MISS_STORE] = _near_miss_frame([])
+        st.session_state[_NEAR_MISS_STORE] = _near_miss_frame(
+            [dict(r) for r in _NEAR_MISS_SEED]
+        )
     return st.session_state[_NEAR_MISS_STORE]
 
 
@@ -1832,7 +1911,16 @@ def get_near_miss_report(report_id) -> dict | None:
     if is_sample_mode():
         store = _near_miss_store()
         match = store[store["id"].astype(str) == str(report_id)]
-        return None if match.empty else match.iloc[0].to_dict()
+        if match.empty:
+            return None
+        record = match.iloc[0].to_dict()
+        # Series 경유에서 None 이 NaN 으로 승격될 수 있다(스토어 dtype 추론 — 시드 도입
+        # 후 실측). 계약은 "빈 값 = None" 이므로 경계에서 정규화해 supabase 와 동형화한다.
+        # photo_paths 같은 list 값은 pd.isna 판정 대상이 아니다(배열 ambiguity 회피).
+        return {
+            k: (None if (not isinstance(v, (list, dict)) and pd.isna(v)) else v)
+            for k, v in record.items()
+        }
     return supabase_repository.get_near_miss_report(report_id)
 
 

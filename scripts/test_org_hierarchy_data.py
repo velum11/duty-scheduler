@@ -52,8 +52,10 @@ def part_a_sample() -> None:
     # 1) 컬럼 계약 (code/name/order/description/is_active + teams.unit_type)
     check("ORG_GROUP_COLUMNS 계약",
           db.ORG_GROUP_COLUMNS == ["group_code", "group_name", "sort_order", "description", "is_active"])
-    check("ORG_DEPT_COLUMNS 는 group_code/description 기반(003 잔재 제거)",
-          db.ORG_DEPT_COLUMNS == ["dept_code", "dept_name", "group_code", "description", "sort_order", "is_active"])
+    check("ORG_DEPT_COLUMNS 는 group_code+대분류/중분류 기반(009, 003 잔재 제거)",
+          db.ORG_DEPT_COLUMNS == ["dept_code", "dept_name", "group_code",
+                                  "major_category", "minor_category",
+                                  "description", "sort_order", "is_active"])
     check("ORG_TEAM_COLUMNS 는 unit_type/description 포함",
           db.ORG_TEAM_COLUMNS == ["dept_code", "team_code", "team_name", "unit_type", "description", "sort_order", "is_active"])
 
@@ -138,8 +140,10 @@ def part_a_sample() -> None:
     check("그룹 참조 수 계약(부서 기준)", "departments" in db.org_group_reference_counts(g_code))
 
     # 8) users/근무형태 화면 계약 안정성 (회귀 금지)
-    check("USER_COLUMNS 안정",
-          db.USER_COLUMNS == ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active", "display_order"])
+    check("USER_COLUMNS 안정(009: 입사일/퇴사일 포함)",
+          db.USER_COLUMNS == ["emp_no", "name", "dept_code", "team_code", "position",
+                              "role", "is_active", "display_order",
+                              "hire_date", "resign_date"])
     check("get_users 컬럼 계약 유지", list(db.get_users().columns) == db.USER_COLUMNS)
     check("get_work_types 컬럼 계약 유지", list(db.get_work_types().columns) == db.WORK_TYPE_COLUMNS)
 
@@ -239,36 +243,40 @@ def part_b_live() -> None:
     if readiness != db.READINESS_READY:
         return
 
+    # 2026-08-07: 초기 seed(4그룹/5부서/6조) 고정 검증을 폐기했다 — 실조직 125명
+    # 적재(그룹 9·부서 32·운영단위 0)로 데이터가 교체됐고, 이후 화면 편집으로 계속
+    # 변한다. 특정 건수·코드 대신 **구조 불변식**만 검증한다(live 데이터 형태 불문).
     groups = db.get_org_groups()
-    check("라이브 그룹 4건", len(groups) == 4, f"len={len(groups)}")
-    check("라이브 그룹코드 = {PET,PVC,DECO,ADMIN}",
-          set(groups["group_code"].astype(str)) == {"PET", "PVC", "DECO", "ADMIN"})
+    check("라이브 그룹 1건 이상", not groups.empty, f"len={len(groups)}")
+    check("시스템 필수 ADMIN 그룹 존재(화면 보호 대상)",
+          "ADMIN" in set(groups["group_code"].astype(str)))
 
     depts = db.get_org_departments()
-    check("라이브 부서 5건", len(depts) == 5, f"len={len(depts)}")
-    check("라이브 부서코드 = {PET,PVC,DECO,MTRL,ADMIN}",
-          set(depts["dept_code"].astype(str)) == {"PET", "PVC", "DECO", "MTRL", "ADMIN"})
+    check("라이브 부서 1건 이상", not depts.empty, f"len={len(depts)}")
+    check("시스템 필수 ADMIN 부서 존재(화면 보호 대상)",
+          "ADMIN" in set(depts["dept_code"].astype(str)))
     check("모든 부서가 group_id→group_code 로 연결(미배정 0)",
           int((depts["group_code"].astype(str) == "").sum()) == 0)
-    dg = depts.set_index("dept_code")["group_code"].astype(str).to_dict()
-    check("MTRL 은 PET 그룹 소속 부서(승인 매핑)", dg.get("MTRL") == "PET")
-    check("PET/PVC/DECO/ADMIN 자기 그룹 소속",
-          dg.get("PET") == "PET" and dg.get("PVC") == "PVC"
-          and dg.get("DECO") == "DECO" and dg.get("ADMIN") == "ADMIN")
+    check("부서 대분류/중분류 컬럼 존재(009 적용)",
+          "major_category" in depts.columns and "minor_category" in depts.columns)
+    check("중분류가 있는 부서는 대분류도 있음(계층 정합)",
+          depts[(depts["minor_category"].astype(str).str.strip() != "")
+                & (depts["major_category"].astype(str).str.strip() == "")].empty)
 
     teams = db.get_org_teams()
-    check("라이브 조 6건", len(teams) == 6, f"len={len(teams)}")
     check("모든 조의 dept_code 가 부서에 존재(department_id FK 무결성)",
-          set(teams["dept_code"].astype(str)).issubset(set(depts["dept_code"].astype(str))))
+          set(teams["dept_code"].astype(str)).issubset(set(depts["dept_code"].astype(str))),
+          f"orphans={set(teams['dept_code'].astype(str)) - set(depts['dept_code'].astype(str))}")
 
-    # 그룹별 부서 조회(group_id 필터) — PET 그룹은 {PET, MTRL}
-    pet_depts = db.get_org_departments(group_code="PET")
-    check("group_code=PET 필터 → {PET,MTRL}",
-          set(pet_depts["dept_code"].astype(str)) == {"PET", "MTRL"})
-    # 부서별 조 조회(department_id 필터)
-    pet_teams = db.get_org_teams(dept_code="PET")
-    check("dept_code=PET 필터 → 조 3건(A/B/C)",
-          set(pet_teams["team_code"].astype(str)) == {"A", "B", "C"})
+    # 그룹별 부서 조회(group_id 필터) — 필터 결과가 자기 그룹 부서만 담는지(건수 불문)
+    admin_group = "ADMIN"
+    admin_depts = db.get_org_departments(group_code=admin_group)
+    check("group_code 필터 결과는 해당 그룹 소속만",
+          set(admin_depts["group_code"].astype(str)) <= {admin_group})
+
+    users = db.get_users()
+    check("라이브 사용자 입사일/퇴사일 컬럼 존재(009 적용)",
+          "hire_date" in users.columns and "resign_date" in users.columns)
 
     print("  (read-only 확인 — 라이브 데이터 무변경)")
 

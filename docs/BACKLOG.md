@@ -10,6 +10,13 @@
 
 | 항목 | 내용 | 유형 |
 |---|---|---|
+| 이메일 알림 트랙(업무요청·숙소예약) | 2026-08-07 구상 확정. ①공용 메일 발송 모듈 — 발송 수단 **확정: 회사메일 비즈메카 SMTP**(`ezesmtp.bizmeka.com:587` STARTTLS + AUTH LOGIN, 465/SSL도 가용 — 2026-08-07 외부망 접속·TLS 핸드셰이크 실검증 완료). **한시 운영: 지메일(velum11) 발송으로 선행 검증**(2026-08-07 앱 비밀번호 `secrets.toml [smtp]` 등록·`lee@kp-tech.co.kr` 샘플 발송 성공). 운영 전환 잔여: 비즈메카 발송용 전용 계정(예: noreply@) 발급 + secrets 교체 ②`users` 이메일 컬럼 신설(migration 승인 게이트) + `master_users` 입력 필드 ③신청 폼 회신 이메일(로그인 사용자 정보 프리필 → 수정 가능, 신청 건에 저장) ④**구현 완료(2026-08-07)**: 접수 시 담당자 서식 메일 — 공용 모듈 `modules/mailer.py`(True/False/None 계약·예외 비전파·`DUTY_MAIL_DISABLE` 테스트 차단) + 업무요청·숙소예약 화면 `_persist` 저장 성공 직후 훅(발송 실패는 warn 배너로 표면화, 접수는 유지). 수신자는 `[notify] to` 고정 주소(한시) — 처리 부서 사용자 라우팅은 users 이메일 컬럼 도입 후 전환. 계약 테스트 `scripts/test_mailer.py`(26 checks)·E2E 실발송 검증 완료 ⑤승인 시 신청자(회신 이메일)에게 메일(처리 화면 승인 액션 훅) ⑥오전 8시 미결 요약 메일 — Streamlit 앱은 상주 스케줄러 불가(Cloud 유휴 슬립)라 외부 트리거 필요(pg_cron+Edge Function 정석). **신청 데이터의 Supabase 통합이 선행 조건**(현재 프로토타입은 로컬 JSON `proto_store`라 외부 잡이 미결건을 읽을 수 없음). 진행 순서: 발송 모듈 → users 컬럼/화면 → 접수·승인 훅(프로토타입 상태에서도 동작) → Supabase 통합 → 8시 요약 | 결정/코드 |
+| 2026-08-07 code-review 잔여 P2/P3 | §6 대체 경로 code-review **실행 완료**(P1 4건 수정: team_code 소거·편성 부서변경 차단·2자리 연도·퇴사자 과거조회). 잔여: ①[P2] 열려 있는 화면 세션은 퇴사·비활성 전환을 즉시 반영하지 못함(get_current_user 가 세션 캐시 user 우선 — is_active 와 동일한 선재 패턴, requirements 문구 정합 완료. 세션 재검증 도입은 별도 과제) ②[P3] `db.is_resigned` 가 서버 로컬 날짜 기준(Cloud UTC → KST 대비 최대 9h 늦게 발효, fail-open 방향) ③Codex 교차검증은 여전히 미실행(다른 모델 계열 감사 불가 환경) | 게이트 |
+| 편성 조회 조 필터 옵션 재구성 | 조 축이 teams→shift_group_code 로 이동해 workspace 조 필터 옵션이 teams 마스터 기반(실DB 0행 → '전체'만) — 대상 월 스냅샷의 근무조 값 기반으로 옵션 재구성 필요. 매칭 로직은 양축 지원 완료, 옵션 소스만 잔여 | 코드 |
+| master_org 그룹/조 시트 코드 제거 시점 | 2026-08-07 단일 시트 전환으로 그룹(_GRP)·조(_OU) 시트 함수·CSS 가 미라우팅 보존 상태(교차 테스트 참조 + 되돌림 여지). 되돌림 없다고 확정되면 해당 블록·참조 테스트·`_dept_team_options` 등 사용자 화면 잔재를 일괄 제거 | 코드 |
+| shift_groups 테이블 처분 | 근무조가 자유 텍스트 스냅샷으로 확정되어 `shift_groups`(0행) 기준정보의 용도가 소멸 — drop migration 또는 향후 "근무조 선택지 추천" 용도 재활용 결정 | 코드 |
+| MANAGER·ADMIN 사번 명단 | 125명 전원 USER 로 적재됨 — 관리자/조장 지정 사번 명단 수령 대기 | 결정 |
+| FIXED_PASSWORD_ACCOUNTS 제거 | ADMIN 고정 비밀번호 예외는 베타 오픈 전 제거 필수(`modules/config.py`) — 008 적용과 함께 처리 | 게이트 |
 | 대시보드 P3 | 비차단 개선 잔여분 | 코드 |
 | master EDIT 그리드 밀도 §2 초과(선재) | 07-29 재구성 QA에서 확인: `views/master/grid.py` `_GRID_HEADER_PX=44/_GRID_ROW_PX=40`이 §2(편집 34/헤더 34–36) 초과 — near-miss 무관 선재 편차, master owner 별건 정합 검토 | 코드 |
 | near-miss 시각 Low 3종(비차단) | 07-29 V1 QA: ①빈 평가/개선 큐가 §0.6 "헤더+흰 본문" 대신 회색 블록(~190px, aggrid overlay/skeleton 확인) ②grade_mark 저레벨 글리프(·/▸) 변별력 소폭 상향 검토 ③improvement 빈 큐 내부 4px 스크롤 | 코드 |

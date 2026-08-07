@@ -192,22 +192,24 @@ check("근무 조회는 편성 테이블과 무관하게 동작(계약 컬럼 �
       list(sched.columns) == db.SCHEDULE_COLUMNS)
 
 
-# ===== 4) teams(A/B/C조) vs shift_groups(근무조) 의미 분리 =====
-print("teams <-> shift_groups 의미 분리 (편성 저장 계약, 소스 정적 검사)")
+# ===== 4) 편성 화면의 조 = 자유 입력 근무조 스냅샷 (2026-08-07 계약) =====
+# 구 계약(조=teams 기준정보 검증, shift_group_code 항상 빈 값)은 2026-08-07 사용자
+# 결정으로 폐기됐다: A/B/C조는 기준정보에서 빠지고 편성표에서 직접 입력한다.
+print("편성 화면 조 축 계약 (자유 입력 근무조 스냅샷, 소스 정적 검사)")
 EDIT_SRC = (ROOT / "views" / "schedule_edit.py").read_text(encoding="utf-8")
 
-# 화면의 "조"는 teams 기준정보로 검증·저장하고 shift_groups 를 사용하지 않는다.
-check("편성 화면은 shift_groups 를 조회·저장하지 않음(조=teams)",
-      "shift_group" not in EDIT_SRC.replace("shift_group_code", "")
-      and "get_shift_groups" not in EDIT_SRC)
-check("편성 저장이 shift_group_code 를 항상 빈 값으로 넘김(근무조 입력 없음)",
-      '"shift_group_code": ""' in EDIT_SRC)
+# 화면의 "조"는 자유 입력이며 normalize_shift_group 으로 정규화해 스냅샷으로 저장한다.
+check("편성 화면이 근무조 정규화(normalize_shift_group)를 정의·사용",
+      "def normalize_shift_group" in EDIT_SRC
+      and "normalize_shift_group(team_txt)" in EDIT_SRC)
+check("편성 저장이 정규화된 근무조를 shift_group_code 로 넘김",
+      '"shift_group_code": shift_code' in EDIT_SRC)
 check("편성 저장이 require_shift=False 를 사용(근무조가 저장을 차단하지 않음)",
       "require_shift=False" in EDIT_SRC)
-check("편성 화면의 조 검증이 teams 기준정보(team_code/team_name) 기반",
-      "db.get_teams()" in EDIT_SRC
-      and 'in_dept["team_code"]' in EDIT_SRC
-      and 'in_dept["team_name"]' in EDIT_SRC)
+check("편성 화면이 조를 기준정보(shift_groups)로 검증하지 않음",
+      "get_shift_groups" not in EDIT_SRC)
+check("저장 후 세션 캐시에 근무조 스냅샷 포함(재조회 시 조 표시 유지)",
+      '"shift_group_code": rec["shift_group_code"]' in EDIT_SRC)
 # assignment 실패를 성공으로 표시하지 않는 플래그 계약
 check("assignment 영속 실패를 성공 메시지로 숨기지 않음(assign_persisted 분기)",
       "assign_persisted = False" in EDIT_SRC and "assign_persisted = True" in EDIT_SRC)

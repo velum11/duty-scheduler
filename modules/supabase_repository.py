@@ -348,6 +348,47 @@ def _clean_int(value) -> int:
         return 0
 
 
+def _clean_date(value):
+    """날짜를 ISO 'YYYY-MM-DD' 문자열로 정규화한다. 빈 값·해석 불가면 None.
+
+    화면 그리드에서 사람이 직접 타이핑하므로 구분자(``-`` ``.`` ``/``)와 구분자 없는
+    8자리(``20241201``)를 모두 받는다. 해석 불가를 0000-00-00 같은 값으로 만들지 않고
+    None 으로 떨어뜨려, 잘못된 입력이 DB 에 조용히 저장되지 않게 한다.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+    else:
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d")
+        text = str(value).strip()
+    if not text or text.lower() in {"none", "nan", "nat", "<na>"}:
+        return None
+    normalized = text.replace(".", "-").replace("/", "-").strip("-")
+    if normalized.isdigit() and len(normalized) == 8:
+        normalized = f"{normalized[:4]}-{normalized[4:6]}-{normalized[6:]}"
+    try:
+        return date.fromisoformat(normalized).isoformat()
+    except ValueError:
+        parts = normalized.split("-")
+        # 연도는 4자리만 받는다 — '25.12.31' 같은 2자리 연도 약식을 서기 0025년으로
+        # 조용히 저장하면 퇴사 판정이 즉시 참이 되어 계정이 잠긴다(2026-08-07 code-review P1).
+        # 해석이 확실하지 않은 입력은 None 으로 떨어뜨려 화면 검증이 차단하게 한다.
+        if (len(parts) == 3 and all(p.isdigit() for p in parts)
+                and len(parts[0]) == 4 and len(parts[1]) <= 2 and len(parts[2]) <= 2):
+            try:
+                return date(int(parts[0]), int(parts[1]), int(parts[2])).isoformat()
+            except ValueError:
+                return None
+        return None
+
+
 def _frame(
     rows: list[dict],
     columns: list[str],
@@ -633,6 +674,37 @@ def org_extensions_probe(*, force: bool = False) -> str:
     return _ORG_PROBE
 
 
+# --- 조직 계층 텍스트 2단 + 재직기간 (migration 009) ---
+# 009 는 departments.major_category/minor_category 와 users.hire_date/resign_date 를
+# 한 파일로 함께 추가한다. 004 선례처럼 둘을 묶어 하나의 capability 로 판정한다.
+# 미적용 환경(예: 009 이전 프로젝트를 가리키는 배포본)에서도 조회는 동작해야 하므로
+# 호출부는 이 플래그로 분기해 빈 값/None 으로 폴백하고, 저장은 이 계층에서 차단한다.
+_TENURE_READY: bool | None = None
+_TENURE_NOT_READY_MESSAGE = (
+    "조직 스키마(부서 분류·재직기간)가 아직 준비되지 않아 저장할 수 없습니다. "
+    "해당 스키마를 적용한 뒤 다시 시도하세요."
+)
+
+
+def org_category_ready() -> bool:
+    """009 스키마(부서 대분류/중분류 + 사용자 입사일/퇴사일) 사용 가능 여부(1회 probe 후 캐시)."""
+    global _TENURE_READY
+    if _TENURE_READY is None:
+        try:
+            client().table("departments").select("major_category").limit(1).execute()
+            client().table("users").select("hire_date").limit(1).execute()
+            _TENURE_READY = True
+        except Exception:
+            _TENURE_READY = False
+    return _TENURE_READY
+
+
+def reset_org_category_readiness() -> None:
+    """009 probe 캐시를 비운다(실행 중 적용 반영 경로)."""
+    global _TENURE_READY
+    _TENURE_READY = None
+
+
 # --- 그룹(organization_groups) — 조직 1급 테이블 ---
 @st.cache_data(ttl=_MAP_CACHE_TTL, show_spinner=False)
 def _group_maps() -> tuple[dict[str, int], dict[str, str]]:
@@ -713,13 +785,19 @@ def delete_organization_group(group_code: str) -> None:
 def get_departments_org() -> pd.DataFrame:
     """부서 목록 + 소속 그룹코드(group_id FK→group_code) + 비고. 조직 스키마 capability(도입: migration 004) 준비 후 호출.
 
-    자연키 계약: dept_code, dept_name, group_code, description, sort_order, is_active.
+    자연키 계약: dept_code, dept_name, group_code, major_category, minor_category,
+    description, sort_order, is_active.
     group_id 가 NULL(미배정)인 부서는 group_code 를 빈 문자열로 반환한다.
+    대분류/중분류는 009 미적용 환경에서 빈 문자열로 폴백한다(조회는 계속 동작).
     """
     _, group_by_id = _group_maps()
+    with_category = org_category_ready()
+    select_cols = "dept_code,dept_name,group_id,description,sort_order,is_active"
+    if with_category:
+        select_cols += ",major_category,minor_category"
     rows = _select_all(
         "departments",
-        "dept_code,dept_name,group_id,description,sort_order,is_active",
+        select_cols,
         lambda query: query.order("sort_order").order("dept_code"),
     )
     natural = []
@@ -729,41 +807,68 @@ def get_departments_org() -> pd.DataFrame:
             "dept_code": str(_required(row, "departments", "dept_code")),
             "dept_name": str(_required(row, "departments", "dept_name")),
             "group_code": group_by_id.get(str(group_id), "") if group_id is not None else "",
+            "major_category": str(row.get("major_category") or ""),
+            "minor_category": str(row.get("minor_category") or ""),
             "description": str(row.get("description") or ""),
             "sort_order": _clean_int(_required(row, "departments", "sort_order")),
             "is_active": _clean_bool(_required(row, "departments", "is_active")),
         })
     return _frame(
         natural,
-        ["dept_code", "dept_name", "group_code", "description", "sort_order", "is_active"],
+        ["dept_code", "dept_name", "group_code", "major_category", "minor_category",
+         "description", "sort_order", "is_active"],
         "departments",
     )
 
 
 def _departments_org_payload(records: list[dict]) -> list[dict]:
+    """부서 upsert payload.
+
+    그룹(organization_groups)은 화면에서 폐지되어 `group_code` 가 더 이상 필수가 아니다
+    (2026-08-07 사용자 결정 — 대분류/중분류 텍스트 2단이 계층을 대신한다). group_code 를
+    아무도 주지 않으면 `group_id` 키 자체를 payload 에서 빼서 **기존 값을 보존**한다.
+    PostgREST upsert 는 배치 내 키가 균일해야 하므로 전부 넣거나 전부 빼는 두 경우만 둔다.
+    """
     if not org_extensions_ready():
         raise SupabaseDataError(_ORG_NOT_READY_MESSAGE)
+    with_category = org_category_ready()
+    if not with_category and any(
+        _clean_text(row.get("major_category")) or _clean_text(row.get("minor_category"))
+        for row in records
+    ):
+        raise SupabaseDataError(_TENURE_NOT_READY_MESSAGE)
+
     group_by_code, _ = _group_maps()
+    with_group = any(_clean_text(row.get("group_code")) for row in records)
     payload = []
     for row in records:
         dept_code = _clean_text(row.get("dept_code"))
         dept_name = _clean_text(row.get("dept_name"))
-        group_code = _clean_text(row.get("group_code"))
         if not dept_code or not dept_name:
             raise SupabaseDataError("부서코드와 부서명은 비어 있을 수 없습니다.")
-        if not group_code:
-            raise SupabaseDataError(f"부서의 소속 그룹을 선택하세요: {dept_code}")
-        group_id = group_by_code.get(group_code)
-        if group_id is None:
-            raise SupabaseDataError(f"부서의 소속 그룹을 찾을 수 없습니다: {group_code}")
-        payload.append({
+        major = _clean_text(row.get("major_category"))
+        minor = _clean_text(row.get("minor_category"))
+        # DB 제약(departments_minor_requires_major)과 같은 규칙을 저장 전에 막는다 —
+        # 중간층만 떠 있는 계층은 트리로 성립하지 않는다.
+        if minor and not major:
+            raise SupabaseDataError(f"중분류를 쓰려면 대분류가 있어야 합니다: {dept_code}")
+        record = {
             "dept_code": dept_code,
             "dept_name": dept_name,
-            "group_id": group_id,
             "description": _clean_text(row.get("description")),
             "sort_order": _clean_int(row.get("sort_order")),
             "is_active": _clean_bool(row.get("is_active")),
-        })
+        }
+        if with_group:
+            group_code = _clean_text(row.get("group_code"))
+            group_id = group_by_code.get(group_code) if group_code else None
+            if group_code and group_id is None:
+                raise SupabaseDataError(f"부서의 소속 그룹을 찾을 수 없습니다: {group_code}")
+            record["group_id"] = group_id
+        if with_category:
+            record["major_category"] = major
+            record["minor_category"] = minor
+        payload.append(record)
     return payload
 
 
@@ -876,9 +981,12 @@ def get_users() -> pd.DataFrame:
     _, dept_by_id = _department_maps()
     _, team_by_id = _team_maps()
     with_order = org_extensions_ready()
+    with_tenure = org_category_ready()
     select_cols = "emp_no,name,department_id,team_id,position,role,is_active"
     if with_order:
         select_cols += ",display_order"
+    if with_tenure:
+        select_cols += ",hire_date,resign_date"
     rows = _select_all("users", select_cols, lambda query: query.order("emp_no"))
     natural = []
     for row in rows:
@@ -897,18 +1005,26 @@ def get_users() -> pd.DataFrame:
             "role": str(_required(row, "users", "role")).strip().upper(),
             "is_active": _clean_bool(_required(row, "users", "is_active")),
             "display_order": _clean_order(row.get("display_order")) if with_order else None,
+            "hire_date": _clean_date(row.get("hire_date")) if with_tenure else None,
+            "resign_date": _clean_date(row.get("resign_date")) if with_tenure else None,
         })
     return _frame(
         natural,
         ["emp_no", "name", "dept_code", "team_code", "position", "role", "is_active",
-         "display_order"],
+         "display_order", "hire_date", "resign_date"],
         "users",
-        nullable_columns=("display_order",),
+        nullable_columns=("display_order", "hire_date", "resign_date"),
     )
 
 
 def _users_payload(records: list[dict]) -> list[dict]:
     with_order = org_extensions_ready()
+    with_tenure = org_category_ready()
+    if not with_tenure and any(
+        _clean_date(row.get("hire_date")) or _clean_date(row.get("resign_date"))
+        for row in records
+    ):
+        raise SupabaseDataError(_TENURE_NOT_READY_MESSAGE)
     blocked_emp_nos = [
         _clean_text(row.get("emp_no")) or "(사번 없음)"
         for row in records
@@ -949,6 +1065,14 @@ def _users_payload(records: list[dict]) -> list[dict]:
         }
         if with_order:
             record["display_order"] = _clean_order(row.get("display_order"))
+        if with_tenure:
+            hire = _clean_date(row.get("hire_date"))
+            resign = _clean_date(row.get("resign_date"))
+            # DB 제약(users_tenure_order)과 같은 규칙을 저장 전에 막아 원장에 사유를 남긴다.
+            if hire and resign and resign < hire:
+                raise SupabaseDataError(f"퇴사일이 입사일보다 앞설 수 없습니다: {emp_no}")
+            record["hire_date"] = hire
+            record["resign_date"] = resign
         payload.append(record)
     return payload
 

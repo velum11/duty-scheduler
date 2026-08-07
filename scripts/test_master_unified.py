@@ -204,9 +204,9 @@ _RENDERS = {
     "근무형태 관리": (_render_work_types, "근무형태 관리",
                  ("master_work_types__save", "master_work_types__add",
                   "master_work_types__delete", "master_work_types__refresh")),
+    # 2026-08-07: 그룹·운영단위 시트 폐지 — 조직 관리는 부서 단일 시트(org_dept)만 남는다.
     "조직 관리": (_render_org, "조직 관리", ("org_dept__save", "org_dept__add",
-                                       "org_dept__delete", "org_dept__refresh",
-                                       "org_unit__save")),
+                                       "org_dept__delete", "org_dept__refresh")),
 }
 
 _bodies: dict[str, str] = {}

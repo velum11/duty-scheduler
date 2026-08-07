@@ -57,10 +57,12 @@ def validate_assignment_records(
     - emp_nos: 유효한 사번 집합
     - dept_codes: 유효한 부서코드 집합
     - team_keys: (dept_code, team_code) 유효 조합 집합
-    - shift_keys: (dept_code, shift_code) 활성 조 조합 집합
-    - require_shift: 근무조 코드 필수 여부. 기본 True(002 신규 저장 계약).
-      근무표 편성 화면처럼 근무조 입력이 아직 없는 경로는 False 로
-      부서·팀 스냅샷만 저장할 수 있다 (DB 는 NULL 허용 — docs/database.md §5.1).
+    - shift_keys: (dept_code, shift_code) 활성 조 조합 집합 — require_shift=True 에서만 대조
+    - require_shift: 근무조 코드 필수 여부. 기본 True(002 신규 저장 계약 — 필수 + 마스터 대조).
+      **False 면 근무조는 자유 텍스트 스냅샷**이다(2026-08-07 사용자 결정: A/B/C조를
+      기준정보에서 빼고 근무편성표에서 직접 입력). 빈 값 허용·shift_groups 마스터
+      대조 없음 — 마스터에 없는 값이라고 저장을 막지 않는다 (DB 는 NULL/자유 텍스트
+      허용 — docs/database.md §5.1).
 
     팀은 users 정책과 동일하게 미지정('')을 허용한다.
     """
@@ -90,7 +92,9 @@ def validate_assignment_records(
         if not shift_code:
             if require_shift:
                 errors.append(f"{tag}: 조 코드를 입력하세요.")
-        elif dept_code in dept_codes and (dept_code, shift_code) not in shift_keys:
+        elif require_shift and dept_code in dept_codes and (dept_code, shift_code) not in shift_keys:
+            # 마스터 대조는 require_shift=True(구 002 강제 계약)에서만 한다.
+            # require_shift=False 는 자유 텍스트 스냅샷 경로(2026-08-07 결정)다.
             errors.append(f"{tag}: 선택한 부서의 활성 조가 아닙니다: {shift_code}")
 
         key = (emp_no, schedule_month)

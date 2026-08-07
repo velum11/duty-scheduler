@@ -275,6 +275,7 @@ def render(user: dict) -> None:
     # 않도록 별도 try 로 감싸 users 기본값으로 안전하게 되돌린다.
     dept_code = str(user.get("dept_code", "") or "")
     team_code = str(user.get("team_code", "") or "")
+    shift_code = ""  # 근무조(편성표 직접입력 텍스트) — users 마스터에는 없고 스냅샷에만 있다
     snapshot_failed = False  # U6: 편성 스냅샷 조회 실패 시 폴백 사실을 표면화(무음 금지)
     try:
         assignment = db.get_month_assignments(year, month, str(user["emp_no"]).strip())
@@ -282,10 +283,12 @@ def render(user: dict) -> None:
             snap = assignment.iloc[0]
             dept_code = str(snap["dept_code"]).strip() or dept_code
             team_code = str(snap["team_code"]).strip()  # NULL 조 → "" 그대로(조 없음 표시)
+            shift_code = str(snap.get("shift_group_code") or "").strip()
     except Exception:  # noqa: BLE001 — 편성 조회 실패 → users 현재 소속으로 표시(근무 달력은 정상)
         snapshot_failed = True
     dept = db.dept_name(dept_code)
-    team = db.team_name(dept_code, team_code)
+    # 조 표시: 신 축(근무조)이 있으면 그것, 없으면 레거시 운영단위명 폴백.
+    team = shift_code or db.team_name(dept_code, team_code)
 
     # dc isMySched 순서: 제목 → 월 이동(‹ 월 ›) → 헤더 줄(사용자·소속 | 근무형태 합계) →
     # 7열 달력. 합계는 헤더 우측으로 이관(하단 요약 제거). 아이콘 밴드·카드 없음.

@@ -1,17 +1,16 @@
-"""조직 관리(master_org) 3시트 재구현 focused UI 계약 테스트.
+"""조직 관리(master_org) 부서 단일 시트 focused UI 계약 테스트.
 
-``test_master_org.py`` 가 데이터·도메인 계약(순수 함수·드릴다운 데이터계층)을 지키는
-회귀 가드라면, 이 파일은 **가로 3시트 [그룹][부서][조] 재구현의 UI 계약**을 검증한다:
+2026-08-07 사용자 결정: 그룹·조(운영단위) 시트를 화면에서 폐지하고 부서 단일 시트에
+대분류/중분류 텍스트 2단(009)을 둔다. 이 파일은 그 **단일 시트 UI 계약**을 검증한다:
 
 - 공통 기반(``views/master``) 위에 재구현: DraftState/MasterGridSpec/render_master_grid/
-  run_save/ReadinessState/master_action_bar/ledger_banner/sheet_head/sheet_locked/
-  drilldown_context 를 실제로 사용하는가.
-- page-scoped 3시트 상태(org_group/org_dept/org_unit) — 공용 ``ms_*`` action key 누수 없음.
-- migration readiness 3-state: NOT_READY 면 세 시트의 모든 write control 비활성 + 조회 전용 배너.
-- 상위 미선택 시 하위 시트 잠금(sheet_locked + can_write=False), 드릴다운 컨텍스트 스트립.
-- dirty_total 공식(신규+기존변경)·view-model 메타(_inactive/_protected/_linked).
+  run_save/ReadinessState/master_action_bar/ledger_banner/sheet_head 를 실제로 사용하는가.
+- page-scoped 부서 시트 상태(org_dept) — 공용 ``ms_*`` action key 누수 없음.
+- 그룹/조 시트가 렌더되지 않는다(버튼 키·시트 제목 부재). 보존된 그룹/조 시트
+  함수·CSS 는 소스에 남아 있을 수 있다(라우팅되지 않음 — 데이터·테이블은 보존).
+- migration readiness 3-state: NOT_READY 면 부서 시트 write 비활성 + 조회 전용 배너.
+- dirty_total 공식(신규+기존변경)·필터 전환 폐기 게이트(draft 보존/폐기).
 - 부분성공 원장(save_*_report → to_persist_kwargs) + 삭제 예외 처리.
-- 화면이 공통 크롬/시트 계약으로 렌더된다(제목·시트·드릴다운, 예외 없음).
 
 실행: PYTHONUTF8=1 .venv/Scripts/python.exe scripts/test_master_org_new.py
 """
@@ -72,8 +71,8 @@ for attr in ("DraftState", "MasterGridSpec", "run_save", "ReadinessState",
     check(f"views.master 공개 API 존재: {attr}", hasattr(master_pkg, attr))
 
 
-# ===== 2) 화면 렌더 — 공통 크롬·3시트·드릴다운 =====
-print("화면 렌더 — 공통 크롬·3시트·드릴다운 컨텍스트")
+# ===== 2) 화면 렌더 — 공통 크롬·부서 단일 시트 =====
+print("화면 렌더 — 공통 크롬·부서 단일 시트(그룹/조 시트 미렌더)")
 
 
 def _screen_render():
@@ -86,22 +85,21 @@ at = AppTest.from_function(_screen_render, default_timeout=45).run()
 check("렌더 예외 없음", not at.exception)
 body = " ".join(str(m.value) for m in at.markdown)
 check("페이지 제목(조직 관리) 표시", "조직 관리" in body)
-check("그룹 시트 제목", "<span class='t'>그룹</span>" in body)
 check("부서 시트 제목", "<span class='t'>부서</span>" in body)
-check("조 시트 제목", "<span class='t'>조</span>" in body)
+check("그룹 시트 미렌더(단일 시트)", "<span class='t'>그룹</span>" not in body)
+check("조 시트 미렌더(단일 시트)", "<span class='t'>조</span>" not in body)
 check("공통 헤더 크롬(ms-head/ms-title)", "ms-head" in body and "ms-title" in body)
-check("공통 시트 헤더(ms-sheet-head) 3개 이상", body.count("ms-sheet-head") >= 3)
-check("드릴다운 컨텍스트 스트립(ms-ctx)", "ms-ctx" in body)
+check("공통 시트 헤더(ms-sheet-head) 존재", "ms-sheet-head" in body)
 # 연결 상태 pill 은 상단 52px 셸 헤더(modules/ui.py)가 소유(ADOPTION_SPEC 항목4·§0.4).
 # 본문 크롬은 제목/설명만 — 본문에서 연결 pill 을 중복 렌더하지 않는다.
 check("본문에 연결 pill 렌더 없음(상단 헤더 소유)",
       "샘플 데이터" not in body and "Supabase 연결" not in body)
 check("상태 스트립(ms-count)", "ms-count" in body)
 keys = {b.key for b in at.button}
-for k in ("org_group__save", "org_group__add", "org_group__delete", "org_group__refresh",
-          "org_dept__save", "org_dept__add", "org_dept__delete", "org_dept__refresh",
-          "org_unit__save", "org_unit__add", "org_unit__delete", "org_unit__refresh"):
+for k in ("org_dept__save", "org_dept__add", "org_dept__delete", "org_dept__refresh"):
     check(f"page-scoped 버튼 키 존재: {k}", k in keys)
+for k in ("org_group__save", "org_group__add", "org_unit__save", "org_unit__add"):
+    check(f"폐지 시트 버튼 키 부재: {k}", k not in keys)
 
 
 def _save_button(app_test, key):
@@ -112,35 +110,28 @@ def _save_button(app_test, key):
 
 
 # 갓 로드된 화면은 dirty=0 → 저장 비활성
-for skey in ("org_group__save", "org_dept__save", "org_unit__save"):
-    sv = _save_button(at, skey)
-    check(f"갓 로드 시 {skey} 존재", sv is not None)
-    if sv is not None and hasattr(sv, "disabled"):
-        check(f"갓 로드 시 {skey} 비활성(변경 없음)", bool(sv.disabled))
-    else:
-        check(f"갓 로드 시 {skey} 라벨에 변경 badge 없음", sv is not None and sv.label == "저장")
+sv = _save_button(at, "org_dept__save")
+check("갓 로드 시 org_dept__save 존재", sv is not None)
+if sv is not None and hasattr(sv, "disabled"):
+    check("갓 로드 시 org_dept__save 비활성(변경 없음)", bool(sv.disabled))
+else:
+    check("갓 로드 시 org_dept__save 라벨에 변경 badge 없음", sv is not None and sv.label == "저장")
 
 
-# ===== 2b) 행 클릭 드릴다운 (상단 그룹/부서 selectbox 제거) =====
-print("행 클릭 드릴다운 — 상단 selectbox 제거 + 행 클릭 배선 + 초기 미선택 하위 잠금")
+# ===== 2b) 단일 시트 — 드릴다운·상위 잠금 제거 =====
+print("단일 시트 — 드릴다운 상위 선택 제거 + 잠금 없이 즉시 편집 가능")
 sb_keys = {s.key for s in at.selectbox}
-check("상단 그룹 선택 selectbox 제거", "og_group" not in sb_keys and "og_group_empty" not in sb_keys)
-check("상단 부서 선택 selectbox 제거", "og_dept" not in sb_keys and "og_dept_empty" not in sb_keys)
+check("상단 그룹 선택 selectbox 없음", "og_group" not in sb_keys and "og_group_empty" not in sb_keys)
+check("상단 부서 선택 selectbox 없음", "og_dept" not in sb_keys and "og_dept_empty" not in sb_keys)
 check("사용 여부 필터 selectbox 는 유지", "og_active" in sb_keys)
-check("그룹/부서 그리드에 행 클릭 드릴다운 핸들러(onCellClicked) 배선",
-      "_DRILL_CLICK" in src and "onCellClicked" in src)
-check("드릴다운 선택은 안정 코드키(session_state)로 보관",
-      "og_group_sel" in src and "og_dept_sel" in src)
-check("그룹 변경 시 하위(부서·조) 선택 초기화(og_dept_sel pop)", 'pop("og_dept_sel"' in src)
-check("클릭된(_linked) 행의 안정 코드키를 읽는 _picked_code 존재",
-      "_picked_code" in src and hasattr(master_org, "_picked_code"))
-# 초기(아무 상위도 클릭 안 함) → 하위 시트 잠금(비우고 행추가 비활성)
-check("초기 미선택 → 부서 시트 잠금(그룹 먼저 선택)", "그룹을 먼저 선택하세요" in body)
-check("초기 미선택 → 조 시트 잠금(부서 먼저 선택)", "부서를 먼저 선택하세요" in body)
-check("초기 미선택 → 부서·조 write 버튼 비활성", all(
-    (_b is not None and getattr(_b, "disabled", False))
-    for _b in (_save_button(at, k) for k in
-               ("org_dept__save", "org_dept__add", "org_unit__save", "org_unit__add"))))
+# 문구 부재 검사는 공통 style CSS 주석에 같은 문구가 있어 오탐한다 — 렌더된 잠금
+# 컴포넌트의 실제 HTML 마커(class='ms-locked')로 검사한다.
+check("잠금 시트 렌더 없음(sheet_locked HTML 부재)", "class='ms-locked'" not in body)
+check("부서 시트는 갓 로드에도 편집 가능(행추가 활성)", (
+    lambda _b: _b is not None and not getattr(_b, "disabled", True)
+)(_save_button(at, "org_dept__add")))
+check("부서 시트에 대분류/중분류 편집 칼럼(009) 계약",
+      master_org._DEPT_COLS[:2] == ["대분류", "중분류"])
 
 
 # ===== 3) migration readiness 3-state =====
@@ -159,9 +150,8 @@ def _all_disabled(app_test, keys):
     return True
 
 
-_WRITE_KEYS = ("org_group__save", "org_group__add", "org_group__delete",
-               "org_dept__save", "org_dept__add", "org_dept__delete",
-               "org_unit__save", "org_unit__add", "org_unit__delete")
+# 2026-08-07 단일 시트: write 게이트 대상은 부서 시트 3버튼이다.
+_WRITE_KEYS = ("org_dept__save", "org_dept__add", "org_dept__delete")
 _orig_readiness = db.org_schema_readiness
 try:
     db.org_schema_readiness = lambda: db.READINESS_NOT_READY
@@ -173,9 +163,9 @@ try:
     # 셸 헤더)과 의미·위치가 분리된다. P1 에서 헤더 배지 슬롯은 제거됐고 배너가 정본 신호다.
     check("NOT_READY 스키마 신호는 배너로 표면화(연결 pill 과 분리)",
           "조직 스키마" in nr_body and "조회만 가능" in nr_body)
-    check("NOT_READY 세 시트 모든 write 버튼 비활성", _all_disabled(at_nr, _WRITE_KEYS))
+    check("NOT_READY 부서 시트 write 버튼 전부 비활성", _all_disabled(at_nr, _WRITE_KEYS))
     check("NOT_READY 에도 새로고침(조회)은 활성",
-          not _all_disabled(at_nr, ("org_group__refresh",)))
+          not _all_disabled(at_nr, ("org_dept__refresh",)))
 
     db.org_schema_readiness = lambda: db.READINESS_PROBE_ERROR
     at_pe = AppTest.from_function(_screen_render, default_timeout=45).run()
@@ -183,33 +173,31 @@ try:
     pe_body = " ".join(str(m.value) for m in at_pe.markdown)
     check("PROBE_ERROR 상태 확인 실패 배너/배지", "확인 실패" in pe_body)
     check("PROBE_ERROR 재확인 버튼 노출", any(b.key == "org__recheck" for b in at_pe.button))
-    check("PROBE_ERROR 세 시트 모든 write 버튼 비활성", _all_disabled(at_pe, _WRITE_KEYS))
+    check("PROBE_ERROR 부서 시트 write 버튼 전부 비활성", _all_disabled(at_pe, _WRITE_KEYS))
 finally:
     db.org_schema_readiness = _orig_readiness
 
 check("sample 모드는 READY(write 가능)", master_org._readiness().write_enabled)
 
 
-# ===== 3b) 상위 미선택 시 하위 시트 잠금 =====
-print("상위 미선택 → 하위 시트 잠금(sheet_locked + write 비활성)")
+# ===== 3b) 그룹 0개에도 부서 시트는 잠기지 않는다(단일 시트 — 상위 선택 없음) =====
+print("그룹 0개 → 부서 시트 잠금 없음(단일 시트)")
 _orig_groups = db.get_org_groups
 try:
     db.get_org_groups = lambda *a, **k: db._typed_empty_frame(db.ORG_GROUP_COLUMNS)
     at_lock = AppTest.from_function(_screen_render, default_timeout=45).run()
     check("그룹 0개 렌더 예외 없음", not at_lock.exception)
     lock_body = " ".join(str(m.value) for m in at_lock.markdown)
-    check("그룹 미선택 → 부서 시트 잠금 안내", "그룹을 먼저 선택하세요" in lock_body)
-    check("부서 미선택 → 조 시트 잠금 안내", "부서를 먼저 선택하세요" in lock_body)
-    check("잠금 시트도 액션바 키 유지(비활성)",
-          _all_disabled(at_lock, ("org_dept__save", "org_unit__save")))
+    check("그룹 0개에도 잠금 렌더 없음", "class='ms-locked'" not in lock_body)
+    check("그룹 0개에도 부서 write 활성(단일 시트 — 그룹 의존 없음)",
+          not _all_disabled(at_lock, ("org_dept__add",)))
 finally:
     db.get_org_groups = _orig_groups
 
 
 # ===== 3c) 반응형/nowrap + 시트 카드 컨테이너 =====
 print("반응형 시트 스택(공통) + 액션바 nowrap + 시트 카드 컨테이너")
-check("시트 카드 컨테이너 키(org_group/dept/unit __sheet)",
-      "org_group__sheet" in src and "org_dept__sheet" in src and "org_unit__sheet" in src)
+check("부서 시트 카드 컨테이너 키(org_dept__sheet)", "org_dept__sheet" in src)
 check("액션바 버튼 white-space:nowrap(눌림 방지)", "white-space:nowrap" in src)
 
 
@@ -344,18 +332,19 @@ def _dirty_probe():
     import pandas as pd
     import streamlit as st
     from views import master_org as mo
+    # baseline 튜플은 _DEPT_COLS 순서(대분류·중분류·코드·코드명·순서·비고·사용)를 따른다.
     st.session_state[mo._OD.key("baseline")] = {
-        "e:D1": ("D1", "PET생산부", "1", "", "True"),
+        "e:D1": ("", "", "D1", "PET생산부", "1", "", "True"),
     }
     live = pd.DataFrame([
-        {"_row_id": "e:D1", "_row_state": "existing", "_sel": False, "코드": "D1",
-         "코드명": "PET생산부수정", "순서": "1", "비고": "", "사용": True},   # 기존 변경 1
-        {"_row_id": "e:D2", "_row_state": "existing", "_sel": False, "코드": "D2",
-         "코드명": "원료실", "순서": "2", "비고": "", "사용": True},          # 변경 없음(집계 제외)
-        {"_row_id": "n:1", "_row_state": "new", "_sel": False, "코드": "NEW",
-         "코드명": "새부서", "순서": "3", "비고": "", "사용": True},          # 신규 1
+        {"_row_id": "e:D1", "_row_state": "existing", "_sel": False, "대분류": "", "중분류": "",
+         "코드": "D1", "코드명": "PET생산부수정", "순서": "1", "비고": "", "사용": True},   # 기존 변경 1
+        {"_row_id": "e:D2", "_row_state": "existing", "_sel": False, "대분류": "", "중분류": "",
+         "코드": "D2", "코드명": "원료실", "순서": "2", "비고": "", "사용": True},          # 변경 없음(집계 제외)
+        {"_row_id": "n:1", "_row_state": "new", "_sel": False, "대분류": "", "중분류": "",
+         "코드": "NEW", "코드명": "새부서", "순서": "3", "비고": "", "사용": True},          # 신규 1
     ])
-    st.session_state[mo._OD.key("baseline")]["e:D2"] = ("D2", "원료실", "2", "", "True")
+    st.session_state[mo._OD.key("baseline")]["e:D2"] = ("", "", "D2", "원료실", "2", "", "True")
     new_cnt, changed_cnt = mo._dirty_counts(mo._OD, live, mo._DEPT_COLS)
     st.write(f"NEW={new_cnt};CHANGED={changed_cnt};TOTAL={mo.dirty_total(new_cnt, changed_cnt)}")
 
@@ -394,14 +383,14 @@ check("운영단위 교대→SHIFT + 허용 외 유형 차단",
       u_recs[0]["unit_type"] == "SHIFT" and any("유형" in e for e in u_errs))
 
 
-# ===== 7) 상위 전환 중 폐기 게이트 = 하위 저장 차단 + continue/discard 무오귀속 =====
-# Codex critical: 자식 draft 있고 상위 selectbox 를 바꿔 폐기 게이트가 열린 상태에서
-# 저장을 눌러도 옛 행이 새 상위에 오귀속되면 안 된다. 게이트중 write 비활성(차단) +
-# discard/취소 해소 시 옛 draft 가 새 상위로 새지 않음을 검증한다.
-print("상위 전환 폐기 게이트 — 하위 write 차단 + discard/취소 무오귀속")
+# ===== 7) 필터 전환 폐기 게이트 — write 차단 + discard/취소 draft 처리 =====
+# 단일 시트 전환(2026-08-07) 후 게이트의 트리거는 상위(그룹) 전환이 아니라 **필터
+# 변경**이다: dirty draft 상태에서 필터를 바꾸면 폐기 확인 게이트가 열리고, 해소
+# 전까지 write 가 비활성된다. discard=편집 폐기 후 재적재, 취소=draft 보존.
+print("필터 전환 폐기 게이트 — write 차단 + discard/취소 draft 처리")
 
 
-# 부서 draft 를 A 로 적재·편집한 뒤 상위 selectbox 를 B 로 전환한 상태를 재현한다.
+# 부서 draft 를 편집한 뒤 필터(사용 여부)를 바꾼 상태를 재현한다.
 # (AppTest.from_function 은 대상 함수만 실행하므로 헬퍼 참조 대신 각 probe 에 인라인한다.)
 def _gate_block_probe():
     import streamlit as st
@@ -409,19 +398,12 @@ def _gate_block_probe():
     from views import master_org as mo
     if not st.session_state.get("_gsetup"):
         st.session_state["_gsetup"] = True
-        counts = adb.get_org_departments().groupby("group_code").size()
-        gA = str(counts.index[0])
-        groups = adb.get_org_groups(is_active=True)
-        gB = next(str(g) for g in groups["group_code"].astype(str) if g != gA)
-        mo._load_depts({"active": "전체", "search": "", "group": gA})
+        mo._load_depts({"active": "전체", "search": ""})
         rows = mo._OD.get_rows().copy()
         rows.loc[rows.index[0], "코드명"] = "임시편집ABC"
         mo._OD.set_rows(rows); mo._OD.set_dirty(True)
-        mo._OD.commit_query({"active": "전체", "search": "", "group": gA})
-        st.session_state["og_active"] = "전체"
-        st.session_state["og_group_sel"] = gB
-        st.session_state["_gA"] = gA; st.session_state["_gB"] = gB
-        st.session_state["_tgt"] = str(rows.iloc[0]["코드"])
+        mo._OD.commit_query({"active": "전체", "search": ""})
+        st.session_state["og_active"] = "사용 안 함"   # 필터 전환 → 폐기 게이트
     mo.render(adb.find_user_by_emp_no("1001"))
 
 
@@ -431,7 +413,7 @@ gbody = " ".join(str(m.value) for m in atb.markdown)
 check("폐기 확인 게이트 표시", "저장되지 않은 변경" in gbody)
 for k in ("org_dept__save", "org_dept__add", "org_dept__delete"):
     b = _save_button(atb, k)
-    check(f"게이트중 {k} 비활성(오귀속 차단)", b is not None and getattr(b, "disabled", False))
+    check(f"게이트중 {k} 비활성(유실 방지)", b is not None and getattr(b, "disabled", False))
 rb = _save_button(atb, "org_dept__refresh")
 check("게이트중에도 새로고침(조회)은 유지", rb is not None and not getattr(rb, "disabled", True))
 
@@ -442,23 +424,16 @@ def _gate_discard_probe():
     from views import master_org as mo
     if not st.session_state.get("_gsetup"):
         st.session_state["_gsetup"] = True
-        counts = adb.get_org_departments().groupby("group_code").size()
-        gA = str(counts.index[0])
-        groups = adb.get_org_groups(is_active=True)
-        gB = next(str(g) for g in groups["group_code"].astype(str) if g != gA)
-        mo._load_depts({"active": "전체", "search": "", "group": gA})
+        mo._load_depts({"active": "전체", "search": ""})
         rows = mo._OD.get_rows().copy()
         rows.loc[rows.index[0], "코드명"] = "임시편집ABC"
         mo._OD.set_rows(rows); mo._OD.set_dirty(True)
-        mo._OD.commit_query({"active": "전체", "search": "", "group": gA})
-        st.session_state["og_active"] = "전체"
-        st.session_state["og_group_sel"] = gB
-        st.session_state["_gA"] = gA; st.session_state["_gB"] = gB
-        st.session_state["_tgt"] = str(rows.iloc[0]["코드"])
+        mo._OD.commit_query({"active": "전체", "search": ""})
+        st.session_state["og_active"] = "사용 안 함"
     mo.render(adb.find_user_by_emp_no("1001"))
 
 
-# discard(폐기하고 이동): 옛 draft 폐기 → 어느 상위에도 저장되지 않음
+# discard(폐기하고 이동): 편집 폐기 → 새 필터로 재적재
 atx = AppTest.from_function(_gate_discard_probe, default_timeout=45).run()
 for b in atx.button:
     if b.key == "org_dept__discard_ok":
@@ -466,11 +441,8 @@ for b in atx.button:
 atx.run()
 check("discard 후 render 예외 없음", not atx.exception)
 rows_x = atx.session_state["org_dept:rows"] if "org_dept:rows" in atx.session_state else None
-lg_x = atx.session_state["org_dept:loaded_group"] if "org_dept:loaded_group" in atx.session_state else None
-check("discard: 미저장 편집 폐기(재적재 행에 편집 없음 → 저장·오귀속 안 됨)",
+check("discard: 미저장 편집 폐기(재적재 행에 편집 없음)",
       rows_x is not None and "임시편집ABC" not in set(rows_x["코드명"].astype(str)))
-check("discard: 새 상위(B)로 재적재(옛 draft 가 새 상위에 저장·오귀속되지 않음)",
-      lg_x is not None and str(lg_x) == str(atx.session_state["_gB"]))
 check("discard: 폐기 게이트 해소(pending 제거)",
       master_org._OD.pending_query_key not in atx.session_state)
 
@@ -481,23 +453,16 @@ def _gate_cancel_probe():
     from views import master_org as mo
     if not st.session_state.get("_gsetup"):
         st.session_state["_gsetup"] = True
-        counts = adb.get_org_departments().groupby("group_code").size()
-        gA = str(counts.index[0])
-        groups = adb.get_org_groups(is_active=True)
-        gB = next(str(g) for g in groups["group_code"].astype(str) if g != gA)
-        mo._load_depts({"active": "전체", "search": "", "group": gA})
+        mo._load_depts({"active": "전체", "search": ""})
         rows = mo._OD.get_rows().copy()
         rows.loc[rows.index[0], "코드명"] = "임시편집ABC"
         mo._OD.set_rows(rows); mo._OD.set_dirty(True)
-        mo._OD.commit_query({"active": "전체", "search": "", "group": gA})
-        st.session_state["og_active"] = "전체"
-        st.session_state["og_group_sel"] = gB
-        st.session_state["_gA"] = gA; st.session_state["_gB"] = gB
-        st.session_state["_tgt"] = str(rows.iloc[0]["코드"])
+        mo._OD.commit_query({"active": "전체", "search": ""})
+        st.session_state["og_active"] = "사용 안 함"
     mo.render(adb.find_user_by_emp_no("1001"))
 
 
-# 취소(continue editing): draft 보존 + 저장은 발생하지 않음(오귀속 없음)
+# 취소(continue editing): draft 보존 + 저장은 발생하지 않음
 atc = AppTest.from_function(_gate_cancel_probe, default_timeout=45).run()
 for b in atc.button:
     if b.key == "org_dept__discard_cancel":
@@ -505,11 +470,8 @@ for b in atc.button:
 atc.run()
 check("취소 후 render 예외 없음", not atc.exception)
 rows_c = atc.session_state["org_dept:rows"] if "org_dept:rows" in atc.session_state else None
-lg_c = atc.session_state["org_dept:loaded_group"] if "org_dept:loaded_group" in atc.session_state else None
 check("취소: 미저장 draft 보존(편집 유지)",
       rows_c is not None and "임시편집ABC" in set(rows_c["코드명"].astype(str)))
-check("취소: 원 상위(A) 유지 — 저장·오귀속 발생하지 않음",
-      lg_c is not None and str(lg_c) == str(atc.session_state["_gA"]))
 
 
 # ===== 8) 부분성공 reconcile 계약(§22, M6) — 범위별 성공만/혼합/전실패 + unknown 미reconcile + 범위격리 =====

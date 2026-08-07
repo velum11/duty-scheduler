@@ -2,6 +2,53 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-08-07(오후) · [인계] 조직·사용자·편성 개편 3종 + migration 009 적용 + 신규 화면 병렬 트랙
+
+**사용자 결정(이번 세션):** ① A/B/C조를 기준정보(teams)에서 빼고 **근무편성표에서 직접 입력**(한 글자 `A` → `A조` 자동 보정). ② 조직 관리는 그룹·운영단위 시트를 폐지하고 **부서 단일 시트 + 대분류/중분류 자유 텍스트 2단**(그룹 시트를 대체). ③ 사용자 관리에 **입사일·퇴사일** 추가, 퇴사일 경과 시 **로그인 차단 + 명단 숨김**(기록 보존, 퇴사일 삭제 시 복귀). ④ migration 009 즉시 적용 승인(테스트 프로젝트).
+
+**적용 상태:**
+- migration `009_org_category_and_tenure.sql` — 테스트 프로젝트 **적용·검증 완료**. 대분류를 기존 그룹명으로 백필(9종), 오전 정제분에서 입사일 125명 채움. teams·organization_groups 는 **휴면 보존**(drop 없음 — 부서 저장이 기존 group_id 귀속·team 배정을 지우지 않도록 스토어 백필 방어 포함, `master_org._save_depts`).
+- 근무조 축 이동: 편성 저장 `shift_group_code`(자유 텍스트 스냅샷) ← 화면 `조` 열. `validators.validate_assignment_records` 는 require_shift=False 에서 **마스터 대조를 하지 않음**(shift_groups 0행이라 기존 대조는 전면 차단이었음). 조회(workspace·my_schedule)는 근무조 우선 표시 + 레거시 team명 폴백.
+- 퇴사 판정 `db.is_resigned` — 당일=재직, 해석 불가=재직(fail-open 의도적). `auth.login`·쿠키 검증 양쪽에서 차단하고 기존 세션 폐기. 고정 비밀번호 예외(ADMIN)보다 **앞**에 배치.
+- 테스트: 전 스위트 **29/30 통과**. 유일 실패 `test_supabase_crud` 는 `--confirm-test-project` 게이트의 설계상 차단(회귀 아님). 구계약을 고정하던 5개 파일(test_master_org·org_new·unified·users_new·migration_002_audit·org_hierarchy_data)을 신계약으로 개정 — org_hierarchy_data 의 live 검증은 seed 건수 고정 대신 **구조 불변식**으로 전환.
+- 문서: requirements.md(§3 로그인·§5 근무표·§6 사용자/조직 관리), database.md(§4 migration 표 006~009 현행화 + 009 이후 조직 모델), master_org/master_users docstring.
+
+**병렬 트랙(신규 화면):** ① 숙소 예약(신청→승인→캘린더, 시안 A/B 전환 탑재) ② 업무요청서 — ui-feature 백그라운드 Owner 가 **신규 파일 15개만으로 완성**(기존 파일 0건 편집, 자체 테스트 89 + 화면 규약 118 통과). 산출·미결질문 10건·붙이기 체크리스트: `.orca/artifacts/new-screens/`. 사용자 직접 세션 브리핑: 같은 폴더 `USER-SESSION-BRIEF.md`. migration 은 **020번대 예약**(초안은 `schema-draft.md`, supabase/migrations 미투입).
+
+**code-review(§6 Codex 대체 경로) 실행 완료 — P1 4건 발견·즉시 수정:** ① 사용자 저장 시 전원 team_id 소거(그리드가 숨김 컬럼 제거 — 저장 직전 스토어 백필로 교체) ② 편성 부서 변경 시 옛 팀코드 잔존으로 저장 영구 차단(부서 변경 행 팀 해제) ③ `_clean_date` 2자리 연도를 서기 00xx 로 저장 → 즉시 계정 잠금(4자리 연도만 허용) ④ workspace 조회에서 퇴사자 과거 근무 소실(기록 있는 월 표시 + 퇴직 라벨로 복원). 수정 후 전 스위트 재검증 30/31(유일 실패 = supabase_crud 게이트 차단). 잔여 P2/P3 는 BACKLOG "2026-08-07 code-review 잔여" 항목.
+
+**포트 배치(세션 종료 시점):** 8501=본 앱 supabase 연동 · 8502=본 앱 sample(아차사고 시드 3건 신설 — `db._NEAR_MISS_SEED`) · 8503=신규 화면 미리보기. 전부 health 200.
+
+**실근태 적재(2026-08-07 오후, 사용자 승인 4건 반영):** PET 근태표 Excel(9개월·21명)을 서브 정제 → `work_schedules` **5,095행 적재**(테스트 프로젝트). 기존 코드 접기 4종(주/야/OFF/연차) + **근무형태 신규 14종**(기호 그대로 — 특주·야+1·근휴·자녀결혼 등, `근태표 반입 기호` description). 미매칭 1명은 후보 사번 2023070302 로 사용자 확정. 등록순서는 최신 월 시트 기준 `users.display_order` 21명 채움 + **편성·월간 화면 정렬을 display_order 반영으로 전환**(`sort_users_for_display` 배선 — schedule_edit / workspace). 정제에서 잡은 핵심: 원본 날짜 시리얼 6개 시트가 1년 어긋나 있어(2025 캐시·#REF!) 시트명+요일축으로 일자 확정 — 시리얼을 믿었으면 6개월치가 2025년으로 들어갈 뻔함. 재실행 스크립트 `.orca/artifacts/beta-migration/load_roster.py`. 시드 도입으로 드러난 sample 아차사고 NaN 승격은 `get_near_miss_report` 경계 정규화로 해소(260 checks 통과).
+
+**PVC 근태대장도 적재 완료(같은 방식 사용자 승인):** 8개월(2026-01~08)·15명·**3,323행** + 근무형태 신규 29종(기타 계열 신설 — 재단·코팅 등). **미매칭 6명분 165행은 제외**(기준정보 무등재 — 퇴사/전출 추정, `퇴사`·`야-3`·`특야-7` 기호도 그들 전용이라 미등록). 사번 확정 시 같은 스크립트 재실행으로 추가 적재 가능(upsert 멱등). 합계: work_schedules **8,418행** / work_types 49종 / display_order 36명.
+
+**남은 위험·미결:**
+- 008 여전히 미적용 — 로그인은 `ADMIN`/`ADMIN`만(8501). 125명 진입은 008 적용 후.
+- **미커밋** — 수정 21파일 + 신규 16파일(프로토타입 15 + migration 009). 커밋은 사용자 승인 대기.
+- 사용자 결정 대기: 캘린더 시안 A/B, 프로토타입 미결질문 10건, MANAGER·ADMIN 사번 명단, 008 적용 시점, Streamlit Cloud secrets 갱신 여부.
+- 개편 3화면(조직·사용자·편성)의 실브라우저 육안 확인은 미실행 — AppTest 렌더 검증까지만. 조 필터 옵션 재구성 등 잔여는 BACKLOG.
+
+## 2026-08-07 · [인계] 실조직·실직원 125명 적재 (test 프로젝트, 전면 초기화 후 재적재)
+
+**Supabase 키 사고 선행:** `.streamlit/secrets.toml`의 `service_role_key`가 폐기된 상태여서 앱 전체가 401 `Unregistered API key`였다. 프로젝트(`icvizwmqdffwsifmnwuk` = `duty-scheduler-test`)는 정상. 사용자가 새 키로 교체해 해소. **Streamlit Cloud 배포본 Secrets도 같은 키면 별도 갱신 필요 — 미확인.**
+
+**사용자 결정(이번 세션):** 4계층(담당–부–팀–파트) → 앱 3계층 접기는 **C안(파트 폐기)**. 처음엔 A안(파트=운영단위)을 골랐으나, **실DB에서 운영단위가 이미 A/B/C 교대조로 쓰이고 그 위에 work_schedules 1,147행이 얹혀 있는 것**을 확인해 재질의 후 C로 변경. 팀 위 계층 직속 인원은 `<조직명> 직속` 부서 신설로 수용. 권한은 전원 USER. 기존 데이터는 **전면 초기화 후 재적재**.
+
+**적재 결과:** 그룹 9(담당/실 7 + 대표이사 1 + 시스템 ADMIN) / 부서 32(팀·TF 22 + 기술연구소 + 직속 8 + 시스템 ADMIN) / **운영단위 0** / 사용자 127(실직원 125 + ADMIN·admin). 원본 125명 전건 대사 일치, 성명 불일치 0, 참조 유실 0.
+
+- **`group_code='ADMIN'`·`dept_code='ADMIN'`·`ADMIN` 계정은 삭제 대상에서 제외**했다. `views/master_org.py::_SYSTEM_CODES`가 화면 보호 대상으로 삼고 `config.FIXED_PASSWORD_ACCOUNTS`가 로그인 예외로 의존한다. 지우면 앱이 잠긴다. 보존 계정이 삭제 대상 부서·운영단위를 참조해 FK 409가 났고, **ADMIN 부서로 이동 + team_id 해제 후 삭제**하는 순서로 해결.
+- **삭제된 것: work_schedules 1,147행 · near_miss_reports 5건 · 기존 조직 15행.** 삭제 전 전체 10개 테이블 1,194행을 `.orca/artifacts/beta-migration/backup/*.json`에 덤프(gitignore 대상, 커밋 금지). 복구가 필요하면 여기서.
+- 재실행 스크립트 `.orca/artifacts/beta-migration/load_beta_data.py` (dry-run 기본, `--apply`로 쓰기). **회사 Supabase 계정 이전 시 그대로 재사용 가능** — 이번 적재는 test 프로젝트 대상이라 이전 후 재실행이 전제다.
+- 이상항목 처리: `본점`(1000, 4자리)·`자산관리담당` 7자리 중복(`3400000`)은 제외하고 정본 `34000000` 채택. `공란`(2026030302)은 원본대로 적재.
+
+**남은 위험·미결:**
+- **운영단위가 0개다.** C안은 이 슬롯을 교대조 전용으로 비워두는 안이고, 원본 조직 데이터에 교대조 정보가 없어 만들지 않았다. **A/B/C 교대조는 화면에서 새로 등록해야 근무표 편성이 가능**하다. 기존 6개(PET·PVC생산부 A/B/C)는 소속 부서가 신체계에 없어 소멸.
+- 008 미적용이라 `users.password_hash`·`login_sessions` 없음 → **로그인은 `ADMIN`/`ADMIN`만 가능**. 125명은 008 적용 전까지 진입 불가.
+- 권한 전원 USER — MANAGER 지정 미정, ADMIN 대상 사번 명단 미수령.
+- `hire_date`(입사일)는 **users 테이블에 컬럼이 없어 적재하지 못했다.** 필요하면 스키마 추가가 선행.
+- 인원 0명 부서 5개(데코코팅팀·데코영업팀·PET생산2팀·공정기술팀·MES TF) — 원본 그대로이며 비활성 처리는 하지 않았다.
+
 ## 2026-08-05 · [인계] 베타 준비 보안 1단계 — 비밀번호 인증 + 서버측 세션(008 DRAFT) + 계정 소유권 방향 확정
 
 **사용자 결정(이번 세션):**

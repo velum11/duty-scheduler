@@ -130,6 +130,11 @@ def _validate_token(token: str):
     user = db.find_user_by_emp_no(emp_no)
     if user is None or not user.get("is_active", False):
         return None
+    # 퇴사일이 지나면 이미 발급된 세션도 즉시 끊는다 — 로그인만 막으면 재직 중 받아둔
+    # 30일 쿠키로 퇴사 후에도 계속 들어올 수 있다.
+    if _is_resigned(user):
+        _revoke_token(token)
+        return None
     return user
 
 
@@ -177,6 +182,17 @@ def _cookie_clear() -> None:
 # 자격증명 실패를 사용자에게 알릴 때 쓰는 단일 문구. "사번은 있는데 비번이 틀렸다"와
 # "사번 자체가 없다"를 구분해 알려주면 유효한 사번 목록을 캐낼 수 있으므로 합친다.
 _BAD_CREDENTIALS = "사번 또는 비밀번호가 올바르지 않습니다."
+
+
+def _is_resigned(user) -> bool:
+    """퇴사일이 지난 사용자인지(migration 009). 판정은 db.is_resigned 가 소유한다.
+
+    퇴사자에게도 ``_BAD_CREDENTIALS`` 를 돌려주는 것은 비활성 계정과 같은 처리다 —
+    "퇴사한 계정입니다"라고 알려주면 그 사번이 실재한다는 사실을 확인해 준다.
+    """
+    if not isinstance(user, dict):
+        return False
+    return db.is_resigned(user.get("resign_date"))
 
 
 def fixed_password_for(emp_no: str) -> str | None:
@@ -235,6 +251,10 @@ def login(emp_no: str, password: str = ""):
     # 입력값이 아니라 DB 의 정규 emp_no 를 저장해 대소문자 표기 흔들림을 막는다.
     user = db.find_user_by_emp_no(emp_no)
     if user is None or not user.get("is_active", False):
+        return None, _BAD_CREDENTIALS
+    # 퇴사자 차단은 고정 비밀번호 예외보다 **앞**이다. 예외는 "스키마 미적용 환경에서도
+    # 관리자가 들어올 수 있게" 하려는 것이지, 퇴사한 계정을 살려두려는 것이 아니다.
+    if _is_resigned(user):
         return None, _BAD_CREDENTIALS
     canonical = str(user.get("emp_no", emp_no))
 
