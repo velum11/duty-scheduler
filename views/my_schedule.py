@@ -16,10 +16,11 @@ from views.workspace import work_type_display
 
 _MONTH_KEY = "my_schedule_month"
 _MODE_KEY = "my_schedule_mode"
-# 달력 셀 표시 방식 — 실제: 근무형태 약칭(야-4·특주 등) 그대로. 요약: 4그룹(주간/야간/
-# OFF/휴가)으로 접어 표시(2026-08-11 사용자 요구 — 상세·요약 전환 조회).
-_MODE_ACTUAL = "실제 근무"
-_MODE_SUMMARY = "요약"
+# 달력 셀 표시 방식(2026-08-11 사용자 요구 재정의) — 두 모드 모두 근무형태 기준정보가
+# 원천이다: 약칭 = work_types.short_label, 명칭 = work_types.name. 색상도 두 모드 모두
+# 근무형태 관리의 색(work_types.color)을 그대로 쓴다(그룹 대표색 접기 폐기).
+_MODE_SHORT = "약칭"
+_MODE_NAME = "명칭"
 _GROUP_ORDER = ("주간", "야간", "OFF", "휴가")
 # 합계 dot 색 — 근무형태 §2 색 계열(주=파랑·야=적·OFF=중립·휴가=녹). 근무 chip 은 개별
 # 근무형태 DB hex 를 쓰지만, 합계는 그룹 집계라 그룹 대표색(§2)으로 dot 을 찍는다.
@@ -136,27 +137,21 @@ def _group_counts(rows: pd.DataFrame, work_types: pd.DataFrame) -> list[tuple[st
     return [(group, count) for group, count in totals.items() if count]
 
 
-def _summary_maps(rows: pd.DataFrame, work_types: pd.DataFrame,
-                  display_of: dict, color_of: dict) -> tuple[dict, dict]:
-    """요약 모드용 코드→(그룹 라벨, 그룹 대표색) 맵.
+def _name_display_map(work_types: pd.DataFrame, display_of: dict) -> dict:
+    """명칭 모드용 코드→명칭(work_types.name) 맵.
 
-    실제 근무 코드(야-4·특주 등)를 4그룹(주간/야간/OFF/휴가)으로 접어 표시한다 —
-    합계 dot(`_group_counts`)과 같은 `db.classify_work_group` 축이라 헤더와 달력이
-    항상 같은 기준으로 읽힌다. 미분류(None) 코드는 요약을 지어내지 않고 실제
-    약칭·색을 그대로 유지한다.
+    기준정보에 없는(미등록·소프트삭제 후 잔존) 코드는 명칭을 지어내지 않고
+    약칭 표시(display_of) 또는 코드 원문으로 폴백한다. 색은 모드와 무관하게
+    근무형태 관리의 색(color_of)을 그대로 쓰므로 여기서 만들지 않는다.
     """
-    type_map = {str(r["code"]): r.to_dict() for _, r in work_types.iterrows()}
-    sum_display, sum_color = {}, {}
-    for code in {str(c) for c in rows.get("work_type_code", pd.Series(dtype=str))}:
-        group = db.classify_work_group(code, type_map.get(code, {}))
-        if group:
-            sum_display[code] = group
-            sum_color[code] = _GROUP_COLOR.get(group, "#8b857c")
-        else:
-            sum_display[code] = display_of.get(code, code)
-            if code in color_of:
-                sum_color[code] = color_of[code]
-    return sum_display, sum_color
+    name_of = dict(display_of)  # 폴백: 약칭/코드
+    if work_types is not None and not work_types.empty:
+        for _, r in work_types.iterrows():
+            code = str(r.get("code") or "").strip()
+            name = str(r.get("name") or "").strip()
+            if code and name:
+                name_of[code] = name
+    return name_of
 
 
 def _styles() -> str:
@@ -175,6 +170,16 @@ def _styles() -> str:
 .my-total .dot { width:8px; height:8px; border-radius:3px; align-self:center; flex:0 0 auto; }
 .my-total .lab { font-size:12px; color:#6b665d; }
 .my-total .val { font-family:'IBM Plex Mono',monospace; font-size:13.5px; font-weight:600; color:#1c1a17; }
+/* 표시 방식(약칭/명칭) 전환 — 두 버튼 동일 폭(내용 길이 무관, 2026-08-11 사용자 요구) */
+div[data-testid="stSegmentedControl"] button,
+div[data-testid="stButtonGroup"] button {
+  min-width:84px; justify-content:center; }
+/* 월 이동 + 전환을 한 행에: 월 내비(첫 자식)가 잔여 폭을 차지하고 전환은 우측 끝.
+   직계 래퍼에 st-key 가 없는 버전이므로 위치(first/last-child) 기반 — 자식이 항상
+   2개(월 내비·전환)라 순번이 안정적이다. 좁은 폭에서는 줄바꿈 허용. */
+.st-key-my_toprow { align-items:center; flex-wrap:wrap; }
+.st-key-my_toprow > div:first-child { flex:1 1 auto; min-width:0; }
+.st-key-my_toprow > div:last-child { flex:0 0 auto; margin-left:auto; }
 .my-calendar { width:100%; }
 .my-weekdays, .my-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
 .my-weekday { font-size:11.5px; font-weight:600; color:#6b665d; padding:6px 0 8px; text-align:center; }
@@ -318,18 +323,25 @@ def render(user: dict) -> None:
     # 조 표시: 신 축(근무조)이 있으면 그것, 없으면 레거시 운영단위명 폴백.
     team = shift_code or db.team_name(dept_code, team_code)
 
-    # dc isMySched 순서: 제목 → 월 이동(‹ 월 ›) → 표시 방식(실제/요약) → 헤더 줄
+    # dc isMySched 순서: 제목 → 월 이동(‹ 월 ›) → 표시 방식(약칭/명칭) → 헤더 줄
     # (사용자·소속 | 근무형태 합계) → 7열 달력. 합계는 헤더 우측(항상 4그룹 기준).
     st.markdown(_styles(), unsafe_allow_html=True)
     st.markdown("<div class='my-title'>내 근무표</div>", unsafe_allow_html=True)
-    _month_navigation(year, month)
-    mode = st.segmented_control(
-        "표시 방식", [_MODE_ACTUAL, _MODE_SUMMARY], key=_MODE_KEY,
-        default=_MODE_ACTUAL, label_visibility="collapsed",
-    )
+    # 구 세션 값('실제 근무'/'요약')이 남아 있으면 새 옵션과 충돌하므로 정리한다.
+    if st.session_state.get(_MODE_KEY) not in (_MODE_SHORT, _MODE_NAME):
+        st.session_state.pop(_MODE_KEY, None)
+    # 월 이동(좌)과 약칭/명칭 전환(우)을 한 행에 — 남는 우측 공간 활용(2026-08-12 사용자 요구).
+    with st.container(key="my_toprow", horizontal=True, gap="small",
+                      vertical_alignment="center"):
+        _month_navigation(year, month)
+        mode = st.segmented_control(
+            "표시 방식", [_MODE_SHORT, _MODE_NAME], key=_MODE_KEY,
+            default=_MODE_SHORT, label_visibility="collapsed",
+        )
+    # 색은 두 모드 공통으로 근무형태 관리 색(color_of). 표시 텍스트만 약칭↔명칭 전환.
     display_cal, color_cal = display_of, color_of
-    if mode == _MODE_SUMMARY:
-        display_cal, color_cal = _summary_maps(rows, work_type_df, display_of, color_of)
+    if mode == _MODE_NAME:
+        display_cal = _name_display_map(work_type_df, display_of)
     groups = _group_counts(rows, work_type_df) if not rows.empty else []
     st.markdown(_header_html(user, dept, team, groups), unsafe_allow_html=True)
     if snapshot_failed:
