@@ -566,6 +566,18 @@ _MASTER_GRID_CSS = {
         "background": "rgba(61, 58, 52, 0.08) !important", "color": "#3D3A34",
         "font-weight": "700", "border-radius": "4px", "justify-content": "center",
     },
+    # 행 드래그 핸들 — AG Grid 는 rowDrag 를 켠 열의 .ag-cell-wrapper 안에 드래그 핸들 →
+    # 셀 값 순으로 넣는다. 래퍼(.ag-cell-wrapper) 자체는 enableCellTextSelection 때문에
+    # **모든 셀**에 생기므로(실측), 반드시 _action 열로 한정해야 한다 — 전역으로 걸면
+    # md-c-left(사번·성명·부서·조) 좌측 정렬이 가운데로 무너진다.
+    '.ag-cell[col-id="_action"] .ag-cell-wrapper': {
+        "width": "100%", "display": "flex", "align-items": "center",
+        "justify-content": "center", "gap": "4px",
+    },
+    '.ag-cell[col-id="_action"] .ag-cell-value': {"flex": "0 0 auto", "width": "auto"},
+    ".ag-row-drag": {"cursor": "grab", "opacity": "0.62", "margin": "0"},
+    ".ag-row-drag:hover": {"opacity": "1"},
+    ".ag-row-drag:active": {"cursor": "grabbing", "opacity": "1"},
 }
 
 _META_COLUMNS = ["_row_id", "_row_state", "_sel", "_removed"]
@@ -580,6 +592,7 @@ def selectable_master_grid(
     col_config: dict | None = None,
     select_all_header: bool = False,
     extra_grid_options: dict | None = None,
+    row_drag: bool = False,
 ) -> pd.DataFrame:
     """행 상태 계약(_row_id/_row_state/_sel/_removed)을 갖춘 기준정보 편집 그리드.
 
@@ -596,6 +609,11 @@ def selectable_master_grid(
       (표시 중인 기존 행만 대상 — 기본 False 로 기존 화면 무변경).
     extra_grid_options: gridOptions 에 덮어쓸 추가 옵션(dict). 조직 관리의
       rowClassRules(가상 그룹 부모 행 강조) 등 — 기본 None 으로 기존 화면 무변경.
+    row_drag: True 면 선택 열(_action)에 AG Grid 내장 드래그 핸들을 붙이고 관리형 행
+      이동(rowDragManaged)을 켠다. 반환 프레임의 행 순서가 곧 화면 순서이며, 이동 확정은
+      rowDragEnd 로 서버에 통지된다(호출부가 권위 상태를 그 순서로 확정해야 한다).
+      전용 핸들 방식이라 셀 텍스트 선택(enableCellTextSelection)·− 제거/체크박스 클릭
+      분기와 경쟁하지 않는다. 기본 False 로 기존 화면 무변경.
     """
     frame = frame.copy().reset_index(drop=True)
     for meta, default in (("_row_id", ""), ("_row_state", "new"), ("_sel", False), ("_removed", "")):
@@ -627,6 +645,11 @@ def selectable_master_grid(
     }
     if select_all_header:
         action_col["headerComponent"] = _SELECT_ALL_HEADER
+    if row_drag:
+        # 핸들은 셀 렌더러(체크박스/− 버튼) 앞에 들어간다 — 폭을 그만큼 넓혀 잘림을 막는다.
+        action_col["rowDrag"] = True
+        action_col["headerTooltip"] = "행 앞 핸들을 잡고 끌어 순서를 바꿉니다"
+        action_col.update({"width": 88, "minWidth": 80, "maxWidth": 96})
     column_defs = [action_col]
     # 폭/정렬 기본값 — 문자 열은 flex 로 남는 폭 배분, 숫자/불리언은 좁은 고정
     widths = {
@@ -674,10 +697,19 @@ def selectable_master_grid(
         # 셀 텍스트 선택·복사(편집·범위 붙여넣기 무영향) — views/master/grid.py 단일 원천.
         **CELL_COPY_OPTIONS,
     }
+    if row_drag:
+        # 관리형 이동 — AG Grid 가 clientSide 행 모델의 순서를 직접 바꾸므로 반환 노드
+        # 순서가 곧 화면 순서다. 이 그리드는 정렬·필터·페이지네이션이 모두 꺼져 있어
+        # (sortable/filter False) 관리형 이동의 전제 조건을 충족한다.
+        grid_options["rowDragManaged"] = True
+        grid_options["rowDragEntireRow"] = False  # 행 아무 데나가 아니라 핸들에서만 시작
     if extra_grid_options:
         grid_options.update(extra_grid_options)
 
     ordered = ["_action"] + order + _META_COLUMNS
+    # 값 편집 외에 '이동 확정'도 서버로 올린다 — 드래그 후 rerun 이 없으면 다음 remount 에서
+    # 순서가 소실된다. 디바운스는 편집과 동일 200ms.
+    update_on = [("cellValueChanged", 200)] + ([("rowDragEnd", 200)] if row_drag else [])
 
     def _mount():
         return AgGrid(
@@ -685,7 +717,7 @@ def selectable_master_grid(
             gridOptions=grid_options,
             key=key,
             height=height,
-            update_on=[("cellValueChanged", 200)],
+            update_on=update_on,
             data_return_mode=DataReturnMode.AS_INPUT,
             allow_unsafe_jscode=True,
             theme="streamlit",
@@ -1216,10 +1248,10 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     인사이동한 직원이 현재 소속으로 오분류되지 않게 한다. 날짜 셀은 내부 코드가 아니라
     근무형태 약칭(display_of)으로 표시한다.
 
-    재직자는 항상 포함한다. 퇴직(비활성)·퇴사일 경과 직원은 해당 월에 저장된 근무
-    기록이 있는 경우에만 포함한다(requirements.md §5 조회·§7 소프트 삭제=참조 보존의
-    취지 — 과거 기록 조회는 유지하되, 기록 없는 퇴직·퇴사자를 위한 빈 행은 만들지
-    않는다). 포함된 퇴직·퇴사자는 성명에 RETIRED_LABEL 을 덧붙여 표시한다.
+    해당 월에 저장된 근무 기록이 있는 직원만 행으로 포함한다(2026-08-11 사용자 결정
+    — 근무가 없는 사람은 재직 여부와 무관하게 월간 근무표에서 제외, 빈 행을 만들지
+    않는다). 포함된 퇴직·퇴사자는 성명에 RETIRED_LABEL 을 덧붙여 표시한다(§7 소프트
+    삭제=참조 보존 — 과거 기록 조회 유지).
 
     퇴사자를 get_users(include_resigned=False)로 아예 빼면 과거 월의 저장된 근무까지
     조회에서 사라진다(2026-08-07 code-review P1) — 그래서 여기서는 전체를 조회한 뒤
@@ -1231,18 +1263,15 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     resigned_mask = users["resign_date"].map(db.is_resigned) if "resign_date" in users.columns \
         else pd.Series(False, index=users.index)
     active_mask = users["is_active"].astype(bool) & ~resigned_mask
-    inactive_emp_nos = set(
-        users.loc[~active_mask, "emp_no"].astype(str).str.strip()
-    )
     all_emp_nos = users["emp_no"].astype(str).str.strip()
     scheds_all = db.get_month_schedules(all_emp_nos, q["year"], q["month"])
     emp_with_records = (
         set(scheds_all["emp_no"].astype(str).str.strip()) if not scheds_all.empty else set()
     )
-    retired_with_records = inactive_emp_nos & emp_with_records
 
     users["_eff_active"] = active_mask  # 재직 = is_active AND 퇴사일 미경과
-    keep_mask = active_mask | all_emp_nos.isin(retired_with_records)
+    # 근무 기록 보유가 포함 조건(재직·퇴직 공통) — 2026-08-11 사용자 결정.
+    keep_mask = all_emp_nos.isin(emp_with_records)
     users = users[keep_mask].copy()
     users["_retired"] = ~users["_eff_active"].astype(bool)
 

@@ -1093,6 +1093,35 @@ def upsert_users_reported(records: list[dict]) -> BatchWriteResult:
     return _reported_write("users", records, "emp_no", ["emp_no"], _users_payload)
 
 
+def update_users_display_order(pairs: list) -> None:
+    """대상 사용자만 display_order 를 갱신한다 (다른 컬럼 무영향 — 전량 upsert 아님).
+
+    upsert 를 쓰지 않는 이유: PostgREST upsert 는 INSERT 경로를 함께 검증하므로
+    name/department_id 같은 NOT NULL 컬럼을 전부 실어야 한다 — 표시순서만 바꾸려고
+    다른 필드를 화면 값으로 덮어쓰는 위험을 만들지 않는다. 대신 emp_no 별 UPDATE 다.
+
+    조직 스키마(도입: migration 004) 미준비면 display_order 컬럼 자체가 없으므로
+    ``upsert_users`` 와 같은 fail-closed 규칙으로 **쓰기 전에** 전체를 차단한다.
+    행 단위 UPDATE 라 원자적이지 않다 — 중간 실패 시 앞 행은 반영된 상태이며, 호출부는
+    재조회로 실제 상태를 확인해야 한다(부분 반영이 있어도 그룹 내 유일성은 슬롯 재배정
+    특성상 깨지지 않는다: 보이는 행들끼리 번호를 맞바꾸는 도중 상태일 뿐이다).
+    """
+    if not pairs:
+        return
+    if not org_extensions_ready():
+        raise SupabaseDataError(
+            "조직 스키마(조직 그룹) 미준비 상태에서는 사용자 표시순서를 저장할 수 없습니다: "
+            + ", ".join(_clean_text(emp) or "(사번 없음)" for emp, _order in pairs)
+        )
+    for emp_no, order in pairs:
+        emp = _clean_text(emp_no)
+        value = _clean_order(order)
+        if not emp or value is None:
+            continue
+        query = client().table("users").update({"display_order": value}).eq("emp_no", emp)
+        _execute(query, "표시순서 저장", "users")
+
+
 def get_work_types() -> pd.DataFrame:
     columns = [
         "code", "name", "category", "short_label", "start_time", "end_time",

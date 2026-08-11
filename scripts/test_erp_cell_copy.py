@@ -138,23 +138,29 @@ def _fake_aggrid(frame, **kwargs):
     return _Resp(frame)
 
 
-_orig_aggrid = ws.AgGrid
-_orig_shell = ws.erp.grid_shell
-try:
-    ws.AgGrid = _fake_aggrid
-    ws.erp.grid_shell = lambda key, **kw: kw["render"]()   # 스켈레톤/세션 우회
-    ws.selectable_master_grid(
-        pd.DataFrame({"코드": ["A"], "사용": [True]}),
-        key="unit_test_roster",
-        columns={"코드": "text", "사용": "bool"},
-        height=200,
-        select_all_header=True,
-    )
-finally:
-    ws.AgGrid = _orig_aggrid
-    ws.erp.grid_shell = _orig_shell
+def _capture_roster(**extra) -> dict:
+    """selectable_master_grid 가 AgGrid 에 실제로 넘기는 kwargs 를 캡처한다."""
+    _captured.clear()
+    orig_aggrid, orig_shell = ws.AgGrid, ws.erp.grid_shell
+    try:
+        ws.AgGrid = _fake_aggrid
+        ws.erp.grid_shell = lambda key, **kw: kw["render"]()   # 스켈레톤/세션 우회
+        ws.selectable_master_grid(
+            pd.DataFrame({"코드": ["A"], "사용": [True]}),
+            key="unit_test_roster",
+            columns={"코드": "text", "사용": "bool"},
+            height=200,
+            select_all_header=True,
+            **extra,
+        )
+    finally:
+        ws.AgGrid = orig_aggrid
+        ws.erp.grid_shell = orig_shell
+    return dict(_captured)
 
-roster_opts = _captured.get("gridOptions", {})
+
+_captured_default = _capture_roster()
+roster_opts = _captured_default.get("gridOptions", {})
 check("편성 그리드가 AgGrid 에 gridOptions 전달", bool(roster_opts))
 check("편성 최종 옵션에 셀 복사 2옵션", copy_enabled(roster_opts))
 check("편성 붙여넣기 핸들러 유지(onGridReady)", "onGridReady" in roster_opts)
@@ -164,7 +170,46 @@ check("편성 행 클릭=선택 억제 유지",
 check("편성 _action 열 유지",
       any(c.get("field") == "_action" for c in roster_opts.get("columnDefs", [])))
 check("편성 그리드 AgGrid 는 여전히 JsCode 허용(allow_unsafe_jscode)",
-      _captured.get("allow_unsafe_jscode") is True)
+      _captured_default.get("allow_unsafe_jscode") is True)
+
+
+# ===== 5) 행 드래그 재정렬(row_drag) — 옵트인 계약 =====
+# 근무표 편성의 행 순서 변경은 _action 열의 AG Grid 내장 드래그 핸들 + 관리형 이동으로만
+# 동작하며, 옵트인이라 다른 호출부(현재 없음)·기본 경로는 그대로여야 한다.
+print("편성 그리드 row_drag — 기본 off · 옵트인 시 핸들/관리형 이동/rowDragEnd 통지")
+_action_default = [c for c in roster_opts["columnDefs"] if c.get("field") == "_action"][0]
+check("기본값은 드래그 없음(colDef.rowDrag 미설정)", "rowDrag" not in _action_default)
+check("기본값은 관리형 이동 없음(rowDragManaged 미설정)",
+      "rowDragManaged" not in roster_opts)
+check("기본 update_on 은 셀 값 변경만",
+      _captured_default.get("update_on") == [("cellValueChanged", 200)])
+
+_captured_drag = _capture_roster(row_drag=True)
+drag_opts = _captured_drag.get("gridOptions", {})
+_action_drag = [c for c in drag_opts["columnDefs"] if c.get("field") == "_action"][0]
+check("row_drag=True → _action 열에 드래그 핸들", _action_drag.get("rowDrag") is True)
+check("row_drag=True → 관리형 행 이동", drag_opts.get("rowDragManaged") is True)
+check("행 전체 드래그는 끔(핸들에서만 시작 — 셀 선택·편집 보호)",
+      drag_opts.get("rowDragEntireRow") is False)
+check("이동 확정을 서버로 통지(rowDragEnd 디바운스)",
+      _captured_drag.get("update_on") == [("cellValueChanged", 200), ("rowDragEnd", 200)])
+check("핸들 추가분만큼 _action 열 폭 확보(체크박스/− 버튼 잘림 방지)",
+      _action_drag.get("width", 0) > _action_default.get("width", 0))
+# 기존 계약이 드래그 옵션에 밀려나지 않았는가.
+check("row_drag 켜도 셀 복사 2옵션 유지", copy_enabled(drag_opts))
+check("row_drag 켜도 붙여넣기·선택 클릭 경로 유지",
+      "onGridReady" in drag_opts and "onCellClicked" in drag_opts
+      and "onCellKeyDown" in drag_opts)
+check("row_drag 켜도 단일클릭 편집 금지·행클릭 선택 억제 유지",
+      drag_opts.get("singleClickEdit") is False
+      and drag_opts.get("suppressRowClickSelection") is True)
+check("row_drag 켜도 선택 열 렌더러(체크박스/− 버튼) 유지",
+      "cellRenderer" in _action_drag and "suppressKeyboardEvent" in _action_drag)
+# 실제 화면(근무표 편성)이 이 옵트인을 켜고 있는가 — 계약과 화면의 결합.
+import inspect  # noqa: E402
+from views import schedule_edit as se  # noqa: E402
+check("근무표 편성 화면이 row_drag 를 켠다",
+      "row_drag=True" in inspect.getsource(se.render))
 
 
 print()

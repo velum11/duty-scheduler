@@ -8,6 +8,9 @@
 행 상태 계약(_row_id/_row_state/_sel — views/workspace.selectable_master_grid):
   - 기존 행: 첫 열 선택 체크박스 → [행 삭제]로 저장 시 삭제 예정 지정(취소 가능)
   - 신규 행: 첫 열 − 버튼 → 즉시 개별 제거 (DB 작업 없음)
+  - 첫 열 드래그 핸들: 행 순서 변경(rowDragManaged). 확정 순서는 [저장] 시
+    users.display_order 로 영속화한다(부서그룹 단위 슬롯 재배정 — _persist_row_order).
+    1차 정렬축은 여전히 부서그룹이라 그룹 경계를 넘는 이동은 재조회에서 복원된다.
 
 날짜 셀은 work_types 약칭으로 표시·입력하고 저장 시 내부 코드로 변환한다.
 [저장]은 변경된 셀만 upsert 하며, 빈 셀로 기존 근무를 자동 삭제하지 않는다
@@ -183,7 +186,7 @@ def _context_html(q: dict, dept_name: str, team_name: str,
         f"<span>입력 <span class='num'>{filled}</span></span>"
         f"<span>미입력 <span class='num'>{empty}</span></span>"
         f"<span class='op'>더블클릭 편집 · 숫자키 1~9·0 입력 · 방향키 이동 · Ctrl+V 붙여넣기"
-        f" · 조 열 직접 입력(A → A조)</span></div>"
+        f" · 조 열 직접 입력(A → A조) · 행 앞 핸들 드래그로 순서 변경</span></div>"
     )
 
 
@@ -196,10 +199,42 @@ def _legend_html(active: list[tuple[str, str, str]]) -> str:
     return ("<div class='se-legend'><span class='lab'>근무형태</span>" + "".join(items) + "</div>")
 
 
-def _change_count(live: pd.DataFrame, day_cols: list, orig_cells: dict, n_del: int) -> int:
-    """미저장 변경 건수 — 기존 행 셀 변경 + 신규 행 입력 셀 + 삭제 예정 행. dirty 판정과 별개
-    표시용 카운트(셀 클릭 순환/숫자키 입력마다 증가해 자가검증 근거가 된다)."""
-    cnt = int(n_del)
+def _visible_emp_order(rows: pd.DataFrame) -> list[str]:
+    """화면에 보이는 행의 사번 시퀀스 (빈 행·중복 제외, 순수) — 행 순서 영속의 입력."""
+    out: list[str] = []
+    seen: set[str] = set()
+    if rows is None or rows.empty or "사번" not in rows.columns:
+        return out
+    for value in rows["사번"]:
+        emp = "" if pd.isna(value) else str(value).strip()
+        if not emp or emp in seen:
+            continue
+        seen.add(emp)
+        out.append(emp)
+    return out
+
+
+def _order_moved(base: list, final: list) -> bool:
+    """행을 서로 **맞바꿨는가** (순수) — 추가·삭제로 인한 시퀀스 차이는 제외한다.
+
+    양쪽에 공통으로 있는 사번만 남겨 비교하므로, 행 삭제(이미 '삭제 N건'으로 세는 변경)나
+    신규 행 추가가 '순서 변경'으로 중복 계상되지 않는다. 영속 판정(_persist_row_order)은
+    이보다 넓은 기준(시퀀스 자체가 다르면 재배정)을 쓴다 — 새로 들어온 직원에게도 슬롯을
+    줘야 하기 때문이며, 그쪽은 값이 안 바뀌면 어차피 쓰지 않는다.
+    """
+    base_set, final_set = set(base), set(final)
+    return [e for e in base if e in final_set] != [e for e in final if e in base_set]
+
+
+def _change_count(live: pd.DataFrame, day_cols: list, orig_cells: dict, n_del: int,
+                  order_changed: bool = False) -> int:
+    """미저장 변경 건수 — 기존 행 셀 변경 + 신규 행 입력 셀 + 삭제 예정 행 + 행 순서 변경.
+    dirty 판정과 별개 표시용 카운트(셀 클릭 순환/숫자키 입력마다 증가해 자가검증 근거가 된다).
+
+    행 순서 변경은 셀 값이 하나도 안 바뀌므로 위 항목으로는 잡히지 않는다 — 드래그만 한
+    상태에서 '미저장 변경 0건'인데 [저장]이 활성인 모순을 막기 위해 1건으로 센다
+    (몇 칸을 옮겼든 '순서 변경'이라는 한 가지 변경으로 읽는 편이 정확하다)."""
+    cnt = int(n_del) + (1 if order_changed else 0)
     if live is None or live.empty or not day_cols:
         return cnt
     for _, r in live.iterrows():
@@ -427,6 +462,9 @@ def render(user: dict) -> None:
             # enableBrowserTooltips: '조' 열 headerTooltip 을 AG Grid 자체 tooltip 컴포넌트
             # (별도 모듈 등록 필요)가 아니라 브라우저 기본 title 로 렌더해 항상 뜨게 한다.
             extra_grid_options={"rowHeight": 30, "enableBrowserTooltips": True},
+            # 행 앞 핸들 드래그로 순서 변경(2026-08-11 사용자 요구 — 근태표 등록 순서 유지).
+            # 확정된 순서는 저장 시 users.display_order 로 영속화된다(_persist_row_order).
+            row_drag=True,
         )
 
     # 구조 변경(− 제거/붙여넣기 신규 행) + 사번 자동 조회를 권위 상태로 동기화
@@ -481,7 +519,11 @@ def render(user: dict) -> None:
 
     # ── 하단: 범례(근무형태 색) + 미저장 변경 N건 ──
     st.markdown(_legend_html(active), unsafe_allow_html=True)
-    changed = _change_count(live, day_cols, st.session_state.get("se_orig_cells", {}), n_del)
+    order_base = st.session_state.get("se_order_base")
+    order_changed = bool(order_base) and _order_moved(list(order_base), _visible_emp_order(live))
+    changed = _change_count(
+        live, day_cols, st.session_state.get("se_orig_cells", {}), n_del, order_changed
+    )
     st.markdown(
         f"<div class='se-dirty{' on' if changed else ''}'>미저장 변경 {changed}건</div>",
         unsafe_allow_html=True,
@@ -661,6 +703,18 @@ def _sync_rows(grid_df: pd.DataFrame, row_cols: list) -> bool:
             # '조'(근무조)는 자동 채움하지 않는다 — 2026-08-07 결정으로 이 칸은 운영단위가
             # 아니라 자유 입력 근무조이며, users 마스터에는 대응 값이 없다.
 
+    # 행 드래그(_action 열 핸들) 결과 — 반환 프레임의 _row_id 시퀀스가 권위 상태와 다르면
+    # 그 순서를 서버 권위로 즉시 확정하고 재마운트한다. 확정하지 않으면 다음 remount 에서
+    # se_feed(옛 순서)가 다시 실려 이동이 소실된다. _row_id 집합이 **정확히 같을 때만**
+    # 재배열해 붙여넣기 신규 행·− 제거 같은 구조 변경과의 경합에서 순서를 추측하지 않는다
+    # (구조 변경은 아래 changed 경로가 이미 remount 한다).
+    prev_rows = st.session_state.get("se_rows")
+    if prev_rows is not None and not prev_rows.empty and "_row_id" in prev_rows.columns:
+        prev_ids = [str(v) for v in prev_rows["_row_id"]]
+        cur_ids = [str(v) for v in live["_row_id"]]
+        if prev_ids != cur_ids and sorted(prev_ids) == sorted(cur_ids):
+            changed = True
+
     # 값 편집도 매 rerun 권위 상태에 반영한다 (구조 변경이 없으면 remount 는 하지 않음
     # — 그리드가 이미 최신 값을 보여주고 있고, feed 재전송은 클릭 rerun 을 삼킬 수 있다).
     st.session_state["se_rows"] = live[row_cols].reset_index(drop=True)
@@ -714,7 +768,7 @@ def _deleted_panel(q: dict) -> None:
 # ---------- 이탈 확인 ----------
 def _discard_draft() -> None:
     for key in ("se_rows", "se_feed", "se_days", "se_orig", "se_orig_cells",
-                "se_orig_assign", "se_deleted", "se_dirty"):
+                "se_orig_assign", "se_order_base", "se_deleted", "se_dirty"):
         st.session_state.pop(key, None)
     st.session_state.pop("nav_guard", None)
 
@@ -868,6 +922,9 @@ def _load_grid(q: dict) -> None:
     st.session_state["se_rows"] = frame
     st.session_state["se_days"] = days
     st.session_state["se_deleted"] = []
+    # 행 순서 영속(users.display_order)의 기준선 — 이 순서와 최종 화면 순서가 다를 때만
+    # 저장 단계에서 슬롯 재배정을 쓴다(순서를 안 바꾼 저장은 users 를 건드리지 않는다).
+    st.session_state["se_order_base"] = _visible_emp_order(frame)
     st.session_state["se_orig_assign"] = orig_assign  # 편성 변경 판정용 로드 스냅샷
     st.session_state["se_orig"] = _canon(frame, [], day_cols)
     # 원본 셀 값(기존 행): '변경분만 저장'과 '빈 칸 = 삭제 아님' 안내에 사용
@@ -923,6 +980,35 @@ def _assignment_snapshots(q: dict, emp_nos: list) -> dict:
 
 
 # ---------- 저장 ----------
+def _persist_row_order(live: pd.DataFrame) -> tuple[int, str]:
+    """드래그로 바뀐 행 순서를 users.display_order 로 영속화한다 (근무 저장 성공 뒤 단계).
+
+    - 로드 시점 순서(se_order_base)와 최종 화면 순서가 같으면 아무것도 쓰지 않는다.
+    - 재배정은 부서그룹 단위 슬롯 교환(db.plan_display_order_slots)이라 화면에 없는
+      사용자의 번호는 바뀌지 않고, 값이 실제로 달라지는 사용자만 갱신한다.
+    - 부서그룹 매핑·유일성 판정은 users 마스터 기준이므로 db.get_users() 전체(퇴사자
+      포함)를 넘긴다 — 그룹 최대 번호 계산에 숨은 사용자도 필요하다.
+    - 실패해도 예외를 올리지 않고 사유를 돌려준다: 근무 저장은 이미 확정됐고 되돌릴 수
+      없다. 여기서 return 해버리면 재조회가 막혀 '저장해도 dirty 가 안 풀리는' 루프가
+      된다. 대신 사유를 저장 결과 메시지에 그대로 노출해 실패를 숨기지 않는다.
+    반환: (갱신한 사용자 수, 실패 사유 — 성공이거나 대상 없음이면 "").
+    """
+    base = st.session_state.get("se_order_base")
+    if base is None:
+        return 0, ""
+    final = _visible_emp_order(live)
+    if final == list(base):
+        return 0, ""
+    try:
+        pairs = db.plan_display_order_slots(final, db.get_users(), db.dept_group_map())
+        if not pairs:
+            return 0, ""
+        db.update_users_display_order(pairs)
+    except Exception as exc:  # 사유를 그대로 보고 — 은폐 금지, 근무 저장은 확정 유지
+        return 0, str(exc)
+    return len(pairs), ""
+
+
 def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
     """최종 화면 상태 기준 혼합 저장.
 
@@ -1140,6 +1226,11 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
         for emp in delete_only:
             cache.pop((month_key, emp), None)
 
+    # 7) 행 순서(users.display_order) 저장 — 드래그로 바꾼 시각 순서를 영속화한다.
+    #    여기서 쓰지 않으면 바로 아래 재조회(_load_grid)가 옛 표시순서로 다시 정렬해
+    #    "저장했는데 순서가 돌아오고 dirty 도 안 풀리는" 루프가 된다.
+    order_saved, order_error = _persist_row_order(live)
+
     n_saved = len(records_plain) + sum(len(v) for v in records_replace.values())
     _load_grid(q)  # 재조회 → 신규 행 existing 전환, DB 편성 재수화, dirty/선택 초기화
 
@@ -1150,7 +1241,11 @@ def _save(live: pd.DataFrame, q: dict, day_cols: list) -> None:
         parts.append(f"{len(replace_after_delete)}명 월 근무 교체")
     if assign_rows and assign_persisted:
         parts.append(f"편성 {len(assign_rows)}명 저장")
+    if order_saved:
+        parts.append(f"행 순서 {order_saved}명 반영")
     notes = []
+    if order_error:
+        notes.append(f"행 순서는 저장하지 못했습니다(근무는 저장됨): {order_error}")
     if cleared:
         notes.append(f"빈 칸으로 지운 {cleared}개 셀은 삭제되지 않고 기존 근무가 유지됩니다.")
     msg = "근무표를 저장했습니다. (" + " · ".join(parts) + ")"

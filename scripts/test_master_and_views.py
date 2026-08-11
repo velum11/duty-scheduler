@@ -54,29 +54,42 @@ check("약칭 표시값도 색상 키에 존재하면 코드와 동일 색(색�
 print("workspace._build_month_grid (필터·약칭·빈월)")
 users = db.get_users()
 au = users[users["is_active"]]
-dept0 = str(au.iloc[0]["dept_code"])
-team0 = str(au.iloc[0]["team_code"])
+# 2026-08-11 규칙: 해당 월 근무 기록 보유자만 행으로 포함(근무 없는 사람 제외).
+_sch = db.get_schedules()
+_julrec = set(
+    _sch[_sch["duty_date"].astype(str).str.startswith("2026-07")]["emp_no"].astype(str).str.strip()
+)
+rec_users = users[users["emp_no"].astype(str).str.strip().isin(_julrec)]
+dept0 = str(rec_users.iloc[0]["dept_code"])
+team0 = str(rec_users.iloc[0]["team_code"])
 
 q_all = {"year": 2026, "month": 7, "dept": workspace.ALL, "team": workspace.ALL, "keyword": ""}
 grid_all, rows_all = workspace._build_month_grid(q_all, display_of)
-n_active = len(au)
-check("전체 필터 → 활성 사용자 전원", len(grid_all) == n_active)
+check("전체 필터 → 해당 월 근무 보유자 전원(근무 없는 사람 제외)",
+      len(grid_all) == len(rec_users) and len(rec_users) < len(au))
 
 q_dept = {"year": 2026, "month": 7, "dept": dept0, "team": workspace.ALL, "keyword": ""}
 grid_dept, _ = workspace._build_month_grid(q_dept, display_of)
-expect_dept = len(au[au["dept_code"].astype(str) == dept0])
-check("부서 필터가 결과를 제한", len(grid_dept) == expect_dept and expect_dept < n_active)
+expect_dept = len(rec_users[rec_users["dept_code"].astype(str) == dept0])
+check("부서 필터가 결과를 제한", len(grid_dept) == expect_dept and expect_dept >= 1)
 
 q_team = {"year": 2026, "month": 7, "dept": dept0, "team": team0, "keyword": ""}
 grid_team, _ = workspace._build_month_grid(q_team, display_of)
-expect_team = len(au[(au["dept_code"].astype(str) == dept0) & (au["team_code"].astype(str) == team0)])
+expect_team = len(rec_users[(rec_users["dept_code"].astype(str) == dept0)
+                            & (rec_users["team_code"].astype(str) == team0)])
 check("조 필터가 결과를 제한(특정 조 선택 시 전체 아님)", len(grid_team) == expect_team and expect_team <= expect_dept)
 
-# 키워드 검색: 첫 사용자 사번
-emp0 = str(au.iloc[0]["emp_no"])
+# 키워드 검색: 근무 보유자 사번
+emp0 = str(rec_users.iloc[0]["emp_no"])
 q_kw = {"year": 2026, "month": 7, "dept": workspace.ALL, "team": workspace.ALL, "keyword": emp0}
 grid_kw, _ = workspace._build_month_grid(q_kw, display_of)
 check("사번 검색이 결과를 제한", len(grid_kw) >= 1 and all(str(v) == emp0 for v in grid_kw["사번"]))
+
+# 근무 없는 활성 사용자는 행에서 제외된다
+_norec = au[~au["emp_no"].astype(str).str.strip().isin(_julrec)]
+if not _norec.empty:
+    check("근무 없는 활성 사용자 미표시",
+          str(_norec.iloc[0]["emp_no"]) not in set(grid_all["사번"].astype(str)))
 
 # 셀이 약칭으로 표시(코드가 아님) — 값이 있는 셀 확인
 day_cols = [c for c in grid_all.columns if c[0].isdigit()]
@@ -90,10 +103,10 @@ for _, r in grid_all.iterrows():
 check("셀 표시값이 내부 코드 원본이 아니라 약칭 매핑을 따름",
       labels_shown.issubset(set(display_of.values()) | {""}) and len(labels_shown) > 0)
 
-# 빈 월(데이터 없는 2030-01) — 여전히 사용자 행은 나오되 셀은 빈값
+# 빈 월(데이터 없는 2030-01) — 근무 보유자가 없으므로 행도 없다(빈 그리드)
 q_empty = {"year": 2030, "month": 1, "dept": workspace.ALL, "team": workspace.ALL, "keyword": ""}
 grid_empty, rows_empty = workspace._build_month_grid(q_empty, display_of)
-check("빈 월: repository 예외 없이 빈 근무(행은 존재)", len(rows_empty) == 0 and len(grid_empty) == n_active)
+check("빈 월: repository 예외 없이 빈 그리드(빈 행 미생성)", len(rows_empty) == 0 and len(grid_empty) == 0)
 
 # 2026-07과 다른 월이 섞이지 않음
 q_aug = {"year": 2026, "month": 8, "dept": workspace.ALL, "team": workspace.ALL, "keyword": ""}

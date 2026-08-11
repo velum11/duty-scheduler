@@ -1022,6 +1022,74 @@ def display_order_conflicts(users_df: pd.DataFrame, group_of: dict) -> list[str]
     return errors
 
 
+def plan_display_order_slots(
+    visible_emp_nos: list,
+    users_df: pd.DataFrame,
+    group_of: dict,
+) -> list[tuple[str, int]]:
+    """화면에 보이는 행 순서를 users.display_order 로 옮길 최소 변경 목록 (순수).
+
+    부서그룹 단위 **슬롯 재배정**이다 — 그룹 안에서 "보이는 행들이 지금 점유한 번호"를
+    오름차순 슬롯으로 삼아 새 시각 순서대로 다시 나눠 준다. 그래서 화면에 없는(필터로
+    숨은) 사용자의 번호는 절대 바뀌지 않고, 그룹 내 유일성(:func:`display_order_conflicts`
+    계약)도 그대로 유지된다.
+
+    규칙:
+      - 대상은 ``users_df`` 에 있고 활성인 사번만. 비활성(퇴직)·미등록 사번에는 순서를
+        쓰지 않는다(비활성은 번호를 점유하지 않는다는 기존 계약과 정합).
+      - 그룹키는 :func:`display_order_conflicts` 와 동일하게 ``group_of[dept_code]`` 이며,
+        매핑이 없는 부서는 dept_code 자체를 그룹키로 쓴다.
+      - 보이는 행이 슬롯보다 많으면(미지정 NULL 등) **그 그룹 전체 사용자**(숨은·비활성
+        포함) 최대 display_order + 10, +20 … 으로 슬롯을 연장한다.
+      - 같은 그룹의 보이는 행이 같은 번호를 중복 점유 중이면 중복을 하나로 접고 연장
+        슬롯으로 메운다(기존 중복을 그대로 복제하지 않는다).
+      - 부서 기준은 화면의 편성 부서가 아니라 **users 마스터의 dept_code** 다 — 번호
+        유일성 판정이 마스터 소속 기준이기 때문이다.
+
+    반환: 값이 실제로 달라지는 ``(emp_no, display_order)`` 쌍만 (그룹 등장 순서 → 시각 순서).
+    """
+    if users_df is None or users_df.empty:
+        return []
+    info: dict[str, dict] = {}
+    group_max: dict[str, int] = {}
+    for _, r in users_df.iterrows():
+        emp = str(r.get("emp_no") or "").strip()
+        if not emp:
+            continue
+        dept = str(r.get("dept_code") or "").strip()
+        group = group_of.get(dept, (dept, 0))[0]
+        try:
+            order = normalize_display_order(r.get("display_order"))
+        except (TypeError, ValueError):
+            order = None  # 형식 오류는 기준정보 화면 검증이 담당 — 여기선 미지정 취급
+        info[emp] = {"group": group, "order": order, "active": bool(r.get("is_active"))}
+        if order is not None:
+            group_max[group] = max(group_max.get(group, 0), order)
+
+    members: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    for raw in visible_emp_nos or []:
+        emp = str(raw or "").strip()
+        row = info.get(emp)
+        if not emp or emp in seen or row is None or not row["active"]:
+            continue
+        seen.add(emp)
+        members.setdefault(row["group"], []).append(emp)
+
+    pairs: list[tuple[str, int]] = []
+    for group, emps in members.items():
+        slots = sorted({info[e]["order"] for e in emps if info[e]["order"] is not None})
+        base = group_max.get(group, 0)
+        step = 1
+        while len(slots) < len(emps):
+            slots.append(base + 10 * step)
+            step += 1
+        for emp, order in zip(emps, slots):
+            if info[emp]["order"] != order:
+                pairs.append((emp, order))
+    return pairs
+
+
 def sort_users_for_display(users_df: pd.DataFrame, org_depts: pd.DataFrame | None = None) -> pd.DataFrame:
     """근무표·편성 공통 직원 정렬 — 그룹순서 → 표시순서(NULL 뒤) → 사번.
 
@@ -1152,6 +1220,44 @@ def save_users_report(df: pd.DataFrame) -> BatchWriteResult:
         return supabase_repository.upsert_users_reported(changed)
     finally:
         _invalidate_users()
+
+
+def update_users_display_order(pairs) -> int:
+    """지정한 사용자만 표시순서(users.display_order)를 갱신한다.
+
+    근무표 편성 화면의 행 드래그 결과를 영속화하는 **대상 지정** 쓰기다 — 사용자 목록
+    전량 upsert(save_users)를 쓰지 않는다: 화면에 없는 사용자의 다른 필드를 되돌릴
+    위험이 없고, 편성 화면이 users 마스터의 나머지 값을 소유하지도 않기 때문이다.
+
+    pairs: ``[(emp_no, display_order)]``. 사번이 비었거나 순서가 미지정(None)인 항목은
+    건너뛴다(이 경로는 순서를 '지우는' 용도가 아니다 — 해제는 사용자 관리 화면 담당).
+    반환: 실제로 갱신 요청한 건수.
+    """
+    normalized: list[tuple[str, int]] = []
+    for emp_no, order in pairs or []:
+        emp = str(emp_no or "").strip()
+        value = normalize_display_order(order)
+        if not emp or value is None:
+            continue
+        normalized.append((emp, value))
+    if not normalized:
+        return 0
+    if is_sample_mode():
+        if _USERS_STORE not in st.session_state:
+            st.session_state[_USERS_STORE] = _base_users()
+        store = st.session_state[_USERS_STORE].copy()
+        by_emp = dict(normalized)
+        store["display_order"] = [
+            by_emp.get(str(emp).strip(), current)
+            for emp, current in zip(store["emp_no"], store["display_order"])
+        ]
+        st.session_state[_USERS_STORE] = store
+        return len(normalized)
+    try:
+        supabase_repository.update_users_display_order(normalized)
+    finally:
+        _invalidate_users()
+    return len(normalized)
 
 
 def _base_work_types() -> pd.DataFrame:

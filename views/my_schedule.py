@@ -15,6 +15,11 @@ from views.workspace import work_type_display
 
 
 _MONTH_KEY = "my_schedule_month"
+_MODE_KEY = "my_schedule_mode"
+# 달력 셀 표시 방식 — 실제: 근무형태 약칭(야-4·특주 등) 그대로. 요약: 4그룹(주간/야간/
+# OFF/휴가)으로 접어 표시(2026-08-11 사용자 요구 — 상세·요약 전환 조회).
+_MODE_ACTUAL = "실제 근무"
+_MODE_SUMMARY = "요약"
 _GROUP_ORDER = ("주간", "야간", "OFF", "휴가")
 # 합계 dot 색 — 근무형태 §2 색 계열(주=파랑·야=적·OFF=중립·휴가=녹). 근무 chip 은 개별
 # 근무형태 DB hex 를 쓰지만, 합계는 그룹 집계라 그룹 대표색(§2)으로 dot 을 찍는다.
@@ -129,6 +134,29 @@ def _group_counts(rows: pd.DataFrame, work_types: pd.DataFrame) -> list[tuple[st
         if group:
             totals[group] += int(count)
     return [(group, count) for group, count in totals.items() if count]
+
+
+def _summary_maps(rows: pd.DataFrame, work_types: pd.DataFrame,
+                  display_of: dict, color_of: dict) -> tuple[dict, dict]:
+    """요약 모드용 코드→(그룹 라벨, 그룹 대표색) 맵.
+
+    실제 근무 코드(야-4·특주 등)를 4그룹(주간/야간/OFF/휴가)으로 접어 표시한다 —
+    합계 dot(`_group_counts`)과 같은 `db.classify_work_group` 축이라 헤더와 달력이
+    항상 같은 기준으로 읽힌다. 미분류(None) 코드는 요약을 지어내지 않고 실제
+    약칭·색을 그대로 유지한다.
+    """
+    type_map = {str(r["code"]): r.to_dict() for _, r in work_types.iterrows()}
+    sum_display, sum_color = {}, {}
+    for code in {str(c) for c in rows.get("work_type_code", pd.Series(dtype=str))}:
+        group = db.classify_work_group(code, type_map.get(code, {}))
+        if group:
+            sum_display[code] = group
+            sum_color[code] = _GROUP_COLOR.get(group, "#8b857c")
+        else:
+            sum_display[code] = display_of.get(code, code)
+            if code in color_of:
+                sum_color[code] = color_of[code]
+    return sum_display, sum_color
 
 
 def _styles() -> str:
@@ -290,15 +318,22 @@ def render(user: dict) -> None:
     # 조 표시: 신 축(근무조)이 있으면 그것, 없으면 레거시 운영단위명 폴백.
     team = shift_code or db.team_name(dept_code, team_code)
 
-    # dc isMySched 순서: 제목 → 월 이동(‹ 월 ›) → 헤더 줄(사용자·소속 | 근무형태 합계) →
-    # 7열 달력. 합계는 헤더 우측으로 이관(하단 요약 제거). 아이콘 밴드·카드 없음.
+    # dc isMySched 순서: 제목 → 월 이동(‹ 월 ›) → 표시 방식(실제/요약) → 헤더 줄
+    # (사용자·소속 | 근무형태 합계) → 7열 달력. 합계는 헤더 우측(항상 4그룹 기준).
     st.markdown(_styles(), unsafe_allow_html=True)
     st.markdown("<div class='my-title'>내 근무표</div>", unsafe_allow_html=True)
     _month_navigation(year, month)
+    mode = st.segmented_control(
+        "표시 방식", [_MODE_ACTUAL, _MODE_SUMMARY], key=_MODE_KEY,
+        default=_MODE_ACTUAL, label_visibility="collapsed",
+    )
+    display_cal, color_cal = display_of, color_of
+    if mode == _MODE_SUMMARY:
+        display_cal, color_cal = _summary_maps(rows, work_type_df, display_of, color_of)
     groups = _group_counts(rows, work_type_df) if not rows.empty else []
     st.markdown(_header_html(user, dept, team, groups), unsafe_allow_html=True)
     if snapshot_failed:
         st.caption("⚠ 편성 정보를 불러오지 못해 소속을 현재 정보로 표시합니다(달력은 정상).")
     if rows.empty:
         st.caption("해당 월에 저장된 근무내역이 없습니다.")
-    st.markdown(_calendar_html(rows, year, month, work_types, display_of, color_of), unsafe_allow_html=True)
+    st.markdown(_calendar_html(rows, year, month, work_types, display_cal, color_cal), unsafe_allow_html=True)
