@@ -439,6 +439,9 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
 .crumb .crumb-mod { color: var(--ink-2); }
 .crumb .crumb-sep { margin: 0 7px; color: var(--line-strong); }
 .crumb .crumb-scr { color: var(--ink); font-weight: 600; }
+/* 헤더 우측 날짜/범위 스탬프 (화면이 채우는 슬롯 — 비면 폭 0) */
+.hdr-stamp { font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--ink-2);
+  letter-spacing: 0.02em; white-space: nowrap; }
 /* 연결 상태 pill (Supabase 초록 / 샘플 중립) */
 .cd-conn-wrap { display: flex; justify-content: flex-end; }
 .cd-conn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.22rem 0.6rem;
@@ -452,12 +455,18 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
 /* 헤더 우측 표준 아이콘 8종 — 상시 노출. 히트영역 32px, hover #f1eee8. 활성/음영은
    색+커서+tooltip 이중부호화(활성=ink-2·pointer / 음영=ink-3 반투명·not-allowed). */
 .st-key-app_header div.stButton { display: flex; justify-content: flex-end; }
-/* 한 줄 flex: 브레드크럼 신축 + pill·아이콘 내용폭 고정(좁은 폭 겹침 방지). 아이콘 슬롯 2px. */
+/* 한 줄 flex: 브레드크럼 신축 + 스탬프·pill·아이콘 내용폭 고정(좁은 폭 겹침 방지). 아이콘 슬롯 2px. */
 .st-key-hdr_row { align-items: center; flex-wrap: nowrap !important; gap: 2px !important; }
+/* 자식 지정은 nth-child 순번이 아니라 **:has(키)** 로 한다 — ① 순번 의존은 스탬프 슬롯이
+   비는 화면에서 순번이 밀려 헤더가 무너지고(2026-08-11 편성 실측 회귀), ② 이 Streamlit
+   버전은 st-key 클래스를 직계 래퍼가 아니라 내부 블록에 달아 키 직접 지정도 안 먹는다
+   (직계 래퍼 실측: 클래스 없음·전폭 1220px). 브레드크럼(항상 첫 자식)만 위치 기반. */
 .st-key-hdr_row > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden; }
-.st-key-hdr_row > div:nth-child(2) { flex: 0 0 auto !important; margin-right: 12px; }  /* 연결 pill */
-/* 3번째 이후 직계 자식 = 8종 아이콘(요소 컨테이너). 내용폭 32px 고정 → 2px 연속 배치. */
-.st-key-hdr_row > div:nth-child(n+3) { flex: 0 0 32px !important; width: 32px !important; min-width: 32px !important; }
+.st-key-hdr_row > div:has(.st-key-hdr_stamp) { flex: 0 0 auto !important; width: auto !important; }
+.st-key-hdr_stamp:not(:empty) { margin-right: 14px; }
+.st-key-hdr_row > div:has(.st-key-hdr_conn) { flex: 0 0 auto !important; width: auto !important; margin-right: 12px; }  /* 연결 pill */
+/* 8종 아이콘 래퍼. 내용폭 32px 고정 → 2px 연속 배치. */
+.st-key-hdr_row > div:has([class*="st-key-hdr_ic_"]) { flex: 0 0 32px !important; width: 32px !important; min-width: 32px !important; }
 div[class*="st-key-hdr_ic_"] div.stButton { justify-content: center; }
 div[class*="st-key-hdr_ic_"] div.stButton button {
   width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center;
@@ -959,6 +968,26 @@ def _sidebar_user_card(user: dict) -> None:
                 request_nav({"type": "logout"})
 
 
+#: 상단 52px 헤더 우측 스탬프 슬롯(이번 run 한정). 세션 스코프라 다른 접속자와 섞이지 않는다.
+_HEADER_STAMP_SLOT = "_app_header_stamp_slot"
+
+
+def header_stamp(text: str) -> None:
+    """상단 헤더 우측에 조회 맥락 스탬프(예: ``2026-08-11 (화) · 전사``)를 채운다.
+
+    화면 본문 렌더 중 호출한다 — 헤더가 이번 run 에서 만들어 둔 슬롯에 그대로 쓰므로
+    조회 조건과 값이 어긋나지 않는다. 헤더가 없는 경로(USER 셸·단위 테스트 등)에서는
+    아무 것도 하지 않는다(조용한 무동작). 표시 전용이며 어떤 상태도 바꾸지 않는다.
+    """
+    slot = st.session_state.get(_HEADER_STAMP_SLOT)
+    if slot is None or not str(text).strip():
+        return
+    with slot:
+        st.markdown(
+            f"<span class='hdr-stamp'>{escape(str(text))}</span>", unsafe_allow_html=True
+        )
+
+
 def _conn_pill_html() -> str:
     """상단 헤더 우측 연결 상태 pill — 데이터 모드(persistence 연결) 전용 신호.
 
@@ -1086,7 +1115,16 @@ def _breadcrumb_header(user: dict, page: str) -> None:
         with st.container(key="hdr_row", horizontal=True, gap="small",
                           vertical_alignment="center"):
             st.markdown(crumb_html, unsafe_allow_html=True)
-            st.markdown(conn_html, unsafe_allow_html=True)
+            # 날짜/범위 스탬프 슬롯 — 값은 화면 본문이 같은 run 에서 채운다(header_stamp).
+            # 헤더는 본문보다 먼저 그려지므로 세션에 '발행'하면 한 프레임 늦는다. 슬롯을
+            # 넘겨 두면 조회 조건과 항상 같은 값이 실린다(화면 내부 KPI 슬롯과 같은 패턴).
+            # 채우지 않는 화면에서는 빈 컨테이너라 폭 0 이다(다른 화면 무변경).
+            st.session_state[_HEADER_STAMP_SLOT] = st.container(
+                key="hdr_stamp", width="content"
+            )
+            # 연결 pill 은 키 컨테이너로 감싼다 — CSS 가 순번이 아니라 키로 지정하게(위 주석).
+            with st.container(key="hdr_conn", width="content"):
+                st.markdown(conn_html, unsafe_allow_html=True)
             for label, icon, default_active in _HEADER_ICONS:
                 # 상시 노출 + 음영: 활성이지만 비활성(삭제/저장 대상 없음)이면 음영(disabled).
                 active, enabled, on_click, reason = _hdr_icon_state(page, icon, default_active)

@@ -1,8 +1,20 @@
 """역할별 홈 대시보드.
 
-ADMIN/MANAGER 는 당일 조직 그룹별 근무 보드(주간·야간·휴무…)를, USER 는 본인
-근무 현황을 표시한다. 데이터는 db 파사드를 통해 조회한다 (샘플/Supabase 공통).
-대시보드는 조회 전용이며 저장 계약과 무관하다.
+ADMIN/MANAGER 는 선택한 일자의 근무 현황(지표)과 부서 → 조직 계층별 근무자 명단을,
+USER 는 본인 근무 현황을 표시한다. 데이터는 db 파사드를 통해 조회한다(샘플/Supabase
+공통). 대시보드는 조회 전용이며 저장 계약과 무관하다.
+
+화면 골격(사용자 재구성 지시서 · DESIGN.md §2~§4 토큰)::
+
+    ① 제목/설명            상단 52px 헤더 우측에 선택 일자 스탬프
+    ② 조회 행              [‹ | 일자 | ›] 세그먼트 · [오늘] ······ 우측 끝: 부서 필터 칩
+    ③ 지표 스트립          당일 근무 / 주간 / 야간 / 휴무
+    ④ 부서별 근무자        부서(대분류) → 조직(중분류) → 주간·야간·휴무 3열 명단
+
+계층 용어: 화면의 "부서"는 조직 관리에서 사람이 입력하는 대분류(major_category),
+"조직"은 중분류(minor_category)다(migration 009). 인원은 **중분류 단위로 합산**하므로
+1팀/2팀·1파트/2파트 같은 하위 분할은 화면에 나타나지 않는다. 어떤 분류명도 코드에
+고정하지 않으며, 유일한 예외는 사용자가 지정한 제외 규칙(아래 상수)이다.
 """
 # DESIGN.md §0 화면 유형 규약 — 대시보드형.
 SCREEN_ARCHETYPE = "DASHBOARD"
@@ -14,25 +26,47 @@ import pandas as pd
 import streamlit as st
 
 from modules import db, ui
-from views import workspace
 from views.common import erp
 
-# 버킷 표시 순서와 대표 색상(카테고리 accent — 색만이 아닌 라벨 병기로 이중 부호화).
-# classify_work_group 은 주간/야간/OFF/휴가/None 을 반환한다. OFF→휴무(라벨만),
-# None→기타(값이 있을 때만 노출). 판정이 category 기반이라 근무형태가 추가돼도 자동 반영.
-_BUCKET_ORDER = ["주간", "야간", "휴무", "휴가", "기타"]
-_BUCKET_COLOR = {
-    "주간": "#1E6FD9",
-    "야간": "#7B4FD8",
-    "휴무": "#7A776F",
-    "휴가": "#2F6B4F",
-    "기타": "#8A6A1C",
+# 버킷 표시 순서. classify_work_group 은 주간/야간/OFF/휴가/None 을 반환한다.
+# OFF→휴무, None→기타. 주간·야간·휴무는 항상 열로 두고, 휴가·기타는 실제 인원이 있을
+# 때만 열을 덧붙인다(값이 있는데 사람을 조용히 떨어뜨리지 않기 위함).
+_BUCKET_ORDER = ("주간", "야간", "휴무", "휴가", "기타")
+_CORE_BUCKETS = ("주간", "야간", "휴무")
+# 열 머리글 6px 사각 점 — 색만이 아니라 라벨을 병기하는 이중 부호화(장식용 보조 신호).
+# §2 팔레트 안에서만 고른다: 주간=주 셀 글자색, 야간=야 셀 글자색, 휴가=연차 셀 글자색,
+# 휴무=아주 약함(무채), 기타=제출됨 배지 글자색.
+_BUCKET_DOT = {
+    "주간": "#2f4d99",
+    "야간": "#9c3232",
+    "휴무": "#a09a90",
+    "휴가": "#2f6b45",
+    "기타": "#8a6212",
 }
+# 요일 색(§2 팔레트) — 토/일만 구분한다(요일 글자 자체가 이중 부호화).
+_DOW_COLOR = {5: "#2f4d99", 6: "#9c3232"}
+
 # canonical(비위젯) 일자 키 — 페이지를 이동해도 유지된다. date_input 위젯 키는
 # Streamlit 이 화면 이탈 시 비우므로(선례: schedule_edit) 별도 위젯 키를 두고
-# canonical 로 재seed 한다.
+# canonical 로 재seed 한다. 부서 필터도 같은 2단 방식이다.
 _DASHBOARD_DATE = "dashboard_date"
 _DASHBOARD_DATE_WIDGET = "dash_date_input"
+_DASHBOARD_MAJOR = "dashboard_major"
+_DASHBOARD_MAJOR_WIDGET = "dash_major_pills"
+
+#: 부서 필터의 '전체' 선택지 라벨(대분류명과 충돌하지 않는 고정 문구).
+_ALL_MAJORS = "전체"
+#: 대분류가 비어 있는 부서를 모으는 자리. 감추지 않고 마지막에 따로 노출한다 —
+#: 조직 관리에서 분류가 빠진 부서를 관리자가 발견할 수 있어야 하기 때문이다.
+_UNCLASSIFIED_LABEL = "미분류"
+#: 소속을 해석하지 못한 근무행의 조직 라벨(집계를 조용히 버리지 않기 위함).
+_UNASSIGNED_LABEL = "(부서 미지정)"
+#: 사용자 지정 제외 대분류 — 이 화면에서만 감춘다(데이터·다른 화면 무변경).
+_EXCLUDED_MAJORS = ("관리",)
+#: 시스템 부서(로그인·권한 전용) 제외.
+_EXCLUDED_DEPT_CODES = ("ADMIN",)
+#: 부서 기준정보에 없는 코드의 정렬 자리(항상 뒤).
+_TAIL_ORDER = 10 ** 6
 
 
 def _clean(value) -> str:
@@ -76,19 +110,14 @@ def render(user: dict) -> None:
         _render_user(user)
         return
 
-    # §1-F 변형: 헤더 중립 프레임만(아이콘 밴드 제거 — 표준 아이콘 8종은 상단 52px 헤더가
-    # 소유 §A-5). 새로고침 등은 상단 헤더 아이콘/rerun 이 담당한다.
+    # ① 제목 — §1-F 헤더 중립 프레임(아이콘 밴드 없음: 표준 아이콘 8종은 상단 52px 헤더 소유).
     erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="대시보드",
-        desc="오늘 근무 현황과 근무표 등록 현황을 확인합니다.",
+        desc="선택한 날짜의 근무 현황과 부서별 근무자를 확인합니다.",
         breadcrumb="홈 › 대시보드",
     )
-    _inject_board_style()
-    # U7: 지표(KPI) 스트립을 제목·설명 바로 아래로 이동한다 — 값은 데이터에서 파생하므로 슬롯을
-    # 먼저(제목 직후) 확보하고, 날짜 내비는 그 아래에 둔다(값은 준비 후 deferred 로 채움).
-    kpi_slot = st.container()
-    the_date = _date_nav_bar()
+    _inject_style()
 
     # 범위 결정(fail-closed): ADMIN=전체, MANAGER=자기 부서, 부서 미확정 MANAGER=차단.
     scope, manager_dept = _scope_for(user)
@@ -100,22 +129,11 @@ def render(user: dict) -> None:
         )
         return
 
-    # 영역 순서(§0.3): title(밴드 아이콘 툴바 포함) → status(KPI) → primary(그룹 보드).
-    # 새로고침은 상단 밴드 아이콘으로 이전했다(위 render_icons).
-
-    # 조직 조회(get_org_groups/dept_group_map/team_name 등)도 오류 처리 범위에 포함한다
-    # — 최초 근무 조회만 감싸면 보드 구성 중 데이터소스 오류가 화면 전체 예외가 된다.
+    the_date = _resolve_date()
+    # 조직 조회(부서 기준정보·편성 스냅샷)도 오류 처리 범위에 포함한다 — 근무 조회만
+    # 감싸면 계층 구성 중 데이터소스 오류가 화면 전체 예외가 된다.
     try:
-        day_rows = db.get_day_schedules(the_date)
-        users = db.get_users(include_resigned=False)  # 퇴사자는 현황 집계에서 제외
-        wt = db.work_types_map()
-        display_of, color_of = _display_maps()
-        # 스냅샷 소속: 해당 월 편성이 있으면 그 당시 부서/조로 그룹핑, 없으면 현재
-        # 소속 폴백(표시용, 자동저장 금지 — requirements.md §5·불변계약).
-        snap = _month_snapshot(the_date)
-        board, present_buckets, totals = _build_board(
-            day_rows, users, wt, snap=snap, manager_dept=manager_dept
-        )
+        tree, majors = _duty_board(the_date, manager_dept=manager_dept)
     except db.DATA_SOURCE_ERRORS as exc:
         st.error(f"근무 데이터를 불러오지 못했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
         return
@@ -123,35 +141,56 @@ def render(user: dict) -> None:
         st.error("근무 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # §1-F 지표 스트립(제목 바로 아래 슬롯에 deferred 로 채움, U7) — 당일 근무·주간·야간·휴무.
-    with kpi_slot:
-        st.markdown(_kpi_strip_html(totals), unsafe_allow_html=True)
+    # ② 조회 행 — 일자 세그먼트 + [오늘] + 우측 끝 부서 칩(같은 행).
+    picked = _query_row(the_date, majors)
+    shown = tree if picked == _ALL_MAJORS else [m for m in tree if m["name"] == picked]
+    totals, columns = _summarize(shown)
 
-    if not board:
+    # 상단 52px 헤더 우측 스탬프 — 조회 행과 **같은 run 에서** 같은 값을 채운다(슬롯 방식).
+    ui.header_stamp(
+        f"{the_date.isoformat()} ({ui.weekday_kr(the_date)}) · "
+        f"{_scope_label(picked, manager_dept)}"
+    )
+
+    # ③ 지표 스트립(제목·조회 행 아래 첫 블록, §0-4). 값은 ④ 명단과 같은 집계에서
+    #    파생하므로 필터 선택과 항상 일치한다.
+    st.markdown(_kpi_strip_html(totals), unsafe_allow_html=True)
+
+    # ④ 부서별 근무자.
+    if not shown:
         ui.empty_state(
             f"{the_date.isoformat()}({ui.weekday_kr(the_date)}) 등록된 근무가 없습니다.",
-            head="당일 근무 현황",
+            head="부서별 근무자",
         )
         return
-
-    # 항상 주간·야간·휴무 컬럼을 두고, 값이 있을 때만 휴가·기타 컬럼을 덧붙인다.
-    columns = [b for b in _BUCKET_ORDER if b in {"주간", "야간", "휴무"} or b in present_buckets]
-
-    # 당일 근무 현황 — §1-E 헤어라인 그룹 섹션(카드 제거). 그룹별 버킷 구조는 기존 로직 유지.
-    for group in board:
-        st.markdown(
-            _group_html(group, columns, display_of, color_of),
-            unsafe_allow_html=True,
-        )
+    st.markdown(_people_html(shown, columns), unsafe_allow_html=True)
 
 
-# ---------- 일자 네비게이션 ----------
-def _canonical_date() -> date:
-    value = st.session_state.get(_DASHBOARD_DATE)
-    if not isinstance(value, date):
-        value = date.today()
-        st.session_state[_DASHBOARD_DATE] = value
-    return value
+def _scope_label(picked: str, manager_dept: str | None) -> str:
+    """헤더 스탬프의 범위 표기 — MANAGER 는 담당 부서, ADMIN 은 선택 대분류(기본 전사)."""
+    if manager_dept:
+        return db.dept_name(manager_dept) or manager_dept
+    return "전사" if picked == _ALL_MAJORS else picked
+
+
+# ---------- ② 조회 행 ----------
+def _resolve_date() -> date:
+    """이번 run 의 조회 일자. 위젯 값 → canonical → 오늘 순으로 해석한다.
+
+    date_input 을 직접 바꾼 run 에서는 위젯 키에 새 값이 이미 반영돼 있으므로 위젯을
+    먼저 본다(헤더 스탬프·집계가 같은 run 에서 같은 날짜를 쓴다). 화면을 떠나면
+    Streamlit 이 위젯 키를 비우므로 canonical(비위젯) 키로 복원하고 다시 seed 한다.
+    """
+    picked = st.session_state.get(_DASHBOARD_DATE_WIDGET)
+    if isinstance(picked, date):
+        st.session_state[_DASHBOARD_DATE] = picked
+        return picked
+    cur = st.session_state.get(_DASHBOARD_DATE)
+    if not isinstance(cur, date):
+        cur = date.today()
+    st.session_state[_DASHBOARD_DATE] = cur
+    st.session_state[_DASHBOARD_DATE_WIDGET] = cur  # 이탈 후 복귀 재seed
+    return cur
 
 
 def _set_date(new_date: date) -> None:
@@ -160,74 +199,65 @@ def _set_date(new_date: date) -> None:
     st.session_state[_DASHBOARD_DATE_WIDGET] = new_date
 
 
-def _date_nav_bar() -> date:
-    """‹ 전일 / 익일 › + 네이티브 캘린더 date_input + [오늘]. 기본=오늘.
+def _shift_date(days: int) -> None:
+    """전일/익일 이동(on_click 콜백) — 콜백은 다음 run 보다 먼저 실행되므로 헤더도 새 값."""
+    _set_date(_resolve_date() + timedelta(days=days))
 
-    canonical 키(dashboard_date)는 비위젯이라 페이지 이동에도 유지된다. date_input
-    위젯 키는 이동 시 Streamlit 이 비우므로 매 실행마다 canonical 로 재seed 하고,
-    위젯에서 새 날짜를 고르면 canonical 에 반영한다.
+
+def _goto_today() -> None:
+    _set_date(date.today())
+
+
+def _query_row(the_date: date, majors: list) -> str:
+    """일자 세그먼트 + [오늘] + 부서 필터 칩을 **한 행**에 렌더하고 선택 대분류를 반환한다.
+
+    칩은 대분류 데이터에서 만든다('전체' + 근무자가 있는 대분류) — 대분류명을 코드에
+    박지 않으므로 조직 개편이 그대로 반영되고, 근무자가 없는 대분류는 칩도 생기지
+    않는다. 선택값은 canonical 키에 보관해 화면을 떠났다 돌아와도 유지한다.
     """
-    cur = _canonical_date()
-    cols = st.columns([1.3, 1.3, 2.6, 1.2, 4.6])
-    with cols[0]:
-        if st.button("‹ 전일", key="dash_prev", width="stretch"):
-            _set_date(cur - timedelta(days=1))
-            st.rerun()
-    with cols[1]:
-        if st.button("익일 ›", key="dash_next", width="stretch"):
-            _set_date(cur + timedelta(days=1))
-            st.rerun()
-    with cols[3]:
-        if st.button("오늘", key="dash_today", width="stretch"):
-            _set_date(date.today())
-            st.rerun()
-    with cols[2]:
-        # 이동 후 위젯 상태가 비워지면 canonical 로 재seed(값 인자 대신 세션키 사용).
-        st.session_state.setdefault(_DASHBOARD_DATE_WIDGET, cur)
-        picked = st.date_input(
-            "조회 일자", key=_DASHBOARD_DATE_WIDGET, label_visibility="collapsed"
-        )
-    if isinstance(picked, date) and picked != cur:
-        st.session_state[_DASHBOARD_DATE] = picked  # 위젯 선택 → canonical 반영
-        cur = picked
-    with cols[4]:
-        color = ui.weekend_color(cur)
-        st.markdown(
-            f"<div class='dash-date-label'>조회 일자 "
-            f"<b style='color:{color}'>{cur.isoformat()} ({ui.weekday_kr(cur)})</b></div>",
-            unsafe_allow_html=True,
-        )
-    return cur
+    options = [_ALL_MAJORS] + list(majors)
+    stored = st.session_state.get(_DASHBOARD_MAJOR)
+    if stored not in options:  # 조직 개편·일자 이동으로 사라진 선택은 전체로 되돌린다
+        stored = _ALL_MAJORS
+        st.session_state[_DASHBOARD_MAJOR] = stored
+    if st.session_state.get(_DASHBOARD_MAJOR_WIDGET) not in options:
+        st.session_state[_DASHBOARD_MAJOR_WIDGET] = stored  # 이탈 후 복귀·옵션 변경 복구
+
+    dow_color = _DOW_COLOR.get(the_date.weekday(), "#1c1a17")
+    with st.container(key="dash_qrow", horizontal=True, gap="small",
+                      vertical_alignment="center"):
+        # 전일/일자/익일은 한 덩어리 세그먼트(내부 구분선만, 버튼 3개를 늘어놓지 않는다).
+        with st.container(key="dash_seg", horizontal=True, gap=None,
+                          vertical_alignment="center", width="content"):
+            st.button("‹", key="dash_prev", help="전일", on_click=_shift_date, args=(-1,))
+            with st.container(key="dash_segval", horizontal=True, gap=None,
+                              vertical_alignment="center", width="content"):
+                st.date_input(
+                    "조회 일자", key=_DASHBOARD_DATE_WIDGET, format="YYYY-MM-DD",
+                    label_visibility="collapsed", width=92,
+                )
+                st.markdown(
+                    f"<span class='dash-dow' style='color:{dow_color}'>"
+                    f"({ui.weekday_kr(the_date)})</span>",
+                    unsafe_allow_html=True,
+                )
+            st.button("›", key="dash_next", help="익일", on_click=_shift_date, args=(1,))
+        st.button("오늘", key="dash_today", on_click=_goto_today)
+        with st.container(key="dash_chips", width="content"):
+            picked = st.pills(
+                "부서 필터", options, key=_DASHBOARD_MAJOR_WIDGET, required=True,
+                label_visibility="collapsed", width="content",
+            )
+    picked = picked if picked in options else _ALL_MAJORS
+    st.session_state[_DASHBOARD_MAJOR] = picked
+    return picked
 
 
-# ---------- 표시맵·스냅샷 헬퍼 ----------
-def _display_maps():
-    """근무 약칭·색상 표시맵. 활성은 work_type_display(약칭 모호성 처리)를 쓰고,
-    비활성(소프트삭제) 근무형태도 과거 근무 참조 보존(requirements.md §6.4·§7)을 위해
-    전체 기준정보에서 약칭·색을 보강한다 — 활성 매핑이 우선한다.
-    """
-    display_of, color_of = workspace.work_type_display()
-    display_of = dict(display_of)
-    color_of = dict(color_of)
-    wt_all = db.get_work_types()
-    if not wt_all.empty:
-        for _, r in wt_all.iterrows():
-            code = _clean(r.get("code"))
-            if not code:
-                continue
-            label = _clean(r.get("short_label")) or code
-            color = _clean(r.get("color"))
-            display_of.setdefault(code, label)
-            if color.startswith("#"):
-                color_of.setdefault(code, color)
-                color_of.setdefault(label, color)
-    return display_of, color_of
-
-
+# ---------- 스냅샷·버킷 ----------
 def _month_snapshot(the_date: date) -> dict:
     """해당 일자가 속한 월의 편성 스냅샷 emp_no -> (dept_code, team_code).
 
-    편성 스냅샷이 있으면 그 당시 소속으로 그룹을 결정한다(불변계약: 스냅샷은 해당
+    편성 스냅샷이 있으면 그 당시 소속으로 계층을 결정한다(불변계약: 스냅샷은 해당
     월의 부서·운영단위를 보존 — requirements.md §5). 없으면 호출부가 현재 users
     소속으로 폴백한다(표시용, 자동저장 금지).
     """
@@ -242,7 +272,6 @@ def _month_snapshot(the_date: date) -> dict:
     return snap
 
 
-# ---------- 보드 구성 ----------
 def _bucket_of(code: str, wt: dict) -> str:
     group = db.classify_work_group(code, wt.get(str(code).strip(), {}))
     if group == "OFF":
@@ -252,113 +281,130 @@ def _bucket_of(code: str, wt: dict) -> str:
     return "기타"
 
 
-def _build_board(day_rows, users, wt, snap=None, manager_dept=None):
-    """당일 근무행을 조직 그룹 → 버킷 → 인원으로 집계한다.
+def _order_of(value) -> int:
+    """정렬 순서 숫자화(해석 불가는 0) — 조직 관리 시트의 '순서' 열을 그대로 따른다."""
+    num = pd.to_numeric(value, errors="coerce")
+    return 0 if pd.isna(num) else int(num)
 
-    - snap: emp_no -> (dept_code, team_code) 편성 스냅샷. 있으면 그 당시 소속으로
-      그룹핑하고, 없으면 현재 users 소속으로 폴백한다(표시용, 저장 안 함).
-    - manager_dept: 지정되면 그 부서(담당 범위)의 근무자만 집계한다(MANAGER 범위).
-      None 이면 전체(ADMIN).
 
-    반환: (board, present_buckets, totals)
-      - board: [{code, name, total, buckets:{버킷: [ {name, team, code} ]}}], 그룹순
-      - present_buckets: 실제 인원이 있는 버킷 집합(휴가/기타 컬럼 노출 판단용)
-      - totals: 버킷별 전체 인원수(요약 카드)
+# ---------- ④ 집계 ----------
+def _dept_index(depts) -> tuple[dict, set]:
+    """부서코드 → (대분류, 중분류, 정렬순서, 부서명) 색인 + 제외 부서코드 집합.
+
+    비활성 부서도 색인에 넣는다 — 그 부서로 등록된 근무가 남아 있으면 계층을 해석해
+    제자리에 보여야 한다(집계를 조용히 버리지 않는다). 감추는 것은 규칙 두 가지뿐:
+    시스템 부서(``_EXCLUDED_DEPT_CODES``)와 사용자 지정 제외 대분류(``_EXCLUDED_MAJORS``).
+    제외는 지표와 명단에 **같은 기준**으로 적용된다(둘이 다른 말을 하지 않게).
     """
-    snap = snap or {}
-    totals = {b: 0 for b in _BUCKET_ORDER}
-    present_buckets: set = set()
-    if day_rows is None or day_rows.empty:
-        return [], present_buckets, totals
+    index: dict = {}
+    excluded: set = {code for code in _EXCLUDED_DEPT_CODES}
+    if depts is None or depts.empty:
+        return index, excluded
+    for _, row in depts.iterrows():
+        code = _clean(row.get("dept_code"))
+        if not code:
+            continue
+        major = _clean(row.get("major_category"))
+        if code.upper() in _EXCLUDED_DEPT_CODES or major in _EXCLUDED_MAJORS:
+            excluded.add(code)
+            continue
+        index[code] = (
+            major,
+            _clean(row.get("minor_category")),
+            _order_of(row.get("sort_order")),
+            _clean(row.get("dept_name")) or code,
+        )
+    return index, excluded
 
+
+def _duty_board(the_date, *, manager_dept=None, depts=None, users=None, day_rows=None):
+    """선택 일자의 근무행을 부서(대분류) → 조직(중분류) → 버킷별 명단으로 모은다.
+
+    - 소속 판정: 그 달 편성 스냅샷 우선, 없으면 현재 users 소속 폴백(표시용·저장 금지).
+    - 버킷 판정: :func:`_bucket_of` (= ``db.classify_work_group``) — 새 분류를 만들지 않는다.
+    - 인원은 **중분류 단위로 합산**한다(PET생산1팀·2팀 → PET생산팀). 중분류가 빈 부서는
+      부서명을 조직 라벨로 쓴다.
+    - 근무자가 없는 조직·부서는 애초에 생기지 않는다(근무행에서만 계층을 만든다).
+    - ``manager_dept`` 가 지정되면 그 부서 근무자만 집계한다(MANAGER 범위).
+    - depts/users/day_rows 는 테스트 주입용.
+
+    반환: ``(tree, majors)``
+      - tree: ``[{name, unclassified, orgs:[{name, people:{버킷:[{name, emp_no}]}}]}]``
+      - majors: 부서 필터 칩 선택지(노출 순서 그대로)
+    """
+    users = db.get_users(include_resigned=False) if users is None else users
+    depts = db.get_org_departments() if depts is None else depts
+    day_rows = db.get_day_schedules(the_date) if day_rows is None else day_rows
+    if day_rows is None or day_rows.empty:
+        return [], []
+
+    index, excluded = _dept_index(depts)
+    wt = db.work_types_map()
+    snap = _month_snapshot(the_date)
     merged = day_rows.merge(users, on="emp_no", how="left")
 
-    # 그룹 권위는 migration 004(organization_groups) — 앱 전체(master_org/db.py)와 동일.
-    # 활성 그룹만 반영하고 그룹명은 organization_groups 에서 정확히 조회한다(P2-4).
-    # 부서가 비활성 그룹에 매핑돼 있거나(soft-delete) 그룹 미해석(조직 스키마 capability 미준비, 도입: migration 004)이면
-    # 비활성 그룹을 재출현시키지 않고 부서를 자체 그룹으로 폴백한다.
-    active_groups = db.get_org_groups(is_active=True)
-    if not active_groups.empty:
-        active_groups = active_groups.sort_values("sort_order", kind="stable")
-    group_name_of = dict(zip(
-        active_groups["group_code"].astype(str), active_groups["group_name"].astype(str)
-    )) if not active_groups.empty else {}
-    active_codes = set(group_name_of)
-    group_seq = list(active_groups["group_code"].astype(str)) if not active_groups.empty else []
-    dgm = db.dept_group_map()  # dept_code -> (group_code, group_order)
-
-    boards: dict = {}
-    order: list = list(group_seq)
-
+    majors: dict = {}
     for _, row in merged.iterrows():
         emp_no = _clean(row.get("emp_no"))
-        # 스냅샷 소속 우선 → 현재 users 소속 폴백(과거일/편성없음, 표시용·저장 안 함).
-        snap_dept, snap_team = snap.get(emp_no, ("", ""))
+        snap_dept, _team = snap.get(emp_no, ("", ""))
         dept = snap_dept or _clean(row.get("dept_code"))
-        team = snap_team or _clean(row.get("team_code"))
-
         if manager_dept is not None and dept != manager_dept:
             continue  # MANAGER 담당 부서 범위 밖
-
-        gc, _ = dgm.get(dept, ("", 0))
-        if gc not in active_codes:
-            # 비활성 그룹/미매핑/조직 스키마 capability 미준비(도입: migration 004) → 부서를 자체 그룹으로 폴백(비활성 재출현 방지)
-            gc = dept or "(미지정)"
-        if gc not in boards:
-            if gc == "(미지정)":
-                name = "(그룹 미지정)"
-            else:
-                name = group_name_of.get(gc) or db.dept_name(gc)
-            boards[gc] = {"code": gc, "name": name, "total": 0, "buckets": {}}
-            if gc not in order:
-                order.append(gc)
-
-        code = _clean(row.get("work_type_code"))
-        bucket = _bucket_of(code, wt)
-        display_name = _clean(row.get("name")) or emp_no
-        team_label = db.team_name(dept, team)
-        boards[gc]["buckets"].setdefault(bucket, []).append(
-            {"name": display_name, "team": team_label, "code": code}
+        if dept in excluded or dept.upper() in _EXCLUDED_DEPT_CODES:
+            continue  # 제외 규칙(시스템 부서·제외 대분류)
+        major, minor, order, dept_name = index.get(
+            dept, ("", "", _TAIL_ORDER, db.dept_name(dept) or dept)
         )
-        boards[gc]["total"] += 1
-        totals[bucket] += 1
-        present_buckets.add(bucket)
+        major_key = major or _UNCLASSIFIED_LABEL
+        org_key = minor or dept_name or _UNASSIGNED_LABEL
+        node = majors.setdefault(major_key, {
+            "name": major_key, "unclassified": not major,
+            "order": order, "orgs": {},
+        })
+        node["order"] = min(node["order"], order)
+        org = node["orgs"].setdefault(org_key, {"name": org_key, "order": order, "people": {}})
+        org["order"] = min(org["order"], order)
+        org["people"].setdefault(_bucket_of(_clean(row.get("work_type_code")), wt), []).append(
+            {"name": _clean(row.get("name")) or emp_no, "emp_no": emp_no}
+        )
 
-    # 인원이 실제로 배치된 그룹만, 정의 순서대로 반환.
-    board = [boards[gc] for gc in order if gc in boards and boards[gc]["total"] > 0]
-    return board, present_buckets, totals
+    # 노출 순서는 조직 관리 시트의 순서(sort_order)를 그대로 따르고, 미분류만 마지막.
+    tree = []
+    for node in sorted(majors.values(),
+                       key=lambda m: (1 if m["unclassified"] else 0, m["order"], m["name"])):
+        orgs = sorted(node["orgs"].values(), key=lambda o: (o["order"], o["name"]))
+        for org in orgs:
+            for members in org["people"].values():
+                members.sort(key=lambda p: (p["name"], p["emp_no"]))
+        node["orgs"] = orgs
+        tree.append(node)
+    return tree, [node["name"] for node in tree]
 
 
-def _text_on(hex_color: str) -> str:
-    """근무형태 DB hex 배경 위 대비 텍스트색(흰/검) — WCAG 상대명도(약칭 배지 가독)."""
-    m = str(hex_color or "").strip().lstrip("#")
-    if len(m) != 6:
-        return "#ffffff"
-    try:
-        r, g, b = (int(m[i:i + 2], 16) for i in (0, 2, 4))
-    except ValueError:
-        return "#ffffff"
-
-    def _lin(c: float) -> float:
-        c /= 255.0
-        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-
-    lum = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
-    return "#ffffff" if (1.05 / (lum + 0.05)) >= ((lum + 0.05) / 0.05) else "#111111"
+def _summarize(tree: list) -> tuple[dict, list]:
+    """표시 중인 계층에서 버킷 합계와 렌더할 열 목록을 만든다(지표 = 명단의 합)."""
+    totals = {bucket: 0 for bucket in _BUCKET_ORDER}
+    for major in tree:
+        for org in major["orgs"]:
+            for bucket, members in org["people"].items():
+                totals[bucket] = totals.get(bucket, 0) + len(members)
+    columns = [b for b in _BUCKET_ORDER if b in _CORE_BUCKETS or totals.get(b)]
+    return totals, columns
 
 
+# ---------- ③ 지표 · ④ 명단 HTML ----------
 def _kpi_strip_html(totals: dict) -> str:
-    """§1-F 지표 스트립 — 좌측 2px 보더 + 26px 모노 값. 강조(당일 근무)만 오렌지 보더."""
+    """지표 스트립 — 좌측 2px 보더 + 모노 값(카드 없음). 당일 근무만 액센트."""
     on_duty = totals.get("주간", 0) + totals.get("야간", 0)
     metrics = [
-        ("당일 근무", on_duty, on_duty > 0),
+        ("당일 근무", on_duty, True),
         ("주간", totals.get("주간", 0), False),
         ("야간", totals.get("야간", 0), False),
         ("휴무", totals.get("휴무", 0), False),
     ]
     cells = []
     for label, value, accent in metrics:
-        border = "#c2410c" if accent else "#e0dbd2"
+        border = "#c2410c" if accent else "#cfc8bd"
         vcolor = "#b4451a" if accent else "#1c1a17"
         cells.append(
             f"<div class='dash-kpi' style='border-left:2px solid {border};'>"
@@ -370,106 +416,147 @@ def _kpi_strip_html(totals: dict) -> str:
     return f"<div class='dash-kpis'>{''.join(cells)}</div>"
 
 
-def _group_html(group, columns, display_of, color_of) -> str:
-    """한 그룹 섹션(§1-E 헤어라인) — 그룹명+인원 헤더 + 버킷 그리드(카드 없음)."""
-    head = (
-        "<div class='dash-group-head'>"
-        f"<span class='dash-group-name'>{escape(group['name'])}</span>"
-        f"<span class='dash-group-count'>{group['total']}</span>명"
-        "</div>"
-    )
-    return (
-        "<div class='dash-group'>" + head
-        + _group_grid_html(group, columns, display_of, color_of)
-        + "</div>"
-    )
+def _people_html(tree: list, columns: list) -> str:
+    """부서 → 조직 → 주간·야간·휴무 3열 명단(이름은 열 아래로 세로로 쌓인다).
+
+    이름마다 위젯을 만들지 않고 한 번의 HTML 로 렌더한다(리렌더 비용·간격 붕괴 방지).
+    열은 flex-wrap 이라 좁아지면 2열 → 1열로 접힌다(고정 3분할 아님).
+    """
+    blocks = []
+    for major in tree:
+        # 부서 헤더 우측은 비운다(합계는 조직 줄이 말한다 — 같은 말을 두 번 하지 않는다).
+        blocks.append(f"<div class='dorg-major'>{escape(major['name'])}</div>")
+        for org in major["orgs"]:
+            counts = {b: len(org["people"].get(b, [])) for b in columns}
+            # 요약은 기본 3버킷을 항상(0 이어도) 쓰고, 휴가·기타는 그 조직에 실제로
+            # 있을 때만 덧붙인다 — 열은 목록 전체에서 같은 순서·같은 개수로 유지해
+            # 조직끼리 세로로 맞춰 읽히게 두되, 요약 문구에 0 을 늘어놓지 않는다.
+            summary = " · ".join(
+                f"{b} {counts[b]}" for b in columns if b in _CORE_BUCKETS or counts[b]
+            )
+            cols_html = []
+            for bucket in columns:
+                names = "".join(
+                    f"<div class='dorg-name'>{escape(person['name'])}</div>"
+                    for person in org["people"].get(bucket, [])
+                )
+                cols_html.append(
+                    "<div class='dorg-col'><div class='dorg-chead'>"
+                    f"<span class='dorg-dot' style='background:{_BUCKET_DOT.get(bucket, '#a09a90')}'></span>"
+                    f"<span class='dorg-clabel'>{escape(bucket)}</span>"
+                    f"<span class='dorg-cnum'>{counts[bucket]}</span></div>"
+                    f"<div class='dorg-names'>{names}</div></div>"
+                )
+            blocks.append(
+                "<div class='dorg-org'><div class='dorg-ohead'>"
+                f"<span class='dorg-oname'>{escape(org['name'])}</span>"
+                f"<span class='dorg-osum'>{escape(summary)}</span></div>"
+                f"<div class='dorg-cols'>{''.join(cols_html)}</div></div>"
+            )
+    return f"<div class='dorg'>{''.join(blocks)}</div>"
 
 
-def _group_grid_html(group, columns, display_of, color_of) -> str:
-    """한 그룹 내부의 버킷 컬럼 그리드(auto-fit → 좁은 폭에서 자연 줄바꿈). 카드 아님(헤어라인)."""
-    cols_html = []
-    for bucket in columns:
-        people = group["buckets"].get(bucket, [])
-        accent = _BUCKET_COLOR.get(bucket, "#8A8880")
-        people_html = "".join(
-            "<div class='dash-person'>"
-            + _person_badge(person["code"], display_of, color_of)
-            + f"<span class='dash-name'>{escape(person['name'])}</span>"
-            + (f"<span class='dash-team'>{escape(person['team'])}</span>" if person["team"] else "")
-            + "</div>"
-            for person in people
-        ) or "<div class='dash-empty'>-</div>"
-        cols_html.append(
-            "<div class='dash-col'>"
-            "<div class='dash-col-head'>"
-            f"<span class='dash-dot' style='background:{accent}'></span>"
-            f"<span class='dash-bucket'>{escape(bucket)}</span>"
-            f"<span class='dash-count'>{len(people)}</span>"
-            "</div>"
-            f"<div class='dash-list'>{people_html}</div>"
-            "</div>"
-        )
-    return f"<div class='dash-grid'>{''.join(cols_html)}</div>"
-
-
-def _person_badge(code: str, display_of: dict, color_of: dict) -> str:
-    code = str(code or "").strip()
-    if not code:
-        return ""
-    label = display_of.get(code, code)
-    color = color_of.get(code) or color_of.get(label) or "#9AA0A6"
-    return (f"<span class='dash-badge' style='background:{color};color:{_text_on(color)}'>"
-            f"{escape(label)}</span>")
-
-
-def _inject_board_style() -> None:
-    # §1-F 지표 스트립 + §1-E 헤어라인 보드(카드 없음). §2 팔레트, 작은 의미 텍스트 ≥#6b665d.
-    # 모노(값·건수)는 전역 stMarkdownContainer 폰트 규칙(특이도 0,2,0)을 0,3,0 규칙으로 덮어
-    # 강제한다(Streamlit 이 인라인 font-family 를 제거하므로 CSS 로).
+def _inject_style() -> None:
+    # §2 팔레트·§3 타이포. 카드(테두리+radius+그림자) 없음 — 구획은 헤어라인과 여백뿐(§0-5).
+    # 작은 의미 텍스트(라벨·건수·요약)는 부속서 A-2 하한 #6b665d 이상을 쓴다.
+    # 모노(값·건수)는 전역 stMarkdownContainer 폰트 규칙(특이도 0,2,0)을 0,3,0 규칙으로
+    # 덮어 강제한다(Streamlit 이 인라인 font-family 를 제거하므로 CSS 로).
     st.markdown(
         """
 <style>
-.dash-date-label { font-size:13px; color:#6b665d; padding-top:.5rem; }
-.dash-date-label b { font-weight:700; }
-/* §1-F 지표 스트립 — 좌측 2px 보더 + 26px 모노 값(카드 박스 없음) */
-.dash-kpis { display:flex; flex-wrap:wrap; gap:12px; margin:.5rem 0 1.1rem; }
-.dash-kpi { flex:1 1 120px; min-width:0; display:flex; flex-direction:column; gap:4px; padding:2px 16px; }
-.dash-klabel { font-size:12px; color:#6b665d; }
+/* ===== ② 조회 행 — 세그먼트 + [오늘] + 우측 끝 부서 칩(한 행), 하단 헤어라인 ===== */
+.st-key-dash_qrow { align-items:center !important; flex-wrap:wrap !important;
+  gap:10px !important; border-bottom:1px solid #e0dbd2; padding-bottom:10px;
+  margin-bottom:12px; }
+.st-key-dash_qrow > div { flex:0 0 auto !important; }
+/* 마지막 항목(부서 칩)만 우측 끝으로 — 키 컨테이너는 레이아웃 래퍼로 감싸이므로
+   래퍼(직계 자식)에 걸어야 margin-left:auto 가 먹는다. */
+.st-key-dash_qrow > div:last-child { margin-left:auto !important; }
+/* 전일 | 일자 | 익일 = 한 덩어리(외곽 1px, 내부 구분선만) */
+.st-key-dash_seg { height:34px; border:1px solid #e2ddd4; border-radius:8px;
+  background:#fff; overflow:hidden; align-items:stretch !important; gap:0 !important;
+  padding:0 !important; }
+.st-key-dash_seg > div { flex:0 0 auto !important; display:flex; align-items:center; }
+.st-key-dash_seg > div + div { border-left:1px solid #eeeae3; }
+/* 후손 선택자로 잡는다 — help(툴팁) 래퍼가 있으면 button 이 .stButton 의 직계자식이
+   아니라 직계자식 선택자는 크기 규칙을 놓친다(키트 _KIT_CSS 주석과 같은 사유). */
+.st-key-dash_seg button {
+  height:32px !important; min-height:32px !important; min-width:34px; padding:0 10px;
+  border:0 !important; border-radius:0 !important; background:transparent !important;
+  box-shadow:none !important; color:#4a453d !important; font-size:15px; line-height:1; }
+.st-key-dash_seg button:hover { background:#f1eee8 !important; color:#1c1a17 !important; }
+.st-key-dash_seg button:focus-visible { outline:2px solid #c2410c; outline-offset:-2px; }
+.st-key-dash_seg div.stButton, .st-key-dash_seg div[data-testid="stTooltipHoverTarget"] {
+  display:flex; align-items:center; }
+/* 일자 텍스트 = 모노 14px/500. date_input 은 세그먼트 안에서 테두리 없이 값처럼 보이게. */
+.st-key-dash_segval { padding:0 6px 0 12px; gap:2px !important; }
+.st-key-dash_segval div[data-testid="stDateInput"] { width:92px; }  /* 모노 10자(84px) + 여유 */
+.st-key-dash_segval div[data-baseweb="input"] { border:0 !important; background:transparent !important;
+  box-shadow:none !important; }
+.st-key-dash_segval div[data-baseweb="input"] > div { padding-right:0 !important; }
+.st-key-dash_segval input { padding:0 !important; height:32px; color:#1c1a17 !important;
+  font-family:'IBM Plex Mono','Consolas','Menlo',monospace !important; font-size:14px !important;
+  font-weight:500 !important; font-variant-numeric:tabular-nums; cursor:pointer; }
+.st-key-dash_segval div[data-testid="stDateInput"] svg { width:15px; height:15px; color:#8b857c; }
+.dash-dow { font-family:'IBM Plex Mono','Consolas','Menlo',monospace; font-size:14px;
+  font-weight:500; white-space:nowrap; }
+/* [오늘] = 분리된 보조 버튼(같은 높이·테두리) */
+.st-key-dash_today button {
+  height:34px !important; min-height:34px !important; padding:0 13px;
+  border:1px solid #e2ddd4 !important; border-radius:8px; background:#fff !important;
+  color:#4a453d !important; font-size:13px; }
+.st-key-dash_today button:hover { background:#f1eee8 !important; color:#1c1a17 !important; }
+/* 부서 필터 칩(st.pills = stButtonGroup) — 선택은 오렌지 틴트 pill, 비선택은 중립 테두리. */
+.st-key-dash_chips div[data-testid="stButtonGroup"] { gap:6px; flex-wrap:wrap; }
+.st-key-dash_chips div[data-testid="stButtonGroup"] button {
+  min-height:28px; padding:5px 12px; border-radius:999px;
+  border:1px solid #e2ddd4 !important; background:#fff !important; color:#6b665d !important;
+  font-size:13px !important; font-weight:500; }
+.st-key-dash_chips div[data-testid="stButtonGroup"] button p { font-size:13px !important; }
+.st-key-dash_chips div[data-testid="stButtonGroup"] button:hover {
+  border-color:#cfc8bd !important; color:#1c1a17 !important; }
+.st-key-dash_chips div[data-testid="stButtonGroup"] button[aria-checked="true"] {
+  border-color:#c2410c !important; background:#fdf3ec !important; color:#b4451a !important;
+  font-weight:600; }
+.st-key-dash_chips div[data-testid="stButtonGroup"] button:focus-visible {
+  outline:2px solid #c2410c; outline-offset:1px; }
+/* ===== ③ 지표 스트립 — 좌측 2px 보더 + 모노 값(카드 없음) ===== */
+.dash-kpis { display:flex; flex-wrap:wrap; gap:12px; margin:.1rem 0 1rem; }
+.dash-kpi { flex:1 1 168px; min-width:0; display:flex; flex-direction:column; gap:3px;
+  padding:2px 16px; }
+.dash-klabel { font-size:13px; color:#6b665d; }
 .dash-kval-row { display:flex; align-items:baseline; gap:4px; }
-.dash-kval { font-size:26px; font-weight:600; letter-spacing:-0.03em; }
-.dash-kunit { font-size:11.5px; color:#6b665d; }
-/* §1-E 그룹 섹션 — 헤어라인 구획, 카드/보더/그림자 없음 */
-.dash-group { padding:6px 0 14px; border-bottom:1px solid #e0dbd2; margin-bottom:4px; }
-.dash-group:last-child { border-bottom:0; }
-.dash-group-head { display:flex; align-items:baseline; gap:8px; margin:2px 0 8px;
-  font-size:12px; color:#6b665d; }
-.dash-group-name { font-size:14px; font-weight:600; color:#1c1a17; }
-.dash-group-count { font-weight:600; color:#1c1a17; }
-.dash-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-  gap:6px 22px; margin-top:.2rem; }
-.dash-col { min-width:0; }
-.dash-col-head { display:flex; align-items:center; gap:.4rem; padding:0 0 5px;
-  border-bottom:1px solid #cfc8bd; }
-.dash-dot { width:8px; height:8px; border-radius:2px; flex:0 0 auto; }
-.dash-bucket { font-size:12.5px; font-weight:600; color:#1c1a17; }
-.dash-count { margin-left:auto; font-size:12.5px; font-weight:600; color:#1c1a17; }
-.dash-list { padding:2px 0 0; display:flex; flex-direction:column; }
-.dash-person { display:flex; align-items:center; gap:.45rem; padding:.28rem 0;
-  border-bottom:1px solid #e6e2da; }
-.dash-person:last-child { border-bottom:none; }
-.dash-badge { display:inline-flex; align-items:center; justify-content:center; min-width:26px;
-  padding:.05rem .34rem; border-radius:6px; font-size:11.5px; font-weight:600; flex:0 0 auto; }
-.dash-name { font-size:14.5px; color:#1c1a17; overflow-wrap:anywhere; }
-.dash-team { margin-left:auto; font-size:11.5px; color:#6b665d; flex:0 0 auto; }
-.dash-empty { color:#6b665d; font-size:12.5px; padding:.3rem 0; }
+.dash-kval { font-size:27px; font-weight:600; letter-spacing:-0.03em; line-height:1.15; }
+.dash-kunit { font-size:13px; color:#6b665d; }
+/* ===== ④ 부서별 근무자 — 부서 → 조직 → 주간·야간·휴무 3열 ===== */
+.dorg-major { font-size:15px; font-weight:600; color:#1c1a17; padding-bottom:6px;
+  border-bottom:1px solid #cfc8bd; margin-top:14px; }
+.dorg { margin-top:2px; }
+.dorg-org { padding:14px 0 16px; border-bottom:1px solid #e6e2da; }
+.dorg-ohead { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.dorg-oname { font-size:14px; font-weight:600; color:#1c1a17; overflow-wrap:anywhere; }
+.dorg-osum { margin-left:auto; font-size:12px; color:#6b665d; white-space:nowrap; }
+.dorg-cols { display:flex; flex-wrap:wrap; gap:12px 28px; margin-top:9px; }
+.dorg-col { flex:1 1 190px; min-width:0; }
+.dorg-chead { display:flex; align-items:center; gap:7px; padding-bottom:5px;
+  border-bottom:1px solid #e0dbd2; }
+.dorg-dot { width:6px; height:6px; border-radius:1px; flex:0 0 auto; }
+.dorg-clabel { font-size:13px; font-weight:500; color:#4a453d; }
+.dorg-cnum { margin-left:auto; font-size:12px; color:#6b665d; }
+.dorg-name { font-size:14.5px; color:#1c1a17; padding:6px 0; overflow-wrap:anywhere;
+  border-bottom:1px solid #efece6; }
 /* 모노 강제(값·건수) — 인라인 font-family 는 Streamlit 이 제거하므로 0,3,0 규칙으로 */
 .stApp [data-testid="stMarkdownContainer"] .dash-kval,
-.stApp [data-testid="stMarkdownContainer"] .dash-count,
-.stApp [data-testid="stMarkdownContainer"] .dash-group-count {
+.stApp [data-testid="stMarkdownContainer"] .dash-dow,
+.stApp [data-testid="stMarkdownContainer"] .dorg-osum,
+.stApp [data-testid="stMarkdownContainer"] .dorg-cnum {
   font-family:'IBM Plex Mono','Consolas','Menlo',monospace; font-variant-numeric:tabular-nums;
 }
 @media (max-width:768px) {
-  .dash-grid { grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:6px 14px; }
+  /* 줄바꿈되면 칩을 우측으로 밀지 않는다(다음 줄 좌측 정렬) */
+  .st-key-dash_qrow > div:last-child { margin-left:0 !important; }
+  .dorg-cols { gap:10px 16px; }
+  .dorg-col { flex:1 1 150px; }
 }
 </style>
 """,

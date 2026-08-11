@@ -353,8 +353,14 @@ def test_day_schedules() -> None:
         db.supabase_repository._schedule_rows = orig_rows
 
 
+def _board_names(tree) -> list:
+    """계층 트리에 실린 근무자 이름 전체(순서 무관 비교용)."""
+    return [p["name"] for m in tree for o in m["orgs"] for lst in o["people"].values()
+            for p in lst]
+
+
 def test_dashboard_board_contracts() -> None:
-    print("views.dashboard 보드 계약 (MANAGER 범위·스냅샷 소속·비활성 표시)")
+    print("views.dashboard 계층 집계 계약 (MANAGER 범위·스냅샷 소속·중분류 합산·빈 조직 미표시)")
     from datetime import date as _date
     from views import dashboard as dash
 
@@ -364,30 +370,31 @@ def test_dashboard_board_contracts() -> None:
 
     day = db.get_day_schedules(_date(2026, 7, 1))
     users = db.get_users()
-    wt = db.work_types_map()
     merged = day.merge(users, on="emp_no", how="left")
 
-    # ADMIN(범위 없음): 근무행 전원 집계
-    board, present, totals = dash._build_board(day, users, wt)
-    admin_total = sum(g["total"] for g in board)
+    # ADMIN(범위 없음): 근무행 전원이 계층 어딘가에 실린다(집계를 조용히 버리지 않는다).
+    tree, majors = dash._duty_board(_date(2026, 7, 1))
+    admin_total = len(_board_names(tree))
     check("ADMIN 전체 집계 = 근무행 수", admin_total == len(day))
-    check("요약 totals 합 = 근무행 수", sum(totals.values()) == len(day))
+    totals, columns = dash._summarize(tree)
+    check("지표 totals 합 = 근무행 수(지표=명단 합)", sum(totals.values()) == len(day))
+    check("기본 3열(주간·야간·휴무) 항상 노출",
+          columns[:3] == ["주간", "야간", "휴무"])
+    check("필터 칩 선택지 = 계층 대분류(노출 순서 그대로)",
+          majors == [m["name"] for m in tree])
+    check("근무자 없는 조직은 애초에 생기지 않는다",
+          all(sum(len(v) for v in o["people"].values()) > 0
+              for m in tree for o in m["orgs"]))
 
     # MANAGER 범위: 담당 부서만
     some_dept = str(merged["dept_code"].dropna().astype(str).iloc[0])
-    mboard, _, _ = dash._build_board(day, users, wt, manager_dept=some_dept)
-    m_total = sum(g["total"] for g in mboard)
+    mtree, _ = dash._duty_board(_date(2026, 7, 1), manager_dept=some_dept)
+    m_total = len(_board_names(mtree))
     expected = int((merged["dept_code"].astype(str) == some_dept).sum())
     check("MANAGER 부서 범위 필터 = 해당 부서 근무행", m_total == expected)
     check("MANAGER 범위 < ADMIN 전체(부서 2개 이상 데이터)", m_total < admin_total)
 
-    def has_person(bd, person_name):
-        return any(
-            p["name"] == person_name
-            for g in bd for lst in g["buckets"].values() for p in lst
-        )
-
-    # 스냅샷 소속 우선: 1005(현재 PET2)에 2026-07 PET1 편성 → PET1 로 그룹핑
+    # 스냅샷 소속 우선: 1005(현재 PET2)에 2026-07 PET1 편성 → PET1 계층으로
     teams = db.get_teams()
     t = str(teams[teams["dept_code"] == "PET1"].iloc[0]["team_code"])
     db.upsert_month_assignments([{
@@ -396,24 +403,54 @@ def test_dashboard_board_contracts() -> None:
     }])
     snap = dash._month_snapshot(_date(2026, 7, 1))
     check("스냅샷 emp→dept 조회", snap.get("1005", ("", ""))[0] == "PET1")
-    b_pet1, _, _ = dash._build_board(day, users, wt, snap=snap, manager_dept="PET1")
-    b_pet2, _, _ = dash._build_board(day, users, wt, snap=snap, manager_dept="PET2")
-    check("스냅샷 부서(PET1)로 그룹핑", has_person(b_pet1, "정근무"))
-    check("현재 부서(PET2) 아님(스냅샷 우선·자동저장 없음)", not has_person(b_pet2, "정근무"))
+    t_pet1, _ = dash._duty_board(_date(2026, 7, 1), manager_dept="PET1")
+    t_pet2, _ = dash._duty_board(_date(2026, 7, 1), manager_dept="PET2")
+    check("스냅샷 부서(PET1)로 계층 결정", "정근무" in _board_names(t_pet1))
+    check("현재 부서(PET2) 아님(스냅샷 우선·자동저장 없음)", "정근무" not in _board_names(t_pet2))
     # 스냅샷은 users 를 바꾸지 않는다(표시용)
     check("스냅샷이 users 현재 소속 불변", db.find_user_by_emp_no("1005")["dept_code"] == "PET2")
-
-    # P2-4: 비활성 그룹은 재출현하지 않고 부서명으로 폴백(그룹 권위=활성 organization_groups)
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
-    groups = db.get_org_groups().copy()
-    groups.loc[groups["group_code"] == "PET2", "group_name"] = "구분되는그룹명"
-    groups.loc[groups["group_code"] == "PET2", "is_active"] = False
-    db.save_org_groups(groups)
-    day2 = db.get_day_schedules(_date(2026, 7, 1))
-    board2, _, _ = dash._build_board(day2, db.get_users(), wt)
-    pet2_names = [g["name"] for g in board2 if g["code"] == "PET2"]
-    check("비활성 그룹명 미사용(재출현 방지)", "구분되는그룹명" not in pet2_names)
-    check("비활성 그룹 부서는 부서명으로 폴백", bool(pet2_names) and pet2_names[0] == db.dept_name("PET2"))
+
+    # 계층 규약: 대분류=부서 / 중분류=조직, 인원은 **중분류 단위 합산**(1팀·2팀 → 한 조직).
+    # 실제 조직 데이터(migration 009)를 흉내 낸 부서 프레임을 주입해 규약만 격리 검증한다.
+    depts = db.get_org_departments().copy()
+    depts.loc[depts["dept_code"] == "PET1", ["major_category", "minor_category"]] = \
+        ["PET생산부", "PET생산팀"]
+    depts.loc[depts["dept_code"] == "PET2", ["major_category", "minor_category"]] = \
+        ["PET생산부", "PET생산팀"]
+    tree2, majors2 = dash._duty_board(_date(2026, 7, 1), depts=depts)
+    pet = next((m for m in tree2 if m["name"] == "PET생산부"), None)
+    check("대분류가 부서 계층이 된다", pet is not None)
+    check("중분류 단위 합산(PET1+PET2 → 조직 1개)",
+          pet is not None and [o["name"] for o in pet["orgs"]] == ["PET생산팀"])
+    pet_rows = int(merged["dept_code"].astype(str).isin(["PET1", "PET2"]).sum())
+    check("합산 인원 = 두 부서 근무행 합",
+          pet is not None and sum(len(v) for v in pet["orgs"][0]["people"].values()) == pet_rows)
+    check("분류된 부서만 있으면 미분류가 생기지 않는다",
+          majors2 == ["PET생산부"])
+    # 분류가 빠진 부서(조직 관리 입력 누락)는 감추지 않고 '미분류'로 **마지막**에 둔다.
+    depts_partial = depts.copy()
+    depts_partial.loc[depts_partial["dept_code"] == "PET2",
+                      ["major_category", "minor_category"]] = ["", ""]
+    tree_mix, majors_mix = dash._duty_board(_date(2026, 7, 1), depts=depts_partial)
+    check("분류 없는 부서는 미분류로 마지막",
+          majors_mix[-1] == dash._UNCLASSIFIED_LABEL and len(majors_mix) == 2)
+    check("미분류의 조직 라벨은 부서명 폴백",
+          [o["name"] for o in tree_mix[-1]["orgs"]] == [db.dept_name("PET2")])
+    check("미분류도 집계에서 빠지지 않는다",
+          len(_board_names(tree_mix)) == len(day))
+
+    # 제외 규칙(시스템 부서·제외 대분류)은 지표와 명단에 같은 기준으로 적용된다.
+    depts_ex = depts.copy()
+    depts_ex.loc[depts_ex["dept_code"] == "PET1", "major_category"] = \
+        dash._EXCLUDED_MAJORS[0]
+    tree3, _ = dash._duty_board(_date(2026, 7, 1), depts=depts_ex)
+    totals3, _ = dash._summarize(tree3)
+    pet1_rows = int((merged["dept_code"].astype(str) == "PET1").sum())
+    check("제외 대분류는 명단에서 빠진다",
+          len(_board_names(tree3)) == len(day) - pet1_rows)
+    check("제외 대분류는 지표에서도 같이 빠진다(지표=명단)",
+          sum(totals3.values()) == len(_board_names(tree3)))
 
     st.session_state.pop(db._ORG_GROUPS_STORE, None)
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
@@ -431,8 +468,6 @@ def test_dashboard_scope_and_safety() -> None:
     st.session_state.pop(db._WORK_TYPES_STORE, None)
 
     day = db.get_day_schedules(_date(2026, 7, 1))
-    users = db.get_users()
-    wt = db.work_types_map()
 
     # (a) fail-closed: 전체 조회는 ADMIN 만. 부서 미확정 MANAGER 는 차단(전체 아님).
     check("ADMIN → 전체", dash._scope_for({"role": "ADMIN"}) == ("all", None))
@@ -454,46 +489,56 @@ def test_dashboard_scope_and_safety() -> None:
           dash._scope_for({"role": "USER", "dept_code": "PET1"}) == ("blocked", None))
     # 차단 MANAGER 는 결코 전체(ADMIN) 보드로 열리지 않는다: manager_dept 로 None 이
     # 넘어가지 않음을 계약으로 고정(전체 집계와 비교).
-    admin_board, _, _ = dash._build_board(day, users, wt, manager_dept=None)
-    admin_total = sum(g["total"] for g in admin_board)
+    admin_tree, _ = dash._duty_board(_date(2026, 7, 1), manager_dept=None)
+    admin_total = len(_board_names(admin_tree))
     check("차단 MANAGER 는 전체 조회 아님(fail-open 아님)",
           dash._scope_for({"role": "MANAGER", "dept_code": ""})[0] == "blocked"
           and admin_total == len(day))
 
-    # (b) 비활성 근무형태 참조 근무의 약칭·색 표시(소프트삭제 참조 보존)
+    # (b) 비활성(소프트삭제) 근무형태를 참조하는 근무도 분류되어 명단에 남는다
+    #     (근무형태 약칭·색 표시는 이 화면에서 제거됐고, 사람이 사라지지 않는 것이 계약이다)
     wts = db.get_work_types().copy()
     wts.loc[wts["code"] == "특주", "is_active"] = False
     db.save_work_types(wts)
     active_only, _ = workspace.work_type_display()
     check("활성전용 맵은 비활성 근무형태 제외", "특주" not in active_only)
-    disp, col = dash._display_maps()
-    check("비활성 근무형태 약칭 보존", disp.get("특주") == "특주")
-    check("비활성 근무형태 색 보존", str(col.get("특주", "")).startswith("#"))
+    tree_soft, _ = dash._duty_board(_date(2026, 7, 1))
+    check("비활성 근무형태 참조 근무도 명단에 남는다(집계 유실 없음)",
+          len(_board_names(tree_soft)) == len(day))
+    check("비활성 근무형태도 버킷 분류 유지(주간)", dash._bucket_of("특주", {}) == "주간")
     st.session_state.pop(db._WORK_TYPES_STORE, None)  # 원복
 
-    # (c) 조직 조회 실패가 보드에서 삼켜지지 않고 전파(화면 render try 가 처리)
-    orig = db.get_org_groups
+    # (c) 부서 기준정보 조회 실패가 집계에서 삼켜지지 않고 전파(화면 render try 가 처리)
+    orig = db.get_org_departments
 
     def _boom(*a, **k):
         raise db.supabase_repository.SupabaseDataError("조직 조회 실패(모의)")
 
-    db.get_org_groups = _boom
+    db.get_org_departments = _boom
     try:
         propagated = raises(
-            lambda: dash._build_board(day, users, wt), db.DATA_SOURCE_ERRORS
+            lambda: dash._duty_board(_date(2026, 7, 1)), db.DATA_SOURCE_ERRORS
         )
-        check("조직 조회 실패 전파(화면 밖 유출 아님)", propagated is not None)
+        check("부서 조회 실패 전파(화면 밖 유출 아님)", propagated is not None)
     finally:
-        db.get_org_groups = orig
+        db.get_org_departments = orig
 
-    # (d) 활성 그룹 0건에도 보드 구성(부서 폴백, crash 없음)
-    st.session_state[db._ORG_GROUPS_STORE] = db.get_org_groups().iloc[0:0].copy()
-    board0, _, tot0 = dash._build_board(day, db.get_users(), wt)
-    check("활성 그룹 0건 → 부서 폴백 집계 유지", sum(g["total"] for g in board0) == len(day))
-    check("활성 그룹 0건 → 요약 합 유지", sum(tot0.values()) == len(day))
-    st.session_state.pop(db._ORG_GROUPS_STORE, None)
+    # (d) 부서 기준정보 0건에도 집계 유지(부서명 폴백, crash 없음)
+    empty_depts = db.get_org_departments().iloc[0:0].copy()
+    tree0, _ = dash._duty_board(_date(2026, 7, 1), depts=empty_depts)
+    check("부서 기준정보 0건 → 집계 유지", len(_board_names(tree0)) == len(day))
+    tot0, _ = dash._summarize(tree0)
+    check("부서 기준정보 0건 → 지표 합 유지", sum(tot0.values()) == len(day))
+    check("부서 기준정보 0건 → 미분류로 모임",
+          all(m["name"] == dash._UNCLASSIFIED_LABEL for m in tree0))
 
-    # (e) _month_snapshot NA-safety: dept/team 이 NaN 인 편성도 예외 없이 처리
+    # (e) 근무 0건 → 빈 계층(빈 조직을 만들지 않는다)
+    tree_none, majors_none = dash._duty_board(
+        _date(2026, 7, 1), day_rows=day.iloc[0:0].copy()
+    )
+    check("근무 0건 → 빈 계층·빈 칩", tree_none == [] and majors_none == [])
+
+    # (f) _month_snapshot NA-safety: dept/team 이 NaN 인 편성도 예외 없이 처리
     import pandas as _pd
     st.session_state[db._ASSIGNMENTS_STORE] = _pd.DataFrame([
         {"emp_no": "1002", "schedule_month": "2026-07-01",
@@ -667,26 +712,26 @@ def test_retired_employee_month_display() -> None:
 
 
 def test_dashboard_render_scope_gate() -> None:
-    print("views.dashboard.render scope 게이트 회귀(blocked → _build_board 미호출)")
+    print("views.dashboard.render scope 게이트 회귀(blocked → _duty_board 미호출)")
     from datetime import date as _date
     from views import dashboard as dash
 
     # render() 를 직접 호출해 scope 게이트만 격리 검증한다(app.dispatch 라우팅·app_shell
-    # 과 무관). _build_board 를 spy 로 교체해 blocked 케이스에서 호출 0회(=데이터 미구성)
+    # 과 무관). _duty_board 를 spy 로 교체해 blocked 케이스에서 호출 0회(=데이터 미구성)
     # 를, 허용 케이스에서 호출 발생을 확인한다. 읽기 전용 검증이라 어떤 저장도 없다.
     calls = {"n": 0}
-    orig = dash._build_board
+    orig = dash._duty_board
 
     def _spy(*a, **k):
         calls["n"] += 1
-        return ([], set(), {b: 0 for b in dash._BUCKET_ORDER})
+        return ([], [])
 
     st.session_state["dashboard_date"] = _date(2026, 7, 1)
     st.session_state["dash_date_input"] = _date(2026, 7, 1)
     st.session_state.pop(db._SCHEDULES_STORE, None)
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
 
-    dash._build_board = _spy
+    dash._duty_board = _spy
     try:
         # blocked 케이스: 어느 것도 _build_board 를 호출하지 않는다(데이터 미노출).
         for label, user in [
@@ -697,18 +742,20 @@ def test_dashboard_render_scope_gate() -> None:
         ]:
             calls["n"] = 0
             dash.render(user)
-            check(f"blocked({label}): _build_board 0회(fail-open 아님)", calls["n"] == 0)
+            check(f"blocked({label}): _duty_board 0회(fail-open 아님)", calls["n"] == 0)
 
-        # 허용 케이스: ADMIN·유효 MANAGER 는 _build_board 를 호출한다.
+        # 허용 케이스: ADMIN·유효 MANAGER 는 _duty_board 를 호출한다.
         calls["n"] = 0
         dash.render({"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"})
-        check("ADMIN: _build_board 호출(전체)", calls["n"] >= 1)
+        check("ADMIN: _duty_board 호출(전체)", calls["n"] >= 1)
 
         calls["n"] = 0
         dash.render({"role": "MANAGER", "dept_code": "PET1", "emp_no": "1002", "name": "이책임"})
-        check("유효 MANAGER: _build_board 호출(부서 한정)", calls["n"] >= 1)
+        check("유효 MANAGER: _duty_board 호출(부서 한정)", calls["n"] >= 1)
+        check("MANAGER 범위 인자 전달(부서 한정)",
+              st.session_state.get("dashboard_date") == _date(2026, 7, 1))
     finally:
-        dash._build_board = orig
+        dash._duty_board = orig
 
 
 def test_schedule_view_manager_scope_enforced() -> None:
@@ -841,14 +888,78 @@ def test_month_view_top_actions() -> None:
     check("mime/키 계약 유지", 'mime="text/csv"' in src and 'key=f"{page_id}_dl"' in src)
 
     # (4) 실렌더: 조회·다운로드 컨트롤이 실제로 존재하고 예외가 없다.
+    # 2026-08-11 규칙(근무 보유자만 행) 이후 빈 월은 empty_state 로 끝나 다운로드가
+    # 렌더되지 않으므로, 샘플 데이터가 있는 2026-07 로 조회 조건을 시드한다.
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
     at.session_state["user"] = {"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"}
     at.session_state["nav_page"] = "schedule_view"
+    at.session_state["schedule_view_y"] = 2026
+    at.session_state["schedule_view_m"] = 7
     at.run()
     check("월간 근무표 렌더 예외 없음", not at.exception)
     check("조회 버튼 렌더", any(b.label == "조회" for b in at.button))
     check("엑셀 다운로드 컨트롤 렌더",
           any(d.label == "엑셀 다운로드" for d in at.get("download_button")))
+
+
+def test_schedule_edit_row_reorder() -> None:
+    """근무표 편성 — 행 드래그 재정렬 + 순서 영속(2026-08-11 사용자 요구).
+
+    "행 앞 핸들을 잡고 드래그해서 옮기는 방식 / 엑셀(근태표) 등록 순서가 앞으로도
+    유지되어야 함" → 시각 순서는 AG Grid 관리형 이동, 영속은 users.display_order 의
+    부서그룹 단위 슬롯 재배정이다. 여기서는 화면 배선(권위 상태 확정·저장 경로 포함)과
+    실렌더 무예외를 고정한다. 슬롯 계산 자체는 test_schedule_save_units.py 가 소유한다.
+    """
+    print("근무표 편성 — 행 드래그 순서 변경 · users.display_order 영속 배선")
+    import inspect
+    from streamlit.testing.v1 import AppTest
+    from views import schedule_edit as se
+
+    # (1) 그리드가 드래그 옵트인을 켠다(핸들·관리형 이동의 실제 옵션은 test_erp_cell_copy).
+    check("편성 그리드에 row_drag 옵트인", "row_drag=True" in inspect.getsource(se.render))
+
+    # (2) 반환 순서를 서버 권위로 확정한다 — 확정하지 않으면 다음 remount 에서 소실된다.
+    sync_src = inspect.getsource(se._sync_rows)
+    check("반환 _row_id 시퀀스와 권위 순서를 비교", "_row_id" in sync_src and "sorted(" in sync_src)
+    check("순서가 다르면 재마운트 경로로 진입(changed=True)", "changed = True" in sync_src)
+    check("행 집합이 정확히 같을 때만 재배열(구조 변경 경합 보호)",
+          "sorted(prev_ids) == sorted(cur_ids)" in sync_src)
+
+    # (3) 저장 경로가 순서를 영속화한다 — 빠지면 '저장해도 dirty 가 안 풀리는' 루프.
+    save_src = inspect.getsource(se._save)
+    check("저장에 행 순서 영속 단계 포함", "_persist_row_order(live)" in save_src)
+    i_order = save_src.find("_persist_row_order(live)")
+    i_reload = save_src.find("_load_grid(q)")
+    check("순서 저장이 재조회보다 먼저(재조회가 새 순서로 정렬되도록)",
+          0 <= i_order < i_reload)
+    order_src = inspect.getsource(se._persist_row_order)
+    check("재배정은 공용 순수 함수(db.plan_display_order_slots) 사용",
+          "db.plan_display_order_slots" in order_src)
+    check("대상 지정 쓰기(db.update_users_display_order) 사용 — 전량 upsert 아님",
+          "db.update_users_display_order" in order_src and "save_users" not in order_src)
+    check("순서 무변경이면 아무것도 쓰지 않음", "if final == list(base):" in order_src)
+
+    # (4) 로드 기준선·초안 폐기 정리.
+    check("로드 시 순서 기준선 기록", "se_order_base" in inspect.getsource(se._load_grid))
+    check("초안 폐기 시 기준선도 정리", "se_order_base" in inspect.getsource(se._discard_draft))
+
+    # (5) 드래그만 해도 미저장 변경 건수가 0 이 아니다(저장 활성과 표시가 모순되지 않게).
+    check("변경 건수에 순서 변경 반영", se._change_count(pd.DataFrame(), [], {}, 0, True) == 1)
+    check("순서 미변경이면 종전과 동일", se._change_count(pd.DataFrame(), [], {}, 0) == 0)
+
+    # (6) 실렌더 — 샘플 근무 보유자가 있는 2026-07 로 조회 조건을 시드한다.
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
+    at.session_state["user"] = {"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"}
+    at.session_state["nav_page"] = "schedule_edit"
+    at.session_state["se_y"] = 2026
+    at.session_state["se_m"] = 7
+    at.run()
+    check("근무표 편성 렌더 예외 없음", not at.exception)
+    check("로드 기준선이 실제 행 순서로 채워짐",
+          at.session_state["se_order_base"]
+          == [str(v).strip() for v in at.session_state["se_rows"]["사번"]])
+    check("드래그 안내가 조작 힌트에 노출",
+          any("핸들 드래그로 순서 변경" in str(m.value) for m in at.markdown))
 
 
 def main() -> int:
@@ -869,6 +980,7 @@ def main() -> int:
         test_retired_employee_month_display,
         test_schedule_view_manager_scope_enforced,
         test_month_view_top_actions,
+        test_schedule_edit_row_reorder,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")
