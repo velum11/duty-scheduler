@@ -558,6 +558,15 @@ def _inject_style() -> None:
   .dorg-cols { gap:10px 16px; }
   .dorg-col { flex:1 1 150px; }
 }
+@media (max-width:640px) {
+  /* 폰 폭: 주간·야간·휴무 3열이 항상 한 줄에 들어가도록 백분율 기반으로 전환.
+     150px 고정 basis 는 3열 합이 폰 폭을 넘어 줄바꿈을 만든다(2026-08-13 사용자 신고). */
+  .dorg-cols { gap:8px 10px; }
+  .dorg-col { flex:1 1 calc(33.333% - 7px); max-width:calc(33.333% - 7px); }
+  .dorg-clabel { font-size:12px; }
+  .dorg-cnum { font-size:11px; }
+  .dorg-name { font-size:13.5px; padding:5px 0; }
+}
 </style>
 """,
         unsafe_allow_html=True,
