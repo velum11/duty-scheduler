@@ -66,9 +66,14 @@ print("컬럼 구성(조회 참조)")
 check("표시 7열", len(nmy._DISPLAY_COLUMNS) == 7)
 check("신고자 열 없음(본인 전용 화면)", "신고자" not in nmy._DISPLAY_COLUMNS)
 check("소속 열 없음(본인 전용 화면)", "소속" not in nmy._DISPLAY_COLUMNS)
-check("조회 컬럼 순서 보존(신고자·소속 제외 시 동일)",
-      nmy._DISPLAY_COLUMNS
-      == [c for c in nmv._DISPLAY_COLUMNS if c not in ("신고자", "소속")])
+# 상태는 발생일 뒤로 당긴다(2026-08-13 확정, 코덱스 자문 합치) — 본인 보고서 목록의
+# 주 관심은 진행 단계라 모바일 첫 화면(스와이프 전)에 상태가 보여야 한다.
+# 그 외의 상대 순서는 조회 화면과 동일해야 한다.
+check("상태가 발생일 바로 뒤(모바일 첫 화면 노출)",
+      nmy._DISPLAY_COLUMNS.index("상태") == nmy._DISPLAY_COLUMNS.index("발생일") + 1)
+check("상태 제외 시 조회 컬럼 상대 순서 보존(신고자·소속 제외)",
+      [c for c in nmy._DISPLAY_COLUMNS if c != "상태"]
+      == [c for c in nmv._DISPLAY_COLUMNS if c not in ("신고자", "소속", "상태")])
 check("모든 표시 열이 조회 화면 열의 부분집합",
       set(nmy._DISPLAY_COLUMNS) <= set(nmv._DISPLAY_COLUMNS))
 check("모든 표시 열에 폭 지정(_COL_CONFIG)",

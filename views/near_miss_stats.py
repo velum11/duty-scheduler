@@ -39,8 +39,8 @@ _STATUS_LABEL = {
     "CLOSED": "종결", "REJECTED": "반려",
 }
 _CAUSE_LABEL = {
-    "JAM": "협착", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
-    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "끼임", "ETC": "기타",
+    "JAM": "끼임", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
+    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
 
 # ── §2 팔레트 리터럴(§1-F 분석 계층은 정확 색 규정 — 도메인 legacy 토큰 대신 §2 직접 사용) ──

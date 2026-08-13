@@ -60,8 +60,8 @@ _STATUS_LABEL = {
 }
 # 발생원인 코드→한글 라벨(§3.1: 분류축=평문, 색 없음). near_miss_stats 와 동일.
 _CAUSE_LABEL = {
-    "JAM": "협착", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
-    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "끼임", "ETC": "기타",
+    "JAM": "끼임", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
+    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
 
 _NOT_READY_MSG = (

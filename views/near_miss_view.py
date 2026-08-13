@@ -59,8 +59,8 @@ _STATUS_COLOR = {
     "REJECTED": TOKENS["danger"],
 }
 _CAUSE_LABEL = {
-    "JAM": "협착", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
-    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "끼임", "ETC": "기타",
+    "JAM": "끼임", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
+    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
 # 등급 색(S 가 가장 중대 → 옅어질수록 경미). TOKENS 재사용.
 _GRADE_COLOR = {
