@@ -1041,6 +1041,11 @@ _PAGE_HEADER_ACTIONS = {
     },
     # 아차사고 조회: 상세 선택 시 인쇄(=PDF 생성·다운로드) 활성. add/delete/save 는 READ 라 미매핑(음영).
     "near_miss_view": {"print": "nmv_print_req"},
+    # 월간 근무표(READ): 화면 안 [조회] 버튼을 없앤 뒤(2026-08-13 사용자 요구) 재조회 진입점은
+    # 이 새로고침 아이콘 하나다. 조건 변경은 위젯 rerun 으로 즉시 반영되고, 이 플래그는
+    # workspace.schedule_screen 이 렌더 첫머리에서 소비해 읽기 캐시를 비우고 재적재한다.
+    # add/delete/save/print 는 미매핑 → 종전대로 음영(READ 화면).
+    "schedule_view": {"refresh": "schedule_view_refresh_req"},
 }
 # 대상 유무(선택·dirty·쓰기가능)에 따라 음영이 갱신되는 아이콘과 그 **미발행 기본값**.
 # True=화면이 아직 상태를 발행하지 않았으면 음영(안전측). add 는 대상이 필요 없는 액션이라

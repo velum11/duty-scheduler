@@ -64,7 +64,13 @@ _MONTH_PICKER = partial(
     .wheel-option { height:44px; scroll-snap-align:center; color:#a09a90; font-size:1rem; line-height:44px; text-align:center; } .wheel-option.is-selected { color:#1c1a17; font-weight:600; }
     .wheel-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; } .wheel-actions button { min-height:38px; border:1px solid #e2ddd4; border-radius:8px; background:#fff; color:#1c1a17; cursor:pointer; font:inherit; font-weight:600; }
     .wheel-actions .confirm { border-color:#c2410c; background:#c2410c; color:#fff; }
-    @media (max-width:640px) { .wheel-backdrop { align-items:flex-end; } .wheel-sheet { width:100vw; border-radius:10px 10px 0 0; padding:18px 16px 22px; } }
+    /* 폰 폭에서도 월 이동 + 표시 전환이 한 줄에 남도록 내비 폭만 줄인다(‹ › 버튼
+       30px 히트영역과 min-height 40px 은 유지 — 제목 최소폭 floor·간격·글자만 축소). */
+    @media (max-width:640px) {
+      .wheel-nav { grid-template-columns:30px auto 30px; gap:3px; }
+      .wheel-nav .month-title { font-size:15px; }
+      .wheel-backdrop { align-items:flex-end; } .wheel-sheet { width:100vw; border-radius:10px 10px 0 0; padding:18px 16px 22px; }
+    }
     """,
     js="""
     export default function(component) {
@@ -174,12 +180,26 @@ def _styles() -> str:
 div[data-testid="stSegmentedControl"] button,
 div[data-testid="stButtonGroup"] button {
   min-width:84px; justify-content:center; }
-/* 월 이동 + 전환을 한 행에: 월 내비(첫 자식)가 잔여 폭을 차지하고 전환은 우측 끝.
-   직계 래퍼에 st-key 가 없는 버전이므로 위치(first/last-child) 기반 — 자식이 항상
-   2개(월 내비·전환)라 순번이 안정적이다. 좁은 폭에서는 줄바꿈 허용. */
-.st-key-my_toprow { align-items:center; flex-wrap:wrap; }
-.st-key-my_toprow > div:first-child { flex:1 1 auto; min-width:0; }
-.st-key-my_toprow > div:last-child { flex:0 0 auto; margin-left:auto; }
+/* ── 상단 한 행: 월 이동(좌) + 약칭/명칭 전환(우) ─────────────────────────────
+   2026-08-13 실 DOM 실측으로 확인한 사실(추정 아님):
+     · st.container(key="my_toprow") 는 flex 컨테이너 자신(stHorizontalBlock)에
+       .st-key-my_toprow 를 단다 → 컨테이너 선택자는 유효하다.
+     · 각 위젯의 element container 에도 .st-key-<위젯 key> 가 붙는다
+       (.st-key-my_schedule_wheel_picker / .st-key-my_schedule_mode).
+       따라서 순번(:first/:last-child)에 기대지 않고 키 클래스로 직접 지정한다.
+     · 줄바꿈의 진짜 원인은 CSS 가 아니라 CCv2 컴포넌트의 width 기본값이
+       "stretch" 라서 element container 가 width:100%(1405px) 를 받은 것이다.
+       flex 첫 항목이 한 줄을 통째로 먹어 전환이 다음 줄로 밀렸다.
+       1차 수정은 파이썬(_month_navigation 의 width="content"), 아래 CSS 는 보강이다.
+   emotion 규칙은 단일 클래스(0-1-0)라 아래 2단 선택자(0-2-0)가 !important 없이 이긴다. */
+.st-key-my_toprow { align-items:center; flex-wrap:wrap; row-gap:6px; }
+.st-key-my_toprow > .st-key-my_schedule_wheel_picker { flex:0 1 auto; width:fit-content;
+  min-width:0; }
+/* CCv2 shadow host 2겹은 emotion 으로 width:100% 가 박혀 있어 content 폭으로 낮춘다. */
+.st-key-my_toprow .stBidiComponent,
+.st-key-my_toprow [data-testid="stBidiComponentIsolated"] { width:fit-content; min-width:0; }
+.st-key-my_toprow > .st-key-my_schedule_mode { flex:0 0 auto; width:fit-content;
+  margin-left:auto; }
 .my-calendar { width:100%; }
 .my-weekdays, .my-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
 .my-weekday { font-size:11.5px; font-weight:600; color:#6b665d; padding:6px 0 8px; text-align:center; }
@@ -198,6 +218,8 @@ div[data-testid="stButtonGroup"] button {
 @media (max-width:640px) {
   .my-title { display:none; } .my-emp { font-size:12px; }
   .my-head { padding:6px 0 10px; }
+  /* 전환 버튼 min-width 84px 은 계약이라 못 줄인다 → 행 간격만 좁혀 한 줄을 지킨다. */
+  .st-key-my_toprow { column-gap:4px; }
   .my-weekdays, .my-calendar-grid { gap:3px; } .my-weekday { font-size:10.5px; padding:4px 0 6px; }
   .my-day { min-height:58px; padding:6px 3px; gap:4px; border-radius:7px; }
   .my-date { font-size:10.5px; } .my-duty { font-size:11px; min-height:20px; padding:3px 0; }
@@ -264,10 +286,14 @@ def _calendar_html(rows: pd.DataFrame, year: int, month: int, work_types: dict,
 
 
 def _month_navigation(year: int, month: int) -> None:
+    # width="content": CCv2 기본값은 "stretch"(=element container width:100%)라서
+    # 가로 컨테이너의 첫 항목이 한 줄을 다 먹고 표시 전환을 다음 줄로 밀어냈다.
+    # 순번 CSS 로 덮지 않고 Streamlit 레이아웃 계약으로 content 폭을 선언한다.
     result = _MONTH_PICKER()(
         key="my_schedule_wheel_picker",
         data={"year": year, "month": month},
         on_month_change_change=lambda: None,
+        width="content",
         height="content",
     )
     change = result.get("month_change")

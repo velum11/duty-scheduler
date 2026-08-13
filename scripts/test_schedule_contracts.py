@@ -572,12 +572,17 @@ def test_month_grid_snapshot() -> None:
         g, _ = workspace._build_month_grid(q, disp)
         return g
 
-    # 스냅샷 부서(PET2)로 조회 → 이동 직원 포함 + 부서 열이 스냅샷 부서명
+    # 스냅샷 부서(PET2)로 조회 → 이동 직원 포함 + 소속 열(대분류·중분류)이 스냅샷 부서 기준
+    # (2026-08-13 표시 계약: 부서명 열 → 조직 관리 대분류·중분류. 샘플 부서에는 분류가
+    #  없으므로 대분류=무분류·중분류=부서명 폴백이 그대로 스냅샷 해석의 증거가 된다.)
     g_pet2 = grid_for("PET2")
     emps_pet2 = set(g_pet2["사번"].astype(str)) if not g_pet2.empty else set()
     check("스냅샷 부서(PET2) 조회에 이동 직원 포함", "1002" in emps_pet2)
-    dept_cell = g_pet2[g_pet2["사번"].astype(str) == "1002"].iloc[0]["부서"]
-    check("부서 열이 스냅샷 부서명 표시", dept_cell == db.dept_name("PET2"))
+    snap_row = g_pet2[g_pet2["사번"].astype(str) == "1002"].iloc[0]
+    check("중분류 열이 스냅샷 부서로 해석(중분류 미입력 → 부서명 폴백)",
+          snap_row["중분류"] == db.dept_name("PET2"))
+    check("대분류 미입력 부서는 무분류로 표시(행을 감추지 않음)",
+          snap_row["대분류"] == workspace.UNCLASSIFIED_LABEL)
 
     # 현재 부서(PET1)로 조회 → 스냅샷 이동으로 1002 제외, 미이동 직원(1003)은 유지
     g_pet1 = grid_for("PET1")
@@ -638,6 +643,89 @@ def test_month_grid_snapshot() -> None:
         db.get_month_assignments = orig
 
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+
+
+def test_month_grid_org_labels_and_order() -> None:
+    """월간 근무표 소속 표시(대분류·중분류) + 행 정렬(2026-08-13 사용자 확정).
+
+    정렬 ① 대분류(부서 마스터에서 유도한 순서·무분류 마지막) ② 조(A→B→C→기타→빈 조)
+    ③ 등록순(display_order, 없으면 뒤) → 사번. 대분류 이름을 코드에 고정하지 않는다.
+    """
+    print("월간 근무표 — 대분류·중분류 표시 + 대분류→조→등록순 정렬")
+    from views import workspace
+
+    # (1) 라벨/순서 도출은 순수 함수 — 주입 프레임만으로 검증(조회 없음).
+    depts = pd.DataFrame([
+        {"dept_code": "B1", "dept_name": "비생산부", "major_category": "PVC생산부",
+         "minor_category": "PVC생산팀", "sort_order": 20},
+        {"dept_code": "A1", "dept_name": "에이부서1", "major_category": "PET생산부",
+         "minor_category": "PET생산팀", "sort_order": 10},
+        {"dept_code": "A2", "dept_name": "에이부서2", "major_category": "PET생산부",
+         "minor_category": "", "sort_order": 11},
+        {"dept_code": "N1", "dept_name": "분류없는부서", "major_category": "",
+         "minor_category": "", "sort_order": 5},
+    ])
+    labels, majors = workspace.org_labels(depts)
+    check("대분류 노출 순서는 부서 sort_order 에서 유도(이름 하드코딩 아님)",
+          majors == ["PET생산부", "PVC생산부"])
+    check("중분류 미입력은 부서명 폴백", labels["A2"] == ("PET생산부", "에이부서2"))
+    check("대분류 미입력은 무분류이며 순서 목록에 넣지 않는다(항상 마지막)",
+          labels["N1"][0] == workspace.UNCLASSIFIED_LABEL
+          and workspace.UNCLASSIFIED_LABEL not in majors)
+    check("마스터에 없는 부서코드도 무분류 + 코드 표시(행을 감추지 않음)",
+          workspace._org_label_of("ZZZ", labels)
+          == (workspace.UNCLASSIFIED_LABEL, "ZZZ"))
+    check("빈 부서 프레임도 안전(빈 맵·빈 순서)",
+          workspace.org_labels(pd.DataFrame()) == ({}, []))
+
+    # (2) 조 정렬 키 — A→B→C→그 밖→빈 조.
+    keyed = sorted(["상시", "", "C조", "A조", "1팀", "B조"], key=workspace._team_sort_key)
+    check("조 정렬: 영문 머리 알파벳 우선 → 그 밖 표기 → 빈 조 마지막",
+          keyed[:3] == ["A조", "B조", "C조"] and keyed[-1] == ""
+          and set(keyed[3:5]) == {"상시", "1팀"})
+
+    # (3) 실제 그리드 행 순서 — 샘플 부서에 분류를 주입(세션 store)하고 원복한다.
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    base = db.get_org_departments().copy()
+    injected = base.copy()
+    codes = [str(c) for c in injected["dept_code"]]
+    check("전제: 샘플 부서 3개 이상(계층 주입 가능)", len(codes) >= 3)
+    injected.loc[injected["dept_code"] == codes[0],
+                 ["major_category", "minor_category"]] = ["PET생산부", "PET생산팀"]
+    injected.loc[injected["dept_code"] == codes[1],
+                 ["major_category", "minor_category"]] = ["PVC생산부", "PVC생산팀"]
+    injected.loc[injected["dept_code"] == codes[2],
+                 ["major_category", "minor_category"]] = ["", ""]  # 무분류(마지막)
+    db.save_org_departments(injected[db.ORG_DEPT_COLUMNS])
+    try:
+        disp, _ = workspace.work_type_display()
+        grid, _rows = workspace._build_month_grid(
+            {"year": 2026, "month": 7, "dept": workspace.ALL, "team": workspace.ALL,
+             "keyword": ""}, disp)
+        check("소속 열이 대분류·중분류(부서명 단일 열 아님)",
+              list(grid.columns)[:5] == ["사번", "성명", "대분류", "중분류", "조"])
+        rank = {"PET생산부": 0, "PVC생산부": 1, workspace.UNCLASSIFIED_LABEL: 2}
+        seen = [rank[m] for m in grid["대분류"]]
+        check("① 대분류 순서(무분류 마지막)로 묶여 정렬",
+              seen == sorted(seen) and len(set(seen)) >= 2)
+        users = db.get_users()
+        order_of = {}
+        for _, u in users.iterrows():
+            try:
+                value = db.normalize_display_order(u.get("display_order"))
+            except (TypeError, ValueError):
+                value = None
+            order_of[str(u["emp_no"]).strip()] = (1, 0) if value is None else (0, value)
+        keys = [
+            (rank[r["대분류"]], workspace._team_sort_key(r["조"]),
+             order_of.get(str(r["사번"]).strip(), (1, 0)), str(r["사번"]).strip())
+            for _, r in grid.iterrows()
+        ]
+        check("②③ 같은 대분류 안에서 조 → 등록순(display_order) → 사번 순",
+              keys == sorted(keys))
+    finally:
+        db.save_org_departments(base[db.ORG_DEPT_COLUMNS])  # 다른 테스트 격리(원복)
 
 
 def test_retired_employee_month_display() -> None:
@@ -790,7 +878,13 @@ def test_schedule_view_manager_scope_enforced() -> None:
             at.session_state[db._ASSIGNMENTS_STORE] = db._typed_empty_frame(
                 db.SCHEDULE_ASSIGNMENT_COLUMNS
             )  # 스냅샷 없음 → 현재 소속 표시
-            at.session_state["q_schedule_view"] = stale_q
+            # 2026-08-13: [조회] 버튼 제거로 조회조건의 원천이 저장 조회조건(q_*)에서
+            # **조건 위젯 세션 상태**로 바뀌었다. 잔존 조회조건 위협모형(이전 사용자가
+            # 남긴 전체/타 부서 조건)은 그대로이므로 위젯 키에 그 잔존값을 심는다.
+            at.session_state["schedule_view_y"] = stale_q["year"]
+            at.session_state["schedule_view_m"] = stale_q["month"]
+            at.session_state["schedule_view_d"] = stale_q["dept"]
+            at.session_state["schedule_view_t"] = stale_q["team"]
             return at.run()
         finally:
             workspace._build_month_grid = orig_build
@@ -813,10 +907,12 @@ def test_schedule_view_manager_scope_enforced() -> None:
               captured["q"].get("team") == ALL)
         grid = captured["grid"]
         emps = set(grid["사번"].astype(str))
-        depts_shown = set(grid["부서"].astype(str))
+        # 표시 열은 대분류·중분류(2026-08-13). 샘플 부서에는 분류가 없어 중분류가
+        # 부서명 폴백이므로, 이 열이 곧 '어느 부서가 보이는가'의 증거다.
+        orgs_shown = set(grid["중분류"].astype(str))
         check("잔존 ALL → PET1 축소: 타 부서 직원(1005/PET2) 제외", "1005" not in emps)
         check("잔존 ALL 축소: 본인 부서 직원(1003) 포함", "1003" in emps)
-        check("표시 부서 PET1 단일(권한범위 강제)", depts_shown == {db.dept_name("PET1")})
+        check("표시 소속 PET1 단일(권한범위 강제)", orgs_shown == {db.dept_name("PET1")})
 
     # 차단 케이스: dept 가 유효하지 않으면 전체조회로 새지 않고 blocked(_build_month_grid
     # 자체가 호출되지 않아야 한다 — fail-closed 는 계산 이전에 막는다).
@@ -838,34 +934,41 @@ def test_schedule_view_manager_scope_enforced() -> None:
         check("ADMIN: 잔존 ALL 유지(_build_month_grid 가 받은 q['dept']=='(전체)')",
               captured["q"].get("dept") == ALL)
         grid2 = captured["grid"]
-        check("ADMIN: 잔존 ALL 전체 유지(다중 부서 표시)",
-              len(set(grid2["부서"].astype(str))) >= 2)
+        check("ADMIN: 잔존 ALL 전체 유지(다중 소속 표시)",
+              len(set(grid2["중분류"].astype(str))) >= 2)
 
 
 def test_month_view_top_actions() -> None:
-    """월간 근무표 상단 액션 정리(2026-08-07 사용자 요구).
+    """월간 근무표 상단 액션 정리(2026-08-07 → 2026-08-13 갱신).
 
-    - 조회 액션은 **돋보기 아이콘**으로 통일한다(상단 52px 헤더의 새로고침=원형 화살표와
-      의미가 섞이지 않게).
-    - 화면 버튼은 상단(조건 줄·컨텍스트 줄)에 모은다: 표 아래 전폭 [엑셀 다운로드] 를
+    - 화면 안 [조회] 버튼은 **없다**(2026-08-13 사용자 요구): 조건 위젯 변경이 곧 조회다.
+    - 같은 조건의 재조회는 상단 52px 헤더의 **새로고침 아이콘**이 담당한다(읽기 캐시를
+      비우고 재적재). 헤더 아이콘 배선은 modules/ui.py 의 페이지별 플래그 매핑 한 줄.
+    - 화면 버튼은 상단(컨텍스트 줄)에 모은다: 표 아래 전폭 [엑셀 다운로드] 를
       컨텍스트 줄 우측으로 올린다.
-    - 조회 게이트(run_query)·엑셀 CSV 계약(원본 grid·utf-8-sig·파일명·mime)은 불변.
+    - 엑셀 CSV 계약(원본 grid·utf-8-sig·파일명·mime)은 불변.
     """
-    print("월간 근무표 상단 액션 — 조회=돋보기 아이콘 · 다운로드 상단 이전 · CSV 계약 불변")
+    print("월간 근무표 상단 액션 — 조건 즉시 반영 · 헤더 새로고침 배선 · CSV 계약 불변")
     import inspect
     from streamlit.testing.v1 import AppTest
+    from modules import ui as ui_mod
     from views import workspace
-    from views.common.erp import kit
 
     src = inspect.getsource(workspace.schedule_screen)
 
-    # (1) 조회 버튼 = 돋보기 아이콘(키트 submit_icon 경로).
-    check("조회 제출 버튼에 돋보기 아이콘 지정", 'submit_icon=":material/search:"' in src)
-    check("조회 라벨·키 계약 유지", 'submit=("조회", f"{page_id}_go")' in src)
-    kit_src = inspect.getsource(kit.condition_panel)
-    check("키트 condition_panel 이 submit_icon 을 버튼 icon 으로 전달", "icon=submit_icon" in kit_src)
-    check("submit_icon 기본값 None(기존 호출부 무영향)",
-          inspect.signature(kit.condition_panel).parameters["submit_icon"].default is None)
+    # (1) [조회] 버튼 없음 = 조건 패널에 submit 을 주지 않는다 → 위젯 값이 곧 조회조건.
+    check("조건 패널에 제출(조회) 버튼 미지정", "submit=(" not in src)
+    check("조회 게이트(run_query) 미사용 — 위젯 변경 즉시 반영", "run_query(" not in src)
+    check("조회조건은 조건 패널 반환값에서 직접 구성", 'v = erp.condition_panel(' in src)
+
+    # (2) 헤더 새로고침 아이콘 배선 — 매핑(ui) ↔ 소비(workspace) 양쪽이 같은 플래그.
+    flag = ui_mod._PAGE_HEADER_ACTIONS.get("schedule_view", {}).get("refresh")
+    check("헤더 새로고침이 월간 근무표에 배선됨", flag == "schedule_view_refresh_req")
+    check("화면이 같은 플래그를 소비", 'f"{page_id}_refresh_req"' in src)
+    check("새로고침은 읽기 캐시를 비우고 재적재", "st.cache_data.clear()" in src)
+    # 새로고침 외 아이콘(추가·삭제·저장·인쇄)은 READ 화면이라 미매핑 = 음영 유지.
+    check("READ 화면에 쓰기 아이콘을 배선하지 않음",
+          set(ui_mod._PAGE_HEADER_ACTIONS["schedule_view"]) == {"refresh"})
 
     # (2) 다운로드는 표 위(컨텍스트 줄)에서 렌더된다 — 표 아래 전폭 버튼 아님.
     i_dl = src.find("st.download_button")
@@ -897,9 +1000,15 @@ def test_month_view_top_actions() -> None:
     at.session_state["schedule_view_m"] = 7
     at.run()
     check("월간 근무표 렌더 예외 없음", not at.exception)
-    check("조회 버튼 렌더", any(b.label == "조회" for b in at.button))
+    check("[조회] 버튼 미렌더(조건 즉시 반영)", not any(b.label == "조회" for b in at.button))
     check("엑셀 다운로드 컨트롤 렌더",
           any(d.label == "엑셀 다운로드" for d in at.get("download_button")))
+    # 헤더 새로고침 클릭 = 플래그 → 다음 렌더에서 화면이 소비(플래그가 남지 않는다).
+    at.session_state["schedule_view_refresh_req"] = True
+    at.run()
+    check("새로고침 플래그 소비 후 예외 없음", not at.exception)
+    check("새로고침 플래그는 소비되어 남지 않음",
+          "schedule_view_refresh_req" not in at.session_state)
 
 
 def test_schedule_edit_row_reorder() -> None:
@@ -962,6 +1071,97 @@ def test_schedule_edit_row_reorder() -> None:
           any("핸들 드래그로 순서 변경" in str(m.value) for m in at.markdown))
 
 
+def test_schedule_edit_org_axis() -> None:
+    """근무표 편성 — 대분류·중분류 표시 축과 조회/정렬 계약 (2026-08-13 사용자 확정).
+
+    ① 그리드 행이 조직관리 대분류·중분류를 함께 보여준다(부서에서 파생한 읽기 전용).
+    ② 조회 조건 '부서'는 대분류 단위이며 선택지는 그 달 편성에서 유도한다(하드코딩 금지).
+    ③ 조 선택지·정렬은 편성 스냅샷의 근무조에서 유도한다(조 기준정보 축 아님).
+    ④ 정렬은 대분류 → 조 → 부서그룹 → 표시순서 → 사번.
+    저장 계약(부서 코드 저장)은 종전대로 '부서' 열 하나가 원천이라는 것도 함께 고정한다.
+    """
+    print("근무표 편성 — 대분류·중분류 표시 축 · 대분류 조회 · 조/대분류 정렬")
+    import inspect
+    from views import schedule_edit as se
+
+    # (1) 표시 열 계약 — 파생 열이 order 에 들어가 편집 왕복에서 값이 사라지지 않는다.
+    check("신원 열에 대분류·중분류 포함", se._FIXED == ["사번", "성명", "대분류", "중분류", "부서", "조"])
+    check("파생 열 선언", se._DERIVED == ("대분류", "중분류"))
+    check("dirty 비교는 파생 열을 보지 않음(저장 대상 아님)",
+          "[\"사번\", \"부서\", \"조\"]" in inspect.getsource(se._canon))
+    grid_src = inspect.getsource(se.render)
+    check("그리드 order 가 _FIXED 를 그대로 사용(숨김 열도 왕복)",
+          "order=_FIXED + day_cols" in grid_src)
+    check("파생 열은 편집 불가", '_MAJOR: {"pinned"' in grid_src and '"editable": False' in grid_src)
+
+    # (2) 대분류 라벨 파생 — 코드에 이름을 고정하지 않고 기준정보에서만 읽는다.
+    catalog = {
+        "org_of": {"D1": ("가생산부", "가생산팀"), "D2": ("가생산부", ""), "D3": ("", "")},
+        "major_order": {"가생산부": 22},
+        "name_codes": {"가1팀": {"D1"}, "가2팀": {"D2"}, "겹침": {"D1", "D2"}},
+        "codes": {"D1", "D2", "D3"},
+    }
+    check("대분류·중분류 파생", se._org_labels("D1", catalog) == ("가생산부", "가생산팀"))
+    check("중분류 없으면 빈 칸(부서명으로 지어내지 않음)", se._org_labels("D2", catalog) == ("가생산부", ""))
+    check("대분류 없으면 미분류", se._org_labels("D3", catalog) == ("미분류", ""))
+    check("미등록 부서코드도 미분류로 표시", se._org_labels("NOPE", catalog) == ("미분류", ""))
+    check("부서 셀 → 코드(코드 입력)", se._dept_code_of_text("D1", catalog) == "D1")
+    check("부서 셀 → 코드(부서명 입력)", se._dept_code_of_text("가2팀", catalog) == "D2")
+    check("동명 부서는 해석하지 않음(저장 검증과 같은 기준)",
+          se._dept_code_of_text("겹침", catalog) == "")
+
+    # (3) 조회 범위 판정 — 전체 / 대분류 / MANAGER 부서 잠금.
+    check("전체는 모두 포함", se._in_scope(se._ALL, "D3", catalog))
+    check("대분류는 소속 부서 전부 포함",
+          se._in_scope("가생산부", "D1", catalog) and se._in_scope("가생산부", "D2", catalog))
+    check("다른 대분류는 제외", not se._in_scope("가생산부", "D3", catalog))
+    check("MANAGER 부서 잠금은 그 부서만(대분류로 넓히지 않음)",
+          se._in_scope(f"{se._DEPT_SCOPE}D1", "D1", catalog)
+          and not se._in_scope(f"{se._DEPT_SCOPE}D1", "D2", catalog))
+
+    # (4) 조 순서 — A조→B조→C조 → 비표준 표기 → 빈 조 (실데이터 값을 감추지 않는다).
+    values = ["", "B팀", "C조", "A조", "B조"]
+    check("조 정렬: 표준 조 먼저, 비표준 뒤, 빈 값 마지막",
+          sorted(values, key=se._shift_rank) == ["A조", "B조", "C조", "B팀", ""])
+
+    # (5) 행 정렬 키 — 대분류(최소 표시순서) → 조 → 부서그룹 → 표시순서(없으면 뒤) → 사번.
+    def key(major, morder, shift, group, order, emp):
+        return se._row_sort_key(major, morder, shift, group, order, emp)
+
+    check("대분류는 최소 표시순서 순", key("가", 22, "A조", 0, 1, "1") < key("나", 24, "A조", 0, 1, "1"))
+    check("미분류는 언제나 마지막", key("가", 999, "", 0, None, "9") < key("", 0, "A조", 0, 1, "1"))
+    check("같은 대분류면 조 순", key("가", 22, "A조", 0, 9, "9") < key("가", 22, "B조", 0, 1, "1"))
+    check("같은 조면 표시순서 순", key("가", 22, "A조", 0, 1, "9") < key("가", 22, "A조", 0, 2, "1"))
+    check("표시순서 미지정은 뒤", key("가", 22, "A조", 0, 99, "9") < key("가", 22, "A조", 0, None, "1"))
+    check("마지막 동률은 사번", key("가", 22, "A조", 0, None, "1") < key("가", 22, "A조", 0, None, "2"))
+
+    # (6) 조 선택지는 조 기준정보가 아니라 편성 스냅샷에서 나온다.
+    src = (ROOT / "views" / "schedule_edit.py").read_text(encoding="utf-8")
+    check("조 선택지가 편성 스냅샷 유도(_shift_options)", "def _shift_options" in src)
+    check("조 선택지에 db.get_teams 를 쓰지 않음", "db.get_teams()" not in src)
+    check("대분류 선택지도 유도(하드코딩된 대분류 이름 없음)",
+          "def _major_options" in src and "PET생산부" not in src and "PVC생산부" not in src)
+
+    # (7) 실렌더(sample) — 새 열이 실제 행에 실리고 초기 상태가 깨끗하다.
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
+    at.session_state["user"] = {"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"}
+    at.session_state["nav_page"] = "schedule_edit"
+    at.session_state["se_y"] = 2026
+    at.session_state["se_m"] = 7
+    at.run()
+    check("대분류 축 렌더 예외 없음", not at.exception)
+    rows = at.session_state["se_rows"]
+    check("행 프레임에 대분류·중분류 열 존재", {"대분류", "중분류"}.issubset(set(rows.columns)))
+    check("부서 열(저장 원천)은 그대로 유지", "부서" in rows.columns)
+    check("조회 조건 '부서' 선택지는 항상 전체를 포함",
+          any(sb.key == "se_d" and "전체 부서" in list(sb.options) for sb in at.selectbox))
+    check("조 선택지도 항상 전체를 포함",
+          any(sb.key == "se_t" and "전체 조" in list(sb.options) for sb in at.selectbox))
+    check("초기 로드는 dirty 아님(파생 열이 가짜 변경을 만들지 않음)",
+          at.session_state["se_dirty"] is False)
+
+
 def main() -> int:
     for test in (
         test_normalize_schedule_month,
@@ -977,10 +1177,12 @@ def main() -> int:
         test_dashboard_scope_and_safety,
         test_dashboard_render_scope_gate,
         test_month_grid_snapshot,
+        test_month_grid_org_labels_and_order,
         test_retired_employee_month_display,
         test_schedule_view_manager_scope_enforced,
         test_month_view_top_actions,
         test_schedule_edit_row_reorder,
+        test_schedule_edit_org_axis,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")

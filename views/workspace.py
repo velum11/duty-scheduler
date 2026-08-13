@@ -4,7 +4,10 @@
 아래 공통 요소를 조합해 DESIGN.md §10 구조를 구성한다:
   페이지 제목 → 한 줄 설명 → 조회 조건 카드 → 요약 카드 → 데이터 그리드 → 하단 액션.
 
-조회는 명시적 [조회] 버튼으로만 갱신하며(자동 조회 없음), 그리드는 읽기 전용으로
+조회 갱신 방식은 화면별로 다르다: 월간 근무표(:func:`schedule_screen`)는 조건 위젯
+변경이 곧 조회이며(별도 [조회] 버튼 없음), 재조회는 상단 52px 헤더의 새로고침
+아이콘이 담당한다. :func:`run_query`/:func:`seed_query_once` 게이트는 아직 명시적
+[조회] 버튼을 쓰는 화면(아차사고 조회)이 그대로 사용한다. 그리드는 읽기 전용으로
 근무코드 색상을 입힌다. 기준정보/근무표의 등록·수정 저장 로직은 이후 단계에서
 이 화면 위에 얹는다.
 """
@@ -21,6 +24,9 @@ from views.common import erp
 from views.master.grid import CELL_COPY_OPTIONS
 
 ALL = "(전체)"
+# 조직 계층 표시(대분류·중분류) 폴백 라벨 — 조직 관리에 분류가 입력되지 않은(또는 마스터에
+# 없는) 부서코드도 행을 감추지 않고 여기로 접어 **항상 마지막**에 둔다.
+UNCLASSIFIED_LABEL = "무분류"
 
 # §1-C 읽기 변형(월간 근무표) 전용 CSS — 조건 줄 헤어라인·컨텍스트 라인(모노 수치)·
 # 표 흰 컨테이너(1px #cfc8bd·radius 8·내부 스크롤). 작은 의미 텍스트 ≥#6b665d(A-2), §2 팔레트.
@@ -47,6 +53,15 @@ _SV_CSS = """
 }
 </style>
 """
+# 일자 열 밀도(§1-C "셀 min-width 34px" + 편성표 col_config 실값 44/34 정합). 읽기 표는
+# 헤더가 "31(일)" 한 줄이라 편성표(2줄 헤더 컴포넌트)보다 하한이 조금 크다 — 아래 값은
+# 실렌더 측정(헤더 라벨 잘림 없음)으로 잡았다. 상한은 넓은 화면에서 표가 다시 벌어지지
+# 않게 하는 캡이다.
+_DAY_COL_MIN_PX = 40
+_DAY_COL_MAX_PX = 52
+# 표 높이 — 행 수에 따라 늘되 §1-C(≈62vh) 상한 안에서 내부 스크롤(편성표와 같은 규칙).
+_GRID_MIN_PX, _GRID_MAX_PX = 240, 500
+
 RETIRED_LABEL = "(퇴직)"
 # 퇴직 행 배경/글자색 — master_users.py 의 .ms-row-inactive 와 동일 토큰
 # (surface-3 / ink-2, views/master/style.py TOKENS) 로 화면 간 시각 일관성을 맞춘다.
@@ -902,6 +917,16 @@ def master_download(view: pd.DataFrame, name: str, key: str) -> None:
 
 # ---------- 근무표 등록/수정 · 전체 근무표 조회 (공통 본문) ----------
 def schedule_screen(user: dict, page_id: str, band=None) -> None:
+    # 상단 52px 헤더의 새로고침 아이콘(modules/ui.py::_PAGE_HEADER_ACTIONS) 의도를
+    # **이 화면의 첫 조회 이전에** 소비한다 — 읽기 캐시(supabase 30s·sample 로더)를 비운
+    # 뒤 이어지는 db.get_* 가 모두 신선한 값을 읽게 하기 위해서다. 아래 조회 세대값
+    # (_rg_key)도 함께 올려 콜드 스켈레톤 표출 대상에 포함한다(구 [조회] 동작 보존).
+    if st.session_state.pop(f"{page_id}_refresh_req", False):
+        st.cache_data.clear()
+        st.session_state[f"{page_id}_refreshgen"] = (
+            st.session_state.get(f"{page_id}_refreshgen", 0) + 1
+        )
+
     scheds = db.get_schedules()
     depts = db.get_departments()
     teams = db.get_teams()
@@ -914,9 +939,9 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
     manager_locked = user["role"] == "MANAGER" and user.get("dept_code")
 
     st.markdown(_SV_CSS, unsafe_allow_html=True)
-    # 영역 순서(§1-C 읽기): 조건 줄(condition_panel) + 우측 [조회] → 헤어라인 → 컨텍스트 라인
-    # → 표 → 범례. 조회/새로고침은 [조회] 버튼(구 밴드 search 아이콘 대체). 클릭 세대값을
-    # 올려 콜드 스켈레톤 표출 대상에 포함한다(구 새로고침 동작 보존 — 조회 결과 동일).
+    # 영역 순서(§1-C 읽기): 조건 줄(condition_panel) → 헤어라인 → 컨텍스트 라인 → 표 → 범례.
+    # 조건 위젯 변경이 곧 조회다(2026-08-13 사용자 요구 — [조회] 버튼 제거). 같은 조건의
+    # 재조회(원본 데이터 재적재)는 상단 헤더 새로고침 아이콘이 담당한다(위 세대값).
     _rg_key = f"{page_id}_refreshgen"
 
     # condition_panel 의 select Field 는 index/value 인자를 받지 않고 항상 위젯 key 의
@@ -933,12 +958,21 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
     # 세션 상태로 종속을 해석해, 사용자가 부서를 바꾼 그 rerun 에서 조 옵션이 갱신되게 한다).
     if manager_locked:
         cur_dept = user["dept_code"]
+        # 이전 사용자(예: ADMIN)가 남긴 부서 위젯 값이 MANAGER 옵션(본인 부서 1개) 밖이면
+        # 위젯 생성 전에 비운다 — 조건이 곧 조회가 된 뒤로는 잔존 위젯 값이 그대로 조회
+        # 조건이 되기 때문이다(데이터 경계는 아래 fail-closed 재적용이 별도로 강제한다).
+        if st.session_state.get(d_key) not in (None, cur_dept):
+            st.session_state.pop(d_key, None)
         dept_field = erp.Field(
             key="d", label="부서", kind="select",
             options=[user["dept_code"]], disabled=True, width=220,
             format_func=lambda c: dept_names.get(c, c),
         )
     else:
+        # 삭제·비활성으로 사라진 부서가 위젯에 남아 있으면 '(전체)'로 되돌린다(조 필터와
+        # 동일 규칙 — 없어진 조건이 남아 결과가 0건이 되는 혼선 방지).
+        if st.session_state.get(d_key) not in ([None, ALL] + list(dept_names)):
+            st.session_state.pop(d_key, None)
         cur_dept = st.session_state.get(d_key, ALL)
         dept_field = erp.Field(
             key="d", label="부서", kind="select",
@@ -979,34 +1013,24 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
                   format_func=lambda c: "전체 조" if c == ALL else team_names.get(c, c)),
         erp.Field(key="kw", label="사번 또는 성명", kind="text"),
     ]
-    # 조건 줄 우측 [조회] 인라인(§1-E). U4: content_fit=True 로 짧은 select 는 내용 맞춤 폭·검색만 신축.
-    # 아이콘은 조회(돋보기) — 상단 52px 헤더의 새로고침(원형 화살표)과 의미를 구분한다
-    # (이 버튼이 이 화면의 유일한 조회 액션이며, 조회 세대값을 올려 재적재를 태운다).
-    v, clicked = erp.condition_panel(page_id, fields, content_fit=True,
-                                     submit=("조회", f"{page_id}_go"),
-                                     submit_icon=":material/search:")
-    if clicked:
-        st.session_state[_rg_key] = st.session_state.get(_rg_key, 0) + 1
+    # 조건 줄(§1-E). U4: content_fit=True 로 짧은 select 는 내용 맞춤 폭·검색만 신축.
+    # [조회] 버튼은 두지 않는다(2026-08-13 사용자 요구) — 위젯 변경이 rerun 을 일으키고
+    # 그 값이 곧 조회 조건이라, 조회는 별도 확인 클릭 없이 즉시 반영된다(읽기 전용 조회라
+    # 자동 조회가 계약 위반이 아니다). 같은 조건의 재적재는 헤더 새로고침 아이콘 담당.
+    v = erp.condition_panel(page_id, fields, content_fit=True)
     refresh_gen = st.session_state.get(_rg_key, 0)
 
-    params = {
+    q = {
         "year": v["y"],
         "month": v["m"],
         "dept": v["d"],
         "team": v["t"],
         "keyword": str(v["kw"] or "").strip(),
     }
-    # U3: 진입 시 세션 최초 1회 기본 조건(당월·범위 전체)으로 자동 조회 seed — 매 rerun 자동조회가
-    # 아니라 최초 1회만, 이후 [조회]가 명시 갱신. 빈 안내 패널 대신 즉시 데이터가 보인다.
-    seed_query_once(page_id, params)
-    q = run_query(page_id, clicked, params)
-    if not q:
-        ui.empty_state("조회 조건을 선택한 후 조회하세요.", head="월별 근무표")
-        return
 
-    # MANAGER 권한범위 fail-closed 재적용: run_query 가 돌려준 저장 조회조건(이전
-    # 사용자·타 부서·ALL 일 수 있음)에도 항상 본인 부서로 축소한다. 위젯 잠금만
-    # 믿지 않는다(잠금은 UX, 실제 데이터 경계는 여기서 강제).
+    # MANAGER 권한범위 fail-closed 재적용: 위젯에서 온 조회조건(잔존 세션 값·타 부서·
+    # ALL 일 수 있음)에도 항상 본인 부서로 축소한다. 위젯 잠금만 믿지 않는다(잠금은 UX,
+    # 실제 데이터 경계는 여기서 강제).
     #
     # scoped 되려면 본인 dept_code 가 (a) ALL 센티널이 아니고 (b) 실제 존재하는 부서
     # 코드여야 한다. 빈값·ALL 센티널("(전체)")·미존재 코드는 모두 차단(blocked)한다 —
@@ -1097,18 +1121,32 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         )
         retired_bg = _retired_parts["background-color"].strip()
         retired_ink = _retired_parts["color"].strip()
-        # 폭 지정(pixel QA 로 실측 발견): 키트 기본값(미지정 컬럼 flex=1,minWidth=90) 은
-        # 원래 st.dataframe(width="stretch") 의 자동 폭보다 좁아 "PET생산부(본동)" 같은
-        # 긴 부서명이 잘렸다(scrollWidth>clientWidth 실측). 데이터·색은 그대로 두고
-        # meta 컬럼만 넉넉한 폭으로 지정해 원 화면과 동등한 잘림 없는 표시를 보존한다.
-        # 신원 4열은 sticky left(pinned) — §1-C 편성표와 동일한 고정 신원 열. 폭은 pixel QA
-        # 실측값 유지(긴 부서명 잘림 방지). read_grid col_config 는 colDef 로 그대로 전달돼
-        # pinned 도 지원한다(jscode 불요).
+        # 폭 지정(pixel QA 실측 기준): 키트 기본값(미지정 컬럼 flex=1,minWidth=90)을 그대로
+        # 두면 신원 열은 좁아 잘리고 **일자 열은 한 글자(주·야·OFF)에 90px** 이 배정돼 표가
+        # 지나치게 벌어진다. 신원 5열은 sticky left(pinned)로 고정 폭을, 일자 열은 §1-C 밀도
+        # (셀 min-width 34px)에 맞춘 좁은 폭을 준다. read_grid col_config 는 colDef 로 그대로
+        # 전달되므로 pinned·cellStyle 도 jscode 없이 지원된다.
+        # 폭은 실렌더 측정(scrollWidth>clientWidth = 잘림)으로 잡았다: 성명은 퇴직 접미사
+        # 포함, 중분류는 분류 미입력 시의 부서명 폴백(가장 긴 값)까지 수용한다.
         meta_col_config = {
-            "사번": {"width": 84, "pinned": "left"},
-            "성명": {"minWidth": 108, "width": 108, "pinned": "left"},
-            "부서": {"minWidth": 150, "width": 150, "pinned": "left"},
-            "조": {"minWidth": 100, "width": 100, "pinned": "left"},
+            "사번": {"width": 84, "minWidth": 84, "pinned": "left"},
+            "성명": {"width": 100, "minWidth": 100, "pinned": "left"},
+            "대분류": {"width": 104, "minWidth": 104, "pinned": "left"},
+            "중분류": {"width": 140, "minWidth": 140, "pinned": "left"},
+            "조": {"width": 60, "minWidth": 60, "pinned": "left"},
+        }
+        # 일자 열: 고정 폭이 아니라 flex + 상·하한 — 좁은 화면에서는 하한(밀도)을 지키고,
+        # 넓은 화면에서는 남는 폭을 균등 배분하되 상한을 넘겨 벌어지지 않게 한다.
+        # 헤더는 2줄(숫자/요일)로 접어 좁은 폭에서도 잘리지 않게 한다(§1-C 편성표의 2줄
+        # 일자 헤더와 같은 표현). **표시 라벨만** 바꾸므로 field(=CSV 열 이름 "1(수)")는
+        # 그대로다 — 엑셀 다운로드 스키마 불변.
+        day_col_config = {
+            c: {"flex": 1, "minWidth": _DAY_COL_MIN_PX, "maxWidth": _DAY_COL_MAX_PX,
+                "headerName": c.replace("(", " ").replace(")", ""),
+                "wrapHeaderText": True, "autoHeaderHeight": True,
+                "cellStyle": {"paddingLeft": "2px", "paddingRight": "2px",
+                              "justifyContent": "center"}}
+            for c in day_cols
         }
         # §1-C 표: 흰 컨테이너(1px #cfc8bd·radius 8·내부 스크롤) — 편성표와 동일 시각. 컨테이너
         # 스타일은 iframe 바깥 래퍼(_SV_CSS 의 .st-key-sv_gridwrap)가 소유한다.
@@ -1117,12 +1155,16 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
             erp.read_grid(
                 grid_ui, columns=meta_cols + day_cols, key=f"{page_id}_grid",
                 color_rules=color_rules,
-                col_config={c: meta_col_config[c] for c in meta_cols if c in meta_col_config},
+                col_config={**{c: meta_col_config[c] for c in meta_cols
+                               if c in meta_col_config}, **day_col_config},
                 row_rules=[{
                     "when": "data['_retired'] === true",
                     "columns": meta_cols, "bg": retired_bg, "ink": retired_ink,
                 }],
                 hidden_fields=["_retired"],
+                # 키트 기본 높이 상한(460)보다 한 화면에 더 담되 §1-C 상한은 지킨다 —
+                # 행 피치(34px)는 키트 읽기 밀도 토큰이 소유한다(화면에서 바꾸지 않는다).
+                height=min(max(_GRID_MIN_PX, 34 * len(grid_ui) + 52), _GRID_MAX_PX),
                 skeleton=False,
             )
         st.markdown(_label_legend_html(display_of, color_of), unsafe_allow_html=True)
@@ -1211,6 +1253,71 @@ def _clean(value) -> str:
     return str(value).strip()
 
 
+def org_labels(depts: pd.DataFrame | None = None) -> tuple[dict, list]:
+    """부서코드 → (대분류, 중분류) 표시 라벨 맵과 대분류 노출 순서를 만든다(순수).
+
+    계층 용어는 대시보드와 같다 — 조직 관리에서 사람이 입력하는 ``major_category``
+    (대분류) · ``minor_category``(중분류, migration 009)가 그대로 화면 계층이다.
+
+    - 대분류가 비었거나 마스터에 없는 부서코드는 :data:`UNCLASSIFIED_LABEL` 로 접고
+      순서상 **마지막**이다(행을 감추지 않는다 — 근무 기록을 조용히 버리지 않는다).
+    - 중분류가 비면 부서명(없으면 부서코드)을 폴백 라벨로 쓴다(dashboard 와 동일 규칙).
+    - 대분류 순서는 **데이터에서 유도**한다: 부서 마스터의 ``sort_order``(같으면 조회
+      순서)가 앞선 부서가 속한 대분류가 먼저다. 특정 대분류 이름을 코드에 고정하지
+      않으므로 조직 관리에서 순서를 바꾸면 화면 순서도 따라간다.
+
+    ``depts`` 는 테스트 주입용이며, 미지정이면 ``db.get_org_departments()`` 를 1회 조회한다.
+    """
+    frame = db.get_org_departments() if depts is None else depts
+    labels: dict = {}
+    majors: list = []
+    if frame is None or frame.empty:
+        return labels, majors
+    rows = []
+    for seq, (_, r) in enumerate(frame.iterrows()):
+        code = _clean(r.get("dept_code"))
+        if not code:
+            continue
+        order = pd.to_numeric(r.get("sort_order"), errors="coerce")
+        rows.append((
+            0 if pd.isna(order) else int(order), seq, code,
+            _clean(r.get("major_category")),
+            _clean(r.get("minor_category")),
+            _clean(r.get("dept_name")),
+        ))
+    for _order, _seq, code, major, minor, name in sorted(rows):
+        if code not in labels:  # 같은 코드가 여러 행이면 첫 매치 우선(db.dept_name 과 동일)
+            labels[code] = (major or UNCLASSIFIED_LABEL, minor or name or code)
+        if major and major not in majors:
+            majors.append(major)
+    return labels, majors
+
+
+def _org_label_of(code, labels: dict) -> tuple[str, str]:
+    """부서코드 한 개의 (대분류, 중분류) — 마스터에 없으면 무분류 + 코드 그대로."""
+    key = _clean(code)
+    if key in labels:
+        return labels[key]
+    return UNCLASSIFIED_LABEL, key
+
+
+def _team_sort_key(value) -> tuple:
+    """조 정렬 키 — A조 → B조 → C조 … → 그 밖(기타 표기) → 빈 조(마지막).
+
+    사용자 확정 순서(정렬기준 ②)를 조 이름 목록으로 하드코딩하지 않고 값에서 유도한다:
+    영문 머리글자(A/B/C…)를 알파벳 순으로 먼저, 그 밖의 표기(1팀·상시 등)를 그 다음,
+    조가 비어 있는 행을 마지막에 둔다. 조 축은 부서 독립 자유 텍스트라(편성 직접입력)
+    기준정보 정렬순서를 쓸 수 없다.
+    """
+    text = _clean(value)
+    if not text:
+        return (2, "")
+    head = text[:1].upper()
+    if "A" <= head <= "Z":
+        return (0, text.upper())
+    return (1, text)
+
+
 def _month_assignment_snapshot(year: int, month: int) -> dict:
     """대상 월의 부서·조 편성 스냅샷 {emp_no: (dept_code, team_code, shift_group_code)}.
 
@@ -1247,6 +1354,11 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     조회 조건의 부서·조 필터도 같은 스냅샷 기준으로 일관 적용해, 과거 월 조회 시
     인사이동한 직원이 현재 소속으로 오분류되지 않게 한다. 날짜 셀은 내부 코드가 아니라
     근무형태 약칭(display_of)으로 표시한다.
+
+    소속 표시 열은 **대분류·중분류**다(2026-08-13 사용자 요구) — 스냅샷의 부서코드를
+    부서 마스터의 조직 계층으로 해석하고(:func:`org_labels`), 분류가 없거나 마스터에
+    없는 코드는 무분류로 접어 마지막에 둔다. 필터·스냅샷 계약(부서코드 기준)은 그대로다.
+    행 정렬은 대분류 → 조 → 등록순(display_order) → 사번 순이다.
 
     해당 월에 저장된 근무 기록이 있는 직원만 행으로 포함한다(2026-08-11 사용자 결정
     — 근무가 없는 사람은 재직 여부와 무관하게 월간 근무표에서 제외, 빈 행을 만들지
@@ -1310,8 +1422,37 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
             keyword, case=False, na=False, regex=False,
         )
         users = users[emp_match | name_match]
-    # 정렬: 부서 → 표시순서(display_order, 근태표 등록 순서·NULL 뒤) → 조 → 사번
-    # (2026-08-07 사용자 요구 — 파일 등록 순서 유지).
+    # 표시 라벨(대분류·중분류·조)을 정렬 **전에** 확정한다 — 정렬 기준과 화면에 보이는
+    # 값이 어긋나지 않게 하기 위해서다(조는 신 축 shift_group_code 우선, 없으면 레거시
+    # 운영단위명). 조/부서 이름 맵은 렌더 1회만 만들어 행마다 재조회하지 않는다.
+    labels, majors = org_labels()
+    major_rank = {name: i for i, name in enumerate(majors)}
+    team_name_by_key: dict = {}
+    for _, t in db.get_teams().iterrows():
+        key = (t["dept_code"], t["team_code"])
+        if key not in team_name_by_key:
+            team_name_by_key[key] = t["team_name"]
+
+    majors_col, minors_col, teams_col = [], [], []
+    for _, u in users.iterrows():
+        major, minor = _org_label_of(u["_eff_dept"], labels)
+        majors_col.append(major)
+        minors_col.append(minor)
+        shift_code = _clean(u.get("_eff_shift"))
+        team_code = _clean(u.get("_eff_team"))
+        teams_col.append(shift_code or (
+            team_name_by_key.get((u["_eff_dept"], team_code), team_code) if team_code else ""
+        ))
+    users["_major"] = majors_col
+    users["_minor"] = minors_col
+    users["_team_label"] = teams_col
+
+    # 정렬(2026-08-13 사용자 확정): ① 대분류(데이터 유도 순서·무분류 마지막)
+    # → ② 조(A→B→C→기타→빈 조) → ③ 등록순(display_order, 없으면 뒤) → 사번.
+    users["_m_rank"] = [major_rank.get(m, len(major_rank)) for m in majors_col]
+    _t_keys = [_team_sort_key(v) for v in teams_col]
+    users["_t_rank"] = [k[0] for k in _t_keys]
+    users["_t_key"] = [k[1] for k in _t_keys]
     _orders = []
     for value in users.get("display_order", pd.Series([None] * len(users))):
         try:
@@ -1321,7 +1462,7 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     users["_d_null"] = [1 if o is None else 0 for o in _orders]
     users["_d_order"] = [0 if o is None else o for o in _orders]
     users = users.sort_values(
-        ["_eff_dept", "_d_null", "_d_order", "_eff_shift", "_eff_team", "emp_no"]
+        ["_m_rank", "_t_rank", "_t_key", "_d_null", "_d_order", "emp_no"]
     )
 
     kept_emp_nos = set(users["emp_no"].astype(str).str.strip())
@@ -1335,37 +1476,19 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     ndays = calendar.monthrange(q["year"], q["month"])[1]
     days = [date(q["year"], q["month"], d) for d in range(1, ndays + 1)]
 
-    # 부서/조 이름은 프레임 전체를 매 행마다 필터링하지 않고, 렌더 1회에 한해
-    # 코드->이름 dict 를 미리 만들어 재사용한다(db.dept_name/team_name 과 동일한
-    # "첫 매치 우선·미매치 시 코드 그대로" 폴백을 그대로 재현한다).
-    dept_name_by_code: dict = {}
-    for _, d in db.get_departments().iterrows():
-        code = d["dept_code"]
-        if code not in dept_name_by_code:
-            dept_name_by_code[code] = d["dept_name"]
-    team_name_by_key: dict = {}
-    for _, t in db.get_teams().iterrows():
-        key = (t["dept_code"], t["team_code"])
-        if key not in team_name_by_key:
-            team_name_by_key[key] = t["team_name"]
-
     rows = []
     for _, u in users.iterrows():
-        dept_code, team_code = u["_eff_dept"], u["_eff_team"]
         name = u["name"]
         if bool(u.get("_retired")):
             name = f"{name}{RETIRED_LABEL}"
-        # 조 표시: 신 축(근무조 스냅샷 텍스트)이 있으면 그것, 없으면 레거시 운영단위명.
-        shift_code = _clean(u.get("_eff_shift"))
+        # 소속 표시는 조직 관리 계층(대분류·중분류)이다 — 스냅샷의 부서코드를 부서
+        # 마스터의 분류로 해석하며(위 org_labels), 분류가 없으면 무분류/부서명 폴백.
         row = {
             "사번": u["emp_no"],
             "성명": name,
-            "부서": dept_name_by_code.get(dept_code, dept_code),
-            "조": shift_code or (
-                team_name_by_key.get((dept_code, team_code), team_code)
-                if team_code
-                else ""
-            ),
+            "대분류": u["_major"],
+            "중분류": u["_minor"],
+            "조": u["_team_label"],
         }
         for d in days:
             code = lookup.get((u["emp_no"], d.isoformat()), "")
