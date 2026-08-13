@@ -5,6 +5,10 @@ DESIGN.md §1-F: 지표 6개(좌측 2px 보더 + 26px 모노 숫자, 제목 바�
 52px 수치` 그리드, 카테고리 단색(등급 오렌지·상태 초록·원인 황토·추이 파랑). 저장/평가
 액션은 이 화면의 책임이 아니다 — 순수 집계 조회다.
 
+지표 타일은 **라벨+값 2줄**이다(영문 오버라인 없음 — near-miss 4화면 공통, `erp.metric_strip`
+와 동일 어휘). 누적·당월 두 행은 **같은 그리드 트랙**을 공유해 카드 폭이 동일하고, 지표가
+적은 행은 늘어나지 않고 남는 칸을 비운다.
+
 년월 지정(기본=당월) + 두 관점: **해당월 말까지 누적**과 **당월 실적**. 파사드 신설 없이
 ``get_near_miss_reports({})`` 로 회사 전체 보고서를 1회 조회하고 년월 기준으로 UI 단에서
 누적/당월을 슬라이스해 count 집계한다(코디 결정 B-1 — facade 신설 없음). count 키 계약은
@@ -117,9 +121,12 @@ def render(user: dict) -> None:
 
     # ① 지표 두 그룹(제목 바로 아래 §8 수용기준 4): 해당월까지 누적 + 당월 실적. CAPA 기한초과는
     #    역할 기반 접근이라 파사드가 평가자/ADMIN 만 집계를 돌려주고 일반 USER 에게는 None('—').
+    #    두 그룹은 한 번에 렌더한다 — 같은 그리드 트랙을 공유해야 카드 폭이 행 간에 같다.
     overdue = db.near_miss_overdue_count(current_user=user)
-    _kpi_cards_cumulative(status_cum, total_cum, overdue, ym)
-    _kpi_cards_current(status_cur, total_cur, ym)
+    _kpi_section([
+        _kpi_cards_cumulative(status_cum, total_cum, overdue, ym),
+        _kpi_cards_current(status_cur, total_cur, ym),
+    ])
 
     # ② 분포 4블록 — 등급·상태·원인은 당월 기준(라벨 명시), 월별 추이는 누적 관점.
     _render_charts(grade_cur, status_cur, cause_cur, total_cur, period_cum, total_cum, ym)
@@ -185,13 +192,45 @@ def _readiness() -> ReadinessState:
 
 
 # ---------- 지표 두 그룹(§1-F 좌측 보더 스트립) ----------
-def _kpi_strip(group_label: str, kpis: list[tuple]) -> None:
-    """지표 스트립 1행 렌더(§1-F: 좌측 2px 보더 + 26px 모노) + 그룹 오버라인.
+def _kpi_section(groups: list[tuple[str, list[tuple]]]) -> None:
+    """지표 그룹 전체를 **한 번에** 렌더한다(그룹 오버라인 + 스트립).
+
+    모든 그룹이 같은 그리드 트랙 수(=지표가 가장 많은 그룹의 개수)를 쓰므로 누적·당월 카드
+    폭이 행 간에 동일하다. 지표가 적은 그룹은 남는 칸을 **비운다**(늘려 채우지 않는다).
+    트랙 수는 데이터에서 파생하고 상수로 박지 않는다."""
+    groups = [(label, items) for label, items in groups if items]
+    if not groups:
+        return
+    cols = max(len(items) for _, items in groups)
+    html = [_kpi_grid_css(cols)]
+    for label, items in groups:
+        html.append(_kpi_group_html(label, items))
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def _kpi_grid_css(cols: int) -> str:
+    """지표 그리드 트랙 수(데이터 파생) + 좁은 폭 단계. 트랙 수가 렌더 시점에 정해지므로
+    정적 CSS(_inject_style)와 분리한다 — 인라인 style 은 media query 로 못 덮는다."""
+    return (
+        "<style>"
+        f".nmf-kpis{{grid-template-columns:repeat({cols},minmax(0,1fr));}}"
+        f"@media (max-width:1100px){{.nmf-kpis"
+        f"{{grid-template-columns:repeat({min(cols, 3)},minmax(0,1fr));}}}}"
+        f"@media (max-width:640px){{.nmf-kpis"
+        f"{{grid-template-columns:repeat({min(cols, 2)},minmax(0,1fr));}}}}"
+        "</style>"
+    )
+
+
+def _kpi_group_html(group_label: str, kpis: list[tuple]) -> str:
+    """지표 스트립 1행 HTML(§1-F: 좌측 2px 보더 + 26px 모노) + 그룹 오버라인.
 
     ``kpis``: ``(label, value, unit, note, accent)``. 강조(오렌지 보더)는 지금 조치가 필요한
-    값>0 항목만. 타일 어휘·형태는 기존과 동일하게 유지하고 그룹 라벨만 위에 덧붙인다."""
+    값>0 항목만. ``note``(영문 오버라인)는 호출부 튜플 계약 호환을 위해 남기지만 렌더하지
+    않는다 — 라벨과 중복이라 near-miss 4화면 공통으로 3줄→2줄(라벨+값)로 줄였다
+    (`erp.metric_strip`/평가·개선조치 화면과 동일 어휘)."""
     cells = []
-    for label, value, unit, note, accent in kpis:
+    for label, value, unit, _note, accent in kpis:  # _note(영문 오버라인) 미렌더 — 2줄 타일
         border = _ACCENT if accent else _LINE_SEC
         vcolor = _ACCENT_TEXT if accent else _INK
         unit_html = f"<span class='nmf-kunit'>{escape(unit)}</span>" if unit else ""
@@ -201,45 +240,46 @@ def _kpi_strip(group_label: str, kpis: list[tuple]) -> None:
             f"<div class='nmf-kval-row'>"
             f"<span class='nmf-kval' style='color:{vcolor};{_MONO}'>{escape(value)}</span>{unit_html}"
             f"</div>"
-            f"<span class='nmf-knote' style='{_MONO}'>{escape(note)}</span>"
             f"</div>"
         )
     head = (f"<div class='nmf-kgroup'>{escape(group_label)}</div>" if group_label else "")
-    st.markdown(f"{head}<div class='nmf-kpis'>{''.join(cells)}</div>", unsafe_allow_html=True)
+    return f"{head}<div class='nmf-kpis'>{''.join(cells)}</div>"
 
 
-def _kpi_cards_cumulative(status_counts: dict, total: int, overdue: int | None, ym: str) -> None:
+def _kpi_cards_cumulative(status_counts: dict, total: int, overdue: int | None,
+                          ym: str) -> tuple[str, list[tuple]]:
     """누적 그룹(해당월 말까지): 총 건수·평가 대기·검토중·평가완료·기한초과·보고서 종결률.
 
     dc §1-F 6지표 구성을 그대로 누적 관점으로 쓴다. '평가 대기'=제출됨(검토 착수 전) 백로그,
-    '검토중'=IN_REVIEW. 기한초과는 역할 게이트(파사드) 결과를 그대로 표시한다."""
+    '검토중'=IN_REVIEW. 기한초과는 역할 게이트(파사드) 결과를 그대로 표시한다.
+    렌더는 하지 않고 ``(그룹 라벨, 타일 목록)`` 만 돌려준다(두 그룹 폭 통일 — `_kpi_section`)."""
     submitted = status_counts.get("SUBMITTED", 0)
     in_review = status_counts.get("IN_REVIEW", 0)
     evaluated = status_counts.get("EVALUATED", 0)
     closed = status_counts.get("CLOSED", 0)
-    _kpi_strip(f"누적 · {_ym_dot(ym)}까지", [
+    return f"누적 · {_ym_dot(ym)}까지", [
         ("총 건수", str(total), "건", "ALL", False),
         ("평가 대기", str(submitted), "건", "PENDING", submitted > 0),
         ("검토중", str(in_review), "건", "IN REVIEW", False),
         ("평가완료", str(evaluated), "건", "DONE", False),
         ("기한초과", _overdue_label(overdue), "", "OVERDUE", bool(overdue)),
         ("보고서 종결률", _closure_rate_label(closed, evaluated), "", "CLOSED", False),
-    ])
+    ]
 
 
-def _kpi_cards_current(status_counts: dict, total: int, ym: str) -> None:
+def _kpi_cards_current(status_counts: dict, total: int, ym: str) -> tuple[str, list[tuple]]:
     """당월 그룹(월초~월말 발생분): 당월 발생·미평가·평가완료·종결. 동일 타일 어휘를 재사용한다."""
     submitted = status_counts.get("SUBMITTED", 0)
     in_review = status_counts.get("IN_REVIEW", 0)
     evaluated = status_counts.get("EVALUATED", 0)
     closed = status_counts.get("CLOSED", 0)
     pending = submitted + in_review
-    _kpi_strip(f"당월 · {_ym_dot(ym)}", [
+    return f"당월 · {_ym_dot(ym)}", [
         ("당월 발생", str(total), "건", "MONTH", total > 0),
         ("미평가", str(pending), "건", "PENDING", False),
         ("평가완료", str(evaluated), "건", "DONE", False),
         ("종결", str(closed), "건", "CLOSED", False),
-    ])
+    ]
 
 
 def _overdue_label(overdue: int | None) -> str:
@@ -338,16 +378,17 @@ def _inject_style() -> None:
 /* 지표 그룹 오버라인(누적/당월 구분) — 모노 소문자 라벨, 카드 아님. */
 .nmf-kgroup {{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.12em;
   color:{_MUT}; margin:.5rem 0 .35rem; }}
-.nmf-kpis {{ display:flex; flex-wrap:wrap; gap:12px; margin:.1rem 0 1.1rem; }}
-.nmf-kpi {{ flex:1 1 130px; min-width:0; display:flex; flex-direction:column; gap:5px;
-  padding:2px 18px; }}
-.nmf-klabel {{ font-size:12px; color:{_MUT}; }}
+/* 지표 스트립 = 고정 트랙 그리드. 누적(6)·당월(4)이 같은 트랙 수를 공유해 카드 폭이
+   행 간에 동일하고, 지표가 적은 행은 늘어나지 않고 남는 칸을 비운다. 트랙 수는 렌더 시
+   데이터에서 파생해 주입한다(_kpi_grid_css). 타일은 라벨+값 2줄(영문 오버라인 없음). */
+.nmf-kpis {{ display:grid; gap:10px 12px; margin:.1rem 0 .8rem; }}
+.nmf-kpi {{ min-width:0; display:flex; flex-direction:column; gap:4px; padding:2px 18px; }}
+.nmf-klabel {{ font-size:12px; color:{_MUT}; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; }}
 .nmf-kval-row {{ display:flex; align-items:baseline; gap:4px; }}
 .nmf-kval {{ font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:600;
   letter-spacing:-0.03em; font-variant-numeric:tabular-nums; }}
 .nmf-kunit {{ font-size:11.5px; color:{_MUT}; }}
-.nmf-knote {{ font-size:11px; color:{_MUT}; font-family:'IBM Plex Mono',monospace;
-  letter-spacing:.08em; }}
 
 .nmf-charts {{ display:flex; flex-wrap:wrap; gap:16px 28px; }}
 .nmf-block {{ flex:1 1 340px; min-width:0; padding:16px 0 8px;
@@ -372,7 +413,6 @@ def _inject_style() -> None:
 /* 모노 강제 — 전역 `.stApp [data-testid=stMarkdownContainer] *`(특이도 0,2,0)를 이기려면
    0,3,0 이상이어야 한다(숫자·오버라인이 sans 로 떨어지는 것 방지). 인라인과 병행 못박음. */
 .stApp [data-testid="stMarkdownContainer"] .nmf-kval,
-.stApp [data-testid="stMarkdownContainer"] .nmf-knote,
 .stApp [data-testid="stMarkdownContainer"] .nmf-bmeta,
 .stApp [data-testid="stMarkdownContainer"] .nmf-rcount,
 .stApp [data-testid="stMarkdownContainer"] .nmf-rpct {{

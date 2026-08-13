@@ -571,7 +571,8 @@ def render(user: dict) -> None:
     # (선택·dirty 변화는 rerun 주기 내 반영).
     # 필터 하단 헤어라인은 condition_panel(§1-E)이 소유한다.
     clicked = st.session_state.pop("se_go_req", False)
-    show_flash("schedule_edit")
+    # 저장/삭제 배너(show_flash)와 삭제 예정 패널은 **본문 최상위에 맨몸으로 두지 않는다** —
+    # 아래 '알림 슬롯'(se_notice) 안에서 렌더한다. 이유는 그 주석 참조(저장 직후 공백 회귀).
 
     # ('조' 선택지는 항상 [전체 조]를 포함하므로 값 없음 분기는 더 이상 생기지 않는다 —
     #  종전 "선택한 부서에 등록된 조/팀이 없습니다" 안내는 조 기준정보 축과 함께 폐기.)
@@ -593,8 +594,6 @@ def render(user: dict) -> None:
     elif "se_rows" not in st.session_state:
         _load_grid(q)
 
-    _deleted_panel(q)
-
     day_cols = [c for c, _ in st.session_state["se_days"]]
     row_cols = _META + _FIXED + day_cols
 
@@ -608,8 +607,21 @@ def render(user: dict) -> None:
         if color.startswith("#"):
             hint_colors[display_of.get(code, sl)] = color
 
-    # 입력 단축키 힌트 라인 → 컨텍스트 라인(값은 그리드 뒤 채움) → 표
-    st.markdown(_hint_html(number_labels, hint_colors), unsafe_allow_html=True)
+    # ── 알림 슬롯(se_notice): 저장/삭제 배너 + 삭제 예정 패널 + 입력 단축키 줄을 **한 컨테이너**로
+    #    묶는다. 배너·패널은 rerun 마다 있거나 없으므로 본문 최상위에 맨몸 요소로 두면 그 유무에
+    #    따라 뒤따르는 모든 요소의 delta 경로가 한 칸씩 밀린다. 그러면 Streamlit 이 새 경로에
+    #    AG Grid 컨테이너(se_gridwrap)를 다시 만들고, 직전 run 의 그리드 블록이 형제로 남아
+    #    **그리드 높이만큼(최대 500px) 빈 블록**이 배너 아래에 생긴다(2026-08-13 저장 직후 공백
+    #    회귀). 실측으로 원인을 좁혔다: 배너 개수가 변하지 않는 새로고침에서는 재현되지 않고,
+    #    배너가 생기거나 사라지는 rerun 에서만 se_gridwrap 블록이 2개가 된다.
+    #    항상 존재하는 컨테이너로 감싸면 본문 최상위 요소 수가 고정돼 그리드 경로가 흔들리지 않는다
+    #    (배너가 없을 때 자식은 힌트 줄 하나뿐이라 종전과 같은 높이·간격이다).
+    with st.container(key="se_notice"):
+        show_flash("schedule_edit")
+        _deleted_panel(q)
+        # 입력 단축키 힌트 라인
+        st.markdown(_hint_html(number_labels, hint_colors), unsafe_allow_html=True)
+    # 컨텍스트 라인(값은 그리드 뒤 채움) → 표
     context_slot = st.container()
 
     # 조회 범위가 특정 대분류(또는 MANAGER 부서 잠금)로 좁혀졌는가 — 대분류 열 숨김 판단.

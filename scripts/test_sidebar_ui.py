@@ -1,6 +1,6 @@
 """사이드바 명칭·버튼 가시성 정리 회귀 테스트 (sample, AppTest + 소스 정적).
 
-- 상단 제목 "교대 근무표", "생산 근무표"/"WORKFORCE" 사이드바 문자열 제거
+- 상단 제목 "WorkOps"(부제 '현장운영'), "생산 근무표"/"WORKFORCE" 사이드바 문자열 제거
 - 접기(sb_hide)·로그아웃(btn_logout) 버튼 렌더 유지
 - ADMIN/MANAGER App Shell 렌더, USER 전용 헤더 회귀 없음
 - 메뉴 라우팅·로그아웃·펼침/접힘 session_state 계약 불변
@@ -59,7 +59,10 @@ def _render(user):
 # ===== 1) 브랜드 문자열 (소스 정적 — 표시 명칭만, 공식 APP_NAME 은 불변) =====
 print("사이드바 브랜드 문자열")
 brand_src = inspect.getsource(ui._sidebar_brand)
-check("사이드바 브랜드에 '교대 근무표' 존재", "교대 근무표" in brand_src)
+# 표시명 확정(2026-08-13, 코덱스 자문 합치): 브랜드 'WorkOps' + 한글 부제 '현장운영'
+check("사이드바 브랜드에 'WorkOps' 존재", "WorkOps" in brand_src)
+check("사이드바 브랜드에 부제 '현장운영' 존재", "현장운영" in brand_src)
+check("사이드바 브랜드에서 구명칭 '교대 근무표' 제거", "교대 근무표" not in brand_src)
 check("사이드바 브랜드에 '생산 근무표' 제거", "생산 근무표" not in brand_src)
 ui_src = inspect.getsource(ui)
 check("ui.py 전체에서 'WORKFORCE' 제거", "WORKFORCE" not in ui_src)
@@ -74,7 +77,8 @@ print("ADMIN App Shell 렌더")
 at = _render(ADMIN)
 check("ADMIN 렌더 예외 없음", not at.exception)
 md_values = " ".join(m.value for m in at.markdown)
-check("렌더 결과에 '교대 근무표' 표시", "교대 근무표" in md_values)
+check("렌더 결과에 'WorkOps' 표시", "WorkOps" in md_values)
+check("렌더 결과에 부제 '현장운영' 표시", "현장운영" in md_values)
 check("렌더 결과에 'WORKFORCE' 미표시", "WORKFORCE" not in md_values)
 btn_keys = {b.key for b in at.button}
 check("접기 버튼(sb_hide) 렌더 유지", "sb_hide" in btn_keys)
@@ -117,7 +121,7 @@ if MANAGER:
     check("MANAGER 렌더 예외 없음", not atm.exception)
     mkeys = {b.key for b in atm.button}
     check("MANAGER 접기/로그아웃 버튼 유지", "sb_hide" in mkeys and "btn_logout" in mkeys)
-    check("MANAGER 렌더에 '교대 근무표'", "교대 근무표" in " ".join(m.value for m in atm.markdown))
+    check("MANAGER 렌더에 'WorkOps'", "WorkOps" in " ".join(m.value for m in atm.markdown))
     check("MANAGER 기존 권한 메뉴 불변", ui._shell_groups("MANAGER") == nav.visible_groups("MANAGER"))
 else:
     check("MANAGER 샘플 계정 존재", False)

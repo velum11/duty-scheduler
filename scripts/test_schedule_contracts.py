@@ -1011,6 +1011,157 @@ def test_month_view_top_actions() -> None:
           "schedule_view_refresh_req" not in at.session_state)
 
 
+def test_month_view_scope_defaults() -> None:
+    """월간 근무표 조회조건 기본값 = 로그인 사용자의 부서·조(2026-08-13 사용자 요구).
+
+    - 부서 원천: ``users.dept_code``. 부서 마스터에 없는 코드는 심지 않는다(0건 조건 금지).
+    - 조 원천: 조 축이 기준정보가 아니라 편성 스냅샷이므로 **대상 월 본인 편성**이 1순위
+      (``shift_group_code`` → 레거시 ``team_code``), 편성이 없으면 ``users.team_code``
+      (스냅샷 없는 월에 표가 쓰는 폴백과 같은 값 → 심은 조건 안에 본인이 반드시 포함).
+    - 이미 선택값이 있으면 덮어쓰지 않는다(사용자가 바꾼 조건 유지).
+    """
+    print("월간 근무표 조회조건 기본값 — 내 부서·조 시드(선택값이 있으면 불변)")
+    from streamlit.testing.v1 import AppTest
+    from views import workspace
+
+    dept_names = {"PET1": "PET생산부(본동)", "PET2": "PET생산부(원료실)"}
+    user = {"emp_no": "1003", "dept_code": "PET1", "team_code": "A", "role": "USER"}
+
+    # (1) 편성 스냅샷 없음 → users 현재 소속(부서·조)
+    d, t = workspace.scope_defaults(user, dept_names, None)
+    check("스냅샷 없음: 부서=users.dept_code", d == "PET1")
+    check("스냅샷 없음: 조=users.team_code(표 폴백과 동일 값)", t == "A")
+
+    # (2) 스냅샷의 근무조(신 축)가 최우선
+    snap_shift = pd.DataFrame([{
+        "emp_no": "1003", "schedule_month": "2026-07", "dept_code": "PET1",
+        "team_code": "A", "shift_group_code": "가조",
+    }])
+    d, t = workspace.scope_defaults(user, dept_names, snap_shift)
+    check("스냅샷 근무조(shift_group_code) 우선", t == "가조")
+
+    # (3) 근무조가 비면 레거시 운영단위(team_code)
+    snap_team = snap_shift.copy()
+    snap_team["shift_group_code"] = ""
+    snap_team["team_code"] = "B"
+    _d, t = workspace.scope_defaults(user, dept_names, snap_team)
+    check("근무조 미기입 월은 레거시 운영단위로 폴백", t == "B")
+
+    # (4) 마스터에 없는 부서코드는 심지 않는다(전체 부서 폴백)
+    d, _t = workspace.scope_defaults({**user, "dept_code": "NOPE"}, dept_names, None)
+    check("부서 마스터에 없는 코드는 미시드(전체 부서 폴백)", d == "")
+    d, t = workspace.scope_defaults({"emp_no": "9001"}, dept_names, None)
+    check("소속 없는 사용자는 부서·조 모두 미시드", (d, t) == ("", ""))
+
+    # (5) 실렌더: 첫 진입에 위젯 세션값이 내 부서·조로 심어진다
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
+    at.session_state["user"] = {
+        "role": "USER", "dept_code": "PET1", "team_code": "A",
+        "emp_no": "1003", "name": "박근무", "is_active": True,
+    }
+    at.session_state["nav_page"] = "schedule_view"
+    at.run()
+    check("첫 진입 렌더 예외 없음", not at.exception)
+    check("첫 진입: 부서 조건이 내 부서로 시드", at.session_state["schedule_view_d"] == "PET1")
+    check("첫 진입: 조 조건이 내 조로 시드", at.session_state["schedule_view_t"] == "A")
+
+    # (6) 사용자가 바꾼 선택은 덮어쓰지 않는다('전체'로 되돌린 경우 포함)
+    at.session_state["schedule_view_d"] = workspace.ALL
+    at.session_state["schedule_view_t"] = workspace.ALL
+    at.run()
+    check("사용자 선택('전체 부서')을 재시드로 덮어쓰지 않음",
+          at.session_state["schedule_view_d"] == workspace.ALL)
+    check("사용자 선택('전체 조')을 재시드로 덮어쓰지 않음",
+          at.session_state["schedule_view_t"] == workspace.ALL)
+
+    # (7) MANAGER 는 시드가 권한범위를 넓히지 않는다(본인 부서 그대로 · fail-closed 유지)
+    at_m = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
+    at_m.session_state["user"] = {
+        "role": "MANAGER", "dept_code": "PET1", "team_code": "A",
+        "emp_no": "1002", "name": "이책임", "is_active": True,
+    }
+    at_m.session_state["nav_page"] = "schedule_view"
+    at_m.run()
+    check("MANAGER 렌더 예외 없음", not at_m.exception)
+    check("MANAGER 시드는 본인 부서(권한범위 확대 없음)",
+          at_m.session_state["schedule_view_d"] == "PET1")
+
+
+def test_month_view_compact_layout() -> None:
+    """좁은 폭(모바일)에서 성명 + 일자만 표시하고 표 높이를 뷰포트에 맞춘다.
+
+    사용자 요구(2026-08-13): "모바일은 이름, 근무표만 나오면 되고, 가로로 보는 게 좋겠어".
+    표시 열만 줄이며 데이터(_build_month_grid)와 CSV 다운로드 원본은 그대로다.
+    """
+    print("월간 근무표 좁은 폭 — 성명+일자만 표시 · 표 높이 뷰포트 맞춤 · 가로 안내")
+    import inspect
+    from streamlit.testing.v1 import AppTest
+    from views import workspace
+
+    meta = ["사번", "성명", "대분류", "중분류", "조"]
+    days = ["1(수)", "2(목)"]
+    wide = workspace.month_grid_columns(meta, days, compact=False)
+    compact = workspace.month_grid_columns(meta, days, compact=True)
+    check("넓은 폭: 신원 5열 + 일자(종전과 동일)", wide == meta + days)
+    check("좁은 폭: 성명 + 일자만", compact == ["성명"] + days)
+    check("좁은 폭에서도 일자 열은 하나도 빠지지 않음",
+          [c for c in compact if c in days] == days)
+    check("신원 열에 성명이 없으면(스키마 변화) 기존 신원 열 유지",
+          workspace.month_grid_columns(["사번"], days, compact=True) == ["사번"] + days)
+
+    # 높이: 데스크톱 규칙 불변 / 좁은 폭은 뷰포트에서 크롬을 뺀 값으로 자른다.
+    tall = workspace.month_grid_height(40, compact=False, landscape=False, viewport_h=900)
+    check("넓은 폭 높이 상한 유지(500)", tall == 500)
+    check("넓은 폭 높이 하한 유지(240)",
+          workspace.month_grid_height(1, compact=False, landscape=False, viewport_h=900) == 240)
+    land = workspace.month_grid_height(40, compact=True, landscape=True, viewport_h=390)
+    check("폰 가로: 표가 뷰포트 안에 들어옴", land <= 390 - 150)
+    check("폰 가로: 최소 높이(헤더+몇 행) 확보", land >= 150)
+    port = workspace.month_grid_height(40, compact=True, landscape=False, viewport_h=844)
+    check("폰 세로: 가로보다 높은 표(세로 공간 활용)", port > land)
+    check("뷰포트 높이를 모르면 행 수 기준 높이(하한 150)",
+          workspace.month_grid_height(1, compact=True, landscape=False, viewport_h=0) == 150)
+
+    src = inspect.getsource(workspace.schedule_screen)
+    check("CSV 다운로드 원본은 표시 열 축소와 무관(grid 원본 유지)",
+          "grid.to_csv(index=False).encode(\"utf-8-sig\")" in src)
+    check("표시 열만 read_grid 에 전달(데이터 프레임은 그대로)",
+          "columns=shown_meta + day_cols" in src and "grid_ui," in src)
+
+    # 실렌더: 좁은 폭 세션값이면 안내 문구가 뜨고 집계 표는 두지 않는다.
+    def run_with(viewport):
+        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
+        at.session_state["user"] = {
+            "role": "USER", "dept_code": "PET1", "team_code": "A",
+            "emp_no": "1003", "name": "박근무", "is_active": True,
+        }
+        at.session_state["nav_page"] = "schedule_view"
+        at.session_state["schedule_view_y"] = 2026
+        at.session_state["schedule_view_m"] = 7
+        if viewport is not None:
+            at.session_state["schedule_view_viewport"] = viewport
+        at.run()
+        return at
+
+    md = lambda at: " ".join(m.value for m in at.markdown)  # noqa: E731
+    at_p = run_with({"w": 390, "h": 844, "compact": True, "landscape": False})
+    check("좁은 폭 세로 렌더 예외 없음", not at_p.exception)
+    check("좁은 폭 세로: 가로 보기 안내 1줄 표시", "가로로 돌리면" in md(at_p))
+    check("좁은 폭: 직원별 집계 표는 두지 않음(이름·근무표만)",
+          "직원별 근무형태 집계" not in md(at_p))
+    check("좁은 폭에서도 엑셀 다운로드는 그대로",
+          any(d.label == "엑셀 다운로드" for d in at_p.get("download_button")))
+
+    at_l = run_with({"w": 844, "h": 390, "compact": True, "landscape": True})
+    check("좁은 폭 가로 렌더 예외 없음", not at_l.exception)
+    check("좁은 폭 가로: 회전 안내는 표시하지 않음", "가로로 돌리면" not in md(at_l))
+
+    at_w = run_with({"w": 1440, "h": 900, "compact": False, "landscape": True})
+    check("넓은 폭: 회전 안내 없음", "가로로 돌리면" not in md(at_w))
+    check("넓은 폭: 직원별 집계 표 유지(종전 동작)", "직원별 근무형태 집계" in md(at_w))
+
+
 def test_schedule_edit_row_reorder() -> None:
     """근무표 편성 — 행 드래그 재정렬 + 순서 영속(2026-08-11 사용자 요구).
 
@@ -1181,6 +1332,8 @@ def main() -> int:
         test_retired_employee_month_display,
         test_schedule_view_manager_scope_enforced,
         test_month_view_top_actions,
+        test_month_view_scope_defaults,
+        test_month_view_compact_layout,
         test_schedule_edit_row_reorder,
         test_schedule_edit_org_axis,
     ):

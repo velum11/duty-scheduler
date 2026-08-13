@@ -13,6 +13,7 @@
 """
 import calendar
 from datetime import date
+from functools import partial
 from html import escape
 
 import pandas as pd
@@ -51,6 +52,27 @@ _SV_CSS = """
 .st-key-sv_gridwrap div[data-testid="stAgGrid"] {
   border:1px solid #cfc8bd; border-radius:8px; overflow:hidden; background:#ffffff;
 }
+/* 뷰포트 프로브(_VIEWPORT_PROBE) — 값을 읽기만 하는 0크기 요소다. display:none 은
+   컴포넌트 마운트 여부를 브라우저 구현에 맡기게 되므로 쓰지 않고, 흐름에서만 빼
+   (absolute) 세로 리듬(블록 gap)에 영향을 주지 않게 한다. */
+.st-key-sv_vp { position:absolute; width:0; height:0; overflow:hidden; }
+/* 모바일 세로 한 줄 안내(가로 전환 제안) — 장식·아이콘 없이 보조 텍스트 1줄(§A-2 #6b665d). */
+.sv-rotate { font-size:12.5px; color:#6b665d; margin:0 0 6px; line-height:1.35; }
+/* 모바일 가로(낮은 뷰포트): 표가 화면을 최대로 쓰도록 상하 여백을 압축한다.
+   폰트·색·컨트롤 크기(히트영역)는 그대로다(§3 타이포·§4 44px 불변) — 줄이는 것은
+   여백과 '한 줄 설명'뿐이다(제목·조건·표·범례는 모두 남는다). 이 화면이 렌더되는
+   동안에만 주입되며, 세로·데스크톱에는 적용되지 않는다. */
+@media (orientation:landscape) and (max-height:540px) {
+  section[data-testid="stMain"] .block-container { padding-bottom:.5rem !important; }
+  /* 제목 아래 한 줄 설명 — 폰 가로에서는 접는다(제목은 상단 앱바·본문 양쪽에 남는다).
+     블록 간 gap(0.65rem)은 건드리지 않는다: Streamlit 마크다운 컨테이너의 음수 하단
+     마진과 겹쳐 제목이 조건 줄 라벨 위로 올라타는 겹침이 실측됐다. */
+  .ms-desc { display:none !important; }
+  [class*="st-key-erpcond_"] { padding-bottom:6px !important; margin-bottom:6px !important; }
+  [class*="st-key-erpcond_"] [data-testid="stVerticalBlock"] { gap:2px !important; }
+  .st-key-sv_ctxrow .sv-ctx { margin:0 !important; }
+  .duty-legend { margin-top:4px !important; }
+}
 </style>
 """
 # 일자 열 밀도(§1-C "셀 min-width 34px" + 편성표 col_config 실값 44/34 정합). 읽기 표는
@@ -61,6 +83,66 @@ _DAY_COL_MIN_PX = 40
 _DAY_COL_MAX_PX = 52
 # 표 높이 — 행 수에 따라 늘되 §1-C(≈62vh) 상한 안에서 내부 스크롤(편성표와 같은 규칙).
 _GRID_MIN_PX, _GRID_MAX_PX = 240, 500
+# 좁은 폭(모바일)에서의 표 높이 하한 — 폰 가로는 뷰포트 높이가 ~390px 라 데스크톱 하한
+# (240)을 그대로 쓰면 표가 화면 밖으로 밀린다. 헤더 + 3행 정도가 보이는 값.
+_GRID_MIN_COMPACT_PX = 150
+# 좁은 폭에서 표 위·아래가 쓰는 화면 크롬 높이(390×844 / 844×390 실측값) — 표 높이를
+# "뷰포트 - 크롬" 으로 잘라 표가 화면 밖으로 밀리지 않게 한다. 세로는 앱바 52 + 제목·설명
+# + 조건(폰 폭에서 여러 줄로 접힘) + 컨텍스트 줄 + 안내 줄 + 범례, 가로는 같은 요소를
+# CSS(@media orientation:landscape)로 압축한 뒤의 값이다. 조건 줄은 폭에 따라 접히는
+# 줄 수가 달라지므로 정확한 합이 아니라 **상한을 정하는 근사값**이다.
+_COMPACT_CHROME_PORTRAIT_PX = 493
+_COMPACT_CHROME_LANDSCAPE_PX = 258
+# 좁은 폭 판정 기준 — 폭이 좁거나(세로 폰) 짧은 변이 작을 때(가로 폰) 모두 '모바일'이다.
+# 폭만 보면 폰 가로(844×390)가 데스크톱으로 잡혀, 정작 가로로 돌린 사용자가 신원 5열에
+# 화면을 다 빼앗긴다(폰 세로 폭 390 < 신원 5열 합계 488px).
+_COMPACT_MAX_W = 768
+_COMPACT_MAX_MIN_SIDE = 540
+# 모바일에서 남기는 신원 열 — 사용자 요구(2026-08-13): "모바일은 이름, 근무표만".
+# 표시만 줄이며 데이터(_build_month_grid 결과)와 CSV 다운로드 원본은 그대로다.
+_COMPACT_META_COLS = ("성명",)
+
+# 뷰포트 프로브 — 좁은 폭/방향/높이를 파이썬으로 올린다(CCv2: iframe 이 아니라 그림자 DOM
+# 이라 window 값이 실제 뷰포트다). AgGrid 는 components.v1 iframe 이라 페이지 CSS 가 표
+# 내부에 닿지 않고, 열 표시/표 높이는 gridOptions(서버측)로만 정할 수 있다 — 그래서 폭을
+# CSS 가 아니라 값으로 받는다. 전송은 '파이썬이 아는 값과 달라졌을 때'만 한다(폰 주소창
+# 접힘 같은 작은 높이 변화 ±120px 는 무시) — 리렌더 폭주 방지.
+_VIEWPORT_PROBE = partial(
+    st.components.v2.component,
+    "duty_viewport_probe",
+    html="<span aria-hidden='true'></span>",
+    js="""
+    export default function (component) {
+      const { data, setTriggerValue } = component;
+      const MAX_W = %(max_w)d, MAX_MIN_SIDE = %(max_min_side)d, H_TOLERANCE = 120;
+      const read = () => {
+        const w = window.innerWidth || document.documentElement.clientWidth || 0;
+        const h = window.innerHeight || document.documentElement.clientHeight || 0;
+        return {
+          w: w, h: h, landscape: w > h,
+          compact: w <= MAX_W || Math.min(w, h) <= MAX_MIN_SIDE,
+        };
+      };
+      const send = () => {
+        const now = read();
+        const last = data || {};
+        if (last.compact === now.compact && last.landscape === now.landscape
+            && Math.abs((last.h || 0) - now.h) <= H_TOLERANCE) { return; }
+        setTriggerValue('viewport', now);
+      };
+      send();
+      let timer = null;
+      const onResize = () => { clearTimeout(timer); timer = setTimeout(send, 250); };
+      window.addEventListener('resize', onResize);
+      window.addEventListener('orientationchange', onResize);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('resize', onResize);
+        window.removeEventListener('orientationchange', onResize);
+      };
+    }
+    """ % {"max_w": _COMPACT_MAX_W, "max_min_side": _COMPACT_MAX_MIN_SIDE},
+)
 
 RETIRED_LABEL = "(퇴직)"
 # 퇴직 행 배경/글자색 — master_users.py 의 .ms-row-inactive 와 동일 토큰
@@ -915,6 +997,139 @@ def master_download(view: pd.DataFrame, name: str, key: str) -> None:
         )
 
 
+# ---------- 좁은 폭(모바일) 레이아웃 · 조회조건 기본값 ----------
+def scope_defaults(user: dict, dept_names: dict, assigns: pd.DataFrame | None) -> tuple[str, str]:
+    """최초 진입 시 심을 (부서, 조) 기본값 — 없으면 빈 문자열(= 전체 폴백)을 돌려준다(순수).
+
+    **부서**: 사용자 레코드(`users.dept_code`)다. 부서 마스터에 없는 코드(미배정·삭제)면
+    시드하지 않는다 — 조회 결과가 0건이 되는 조건을 기본값으로 심지 않기 위해서다.
+
+    **조**: 조 축은 기준정보가 아니라 편성 스냅샷(`schedule_assignments.shift_group_code`)
+    이므로 대상 월 **본인 편성**을 1순위 원천으로 쓴다. 해석 순서는 이 화면이 표에서 쓰는
+    유효 조(:func:`_build_month_grid` 의 ``_eff_shift``/``_eff_team``)와 같다:
+
+      1. 스냅샷 근무조 ``shift_group_code`` (신 축, 편성 직접입력)
+      2. 스냅샷 운영단위 ``team_code`` (과거 월 레거시 축)
+      3. 편성이 없으면 ``users.team_code`` — 스냅샷이 없는 월에 표가 쓰는 현재 소속
+         폴백과 **같은 값**이라, 심은 조건 안에 본인이 반드시 포함된다.
+
+    옵션 집합에 없는 값은 호출부(위젯 생성 전 유효성 검사)가 '(전체)'로 되돌린다.
+    """
+    dept = _clean(user.get("dept_code"))
+    seed_dept = dept if dept and dept in dept_names else ""
+    seed_team = ""
+    if assigns is not None and not assigns.empty:
+        row = assigns.iloc[0]
+        seed_team = _clean(row.get("shift_group_code")) or _clean(row.get("team_code"))
+    if not seed_team:
+        seed_team = _clean(user.get("team_code"))
+    return seed_dept, seed_team
+
+
+def _seed_scope_defaults(user: dict, page_id: str, dept_names: dict, year: int, month: int) -> None:
+    """조회조건(부서·조)에 **선택값이 없을 때만** 로그인 사용자 소속을 심는다.
+
+    규율은 연·월 기본값(위 ``y_key``/``m_key`` 선점)과 같다 — 값이 있는 위젯 키는 절대
+    덮어쓰지 않으므로, 화면에 머무는 동안 사용자가 바꾼 선택('전체 부서' 포함)은 그대로
+    유지된다. 위젯 인스턴스화 **전**에만 세션 키를 쓸 수 있어 조건 패널 렌더 앞에서 부른다.
+
+    '세션 1회 플래그' 대신 값 유무로 판단하는 이유(실측): Streamlit 은 어떤 실행에서
+    렌더되지 않은 위젯의 상태를 정리한다. 다른 화면에 갔다 오면 이 화면의 조건 위젯 값이
+    모두 사라지므로(연·월도 today 로 되돌아온다), 플래그로 1회만 심으면 재진입 때 부서·조만
+    '(전체)'로 남아 기본값 계약이 깨진다. 값이 없을 때 심으면 첫 진입·재진입 모두 내
+    부서·조로 열리고, 머무는 동안의 선택은 그대로다.
+    """
+    d_key, t_key = f"{page_id}_d", f"{page_id}_t"
+    if d_key in st.session_state and t_key in st.session_state:
+        return
+    emp = _clean(user.get("emp_no"))
+    assigns = db.get_month_assignments(int(year), int(month), emp) if emp else None
+    seed_dept, seed_team = scope_defaults(user, dept_names, assigns)
+    if seed_dept and d_key not in st.session_state:
+        st.session_state[d_key] = seed_dept
+    if seed_team and t_key not in st.session_state:
+        st.session_state[t_key] = seed_team
+
+
+def viewport_state(page_id: str) -> dict:
+    """이 세션에서 마지막으로 확인된 뷰포트({w,h,landscape,compact}) — 없으면 빈 dict.
+
+    값은 :func:`mount_viewport_probe` 가 갱신한다. 화면 상단에서는 **읽기만** 한다.
+    """
+    return st.session_state.get(f"{page_id}_viewport") or {}
+
+
+def mount_viewport_probe(page_id: str) -> None:
+    """뷰포트 프로브를 화면 **본문 마지막**에 붙이고, 값이 바뀌었으면 다시 그린다.
+
+    본문 끝에 두는 이유: 컴포넌트 트리거는 진행 중인 스크립트 실행을 중단시키고 리런을
+    건다. 조건 위젯보다 **앞**에서 마운트하면 첫 진입 리런이 조건 위젯 생성 전에 실행을
+    끊어, 그 실행에서 심어 둔 조회조건 기본값(연·월·부서·조)이 위젯에 실리지 못하는
+    경합이 생긴다(실측). 마지막에 두면 위젯이 모두 만들어진 뒤에만 리런이 걸린다.
+
+    값이 바뀐 rerun 에서는 :func:`st.rerun` 으로 한 번 더 그린다 — 표시 열·표 높이는
+    화면 위쪽(표)에서 이미 쓰였기 때문에, 새 값으로 다시 그려야 반영된다.
+    """
+    store = f"{page_id}_viewport"
+    known = st.session_state.get(store) or {}
+    with st.container(key="sv_vp"):
+        result = _VIEWPORT_PROBE()(
+            key=f"{page_id}_vp", data=known, on_viewport_change=lambda: None,
+            width="content", height="content",
+        )
+    payload = result.get("viewport") if result is not None else None
+    if not isinstance(payload, dict):
+        return
+    fresh = {
+        "w": int(payload.get("w") or 0), "h": int(payload.get("h") or 0),
+        "landscape": bool(payload.get("landscape")),
+        "compact": bool(payload.get("compact")),
+    }
+    if fresh == known:
+        return
+    st.session_state[store] = fresh
+    # 표시가 실제로 달라지는 변화일 때만 다시 그린다 — 넓은 폭에서는 방향·높이가 표에
+    # 쓰이지 않으므로(데스크톱 규칙 그대로) 첫 값 수신에도 추가 리런을 만들지 않는다.
+    def _layout(state: dict) -> tuple:
+        compact = bool(state.get("compact"))
+        if not compact:
+            return (False,)
+        return (True, bool(state.get("landscape")), int(state.get("h") or 0))
+
+    if _layout(fresh) != _layout(known):
+        st.rerun()
+
+
+def month_grid_columns(meta_cols: list[str], day_cols: list[str], *, compact: bool) -> list[str]:
+    """표에 **표시할** 열 — 좁은 폭이면 성명 + 일자만 남긴다(순수).
+
+    데이터 프레임(``_build_month_grid`` 결과)과 CSV 다운로드 원본은 그대로이며 표시 열만
+    줄인다. 남길 신원 열이 실제 프레임에 없으면(스키마 변화) 기존 신원 열을 유지한다.
+    """
+    if not compact:
+        return list(meta_cols) + list(day_cols)
+    kept = [c for c in meta_cols if c in _COMPACT_META_COLS]
+    return (kept or list(meta_cols)) + list(day_cols)
+
+
+def month_grid_height(nrows: int, *, compact: bool, landscape: bool, viewport_h: int) -> int:
+    """표 높이 — 행 수만큼 늘되 화면(뷰포트) 밖으로 넘치지 않게 자른다(순수).
+
+    데스크톱은 종전 규칙(행 34px + 여백, 240~500) 그대로다. 좁은 폭에서는 뷰포트 높이에서
+    화면 크롬을 뺀 '남는 높이'로 한 번 더 자른다 — 폰 가로처럼 낮은 뷰포트에서 표가 화면
+    밖으로 밀리지 않고, 표 안 스크롤로 날짜를 보게 된다.
+    """
+    natural = 34 * max(int(nrows), 1) + 52
+    height = max(_GRID_MIN_PX, min(natural, _GRID_MAX_PX))
+    if not compact:
+        return height
+    chrome = _COMPACT_CHROME_LANDSCAPE_PX if landscape else _COMPACT_CHROME_PORTRAIT_PX
+    room = int(viewport_h) - chrome if viewport_h else 0
+    if room <= 0:
+        return max(_GRID_MIN_COMPACT_PX, min(natural, _GRID_MAX_PX))
+    return max(_GRID_MIN_COMPACT_PX, min(natural, _GRID_MAX_PX, room))
+
+
 # ---------- 근무표 등록/수정 · 전체 근무표 조회 (공통 본문) ----------
 def schedule_screen(user: dict, page_id: str, band=None) -> None:
     # 상단 52px 헤더의 새로고침 아이콘(modules/ui.py::_PAGE_HEADER_ACTIONS) 의도를
@@ -952,6 +1167,18 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         st.session_state[y_key] = today.year
     if m_key not in st.session_state:
         st.session_state[m_key] = today.month
+
+    # 화면 폭/방향 — 표시 열·표 높이를 정하는 값(아래 _render_body). 프로브 마운트는
+    # 본문 마지막(mount_viewport_probe)이고 여기서는 세션에 남은 값을 읽기만 한다.
+    vp = viewport_state(page_id)
+    compact = bool(vp.get("compact"))
+    landscape = bool(vp.get("landscape"))
+
+    # 조회조건 기본값(2026-08-13 사용자 요구) — 선택값이 없을 때 내 부서·조를 심는다.
+    # 사용자가 바꾼 선택은 덮어쓰지 않는다(위젯 상태 계약). MANAGER 는 아래에서 본인
+    # 부서로 잠기고 fail-closed 재적용도 그대로라 이 시드가 권한범위를 넓히지 않는다.
+    _seed_scope_defaults(user, page_id, dept_names,
+                         int(st.session_state[y_key]), int(st.session_state[m_key]))
 
     # 부서→조 종속 옵션: 조 Field 를 만들기 전에 "현재" 부서 선택을 세션 상태에서
     # 읽는다(near_miss_view 의 period_on 선-조회 패턴과 동일 — 위젯 렌더 순서가 아니라
@@ -1148,29 +1375,47 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
                               "justifyContent": "center"}}
             for c in day_cols
         }
+        # 표시 열 — 좁은 폭(모바일)은 성명 + 일자만(2026-08-13 사용자 요구). 프레임과 CSV
+        # 원본은 그대로이고 **표시만** 줄인다(신원 5열 합계 488px 이 폰 폭 390px 을 넘어
+        # 날짜가 화면 밖으로 밀리는 문제). 좁은 폭에서는 성명 열 폭도 한 단계 줄인다.
+        shown_meta = month_grid_columns(meta_cols, [], compact=compact)
+        if compact:
+            meta_col_config = {**meta_col_config, "성명": {"width": 84, "minWidth": 84,
+                                                          "pinned": "left"}}
+            # 모바일 세로: 한 화면에 담기는 날짜가 적으므로 가로 전환을 한 줄로 안내한다
+            # (표 위, 보조 텍스트 1줄 — 장식·아이콘 없음).
+            if not landscape:
+                st.markdown(
+                    "<div class='sv-rotate'>가로로 돌리면 한 번에 더 많은 날짜를 볼 수 있습니다</div>",
+                    unsafe_allow_html=True,
+                )
         # §1-C 표: 흰 컨테이너(1px #cfc8bd·radius 8·내부 스크롤) — 편성표와 동일 시각. 컨테이너
         # 스타일은 iframe 바깥 래퍼(_SV_CSS 의 .st-key-sv_gridwrap)가 소유한다.
         # skeleton=False: 콜드 로드 표출은 상위 grid_shell(prepare) 가 담당(이중 shell 방지).
         with st.container(key="sv_gridwrap"):
             erp.read_grid(
-                grid_ui, columns=meta_cols + day_cols, key=f"{page_id}_grid",
+                grid_ui, columns=shown_meta + day_cols, key=f"{page_id}_grid",
                 color_rules=color_rules,
-                col_config={**{c: meta_col_config[c] for c in meta_cols
+                col_config={**{c: meta_col_config[c] for c in shown_meta
                                if c in meta_col_config}, **day_col_config},
                 row_rules=[{
                     "when": "data['_retired'] === true",
-                    "columns": meta_cols, "bg": retired_bg, "ink": retired_ink,
+                    "columns": shown_meta, "bg": retired_bg, "ink": retired_ink,
                 }],
                 hidden_fields=["_retired"],
                 # 키트 기본 높이 상한(460)보다 한 화면에 더 담되 §1-C 상한은 지킨다 —
                 # 행 피치(34px)는 키트 읽기 밀도 토큰이 소유한다(화면에서 바꾸지 않는다).
-                height=min(max(_GRID_MIN_PX, 34 * len(grid_ui) + 52), _GRID_MAX_PX),
+                # 좁은 폭에서는 뷰포트 높이에도 맞춘다(폰 가로에서 표가 화면을 최대로 사용).
+                height=month_grid_height(len(grid_ui), compact=compact, landscape=landscape,
+                                         viewport_h=int(vp.get("h") or 0)),
                 skeleton=False,
             )
         st.markdown(_label_legend_html(display_of, color_of), unsafe_allow_html=True)
 
-        # 사용자별 집계 (전체 근무표 조회)
-        if page_id == "schedule_view" and not month_rows.empty:
+        # 사용자별 집계 (전체 근무표 조회) — 좁은 폭에서는 두지 않는다: 사용자 요구가
+        # "모바일은 이름·근무표만" 이고, 폰에서 두 번째 그리드(별도 iframe)는 표 아래
+        # 화면을 통째로 차지한다. 데이터·집계 로직은 그대로이며 넓은 폭에서는 종전과 같다.
+        if page_id == "schedule_view" and not month_rows.empty and not compact:
             st.write("")
             ui.panel_head("직원별 근무형태 집계")
             agg = _build_agg(grid, month_rows, wt, display_of)
@@ -1179,13 +1424,19 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
     _ndays = calendar.monthrange(int(q["year"]), int(q["month"]))[1]
     # fingerprint = 조회조건 q + 새로고침 세대값. q 가 같으면(같은 데이터) 재전환하지 않아
     # warm/미변경 rerun 에 스켈레톤이 뜨지 않고(무점멸), q 변경/새로고침에만 콜드 표출된다.
-    _fp = (tuple(sorted((str(k), str(v)) for k, v in q.items())), refresh_gen)
+    # 폭 구간·방향도 지문에 넣는다 — 표시 열/표 높이가 바뀌는 전환이라 스켈레톤으로
+    # 덮어야 낡은 형상(신원 5열)이 잠깐 남지 않는다. 높이 값 자체는 넣지 않는다
+    # (주소창 접힘 같은 잔변화로 스켈레톤이 깜빡이지 않게).
+    _fp = (tuple(sorted((str(k), str(v)) for k, v in q.items())), refresh_gen,
+           compact, landscape)
     erp.grid_shell(
         f"{page_id}_screen",
         nrows=7, ncols=min(_ndays + 4, 8),
         fingerprint=_fp, height=360,
         prepare=_cold_load, render=_render_body,
     )
+    # 화면 폭/방향 프로브는 본문의 **맨 끝**에 둔다(위 mount_viewport_probe 주석 참조).
+    mount_viewport_probe(page_id)
 
 
 def team_filter_options(assigns: pd.DataFrame | None, teams: pd.DataFrame | None,

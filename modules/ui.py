@@ -299,6 +299,10 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
 .sb-title-ko {
   color: var(--sb-sel-text); font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap;
 }
+.sb-title-sub {
+  color: var(--sb-text); font-size: 10.5px; font-weight: 500; line-height: 1.25;
+  letter-spacing: .04em; white-space: nowrap;
+}
 /* 접기 버튼 — 심플 아이콘 전용. 기본 투명·무테두리, hover 때만 옅은 배경. */
 .st-key-sb_hide div.stButton button {
   width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center;
@@ -711,8 +715,8 @@ def setup_page() -> None:
     user = st.session_state.get("user") or {}
     role = str(user.get("role", "")).strip().upper()
     st.set_page_config(
-        page_title="교대 근무표",
-        page_icon=_FAVICON if Path(_FAVICON).exists() else "🏭",
+        page_title="WorkOps · 현장운영",
+        page_icon=_FAVICON if Path(_FAVICON).exists() else "🟧",
         layout="wide",
         # USER=상단/하단 nav 셸(사이드바 미사용) → collapsed. ADMIN/MANAGER=사이드바 셸이지만
         # "auto" 로 두어 좁은 화면(모바일)에서는 Streamlit 이 자동으로 접어 본문을 가리지 않게 한다
@@ -804,12 +808,17 @@ def _shell_groups(role: str, caps=None) -> list:
 
 
 def _sidebar_brand() -> None:
-    """사이드바 헤더: 오렌지 로고 마크 + 앱명(교대 근무표) + 접기(66px 레일) 버튼."""
+    """사이드바 헤더: 오렌지 로고 마크 + 앱명(WorkOps | 현장운영) + 접기(66px 레일) 버튼.
+
+    표시명은 2026-08-13 확정(코덱스 자문 합치): 브랜드 'WorkOps' 주 표기 + 한글
+    부제 '현장운영' — 근무표·아차사고에 더해 숙소예약·업무요청서 등 확장 모듈까지
+    포괄하는 이름이다. config.APP_NAME('WorkOps')이 공식 원천."""
     with st.container(key="sb_head"):
         brand, toggle = st.columns([5, 1.15], vertical_alignment="center")
         brand.markdown(
             "<div class='sb-brand'><span class='sb-logo'>W</span>"
-            "<span class='sb-title'><span class='sb-title-ko'>교대 근무표</span></span></div>",
+            "<span class='sb-title'><span class='sb-title-ko'>WorkOps</span>"
+            "<span class='sb-title-sub'>현장운영</span></span></div>",
             unsafe_allow_html=True,
         )
         with toggle:
