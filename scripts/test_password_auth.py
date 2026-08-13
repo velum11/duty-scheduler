@@ -25,6 +25,12 @@ import streamlit as st  # noqa: E402
 
 from modules import auth, config, db, passwords  # noqa: E402
 
+# 베타 한시 스위치는 기본이 켜져 있어 강제변경 게이트를 끈다(사용자 지시 2026-08-13).
+# 이 테스트 본문은 **정책 원형**(강제변경 포함)을 검증하므로 잠시 끄고, 마지막
+# 섹션(8)에서 스위치 동작 자체를 검증한 뒤 원래 값으로 되돌린다.
+_ORIG_BETA_SKIP = config.BETA_SKIP_FORCED_PASSWORD_CHANGE
+config.BETA_SKIP_FORCED_PASSWORD_CHANGE = False
+
 PASS = 0
 FAIL: list[str] = []
 
@@ -228,8 +234,8 @@ finally:
     config.FIXED_PASSWORD_ACCOUNTS.clear()
     config.FIXED_PASSWORD_ACCOUNTS.update(orig_fixed)
 
-check("고정예외: 현재 등재는 활성 관리자 사번 'ADMIN' 하나뿐(한시적)",
-      config.FIXED_PASSWORD_ACCOUNTS == {"ADMIN": "ADMIN"})
+check("고정예외: 베타 오픈에 맞춰 등재가 비어 있다(일반 정책 복귀, 2026-08-13)",
+      config.FIXED_PASSWORD_ACCOUNTS == {})
 
 # =========================================================================
 # 7) 정적 계약: fail-closed·게이트 배치·세션 해시 저장
@@ -259,6 +265,29 @@ check("초기화: ADMIN 초기화는 해시를 지우고 강제변경을 켠다"
 mu_src = (ROOT / "views" / "master_users.py").read_text(encoding="utf-8")
 check("초기화 UI: ADMIN 에게만 노출된다", "auth.is_admin(user)" in mu_src)
 check("초기화 UI: 초기화 시 세션도 폐기한다", "revoke_user_sessions" in mu_src)
+
+# =========================================================================
+# 8) 베타 한시 스위치 — 강제변경 라우팅 게이트만 끈다(로그인 검증·잠금은 그대로)
+# =========================================================================
+reset_state()
+db._sample_update_credential("1001", {"initial_password_expires_at": None})
+config.BETA_SKIP_FORCED_PASSWORD_CHANGE = True
+
+user, err = auth.login("1001", "1001")
+check("베타 스위치: 초기 비번(사번) 로그인은 그대로 성공", user is not None and err is None)
+check("베타 스위치: 강제변경 게이트가 꺼진다", auth.needs_password_change() is False)
+check("베타 스위치: 세션 판정(must_change)은 보존된다",
+      st.session_state.get("must_change_password") is True)
+
+reset_state()
+user, err = auth.login("1001", "wrongpass")
+check("베타 스위치: 틀린 비밀번호는 여전히 거부", user is None and err is not None)
+
+config.BETA_SKIP_FORCED_PASSWORD_CHANGE = False
+reset_state()
+auth.login("1001", "1001")
+check("베타 스위치: 끄면 강제변경이 즉시 복원된다", auth.needs_password_change() is True)
+config.BETA_SKIP_FORCED_PASSWORD_CHANGE = _ORIG_BETA_SKIP
 
 print(f"\n{PASS} passed, {len(FAIL)} failed")
 for name in FAIL:

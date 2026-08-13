@@ -327,7 +327,13 @@ def login(emp_no: str, password: str = ""):
 
 
 def needs_password_change() -> bool:
-    """현재 로그인 사용자가 비밀번호를 바꾸기 전인가(라우팅 게이트)."""
+    """현재 로그인 사용자가 비밀번호를 바꾸기 전인가(라우팅 게이트).
+
+    베타 한시 스위치(config.BETA_SKIP_FORCED_PASSWORD_CHANGE)가 켜져 있으면 게이트를
+    통째로 끈다 — 세션의 must_change_password 판정 자체는 그대로 계산·보존되므로
+    스위치를 끄는 즉시 강제변경이 복원된다."""
+    if config.BETA_SKIP_FORCED_PASSWORD_CHANGE:
+        return False
     if not st.session_state.get("user"):
         return False
     return bool(st.session_state.get("must_change_password", False))

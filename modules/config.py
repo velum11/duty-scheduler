@@ -37,10 +37,16 @@ LOGIN_LOCK_MINUTES = 10
 # 계정까지 예외가 된다.
 #
 # !! 베타 오픈 전에 이 dict 를 비운다. 비우면 예외는 전부 사라지고 해당 계정은
-#    일반 정책(초기 비번=사번, 최초 로그인 시 변경 강제)으로 돌아간다.
-FIXED_PASSWORD_ACCOUNTS: dict[str, str] = {
-    "ADMIN": "ADMIN",
-}
+#    일반 정책(초기 비번=사번)으로 돌아간다.
+#    → 2026-08-13 베타 오픈에 맞춰 비움(008 적용 완료). ADMIN 도 이제 일반 경로로
+#      로그인한다(초기 비밀번호 = 사번 'ADMIN').
+FIXED_PASSWORD_ACCOUNTS: dict[str, str] = {}
+
+# 사용자 지시(2026-08-13): 베타 초기에는 최초 로그인 강제 비밀번호 변경을 걸지 않는다 —
+# 전 직원이 "사번=비밀번호"로 바로 들어와 화면을 써보게 하는 것이 목적. 이 스위치는
+# **강제변경 라우팅 게이트만** 끈다(auth.needs_password_change). 로그인 검증·잠금·해시
+# 저장 계약은 그대로다. 정식 전환 시 False 로 되돌리면 강제변경이 복원된다.
+BETA_SKIP_FORCED_PASSWORD_CHANGE: bool = True
 
 ROLES = ("USER", "MANAGER", "ADMIN")
 

@@ -31,10 +31,13 @@ def render() -> None:
                 else:
                     st.rerun()
 
-            st.caption(
-                "처음 로그인하거나 비밀번호를 초기화한 경우, 비밀번호는 사번과 같습니다. "
-                "로그인 후 바로 변경해야 합니다."
-            )
+            if config.BETA_SKIP_FORCED_PASSWORD_CHANGE:
+                st.caption("비밀번호는 본인 사번과 같습니다.")
+            else:
+                st.caption(
+                    "처음 로그인하거나 비밀번호를 초기화한 경우, 비밀번호는 사번과 같습니다. "
+                    "로그인 후 바로 변경해야 합니다."
+                )
 
         if db.is_sample_mode():
             st.caption("로컬 데이터 모드 접속 사번 — 1001: 관리자 · 1002: 조장 · 1003: 사원")
