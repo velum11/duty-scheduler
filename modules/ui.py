@@ -12,7 +12,7 @@ App Shell 구조 (DESIGN.md §2):
 공개 API:
 - setup_page      페이지 설정 + 전역 CSS (다른 st 호출보다 먼저)
 - app_shell       ADMIN/MANAGER 단일 다크 사이드바 + 본문 브레드크럼
-- user_app_shell  USER 상단 정보 + 반응형 3개 메뉴
+- user_app_shell  USER 상단 고정 앱바(앱명/현재 화면명) + 햄버거 메뉴 시트(모바일 우선)
 - page_header / page_title / card / summary_cards / empty_state / action_bar
 - badge_html / legend_html / weekday_kr / weekend_color / role_label
 """
@@ -587,83 +587,120 @@ section[data-testid="stSidebar"] div[data-testid="stLayoutWrapper"]:has(> .st-ke
 </style>
 """
 
+# USER 전용 셸 CSS — 상단 고정 앱바(52px, ADMIN 헤더와 같은 높이) + 햄버거 메뉴 시트(st.popover).
+# 2026-08-13 사용자 지시로 하단 고정 탭바를 제거했다: USER 메뉴는 능력에 따라 7~9개까지
+# 늘어나 좁은 폭(≤490px)에서 열당 52px 로 쪼그라들며 라벨이 잘렸고, 마지막 두 항목이
+# Streamlit Cloud 우하단 'Manage app' 오버레이(≈88×36 + 여백)와 겹쳤다. 내비게이션은
+# 상단 앱바의 햄버거 시트 하나로 통일한다(모바일·데스크톱 동일 구조 — 진입점 이중화 없음).
+# 색은 전역 --cd-* 토큰(DESIGN §2)만 쓴다(구 파랑 계열 #1E3A6E/#D3DAE3 등 팔레트 밖 색 제거).
 _USER_SHELL_CSS = """
 <style>
-.st-key-user_app_header {
-  background:#FFFFFF; border-bottom:1px solid #D3DAE3;
-  margin:0 -1.25rem 0; padding:0.48rem 1.25rem;
+/* CSS 주입용 markdown(스타일 태그만 든 요소)은 화면에 보이지 않으면서도 18px 를 차지해
+   앱바를 아래로 민다. USER 셸에서만, '자식이 style 하나뿐인' 마크다운 컨테이너에 한정해
+   숨긴다 — display:none 안의 <style> 규칙은 그대로 적용된다(내용 있는 마크다운 불변). */
+div[data-testid="stElementContainer"]:has(div[data-testid="stMarkdownContainer"] > style:only-child) {
+  display:none !important;
 }
-.st-key-user_app_header div[data-testid="stHorizontalBlock"],
-.st-key-user_nav div[data-testid="stHorizontalBlock"] { flex-wrap:nowrap; }
-.st-key-user_app_header div[data-testid="stColumn"],
-.st-key-user_nav div[data-testid="stColumn"] { min-width:0 !important; }
-.user-header-line { display:flex; align-items:center; gap:1rem; min-width:0; }
-.user-app-name { flex:0 0 auto; color:#1E3A6E; font-size:.92rem; font-weight:700; white-space:nowrap; }
-.user-account { min-width:0; color:#6B7280; font-size:.78rem; line-height:1.35; overflow-wrap:anywhere; }
-.user-account strong { color:#26282B; font-weight:600; }
-.st-key-user_app_header div.stButton { display:flex; justify-content:flex-end; }
-.st-key-user_app_header div.stButton > button {
-  min-height:1.75rem; padding:.1rem .55rem; gap:.3rem; border:1px solid #C9D2DE;
-  border-radius:4px; background:#FFFFFF; color:#4B5563; font-size:.74rem; font-weight:500;
-  white-space:nowrap;
+/* ===== 상단 고정 앱바 — 스크롤해도 메뉴에 항상 닿는다 =====
+   sticky 는 가로 블록 자신이 아니라 **부모 레이아웃 래퍼**에 건다: 래퍼는 자식(앱바)과
+   높이가 같아 앱바에 직접 걸면 미끄러질 여지가 없어 그냥 함께 스크롤된다(실측 회귀).
+   래퍼의 컨테이닝 블록은 본문 전체 세로 블록이라 정상적으로 상단에 고정된다.
+   자식 지정은 순번이 아니라 :has(> 키) 로 한다(ADMIN 사이드바와 동일 패턴). */
+div[data-testid="stLayoutWrapper"]:has(> .st-key-user_topbar) {
+  position:sticky; top:0; z-index:900;
 }
-.st-key-user_app_header div.stButton > button [data-testid="stIconMaterial"] { font-size:16px; }
-.st-key-user_nav {
-  background:#FFFFFF; border-bottom:1px solid #D3DAE3;
-  margin:0 -1.25rem .75rem; padding:.35rem 1.25rem;
+.st-key-user_topbar {
+  background:var(--cd-headbar); border-bottom:1px solid var(--cd-line);
+  margin:0 -1.25rem .55rem; padding:.25rem 1.25rem;
+  min-height:52px; align-items:center;
+  flex-wrap:nowrap !important; gap:.5rem !important;
 }
-.st-key-user_nav div[data-testid="stHorizontalBlock"] { gap:.4rem !important; }
-/* 메뉴 항목 수와 무관하게 동일 폭 분배 (flex-basis 0 → grow 로 균등, nowrap 유지).
-   데스크톱 폭에선 7개(아차사고 base 4 포함)도 라벨이 열 안에 들어간다. 좁은 폭(≤768px,
-   하단 고정바)에서는 열 폭이 급감해 nowrap 라벨이 넘쳐 겹치므로, 모바일 미디어쿼리에서
-   라벨 줄바꿈(white-space:normal + keep-all + overflow:hidden)으로 겹침을 없앤다. */
-.st-key-user_nav div[data-testid="stColumn"] { flex:1 1 0 !important; width:auto !important; min-width:0 !important; }
-.st-key-user_nav div.stButton > button {
-  width:100%; min-height:2.25rem; border:1px solid transparent; border-radius:4px;
-  justify-content:center; gap:.35rem; background:transparent; color:#667085;
-  font-size:.8rem; font-weight:600; white-space:nowrap;
+/* Streamlit 마크다운 블록의 하단 음수 마진(-14px)은 앱바에서 상자 높이를 23px→9px 로
+   줄여 텍스트를 잘라먹는다(실측). 앱바 안에서만 0 으로 되돌린다. */
+.st-key-user_topbar div[data-testid="stMarkdownContainer"] { margin-bottom:0 !important; }
+.st-key-user_title { min-width:0; }
+.ub-title {
+  display:flex; align-items:baseline; gap:.4rem; min-width:0; white-space:nowrap;
 }
-.st-key-user_nav div.stButton > button:hover { background:#F1F4F8; color:#1E3A6E; }
-.st-key-user_nav div.stButton > button[kind="primary"] {
-  border-color:#C9D5E6; background:#EAF0F8; color:#1E3A6E;
+.ub-app { flex:0 0 auto; font-size:12.5px; font-weight:700; color:var(--cd-ink-3); letter-spacing:.01em; }
+.ub-sep { flex:0 0 auto; font-size:12.5px; color:var(--cd-line-strong); }
+.ub-screen {
+  min-width:0; font-size:15px; font-weight:600; color:var(--cd-ink); letter-spacing:-.01em;
+  overflow:hidden; text-overflow:ellipsis;
 }
+.ub-acct { display:flex; align-items:baseline; gap:.35rem; white-space:nowrap; }
+.ub-acct-name { font-size:12.5px; font-weight:600; color:var(--cd-ink-2); }
+.ub-acct-meta { font-size:12.5px; color:var(--cd-ink-3); }
+.ub-acct-meta:not(:empty)::before { content:"·"; margin-right:.35rem; color:var(--cd-line-strong); }
+/* 햄버거(메뉴 트리거) — 터치 히트영역 44px(§4 USER 터치 기준), 좌측 고정 */
+.st-key-user_menu_pop div[data-testid="stPopover"] { display:flex; }
+.st-key-user_menu_pop button {
+  min-height:44px; height:44px; padding:0 .6rem; gap:.35rem;
+  border:1px solid var(--cd-line-strong) !important; border-radius:6px;
+  background:var(--cd-surface); color:var(--cd-ink-2);
+  font-size:13px; font-weight:600; white-space:nowrap; box-shadow:none !important;
+}
+.st-key-user_menu_pop button:hover { background:#f1eee8; color:var(--cd-ink); }
+.st-key-user_menu_pop button:focus-visible { outline:2px solid var(--cd-accent); outline-offset:1px; }
+.st-key-user_menu_pop button [data-testid="stIconMaterial"] { font-size:20px; }
+
+/* ===== 햄버거 메뉴 시트(popover 본문) — 전체 메뉴 + 로그아웃 =====
+   popover 본문은 portal 로 body 직속에 렌더되어 stMain 스코프 CSS 가 닿지 않는다.
+   시트 안 마커(.um-sheet)로 한정해, 다른 화면의 popover(기준정보 아이콘 툴바)에는
+   영향이 없게 한다. */
+div[data-testid="stPopoverBody"]:has(.um-sheet) {
+  min-width:264px; max-width:min(86vw, 320px); padding:.4rem .4rem .45rem !important;
+  /* 낮은 뷰포트(가로 모드 등)에서도 시트가 화면 밖으로 넘치지 않게 자체 스크롤 */
+  max-height:calc(100vh - 64px); overflow-y:auto;
+}
+/* 항목 사이는 2px — 시트가 세로로 늘어져 스크롤되지 않게 한다(정보 밀도) */
+div[data-testid="stPopoverBody"]:has(.um-sheet) div[data-testid="stVerticalBlock"] { gap:2px !important; }
+div[data-testid="stPopoverBody"]:has(.um-sheet) div[data-testid="stMarkdownContainer"] { margin-bottom:0 !important; }
+.um-acct {
+  display:flex; flex-direction:column; gap:1px;
+  padding:.15rem .55rem .45rem; margin-bottom:.35rem;
+  border-bottom:1px solid var(--cd-line);
+}
+.um-acct-name { font-size:13.5px; font-weight:600; color:var(--cd-ink); }
+.um-acct-meta { font-size:12px; color:var(--cd-ink-3); }
+/* 메뉴 항목 — 44px 터치 타깃, 좌측 정렬 아이콘 + 라벨. 현재 화면은 오렌지 틴트 + 좌측 바. */
+div[class*="st-key-user_nav_"] div.stButton > button {
+  width:100%; min-height:44px; justify-content:flex-start; text-align:left; gap:.55rem;
+  padding:0 .55rem; border:1px solid transparent !important; border-radius:6px;
+  background:transparent; color:var(--cd-ink-2); font-size:14.5px; font-weight:500;
+  white-space:nowrap; box-shadow:none !important;
+}
+div[class*="st-key-user_nav_"] div.stButton > button > div { flex:1 1 auto; min-width:0; justify-content:flex-start; }
+div[class*="st-key-user_nav_"] div.stButton > button:hover { background:#f1eee8; color:var(--cd-ink); }
+div[class*="st-key-user_nav_"] div.stButton > button:focus-visible {
+  outline:2px solid var(--cd-accent); outline-offset:-2px;
+}
+div[class*="st-key-user_nav_"] div.stButton > button[kind="primary"] {
+  background:var(--cd-accent-tint); color:var(--cd-accent-text); font-weight:700;
+  box-shadow:inset 2px 0 0 var(--cd-accent) !important;
+}
+div[class*="st-key-user_nav_"] div.stButton > button [data-testid="stIconMaterial"] { font-size:19px; }
+/* 로그아웃 — 시트 맨 아래, 헤어라인으로 구분(파괴적 액션 아님: 중립 표면 버튼) */
+.st-key-btn_logout_user { border-top:1px solid var(--cd-line); margin-top:.35rem; padding-top:.4rem; }
+.st-key-btn_logout_user div.stButton > button {
+  width:100%; min-height:40px; justify-content:flex-start; gap:.55rem; padding:0 .55rem;
+  border:1px solid var(--cd-line-strong) !important; border-radius:6px;
+  background:var(--cd-surface); color:var(--cd-ink-2); font-size:13.5px; font-weight:600;
+}
+.st-key-btn_logout_user div.stButton > button:hover { background:#f1eee8; color:var(--cd-ink); }
+.st-key-btn_logout_user div.stButton > button:focus-visible {
+  outline:2px solid var(--cd-accent); outline-offset:-2px;
+}
+.st-key-btn_logout_user div.stButton > button [data-testid="stIconMaterial"] { font-size:18px; }
+
+/* ===== 모바일(≤768px) — 본문 좌우 여백만 좁힌다(하단 고정바 없음 → 하단 패딩 불요) ===== */
 @media (max-width:768px) {
-  section[data-testid="stMain"] .block-container {
-    padding-left:.65rem; padding-right:.65rem;
-    padding-bottom:calc(82px + env(safe-area-inset-bottom));
-  }
-  .st-key-user_app_header { margin:0 -.65rem 0; padding:.42rem .65rem; }
-  .st-key-user_app_header div[data-testid="stHorizontalBlock"] { gap:.35rem !important; }
-  .user-header-line { display:block; }
-  .user-app-name { font-size:.86rem; }
-  .user-account { margin-top:.12rem; font-size:.72rem; line-height:1.25; }
-  .st-key-user_app_header div.stButton > button {
-    min-height:1.9rem; padding:0 .5rem; gap:.25rem; font-size:.7rem; white-space:nowrap;
-  }
-  .st-key-user_nav {
-    position:fixed; z-index:990; left:0; right:0; bottom:0;
-    margin:0; padding:.32rem .35rem calc(.32rem + env(safe-area-inset-bottom));
-    border-top:1px solid #D3DAE3; border-bottom:0;
-    box-shadow:0 -2px 8px rgba(15,42,74,.08);
-  }
-  .st-key-user_nav div[data-testid="stHorizontalBlock"] { gap:.16rem !important; }
-  .st-key-user_nav div.stButton > button {
-    min-height:3.25rem; padding:.22rem .1rem; flex-direction:column; gap:.06rem;
-    font-size:.63rem; line-height:1.02; white-space:normal; word-break:keep-all;
-    text-align:center; overflow:hidden;
-  }
-  /* 라벨(마크다운 컨테이너·p)을 버튼 폭(100%)에 맞춰 줄바꿈시킨다 — 항목 수가 많아도
-     (아차사고 base 4 포함 7개) 라벨이 좁은 열 안에서 2줄로 접혀 이웃 열로 넘치거나
-     겹치지 않는다. width:100% 가 없으면 shrink-to-fit 로 한 줄을 유지해 버튼 밖으로
-     삐져나오므로 반드시 100% 로 폭을 고정한다. keep-all 로 단어 중간 끊김을 막고,
-     overflow:hidden 으로 최악의 경우에도 열 밖으로 새지 않는다(390px 하단 고정바
-     오버플로/겹침 회귀 수정). */
-  .st-key-user_nav div.stButton > button div[data-testid="stMarkdownContainer"],
-  .st-key-user_nav div.stButton > button p {
-    white-space:normal !important; word-break:keep-all; line-height:1.02;
-    text-align:center; width:100%; max-width:100%;
-  }
-  .st-key-user_nav div.stButton > button [data-testid="stIconMaterial"] { font-size:19px; }
+  section[data-testid="stMain"] .block-container { padding-left:.65rem; padding-right:.65rem; }
+  .st-key-user_topbar { margin:0 -.65rem .5rem; padding:.25rem .65rem; gap:.4rem !important; }
+  /* 좁은 폭에서는 계정 상세(부서·조)를 감추고 이름만 남긴다 — 전체 계정은 메뉴 시트가 보여준다 */
+  .ub-acct-meta { display:none; }
+  .ub-app { font-size:12px; }
+  .ub-screen { font-size:14.5px; }
 }
 </style>
 """
@@ -1160,8 +1197,35 @@ def _breadcrumb_header(user: dict, page: str) -> None:
                         st.rerun()
 
 
+#: USER 햄버거 메뉴(popover) 위젯 키. ``on_change="rerun"`` 이라 열림/닫힘이
+#: ``st.session_state[_USER_MENU_KEY]`` 에 담기고, 메뉴 항목 콜백이 이 값을 False 로
+#: 되돌려 **이동 후 시트가 닫힌 상태**를 보장한다(Streamlit 기본 동작은 내부 위젯을
+#: 눌러도 popover 를 열어 둔 채 rerun 한다 — st.popover docstring).
+#: 위젯 값은 콜백(위젯 인스턴스화 이전)에서만 쓸 수 있다 — 렌더 본문에서 대입하면
+#: StreamlitAPIException(cannot be modified after the widget ... is instantiated).
+_USER_MENU_KEY = "user_menu_pop"
+
+
+def _user_menu_go(page_id: str) -> None:
+    """메뉴 시트에서 화면 이동 — 이동 후 시트를 닫는다(on_click 콜백)."""
+    st.session_state.nav_page = page_id
+    st.session_state[_USER_MENU_KEY] = False
+
+
+def _user_menu_logout() -> None:
+    """메뉴 시트 로그아웃 — 세션 정리 후 시트를 닫는다(on_click 콜백)."""
+    st.session_state[_USER_MENU_KEY] = False
+    auth.logout()
+
+
 def user_app_shell(user: dict) -> str:
-    """USER 전용 상단 정보와 반응형 3개 메뉴를 렌더링한다."""
+    """USER 전용 셸 — 상단 고정 앱바(앱명 · 현재 화면명 · 계정) + 햄버거 메뉴 시트.
+
+    모바일 우선 구조다(USER 는 현장 단말 비중이 높다). 내비게이션 진입점은 앱바의
+    햄버거 하나이며, 시트에는 이 사용자가 접근 가능한 화면 전부(nav.user_menu — 능력
+    게이트 포함)와 로그아웃이 들어간다. 하단 고정 탭바는 두지 않는다(잘림·오버레이
+    겹침 제거, _USER_SHELL_CSS 주석 참조). 반환값은 선택된 page id 로 종전과 같다.
+    """
     caps = _menu_caps(user)
     menu = nav.user_menu(caps)
     valid_pages = {item["id"] for item in menu}
@@ -1171,40 +1235,83 @@ def user_app_shell(user: dict) -> str:
         st.session_state.nav_page = page
 
     st.markdown(_USER_SHELL_CSS, unsafe_allow_html=True)
-    _user_header(user)
-    with st.container(key="user_nav"):
-        cols = st.columns(len(menu))
-        for col, item in zip(cols, menu):
-            with col:
-                if st.button(
-                    item["label"],
-                    key=f"user_nav_{item['id']}",
-                    icon=item["icon"],
-                    type="primary" if item["id"] == page else "secondary",
-                    width="stretch",
-                ):
-                    st.session_state.nav_page = item["id"]
-                    st.rerun()
+    account = _user_account(user)
+    sheet = _user_topbar(account, page)
+    with sheet:
+        _user_menu_sheet(account, menu, page)
     return page
 
 
-def _user_header(user: dict) -> None:
+def _user_account(user: dict) -> tuple:
+    """(이름, '부서 · 조') — 앱바와 메뉴 시트가 같은 계정 표기를 쓰도록 한 곳에서 만든다."""
     dept = db.dept_name(user.get("dept_code", ""))
     team = db.team_name(user.get("dept_code", ""), user.get("team_code", ""))
-    account = " · ".join(
-        escape(str(value)) for value in (user.get("name", ""), dept, team) if value
+    return str(user.get("name", "")), " · ".join(str(v) for v in (dept, team) if v)
+
+
+def _user_topbar(account: tuple, page: str):
+    """상단 고정 앱바 한 줄 — [햄버거] 앱명 / 현재 화면명 … 계정. 메뉴 시트 컨테이너 반환.
+
+    폭 배분은 순번 선택자가 아니라 파이썬 width 계약으로 정한다(햄버거·계정=content,
+    제목=stretch). 좁은 폭에서는 제목이 먼저 줄고 ellipsis 로 잘린다."""
+    name, meta = account
+    title_html = (
+        f"<div class='ub-title'><span class='ub-app'>{escape(config.APP_NAME)}</span>"
+        f"<span class='ub-sep'>/</span>"
+        f"<span class='ub-screen'>{escape(nav.page_label(page))}</span></div>"
     )
-    with st.container(key="user_app_header"):
-        info, logout = st.columns([5, 1.6], vertical_alignment="center")
-        info.markdown(
-            f"<div class='user-header-line'><span class='user-app-name'>{escape(config.APP_NAME)}</span>"
-            f"<span class='user-account'><strong>{account}</strong></span></div>",
-            unsafe_allow_html=True,
+    acct_html = (
+        f"<div class='ub-acct'><span class='ub-acct-name'>{escape(name)}</span>"
+        f"<span class='ub-acct-meta'>{escape(meta)}</span></div>"
+    )
+    with st.container(key="user_topbar", horizontal=True, gap="small",
+                      vertical_alignment="center"):
+        with st.container(key="user_menu_slot", width="content"):
+            # 네이티브 popover: 열기는 프레임워크가 처리하고, 닫기는 항목 콜백이 소유한다.
+            # 내용은 닫힌 상태에서도 실행된다(위젯 계약 유지 — btn_logout_user 등).
+            sheet = st.popover(
+                "메뉴", icon=":material/menu:", key=_USER_MENU_KEY,
+                on_change="rerun", width="content", help="전체 메뉴 열기",
+            )
+        with st.container(key="user_title", width="stretch"):
+            st.markdown(title_html, unsafe_allow_html=True)
+        with st.container(key="user_acct", width="content"):
+            st.markdown(acct_html, unsafe_allow_html=True)
+    return sheet
+
+
+def _user_menu_sheet(account: tuple, menu: list, page: str) -> None:
+    """햄버거 시트 본문 — 계정 헤더 + 접근 가능 화면 전부 + 로그아웃.
+
+    항목은 ``modules/nav.py`` 의 USER 메뉴(능력 게이트 반영)를 그대로 쓴다(하드코딩 금지).
+    현재 화면은 primary 로 표시하고, 클릭은 on_click 콜백에서 이동 + 시트 닫기를 함께
+    처리한다(콜백 뒤 Streamlit 이 자동 rerun 하므로 st.rerun 을 별도로 던지지 않는다).
+    ``.um-sheet`` 마커는 이 시트의 popover 본문만 CSS 로 한정하기 위한 훅이다."""
+    name, meta = account
+    st.markdown(
+        "<div class='um-sheet'></div>"
+        f"<div class='um-acct'><span class='um-acct-name'>{escape(name)}</span>"
+        f"<span class='um-acct-meta'>{escape(meta)}</span></div>",
+        unsafe_allow_html=True,
+    )
+    for item in menu:
+        # 위젯 key 는 종전 셸과 동일(user_nav_{id}) — st-key 클래스가 곧 CSS 훅이다.
+        st.button(
+            item["label"],
+            key=f"user_nav_{item['id']}",
+            icon=item["icon"],
+            type="primary" if item["id"] == page else "secondary",
+            width="stretch",
+            on_click=_user_menu_go,
+            args=(item["id"],),
         )
-        with logout:
-            if st.button("LogOut", key="btn_logout_user", icon=":material/logout:", width="content"):
-                auth.logout()
-                st.rerun()
+    st.button(
+        "로그아웃",
+        key="btn_logout_user",
+        icon=":material/logout:",
+        width="stretch",
+        on_click=_user_menu_logout,
+    )
 
 
 # ---------- 화면 공통 컴포넌트 ----------
