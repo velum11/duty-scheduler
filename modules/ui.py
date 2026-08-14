@@ -73,6 +73,28 @@ html, body, .stApp { font-size: 14px; }
 div[data-testid="stDecoration"],
 div[data-testid="stStatusWidget"] { display: none !important; }
 
+/* 기본 헤더 밴드(header[data-testid="stHeader"]) 무력화 — **Streamlit Cloud 전용 회귀 차단**.
+   이 밴드는 position:absolute; top:0; z-index:999990 로 앱 자체 52px 헤더 행(hdr_row, y≈28~60)
+   위에 겹친다. 로컬은 툴바 액션이 없어 배경이 transparent 라 그냥 비쳐 보이지만, Cloud 는
+   Share/편집/GitHub 버튼(stToolbarActions)을 넣으면서 **불투명 배경(#f4f2ee)** 을 칠해 앱
+   헤더가 통째로 가려진다(2026-08-14 실측: 로컬 rgba(0,0,0,0) vs Cloud rgb(244,242,238)).
+   그래서 로컬 검증만으로는 절대 재현되지 않는다 — 배경·그림자를 강제로 지우고 클릭도
+   통과시켜 앱 헤더가 최상단을 차지하게 한다. 높이는 건드리지 않는다(레이아웃 흔들림 회피). */
+header[data-testid="stHeader"] {
+  background: transparent !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+}
+/* Cloud 툴바(Share·편집·GitHub)는 앱 헤더 아이콘과 같은 우상단을 차지해 시각 충돌을 만든다.
+   앱 소유자는 share.streamlit.io 와 우하단 Manage app 으로 관리하므로 화면에서는 감춘다. */
+header[data-testid="stHeader"] div[data-testid="stToolbarActions"] { display: none !important; }
+/* 단, 네이티브 사이드바 펼침·접기는 모바일 드로어의 유일한 진입점이라 클릭을 살린다
+   (위 pointer-events:none 의 예외 — ≤768px 복원 규칙과 짝을 이룬다).
+   1.59 실측 testid 는 stExpandSidebarButton 이고, 구·신 버전 명칭을 함께 적어 둔다. */
+[data-testid="stExpandSidebarButton"],
+[data-testid="stSidebarCollapsedControl"],
+div[data-testid="stSidebarHeader"] { pointer-events: auto !important; }
+
 section[data-testid="stMain"] .block-container {
   padding: 0 1.25rem 2rem; max-width: 100%;
 }
