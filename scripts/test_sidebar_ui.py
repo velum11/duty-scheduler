@@ -228,8 +228,22 @@ check("활성 리프 오렌지 점 + 좌측 오렌지 바",
 check("그룹 캐럿 › 회전(닫힘 0deg / 열림 90deg)",
       "\\203A" in shell_css and "rotate(0deg)" in shell_css
       and "rotate(90deg)" in shell_css and "_grpopen" in shell_css)
+# 네이티브 접힘 계약(2026-08-14 회귀) — Streamlit 1.59 는 접힘을 사이드바 section 의
+# min-width:0 / max-width:0 / translateX 로 표현한다. 셸 CSS 가 폭을 무조건 !important 로
+# 고정하면 그 계약이 깨져 접어도 자리(236px·레일 66px)가 남고 본문이 전폭을 회수하지
+# 못한다. 폭 고정은 반드시 펼침 상태(aria-expanded="true")로 스코프한다.
+check("사이드바 폭 고정이 펼침 상태로 스코프(aria-expanded=true)",
+      'section[data-testid="stSidebar"][aria-expanded="true"] {' in shell_css
+      and "width: var(--sb-w) !important; min-width: var(--sb-w) !important" in shell_css)
+check("스코프 없는 사이드바 폭 강제 없음(접힘 시 폭 0 회수)",
+      'section[data-testid="stSidebar"] {\n  width: var(--sb-w) !important' not in shell_css)
+check("펼침 상태에서만 내부 래퍼 폭 고정",
+      'section[data-testid="stSidebar"][aria-expanded="true"] > div:first-child' in shell_css)
 # 66px 레일 CSS 계약 — 폭 66px + 모듈 글리프 히트영역 + 세로 스택
 check("레일 폭 66px 전환", "_RAIL_CSS" in ui_src and "width: 66px !important" in ui._RAIL_CSS)
+check("레일 폭 고정도 펼침 상태로 스코프",
+      'section[data-testid="stSidebar"][aria-expanded="true"],' in ui._RAIL_CSS
+      and 'section[data-testid="stSidebar"] {' not in ui._RAIL_CSS)
 check("레일 모듈 글리프 히트영역(≥40px)", "st-key-sbr_" in ui._RAIL_CSS and "height: 44px" in ui._RAIL_CSS)
 check("레일 세로 스택(브랜드 W·유저 아바타)",
       "sb-rail-logo" in ui._RAIL_CSS and "sb-rail-ava" in ui._RAIL_CSS)
@@ -306,6 +320,111 @@ check("렌더: 새로고침(app_hdr_refresh) 활성", "app_hdr_refresh" in hdr_b
 check("렌더: 저장·삭제(app_hdr_save/delete) 음영(disabled)",
       hdr_btns.get("app_hdr_save") is not None and hdr_btns["app_hdr_save"].disabled
       and hdr_btns.get("app_hdr_delete") is not None and hdr_btns["app_hdr_delete"].disabled)
+
+
+# ===== 10) 모바일(≤768px) 셸 계약 — 헤더 아이콘 도달성 + 드로어 자동 닫힘 =====
+# S-01: 390px 에서 아이콘 8종이 스탬프/pill 뒤에 밀려 뷰포트 밖으로 잘리던 회귀(도달 불가).
+#       기능을 숨기지 않고 아이콘 그룹만 다음 줄로 내린다(order + 100% 브레이크).
+# S-04: 드로어에서 메뉴를 골라도 닫히지 않던 문제 — 이동 신호 + 폭 게이트 브리지로 닫는다.
+print("모바일(≤768px) 셸 계약")
+
+
+def media_block(css: str, query: str = "@media (max-width: 768px)") -> str:
+    """미디어쿼리 블록 **본문만** 중괄호 균형으로 잘라낸다(밖/안 구분용).
+
+    부분 문자열이 CSS 어딘가에 있기만 하면 통과하는 검사는 규칙이 미디어쿼리 밖으로
+    새어도 잡지 못한다 — 이 슬라이서로 '안에 있음'과 '밖에 없음'을 함께 검사한다.
+    """
+    i = css.find(query)
+    if i < 0:
+        return ""
+    j = css.find("{", i)
+    depth = 0
+    for k in range(j, len(css)):
+        if css[k] == "{":
+            depth += 1
+        elif css[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return css[j + 1:k]
+    return ""
+
+
+mobile_block = media_block(shell_css)
+shell_desktop = shell_css.replace(mobile_block, "")
+check("모바일 미디어쿼리 블록 존재(중괄호 균형 슬라이스)", bool(mobile_block.strip()))
+check("S-01: 헤더 행 wrap 은 모바일 블록 안에서만",
+      "flex-wrap: wrap !important" in mobile_block
+      and "flex-wrap: wrap" not in shell_desktop)
+check("S-01: 모든 직계 자식 기본 order:1(미분류 자식이 앞으로 끼어들지 않음)",
+      ".st-key-hdr_row > div { order: 1; }" in mobile_block)
+check("S-01: 100% 폭 브레이크가 order:2 로 줄을 가른다",
+      '.st-key-hdr_row::before { content: ""; order: 2; flex: 0 0 100%;' in mobile_block)
+check("S-01: 아이콘 슬롯만 브레이크 뒤(order:3)",
+      'st-key-hdr_ic_"]) { order: 3; }' in mobile_block)
+check("S-01: 브레드크럼만 신축 축(flex-basis 0) — 스탬프·pill 이 같은 줄에 남는다",
+      "flex: 1 1 0 !important" in mobile_block and "min-width: 0 !important" in mobile_block)
+check("S-01: 펼침 버튼(») 클리어런스 26px",
+      "padding-left: 26px" in mobile_block)
+check("S-01: 좁아진 브레드크럼은 말줄임(인라인 span → block)",
+      ".crumb { display: block; max-width: 100%; }" in mobile_block)
+check("S-01: 스탬프 PC 여백은 모바일에서 0", "margin-right: 0" in mobile_block)
+check("S-01: PC 헤더는 한 줄 유지(nowrap 규칙은 미디어쿼리 밖)",
+      "flex-wrap: nowrap !important" in shell_desktop)
+check("S-01: 아이콘 슬롯 32px 고정 유지(히트영역)",
+      "flex: 0 0 32px !important" in shell_desktop)
+
+# S-02 — 그리드 가로 스크롤 그림자는 **전역 CSS 의 모바일 블록 안에만** 있어야 한다.
+css_mobile = media_block(ui._CSS)
+css_desktop = ui._CSS.replace(css_mobile, "")
+check("S-02: 그림자 선택자가 모바일 블록 안에 있다",
+      'div[data-testid="stElementContainer"]:has(iframe[title*="agGrid"])::after' in css_mobile)
+check("S-02: 모바일 블록 밖에는 그리드 그림자 선택자가 없다(PC 불변)",
+      'iframe[title*="agGrid"]' not in css_desktop)
+check("S-02: 그림자 속성 — 우측 24px 절대배치 + 클릭 통과 + 잉크 그라데이션",
+      "position: absolute" in css_mobile and "right: 1px" in css_mobile
+      and "width: 24px" in css_mobile and "pointer-events: none" in css_mobile
+      and "linear-gradient(to right, rgba(28, 26, 23, 0), rgba(28, 26, 23, 0.10))" in css_mobile)
+
+bridge_src = inspect.getsource(ui._drawer_autoclose_bridge)
+nav_src2 = inspect.getsource(ui.request_nav)
+check("S-04: 이동 요청이 드로어 닫기 신호를 남긴다", "_DRAWER_CLOSE_FLAG" in nav_src2)
+check("S-04: 브리지는 신호를 1회 소비하고 st.iframe 으로 렌더(components.v1 deprecated)",
+      "pop(" in bridge_src and "st.iframe(" in bridge_src
+      and "components.html" not in ui_src)
+check("S-04: 폭 게이트(≤768px)로 PC 무동작", "innerWidth" in ui._DRAWER_CLOSE_JS
+      and "768" in ui._DRAWER_CLOSE_JS)
+check("S-04: 네이티브 접기 컨트롤만 클릭(자체 DOM 조작 없음)",
+      "stSidebarCollapseButton" in ui._DRAWER_CLOSE_JS
+      and "stSidebarHeader" in ui._DRAWER_CLOSE_JS)
+check("S-04: 이미 닫혔으면 무동작(aria-expanded 확인)",
+      'aria-expanded' in ui._DRAWER_CLOSE_JS)
+check("S-04: 재마운트 nonce(2회차 이동에서도 실행)", "_DRAWER_CLOSE_SEQ" in bridge_src)
+
+# 발화 관측 — 신호는 렌더 직전에 pop 되므로 "플래그 부재"로는 발화를 구분할 수 없다.
+# 누적 발화 횟수(_DRAWER_CLOSE_SEQ)로 이동 없음 / 그룹 토글 / 실제 이동을 구분한다.
+check("S-04: 이동이 없으면 브리지 미발화(SEQ 없음)", ui._DRAWER_CLOSE_SEQ not in at.session_state)
+atd = AppTest.from_file(str(ROOT / "app.py"), default_timeout=45)
+atd.session_state["user"] = ADMIN
+atd.session_state["nav_page"] = "dashboard"
+atd.run()
+grp_btn = [b for b in atd.button if str(b.key).startswith("sbg_near_miss")]
+if grp_btn:
+    grp_btn[0].click().run()
+check("S-04: 그룹 토글(이동 아님)은 브리지 미발화",
+      ui._DRAWER_CLOSE_SEQ not in atd.session_state)
+leaf = [b for b in atd.button if b.key == "sbi_near_miss_view"]
+check("렌더: 그룹 펼침 후 리프(sbi_near_miss_view) 존재", bool(leaf))
+if leaf:
+    leaf[0].click().run()
+    check("S-04: 사이드바 이동 1회 = 브리지 1회 발화(SEQ==1)",
+          ui._DRAWER_CLOSE_SEQ in atd.session_state
+          and atd.session_state[ui._DRAWER_CLOSE_SEQ] == 1)
+    check("S-04: 발화 후 신호는 소비돼 남지 않는다",
+          ui._DRAWER_CLOSE_FLAG not in atd.session_state
+          or not atd.session_state[ui._DRAWER_CLOSE_FLAG])
+    check("S-04: 이동은 실제로 수행됐다(nav_page 전환)",
+          atd.session_state["nav_page"] == "near_miss_view")
 
 
 print()

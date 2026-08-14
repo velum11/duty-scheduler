@@ -295,6 +295,7 @@ def _render_list(user: dict, reports: pd.DataFrame) -> None:
         col_config=_COL_CONFIG,
         checkbox_marker=False,      # §0-1: 행 클릭이 곧 선택(상세 열기용 체크박스 금지)
         row_height=44,              # USER·터치 variant(§4 44px) — lodging_my 와 동일 계약
+        scroll_affordance=True,     # 모바일 폭에서 "오른쪽에 열이 더 있음" 신호(상시 스크롤바)
         color_rules={
             "제안등급": _GRADE_COLOR,
             "확정등급": _GRADE_COLOR,

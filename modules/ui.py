@@ -203,6 +203,26 @@ div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] { border: no
 
 /* 데이터 모드 안내 (하단, 눈에 띄지 않게) */
 .data-mode-note { color: var(--cd-ink-2); font-size: 0.78rem; text-align: right; margin-top: 0.6rem; }
+
+/* ── 모바일(≤768px) 표 가로 스크롤 어포던스 ──
+   좁은 폭에서 표는 컨테이너 안에서 가로 스크롤한다(DESIGN §5). 그런데 모바일 브라우저의
+   오버레이 스크롤바는 정지 상태에서 사라져, 6~9열 중 3열만 보이는 화면에 "오른쪽에 더
+   있다"는 신호가 하나도 남지 않았다(390×844 실측: 내부 오버플로 392px, 신호 0).
+   그리드 컨테이너 오른쪽 끝에 24px 엣지 그림자를 덮어 "여기서 잘렸다"를 드러낸다.
+   - 장식이 아니라 스크롤 가능 표시다. 표면색(#fff)으로 페이드하면 흰 셀 위에서 아무것도
+     보이지 않아(실측) 신호가 되지 않으므로, 잉크(--cd-ink) 10% 로 어둡게 깔아 경계를 만든다.
+   - pointer-events:none — 스와이프·셀 클릭을 가리지 않는다.
+   - 테두리(1px)와 라운드는 그대로 두려고 1px 안쪽으로 넣는다.
+   - AgGrid 컴포넌트 iframe 을 가진 요소 컨테이너에만 붙는다(컴포넌트 이름 기준 — emotion
+     해시 선택자 아님). PC 는 이 미디어쿼리 밖이라 그리드 외관 불변. */
+@media (max-width: 768px) {
+  div[data-testid="stElementContainer"]:has(iframe[title*="agGrid"]) { position: relative; }
+  div[data-testid="stElementContainer"]:has(iframe[title*="agGrid"])::after {
+    content: ""; position: absolute; top: 1px; right: 1px; bottom: 1px; width: 24px;
+    pointer-events: none; border-radius: 0 7px 7px 0;
+    background: linear-gradient(to right, rgba(28, 26, 23, 0), rgba(28, 26, 23, 0.10));
+  }
+}
 </style>
 """
 
@@ -248,14 +268,25 @@ _SHELL_CSS = """
 
 /* ===== 사이드바 골격 (다크 + 우측 구분선, 그림자 없음) ===== */
 section[data-testid="stSidebar"] {
-  width: var(--sb-w) !important; min-width: var(--sb-w) !important;
-  max-width: var(--sb-w) !important;
   background: var(--sb-col-bg);
-  border-right: 1px solid var(--sb-border); box-shadow: none;
+  box-shadow: none;
   font-family: "IBM Plex Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", -apple-system, sans-serif;
   transition: width 0.28s ease;
 }
-section[data-testid="stSidebar"] > div:first-child { width: var(--sb-w) !important; }
+/* 폭·테두리 고정은 **펼침 상태에서만** 건다(aria-expanded="true").
+   Streamlit 1.59 의 네이티브 접힘은 사이드바 section 에 emotion 규칙
+   `min-width:0; max-width:0; transform:translateX(-<저장폭>px)` 을 적용해 **자리를 비우는**
+   방식이다(2026-08-14 CSSOM 실측). 여기서 폭을 무조건 !important 로 못 박으면 그 max-width:0
+   이 무력화돼, 접어도 flex 자리는 236px(레일은 66px) 그대로 남고 사이드바만 화면 밖으로
+   밀려난다 — 본문이 계속 오른쪽에 붙박인 채 좌측에 빈 띠가 남고 네이티브 확장 버튼(»)이
+   그 띠 위에서 앱 헤더와 겹쳤다(1440×900 실측: 접힘인데 main x=236·w=1204).
+   접힘 상태에서는 우리 규칙을 걷어 Streamlit 계약(폭 0)이 그대로 성립하게 한다. */
+section[data-testid="stSidebar"][aria-expanded="true"] {
+  width: var(--sb-w) !important; min-width: var(--sb-w) !important;
+  max-width: var(--sb-w) !important;
+  border-right: 1px solid var(--sb-border);
+}
+section[data-testid="stSidebar"][aria-expanded="true"] > div:first-child { width: var(--sb-w) !important; }
 /* 기존 «/» 접기 토글 제거 — 접힘(66px 레일)/펼침은 아이콘 버튼 + st.session_state.sb_collapsed 로 제어 */
 div[data-testid="stSidebarHeader"] { display: none !important; }
 div[data-testid="stSidebarContent"] {
@@ -526,6 +557,42 @@ div[class*="st-key-hdr_ic_off_"] div.stButton button[disabled] {
     padding: 0.25rem 0.4rem 0 !important;
   }
   section[data-testid="stSidebar"] { box-shadow: 2px 0 16px rgba(15, 42, 74, 0.28); }
+
+  /* 헤더를 **정확히 두 줄**로 접는다 — 1행: 메타(브레드크럼·날짜 스탬프·연결 pill),
+     2행: 아이콘 8종 우측 정렬.
+     390px 실측(2026-08-14): 아이콘 8개는 32px 슬롯 + 2px 간격으로 270px 를 쓰는데,
+     날짜 스탬프(157px)와 연결 pill(85px)이 앞에 붙는 대시보드에서는 한 줄 합이 본문
+     폭(350px)을 넘어 새로고침 이후 5개가 뷰포트 밖으로 잘리고 페이지 가로 스크롤도
+     없어 **도달 자체가 불가능**했다(§0-3 아이콘 툴바는 헤더 안에만 — 본문으로 뺄 수 없다).
+     기능을 숨기지 않고 §5 반응형(wrap)으로 해결한다: 아이콘 그룹만 다음 줄로 내려
+     8개 전부 350px 안에 들어온다(270 ≤ 350).
+     **배치는 자식 구성과 무관하게 결정적이어야 한다**: order 를 지정받지 못한 자식이
+     생기면 초기값 0 이라 메타보다 앞(1행 맨 앞)으로 끼어들기 때문에, 순번·개별 키 열거가
+     아니라 **모든 직계 자식 기본 order:1 + 아이콘만 order:3** 으로 분류한다. 앞으로 헤더에
+     자식이 추가돼도 그 자식은 메타 줄 끝에 붙을 뿐 줄 구조가 깨지지 않는다.
+     헤더 밴드는 min-height 52px 라 두 줄에서 자연히 늘어난다. PC 는 이 블록 밖이라 불변. */
+  .st-key-hdr_row { flex-wrap: wrap !important; row-gap: 2px; justify-content: flex-end; }
+  /* ① 기본값: 모든 직계 자식은 메타 줄 */
+  .st-key-hdr_row > div { order: 1; }
+  /* ② 100% 폭 브레이크 — 여기서 반드시 줄이 바뀐다(높이 0) */
+  .st-key-hdr_row::before { content: ""; order: 2; flex: 0 0 100%; height: 0; }
+  /* ③ 아이콘 슬롯만 브레이크 뒤로 */
+  .st-key-hdr_row > div:has([class*="st-key-hdr_ic_"]) { order: 3; }
+  /* 브레드크럼이 메타 줄의 유일한 신축 항목(flex-basis 0)이다. 줄바꿈 계산에서 폭 0 으로
+     잡히므로 스탬프·pill 이 **항상 같은 줄에 남고**(basis auto 면 브레드크럼이 남는 폭을 다
+     먹어 pill 이 3행으로 떨어졌다 — 390 실측 91px), 남는 폭만 차지하다 좁아지면 말줄임된다.
+     좌측 26px 들여쓰기는 접힌 상태에서 좌상단에 뜨는 네이티브 사이드바 펼침 버튼
+     (»: x 16~41 실측) 자리를 비워 브레드크럼 첫 글자와 겹치지 않게 한다. */
+  .st-key-hdr_row > div:first-child {
+    flex: 1 1 0 !important; min-width: 0 !important; padding-left: 26px;
+  }
+  /* 줄어든 브레드크럼은 글자 중간 하드 클립이 아니라 말줄임으로 끝나야 한다 — .crumb 은
+     인라인 span 이라 overflow/text-overflow 가 먹지 않는다(390 실측: "홈 / 대시"에서 잘림).
+     블록으로 바꿔 컨테이너 폭에 묶으면 기존 ellipsis 선언이 그대로 동작한다.
+     전체 경로는 바로 아래 25px 페이지 제목이 항상 온전히 보여 준다. */
+  .st-key-hdr_row > div:first-child .crumb { display: block; max-width: 100%; }
+  /* 스탬프의 PC 용 오른쪽 여백(14px)은 좁은 폭에서 메타 줄을 그만큼 잡아먹으므로 0 으로 둔다. */
+  .st-key-hdr_stamp:not(:empty) { margin-right: 0; }
 }
 </style>
 """
@@ -535,8 +602,10 @@ div[class*="st-key-hdr_ic_off_"] div.stButton button[disabled] {
 # 모든 글리프 버튼은 help(tooltip/접근성 이름) 필수(표현 계층·접근성). §2 팔레트만.
 _RAIL_CSS = """
 <style>
-section[data-testid="stSidebar"],
-section[data-testid="stSidebar"] > div:first-child {
+/* 레일 폭도 펼침 상태에서만 고정한다 — 네이티브 접힘(aria-expanded="false")에서는
+   폭 규칙을 걷어야 Streamlit 의 max-width:0 이 살아난다(_SHELL_CSS 골격 주석 참조). */
+section[data-testid="stSidebar"][aria-expanded="true"],
+section[data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
   width: 66px !important; min-width: 66px !important; max-width: 66px !important;
 }
 /* 레일 상단: 브랜드 W + 펼치기 토글(세로 중앙) */
@@ -785,6 +854,7 @@ def app_shell(user: dict) -> str:
             query = _sidebar_search()
             _sidebar_nav(groups, page, query)
             _sidebar_user_card(user)
+        _drawer_autoclose_bridge()
 
     _breadcrumb_header(user, page)
     return page
@@ -907,6 +977,66 @@ def _sidebar_rail(groups: list, page: str, user: dict) -> None:
             request_nav({"type": "logout"})
 
 
+# ---------- 모바일 드로어 자동 닫힘 (선택 → 닫힘, USER 셸 메뉴 시트와 동일 계약) ----------
+#: 사이드바에서 화면을 고른 그 rerun 에서만 소비하는 1회성 신호.
+_DRAWER_CLOSE_FLAG = "_sb_drawer_close"
+#: 브리지 재마운트 강제용 일련번호(같은 HTML 이면 iframe 이 재사용돼 스크립트가 안 돈다).
+_DRAWER_CLOSE_SEQ = "_sb_drawer_close_seq"
+
+# 모바일(≤768px)에서 사이드바는 본문을 덮는 오버레이 드로어다(03dcb6b). 메뉴를 골라도
+# 드로어가 그대로 남아 새 화면을 가리는 문제를 닫힘으로 정합한다(USER 셸 햄버거 시트의
+# _user_menu_go 와 같은 "선택 = 닫힘" 계약).
+#
+# Streamlit 1.59 에는 **열려 있는 사이드바를 서버에서 접는 API가 없다** — rerun 마다
+# set_page_config(initial_sidebar_state="collapsed") 를 다시 호출해도 이미 열린 드로어는
+# aria-expanded="true" 그대로다(2026-08-14 격리 실험 실측). 그래서 화면을 고른 그 rerun 에만
+# 같은 오리진 컴포넌트를 1회 띄워 네이티브 접기 컨트롤을 눌러 준다.
+#   * 폭 게이트(parent innerWidth ≤ 768) — PC 사이드바/레일 동작은 손대지 않는다.
+#   * 이미 닫혀 있으면 즉시 종료, 컨트롤을 못 찾으면 2초 후 포기 → 실패해도 현행 동작
+#     (드로어 유지)으로 남을 뿐 화면이 깨지지 않는다.
+#   * 접기 컨트롤은 ≤768px 에서만 노출되는 네이티브 X(_SHELL_CSS @media 복원분)이다.
+_DRAWER_CLOSE_JS = """
+<script>
+(function () {
+  var d = window.parent && window.parent.document;
+  if (!d || (window.parent.innerWidth || 0) > 768) return;
+  var tries = 0;
+  var timer = setInterval(function () {
+    tries += 1;
+    var sb = d.querySelector('section[data-testid="stSidebar"]');
+    if (!sb || sb.getAttribute('aria-expanded') !== 'true') { clearInterval(timer); return; }
+    var btn = d.querySelector('[data-testid="stSidebarCollapseButton"] button')
+           || d.querySelector('div[data-testid="stSidebarHeader"] button');
+    if (btn) { btn.click(); clearInterval(timer); return; }
+    if (tries > 20) clearInterval(timer);
+  }, 100);
+})();
+</script>
+"""
+
+
+def _drawer_autoclose_bridge() -> bool:
+    """이동 신호가 남아 있으면 드로어 닫기 브리지를 1회 렌더하고 True 를 돌려준다.
+
+    발화 여부는 반환값과 :data:`_DRAWER_CLOSE_SEQ`(누적 발화 횟수) 둘 다로 관측된다 —
+    신호는 렌더 직전에 소비(pop)되므로 "신호가 남아 있는지"만으로는 발화를 구분할 수 없다.
+
+    HTML 이 직전과 같으면 Streamlit 이 기존 iframe 을 그대로 재사용해 스크립트가 다시
+    실행되지 않는다 — 실제로 두 번째 메뉴 이동에서 드로어가 안 닫혔다(2026-08-14 실측).
+    매 호출마다 일련번호를 실어 재마운트를 강제한다.
+
+    렌더러는 :func:`st.iframe` 이다 — 구 ``components.v1.html`` 은 1.59 에서 deprecated
+    (2026-06-01 제거 예정)이고, 실브라우저에서 st.iframe 도 raw HTML 의 스크립트를 실행하고
+    parent DOM 에 접근함을 확인했다. 높이 0 은 ``StreamlitInvalidHeightError`` 라 1px 을
+    쓴다(사이드바 맨 아래 1px — 실측 레이아웃 영향 없음)."""
+    if not st.session_state.pop(_DRAWER_CLOSE_FLAG, False):
+        return False
+    seq = int(st.session_state.get(_DRAWER_CLOSE_SEQ, 0)) + 1
+    st.session_state[_DRAWER_CLOSE_SEQ] = seq
+    st.iframe(f"<!-- nav {seq} -->{_DRAWER_CLOSE_JS}", height=1)
+    return True
+
+
 # ---------- 이동 가드 (미저장 변경 보호 — 기능 전용, 시각 요소 없음) ----------
 # 화면이 st.session_state["nav_guard"] = {"owner": <page_id>} 를 설정해 두면,
 # 사이드바 메뉴 이동·로그아웃은 즉시 수행되지 않고 nav_pending 으로 보류된다.
@@ -927,7 +1057,13 @@ def request_nav(action: dict) -> None:
     가드 보류 시에는 st.rerun 을 던지지 않고 현재 rerun 을 계속 진행한다.
     (여기서 중단하면 본문 위젯이 렌더되지 않아 세션 위젯 상태가 사라지고,
     조회 조건이 기본값으로 리셋되며 pending 이 덮어써질 수 있다.)
+
+    화면 이동 요청이면 모바일 드로어 닫기 신호를 남긴다(:data:`_DRAWER_CLOSE_FLAG`).
+    현재 화면 재클릭·가드 보류에서도 남긴다 — 어느 경우든 모바일에서는 드로어가 본문
+    (가드 확인 대화 포함)을 덮고 있어 닫는 것이 맞다. PC 에서는 브리지가 무동작이다.
     """
+    if action.get("type") == "page":
+        st.session_state[_DRAWER_CLOSE_FLAG] = True
     if action.get("type") == "page" and action.get("target") == st.session_state.get("nav_page"):
         return  # 현재 화면 재클릭은 이동이 아니므로 가드를 묻지 않는다
     if st.session_state.get("nav_guard"):

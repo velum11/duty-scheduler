@@ -436,6 +436,33 @@ _SELECT_CSS = {
     ".ag-cell .ag-selection-checkbox": {"margin-right": "8px"},
 }
 
+# 가로 스크롤 어포던스(옵트인 — ``scroll_affordance=True``).
+# 좁은 폭에서 표는 컨테이너 안에서 가로 스크롤한다(DESIGN §5). 그런데 모바일 브라우저는
+# **오버레이 스크롤바**라 스크롤 중에만 잠깐 뜨고, 정지 상태에서는 "오른쪽에 열이 더 있다"는
+# 신호가 화면에 하나도 없다(2026-08-14 390×844 실측: 6열 중 3열만 보이는데 내부 오버플로
+# 392px, 스크롤바·페이드 없음). ``::-webkit-scrollbar`` 를 칠하면 그 스크롤러가 오버레이가
+# 아닌 **상시 노출 스크롤바**로 바뀌어 신호가 생긴다.
+#
+# 스코프: AG Grid 는 가로 오버플로가 있을 때만 ``.ag-body-horizontal-scroll`` 을 보이게 하고,
+# 넘치지 않으면 ``visibility:hidden`` 이다(PC 1440 실측). 즉 이 규칙은 **넘칠 때만** 눈에
+# 보이고, 넘치지 않는 그리드(=현행 PC 아차사고 목록)의 외관은 그대로다. 자리(16px 스크롤 행)는
+# AG Grid 가 이미 잡아 두므로 표 높이도 변하지 않는다. 색은 §2 팔레트 토큰만 쓴다.
+#
+# ``scrollbar-width``/``scrollbar-color`` 는 함께 쓰지 않는다 — 표준 속성이 있으면 Chromium 이
+# ``::-webkit-scrollbar`` 규칙을 무시해 지정한 팔레트 색이 적용되지 않는다(2026-08-14 4변형
+# 실측: webkit 전용만 의도한 thumb 색으로 칠해짐).
+_HSCROLL_AFFORDANCE_CSS = {
+    ".ag-body-horizontal-scroll-viewport::-webkit-scrollbar": {
+        "height": "10px", "-webkit-appearance": "none"},
+    ".ag-body-horizontal-scroll-viewport::-webkit-scrollbar-track": {
+        "background": TOKENS["canvas"]},
+    ".ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb": {
+        "background": TOKENS["line-strong"], "border-radius": "999px",
+        "border": "2px solid " + TOKENS["canvas"]},
+    ".ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb:hover": {
+        "background": TOKENS["ink-3"]},
+}
+
 
 def _prepare_read_frame(df: pd.DataFrame, cols: list[str], hidden: list[str]) -> pd.DataFrame:
     """표시 컬럼은 빈문자 string 으로, 숨김 컬럼은 원형 그대로 보정한 프레임 사본."""
@@ -662,7 +689,8 @@ def _build_select_gridoptions(df: pd.DataFrame, *, key_field: str,
                               row_rules: list[dict] | None,
                               hidden_fields: list[str] | None,
                               row_height: int,
-                              checkbox_marker: bool = True) -> tuple[pd.DataFrame, dict, dict]:
+                              checkbox_marker: bool = True,
+                              scroll_affordance: bool = False) -> tuple[pd.DataFrame, dict, dict]:
     """SELECT 그리드의 view·gridOptions·custom_css 를 (AgGrid 호출 없이) 구성한다.
 
     불변식 검증(col_config 화이트리스트·key_field 자연키 계약)을 여기서 먼저 강제하므로
@@ -679,6 +707,8 @@ def _build_select_gridoptions(df: pd.DataFrame, *, key_field: str,
     frame[key_field] = frame[key_field].fillna("").astype(str)
     coldefs, custom = _build_read_coldefs(cols, hidden, color_rules, col_config, row_rules)
     custom = {**custom, **_SELECT_CSS}
+    if scroll_affordance:
+        custom = {**custom, **_HSCROLL_AFFORDANCE_CSS}
     # 첫 표시 열에 네이티브 선택 체크박스(마커) — 기본 켬. 행 클릭이 곧 선택인(§0-1) 화면은
     # checkbox_marker=False 로 끄고 선택행 오렌지 바+틴트로만 이중부호화한다(상세 열기용
     # 체크박스 금지 준수 — 클릭 선택은 rowSelection=single 로 유지).
@@ -738,7 +768,8 @@ def select_grid(df: pd.DataFrame, *, key: str, key_field: str,
                 hidden_fields: list[str] | None = None,
                 height: int | None = None,
                 row_height: int = _SELECT_ROW_PX,
-                checkbox_marker: bool = True) -> str | None:
+                checkbox_marker: bool = True,
+                scroll_affordance: bool = False) -> str | None:
     """AgGrid 단일 선택 목록 어댑터(§0.5 — read_grid 와 별개 capability, 편집 자산 없음).
 
     MASTER_DETAIL 목록(큐)에서 한 행을 선택해 그 **자연키**(``key_field`` 값)를 돌려준다.
@@ -768,12 +799,17 @@ def select_grid(df: pd.DataFrame, *, key: str, key_field: str,
 
     ``row_height``: 행 피치(§0.6 실측 잠금). 기본 32(데스크톱 M/A 큐 밀도). USER·터치
     variant 는 44 를 준다(32×32 히트영역 계약과 정합).
+
+    ``scroll_affordance``: 가로로 넘칠 때 스크롤바를 상시 노출로 칠한다
+    (:data:`_HSCROLL_AFFORDANCE_CSS`). 모바일 오버레이 스크롤바 때문에 "오른쪽에 열이 더
+    있다"는 신호가 사라지는 화면(USER 소관 목록)에서 켠다. 기본 꺼짐 — 다른 호출부의
+    그리드 외관은 그대로다.
     """
     view, options, custom = _build_select_gridoptions(
         df, key_field=key_field, columns=columns, selected_key=selected_key,
         color_rules=color_rules, col_config=col_config, row_rules=row_rules,
         hidden_fields=hidden_fields, row_height=row_height,
-        checkbox_marker=checkbox_marker,
+        checkbox_marker=checkbox_marker, scroll_affordance=scroll_affordance,
     )
     h = height if height is not None else read_grid_height(len(view), row_px=row_height)
 

@@ -26,6 +26,7 @@ os.environ["DUTY_DATA_MODE"] = "sample"
 import pandas as pd  # noqa: E402
 
 from views.common.erp import kit  # noqa: E402
+from views.master import TOKENS  # noqa: E402
 
 PASS = 0
 FAIL: list[str] = []
@@ -70,6 +71,7 @@ def build(df, **kw):
         row_rules=kw.get("row_rules"),
         hidden_fields=kw.get("hidden_fields"),
         row_height=kw.get("row_height", 34),
+        scroll_affordance=kw.get("scroll_affordance", False),
     )
 
 
@@ -100,6 +102,30 @@ check("view 에 key_field 실려있음(hidden 반환용)", "_k" in view.columns)
 check("초기 미선택 시 initialState 없음", "initialState" not in opts)
 check("SELECT 배경 틴트 custom_css 병합(이중부호화)",
       any("ag-row-selected" in sel for sel in custom))
+
+# ===== 1-b) 가로 스크롤 어포던스(옵트인) — 모바일 오버레이 스크롤바 대응 =====
+# 기본은 꺼짐이라 다른 호출부(편성·기준정보) 그리드 CSS 는 그대로다.
+print("가로 스크롤 어포던스 옵트인")
+# 기본값은 **공개 시그니처**에서 고정한다 — private 헬퍼에 False 를 직접 넘겨 확인하면
+# 공개 API 기본값이 True 로 바뀌어도(=전 호출부 외관 변경) 테스트가 통과한다.
+_sig = inspect.signature(kit.select_grid).parameters
+check("공개 select_grid 기본값 scroll_affordance=False",
+      "scroll_affordance" in _sig and _sig["scroll_affordance"].default is False)
+check("read_grid 는 어포던스 인자를 갖지 않는다(SELECT 전용 옵트인)",
+      "scroll_affordance" not in inspect.signature(kit.read_grid).parameters)
+check("기본 호출 경로에 스크롤바 CSS 미주입",
+      not any("scrollbar" in sel for sel in custom))
+_, _, custom_sa = build(sample_df(), scroll_affordance=True)
+check("scroll_affordance=True → 가로 스크롤바 selector 주입",
+      any("ag-body-horizontal-scroll-viewport::-webkit-scrollbar" in sel for sel in custom_sa))
+check("thumb 색은 팔레트 토큰(line-strong)",
+      any("thumb" in sel and props.get("background") == TOKENS["line-strong"]
+          for sel, props in custom_sa.items()))
+check("표준 scrollbar-width/color 미사용(webkit 규칙 무효화 방지)",
+      not any("scrollbar-width" in props or "scrollbar-color" in props
+              for props in custom_sa.values()))
+check("어포던스는 기본 CSS 를 덮지 않는다(기존 selector 보존)",
+      all(sel in custom_sa for sel in custom))
 
 
 # ===== 2) 밀도 variant(row_height) =====

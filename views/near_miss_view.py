@@ -208,6 +208,7 @@ def render(user: dict) -> None:
         columns=_DISPLAY_COLUMNS, selected_key=st.session_state.get(_SEL_KEY),
         col_config=_COL_CONFIG,
         checkbox_marker=False,  # §0-1: 행 클릭이 곧 선택(상세 열기용 체크박스 금지)
+        scroll_affordance=True,  # 모바일 폭에서 "오른쪽에 열이 더 있음" 신호(상시 스크롤바)
         color_rules={
             "제안등급": _GRADE_COLOR,
             "확정등급": _GRADE_COLOR,
