@@ -59,9 +59,11 @@ _FORM_WIDGET_KEYS = [
     "nm_f_countermeasure", "nm_f_site_description",
 ]
 
+# 발생원인 선택 라벨 — 6화면 단일 어휘(2026-08-14 통일). 등록에서 고른 문구가 내 아차사고·
+# 조회·평가·개선조치·분석에서 **같은 문구**로 다시 보여야 한다(KOSHA 현행 단문 용어).
 _CAUSE_LABELS = {
-    "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘·충돌",
-    "SLIP": "미끄러짐·넘어짐", "BURN": "화상·고온", "PINCH": "협착", "ETC": "기타",
+    "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘",
+    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
 
 # 필수 8필드(라벨·세션키) — _validate 계약과 동일 집합. 체크리스트·진행 바가 이 목록에서 파생.
@@ -88,7 +90,8 @@ _LINE_SEC = "#e0dbd2"
 _LINE_HDR = "#cfc8bd"
 _ACCENT = "#c2410c"
 _ACCENT_TEXT = "#b4451a"
-_MONO = "'IBM Plex Mono', monospace"
+# 인라인 style 속성에 들어가도 안전하도록 **큰따옴표**로 감싼다(6화면 공통 규약, 2026-08-14).
+_MONO = '"IBM Plex Mono", monospace'
 
 _FORM_CSS = f"""
 <style>
@@ -102,8 +105,11 @@ _FORM_CSS = f"""
 .nm-reporter .k {{ color:{_WEAK}; }}
 .nm-reporter .v {{ color:{_INK}; font-weight:600; }}
 .nm-reporter .lock {{ margin-left:auto; font-size:12px; color:{_FAINT}; white-space:nowrap; }}
-/* 섹션 오버라인(모노) + 헤어라인 */
-.nm-sec {{ display:flex; align-items:center; gap:10px; margin:18px 0 2px; }}
+/* 섹션 오버라인(모노) + 헤어라인.
+   하단 여백 2px→10px (2026-08-14 실측): 오버라인 박스(y+18)와 바로 다음 필드 라벨 박스가
+   2px 겹쳐 렌더됐다(1440·390 동일). 전역 markdown margin-bottom:0 보정 때문에 이 margin 이
+   유일한 간격원이라, 섹션 라벨과 첫 필드 라벨이 붙어 보이는 원인이었다. */
+.nm-sec {{ display:flex; align-items:center; gap:10px; margin:18px 0 10px; }}
 .nm-sec .ov {{ font-family:{_MONO}; font-size:11px; letter-spacing:.14em; color:{_ACCENT_TEXT};
   white-space:nowrap; }}
 .nm-sec .rule {{ flex:1; height:1px; background:{_LINE}; }}

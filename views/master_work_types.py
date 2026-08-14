@@ -296,37 +296,45 @@ _WT_CROW_CSS = """
 .wt-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
 .wt-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
-.wt-crow .dist { font-size:11.5px; color:#6b665d; white-space:nowrap; }
+.wt-crow .dist { font-size:12.5px; color:#6b665d; white-space:nowrap;
+  font-variant-numeric:tabular-nums; }
 .wt-crow .edit { margin-left:auto; display:inline-flex; align-items:center; gap:6px; }
 /* 색·모양은 공용 .ms-chip 토큰 그대로 쓰고 **크기만** 사용처에서 올린다 — 공용 정의는
    .68rem 이고 이 앱의 root 는 14px 라 실측 9.52px 로 떨어진다(DESIGN §0-6 라벨 11px 이하
-   금지). 헤더 아이콘의 활성 근거를 읽는 숫자이므로 사용/미사용 표기(.dist 11.5px)와 같은
-   크기로 맞추고, 값이 실시간으로 바뀌므로 tabular-nums 로 자릿수 흔들림을 없앤다. */
-.wt-crow .edit .ms-chip { font-size:11.5px; padding:2px 8px;
+   금지). 헤더 아이콘의 활성 근거를 읽는 숫자이므로 기준정보 3화면 공통 상태 칩 크기
+   (12px/600)로 맞추고, 값이 실시간으로 바뀌므로 tabular-nums 로 자릿수 흔들림을 없앤다.
+   ※ 공용 정의 자체(views/master/style.py `.ms-chip`)의 9.52px 는 소유 밖이라 보고만 한다. */
+.wt-crow .edit .ms-chip { font-size:12px; padding:2px 8px;
   font-variant-numeric:tabular-nums; }
 </style>
 """
 
 
 # ---- 컬럼 폭·정렬(디자인 계약 §4·mockup) ----
+# 기준정보 3화면 공통 규격(2026-08-14 재검수): 코드/식별 108(좌측 고정) · 명칭 114 ·
+# 순서 74 · 사용 여부 토글 72. 같은 성격 열이 화면마다 다른 폭(108/110/112, 74/72/92,
+# 72/72/84)으로 서 있던 것을 한 값으로 모은다.
 _COL_WIDTHS = {
     "코드": {"width": 108, "minWidth": 88, "pinned": "left", "cellClass": "md-c-left",
             "editable": _EDIT_NEW_ONLY},
-    "명칭": {"width": 118, "minWidth": 96, "cellClass": "md-c-left",
+    "명칭": {"width": 114, "minWidth": 96, "cellClass": "md-c-left",
             "cellStyle": {"fontSize": "14.5px"}},  # §1-E 본문 14.5
     "분류": {"width": 96, "minWidth": 76, "cellClass": "md-c-left", "cellRenderer": _CATEGORY_RENDERER},
-    "약칭": {"width": 130, "minWidth": 96, "cellClass": "md-c-left", "cellRenderer": _SHORT_LABEL_RENDERER},
+    # 약칭 chip(≤4자)·색상 스와치+HEX·근무 pill 은 실제 콘텐츠보다 넉넉했다 — 13열 합이
+    # 1440(사이드바 제외 1169)에서 151px 넘쳐 표시순서·사용이 가로 스크롤 뒤로 밀렸다.
+    # 콘텐츠 최소폭(약칭 chip 86 · 색상 편집기 131 · 근무 pill 66)을 지키는 선에서 줄인다.
+    "약칭": {"width": 112, "minWidth": 96, "cellClass": "md-c-left", "cellRenderer": _SHORT_LABEL_RENDERER},
     "시작": {"width": 80, "minWidth": 66, "cellClass": "md-c-center ms-num"},
     "종료": {"width": 80, "minWidth": 66, "cellClass": "md-c-center ms-num"},
-    "색상": {"width": 156, "minWidth": 130, "cellClass": "md-c-left",
+    "색상": {"width": 140, "minWidth": 132, "cellClass": "md-c-left",
             "cellRenderer": _COLOR_RENDERER, "cellEditor": _COLOR_EDITOR},
     # §1-E: 근무 여부(실근무)·사용 = pill 렌더러(§2 팔레트) + 불리언 체크박스 편집(더블클릭).
     # 값·저장·is_work/is_active 경로 불변(pill display-only). 특근수당은 부가 플래그라 체크박스 유지.
-    "실근무": {"width": 84, "minWidth": 68, "cellClass": "md-c-center", "cellRenderer": _WORK_PILL_RENDERER},
-    "특근수당": {"width": 84, "minWidth": 72, "cellClass": "md-c-center"},
+    "실근무": {"width": 74, "minWidth": 68, "cellClass": "md-c-center", "cellRenderer": _WORK_PILL_RENDERER},
+    "특근수당": {"width": 74, "minWidth": 68, "cellClass": "md-c-center"},
     "설명": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left", "cellStyle": {"fontSize": "14.5px"}},
-    "표시순서": {"width": 92, "minWidth": 78, "cellClass": "md-c-center ms-num"},
-    "사용": {"width": 84, "minWidth": 66, "cellClass": "md-c-center", "cellRenderer": _USE_PILL_RENDERER},
+    "표시순서": {"width": 74, "minWidth": 68, "maxWidth": 110, "cellClass": "md-c-center ms-num"},
+    "사용": {"width": 72, "minWidth": 66, "cellClass": "md-c-center", "cellRenderer": _USE_PILL_RENDERER},
 }
 
 
@@ -441,8 +449,10 @@ def render(user: dict) -> None:
         desc=_WT_DESC,
         breadcrumb="기준정보 › 근무형태 관리",
     )
-    st.markdown(_EXTRA_CSS, unsafe_allow_html=True)  # 저장 오류 목록 보조 스타일(항상 주입)
-    st.markdown(_WT_CROW_CSS, unsafe_allow_html=True)
+    # 페이지 CSS 는 **한 번에** 주입한다 — style 전용 markdown 도 블록 하나(≈9px)를 차지해
+    # 두 번 나누면 조건 줄이 사용자·조직 화면보다 9px 내려앉는다(2026-08-14 실측: 조건 줄
+    # y 183.4 vs 174.3). 내용은 종전 두 블록과 동일하다.
+    st.markdown(_EXTRA_CSS + _WT_CROW_CSS, unsafe_allow_html=True)
 
     # ---- 조건 패널(우측 인라인 라벨, KP-standard) — 위젯 key 는 기존 DraftState 스코프
     #      키(state.key("f_active")/"f_search")를 widget_key 로 그대로 지정해 세션 상태를
@@ -474,8 +484,9 @@ def render(user: dict) -> None:
     # 색 미리보기 계약은 **셀 단위**로 유지된다: 색상 열(_COLOR_RENDERER)의 스와치+HEX,
     # 약칭 열(_SHORT_LABEL_RENDERER)의 근무형태 색 chip(근무표 배지와 동일 어휘·명도 기반
     # 텍스트색). 색 편집(피커/HEX 양방향)·검증(#RRGGBB·중복 경고) 계약은 불변이다.
-    st.markdown("<div style='border-top:1px solid #e0dbd2;margin:2px 0 8px;'></div>",
-                unsafe_allow_html=True)
+    # 헤어라인은 조건 패널 자체가 하단 border 로 그린다(views/common/erp/kit.py
+    # `[class*="st-key-erpcond_"]`) — 여기서 다시 그리면 22px 간격의 이중 괘선이 된다
+    # (2026-08-14 실측 y264.4/287.0). 조직 관리와 같은 한 줄 구획으로 맞춘다.
     count_row_slot = st.container()  # 건수 행(근무형태 + 건수 pill + 사용/미사용 + 우측 편집 상태) — deferred
     banner_slot = st.container()  # 배너(삭제 확인/폐기 확인/원장/오류/flash 중 1개)
 
@@ -485,7 +496,10 @@ def render(user: dict) -> None:
         page_id=PAGE_ID, columns=_GRID_COLUMNS, order=_USER_COLS,
         col_config=_col_config(), select_all=True,
         height=master_grid_height(len(frame)),
-        grid_options={"onCellValueChanged": _DUP_REFRESH, "rowHeight": 42},  # §1-E 행 높이 확대
+        # rowHeight 는 공용 기본값(views/master/grid.py `_GRID_ROW_PX`=40). 화면에서 42 로
+        # 덮으면 조직 관리(40)와 행 높이가 어긋나고, 높이 계산(master_grid_height)이 40
+        # 기준이라 행마다 2px 씩 모자라 불필요한 내부 스크롤이 생긴다(2026-08-14 재검수).
+        grid_options={"onCellValueChanged": _DUP_REFRESH},
     )
     grid_df = render_master_grid(spec, frame, key=state.grid_key())
 

@@ -42,24 +42,33 @@ _SEL_KEY = "nm_view_selected_id"
 
 # 상태·원인 코드 → 한글 라벨(파사드 코드값은 NEAR_MISS_STATUSES/NEAR_MISS_CAUSE_CODES,
 # 화면 표시만 한글화한다 — 코드 자체는 바꾸지 않는다).
+# 상태 코드→라벨 — 6화면 단일 어휘. SUBMITTED 는 '제출'이 아니라 **'제출됨'**(DESIGN §2 상태
+# 배지 표기이자 평가·개선조치·내 아차사고·등록 안내 문구와 동일, 2026-08-14 통일).
 _STATUS_LABEL = {
-    "SUBMITTED": "제출",
+    "SUBMITTED": "제출됨",
     "IN_REVIEW": "검토중",
     "EVALUATED": "평가완료",
     "CLOSED": "종결",
     "REJECTED": "반려",
 }
 # 상태 색(이중부호화 — 라벨 텍스트는 항상 함께 표시되므로 색은 보조 신호).
-# 기존 기준정보 색 토큰(views/master/style.py TOKENS)을 재사용해 새 색을 만들지 않는다.
+# 값은 DESIGN §2 상태 배지 = ``views/master/style.py::LIFECYCLE_BADGE`` 와 **같은 색**으로
+# 맞춘다(2026-08-14): 종전 이 화면은 제출됨=파랑·검토중=황토로 두 상태가 서로 바뀌어 있어,
+# 평가·개선조치(lifecycle_badge_html)와 같은 상태가 화면마다 다른 색으로 보였다.
 _STATUS_COLOR = {
-    "SUBMITTED": TOKENS["info"],
-    "IN_REVIEW": TOKENS["gold"],
-    "EVALUATED": TOKENS["success"],
-    "CLOSED": TOKENS["ink-3"],
-    "REJECTED": TOKENS["danger"],
+    "SUBMITTED": TOKENS["gold"],       # #8a6212 (§2 제출됨)
+    "IN_REVIEW": TOKENS["info"],       # #2f4d99 (§2 검토중)
+    "EVALUATED": TOKENS["success"],    # #2f6b45
+    "CLOSED": "#5c564d",               # §2 종결 배지 텍스트
+    "REJECTED": TOKENS["danger"],      # #9c3232
 }
+# 발생원인 코드→한글 라벨 — **6화면 단일 어휘**(2026-08-14 통일). 산업안전(KOSHA 재해발생형태)
+# 현행 용어를 우선하고, 코드 의미가 겹치지 않게 단문으로 고정한다:
+#   HIT=부딪힘(현행 표준어, 구 '충돌') · DROP=낙하물(물체 — 사람의 FALL=추락과 구분) ·
+#   SLIP=미끄러짐 · BURN=화상 · JAM=끼임 / PINCH=협착(2026-08-13 결정 계승).
+# 라벨 최대 4자(미끄러짐)라 목록 원인 열(92px)·분석 라벨 트랙(76px/모바일 64px)에서 잘리지 않는다.
 _CAUSE_LABEL = {
-    "JAM": "끼임", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
+    "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘",
     "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
 # 등급 색(S 가 가장 중대 → 옅어질수록 경미). TOKENS 재사용.
@@ -83,7 +92,8 @@ def _grade_mark(grade, empty: str = "없음") -> str:
 # (erp.metadata_strip) 대신 10.5px 모노 오버라인 라벨 + 13.5px 값을 박스 없이 flex 로 나열한다.
 # 작은 라벨 색은 #6b665d(캔버스 위 ≥5:1) — §A-2 대비 규칙 준수.
 _META_FAINT = "#6b665d"
-_META_MONO = "'IBM Plex Mono', monospace"
+# 인라인 style 속성 값이므로 **큰따옴표**(작은따옴표는 style 속성을 끊어 전체 무효화).
+_META_MONO = '"IBM Plex Mono", monospace'
 
 
 def _meta_cell(label: str, value: str, is_html: bool = False) -> str:
@@ -97,19 +107,41 @@ def _meta_cell(label: str, value: str, is_html: bool = False) -> str:
         f"<span style='font-size:13.5px;color:{TOKENS['ink']};line-height:1.35;'>{v}</span></div>"
     )
 
+
+def _read_field(label: str, value: str) -> None:
+    """전폭 읽기 필드(라벨 12.5/600 + 본문 **14.5px**/1.7).
+
+    공용 ``erp.field_block`` 은 본문이 13px 이라 같은 항목(사고내용·예방대책 등)이 평가·개선
+    조치·내 아차사고의 상세 본문(14.5px/1.7)보다 작게 보였다 — DESIGN 부속서 A-3(본문
+    ≥14.5px)에도 미달한다. kit 은 이 작업의 수정 범위 밖(공용)이라 화면 로컬로 같은 구조를
+    14.5px 로 렌더하고, kit 쪽 정합은 별도 보고 항목으로 남긴다(2026-08-14)."""
+    body = escape(value) if str(value or "").strip() else "-"
+    st.markdown(
+        "<div style='margin:8px 0 0;'>"
+        f"<div style='font-size:12.5px;font-weight:600;color:{TOKENS['ink-2']};"
+        "margin-bottom:2px;'>" + escape(label) + "</div>"
+        f"<div style='font-size:14.5px;line-height:1.7;color:{TOKENS['ink']};"
+        f"white-space:pre-wrap;text-wrap:pretty;'>{body}</div></div>",
+        unsafe_allow_html=True,
+    )
+
 _DISPLAY_COLUMNS = [
     "보고번호", "작업명", "신고자", "소속", "발생일",
     "제안등급", "확정등급", "상태", "원인",
 ]
 
 # 컬럼 폭(1366×768에서 9열이 가로 오버플로 없이 들어가도록 — 작업명·소속은 flex 로 잔여 폭 흡수).
+# 같은 성격 열은 내 아차사고와 **같은 값**을 쓴다(보고번호 112 · 작업명 flex2/min150 ·
+# 발생일 96 · 등급 84 · 상태 88 · 원인 92 — 2026-08-14 6화면 열 폭 통일).
 _COL_CONFIG = {
     "보고번호": {"width": 112, "cellStyle": {"fontFamily": "'IBM Plex Mono', monospace",
                                           "letterSpacing": "0.01em"}},
-    "작업명": {"flex": 2, "minWidth": 160},
+    "작업명": {"flex": 2, "minWidth": 150},
     "신고자": {"width": 92},
-    "소속": {"flex": 1, "minWidth": 96},
-    "발생일": {"width": 104},
+    # 소속 minWidth 96→128: 390px 실측에서 96px 로 눌려 부서명이 말줄임됐다
+    # ('PET생산부(원료실)' 118px > 96-14px). 데스크톱은 flex 로 늘어나 영향 없다.
+    "소속": {"flex": 1, "minWidth": 128},
+    "발생일": {"width": 96},   # 내 아차사고와 동일 값(실측 74px + 패딩 14px)
     "제안등급": {"width": 84},
     "확정등급": {"width": 84},
     "상태": {"width": 88},
@@ -324,17 +356,17 @@ def _render_result_detail(df: pd.DataFrame) -> None:
         f"{meta_cells}</div>",
         unsafe_allow_html=True,
     )
-    erp.field_block("작업명", _clean(report.get("work_name")))
-    erp.field_block("사고내용", _clean(report.get("incident_content")))
+    _read_field("작업명", _clean(report.get("work_name")))
+    _read_field("사고내용", _clean(report.get("incident_content")))
 
     # ── 부차 참조 서술(발생원인 상세·작업내용·예방대책·현장 상황) 기본 접힘으로 상세 높이 bound. ──
     with st.expander("보고서 상세 더 보기", expanded=False):
         cause_detail = _clean(report.get("cause_detail"))
         if cause_detail:
-            erp.field_block("발생원인 상세", cause_detail)
-        erp.field_block("작업내용", _clean(report.get("work_content")))
-        erp.field_block("예방대책", _clean(report.get("countermeasure")))
-        erp.field_block("작업현장 상황설명", _clean(report.get("site_description")))
+            _read_field("발생원인 상세", cause_detail)
+        _read_field("작업내용", _clean(report.get("work_content")))
+        _read_field("예방대책", _clean(report.get("countermeasure")))
+        _read_field("작업현장 상황설명", _clean(report.get("site_description")))
 
     # ── 사진(있을 때) — 서명 URL 썸네일 그리드(조회 전용, 클릭 확대는 st.image 기본). ──
     _render_view_photos(report.get("photo_paths"))

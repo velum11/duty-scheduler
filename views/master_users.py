@@ -145,7 +145,9 @@ _MU_CSS = """
 .mu-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
 .mu-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
-.mu-crow .dist { font-size:11.5px; color:#6b665d; white-space:nowrap;
+/* 좌측 분포(재직/퇴직)와 우측 상태 텍스트는 같은 성격의 보조 정보라 같은 크기를 쓴다 —
+   종전 11.5 vs 12.5 혼재를 §3 캡션 12.5 로 통일(2026-08-14 재검수). */
+.mu-crow .dist { font-size:12.5px; color:#6b665d; white-space:nowrap;
   font-variant-numeric:tabular-nums; }
 .mu-crow .gap { flex:1 1 auto; min-width:8px; }
 .mu-crow .wip, .mu-crow .calm, .mu-crow .sel, .mu-crow .hint {
@@ -156,6 +158,11 @@ _MU_CSS = """
 .mu-crow .sel { font-weight:600; color:#4a453d; }
 .mu-crow .hint { color:#6b665d; }
 .mu-crow .sep { color:#cfc8bd; }
+/* ADMIN 전용 expander 안의 실행 버튼(비밀번호 초기화·담당/이메일 저장)은 앱 전역 버튼
+   높이(2.15rem=30.1px 실측)를 그대로 받아 히트영역 하한 32px(§0.6·§4)을 밑돌았다.
+   두 버튼 모두 되돌리기 어려운 쓰기 액션이라 하한을 지킨다(모양·색 규칙은 불변). */
+.st-key-master_users__pwreset_run button,
+.st-key-master_users__cap_save button { min-height:32px !important; }
 </style>
 """
 
@@ -1140,7 +1147,6 @@ def render(user: dict) -> None:
     hint_json = json.dumps(_group_hints(group_of, dept_names, dept_labels), ensure_ascii=False)
 
     readiness = _readiness()
-    st.markdown(_MU_CSS, unsafe_allow_html=True)
     # §1-E 표형(구조 교체) — 아이콘 밴드 제거(§0-3). 실기능 액션(행 추가·삭제·저장·새로고침)은
     # 건수 행 우측으로 이전하고, 그리드 저장/dirty/2단계 삭제 계약은 전부 보존(표현 계층만).
     erp.screen_frame(
@@ -1149,6 +1155,10 @@ def render(user: dict) -> None:
         desc="사번·소속·권한을 표에서 직접 편집하고 [저장]으로 일괄 반영합니다.",
         breadcrumb="기준정보 › 사용자 관리",
     )
+    # 페이지 CSS 주입은 **제목 뒤**에 둔다 — style 전용 markdown 도 블록 하나를 차지해
+    # 앞에 두면 제목이 9px 내려앉고, 조직·근무형태 화면(제목 뒤 주입)과 제목 기준선이
+    # 어긋난다(2026-08-14 실측: 제목 y 115.0 vs 105.9).
+    st.markdown(_MU_CSS, unsafe_allow_html=True)
     # readiness 배너(NOT_READY/PROBE_ERROR 만) + 확인 실패 시 재프로브 — 조직 화면과 동일 UX(§25).
     readiness.banner()
     if readiness.state is Readiness.PROBE_ERROR:
@@ -1185,9 +1195,10 @@ def render(user: dict) -> None:
         # 늘렸다. 짧은 코드값 select 는 내용 맞춤, 검색만 신축(기준정보 3화면 동일).
         content_fit=True,
     )
-    # §1-E: 필터 줄 → 헤어라인 → (건수 행 + 표)
-    st.markdown("<div style='border-top:1px solid #e0dbd2;margin:2px 0 8px;'></div>",
-                unsafe_allow_html=True)
+    # §1-E: 필터 줄 → 헤어라인 → (건수 행 + 표). 헤어라인은 조건 패널 자체가 하단
+    # border 로 그린다(views/common/erp/kit.py `[class*="st-key-erpcond_"]`) — 여기서 다시
+    # 그리면 22px 간격의 이중 괘선이 된다(2026-08-14 실측 y255.3/277.9). 조직 관리는
+    # 처음부터 한 줄이었으므로 세 화면 중 이 화면·근무형태만 두 줄이었다.
     params = {
         "active": cond["active"], "dept": cond["dept"], "role": cond["role"],
         "search": str(cond["search"]).strip(),
@@ -1480,13 +1491,18 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str = "", *,
     col_config = {
         # 사번(자연키)은 저장행에서 편집 불가(신규행만)지만, 읽기전용 틴트는 보호행에만 준다 —
         # org 코드열과 동일(모든 저장행 과잉 틴트 회피). editable=false 자체가 키 잠금 어포던스.
-        "사번": {"width": 110, "minWidth": 96, "cellClass": "md-c-left",
+        # 폭·정렬은 기준정보 3화면 공통 규격이다(2026-08-14 재검수): 코드/식별 열 108,
+        # 명칭 열 114, 순서 74, 사용 여부 토글 72. 같은 성격 열이 화면마다 다른 폭으로
+        # 서던 것을 없앤다(근무형태 코드 108 · 조직 코드 108 과 동일).
+        # 좁은 폭에서 가로 스크롤될 때 신원(사번)이 사라지지 않도록 좌측 고정한다 —
+        # 근무형태 관리 코드 열과 같은 계약(첫 열이라 열 순서는 바뀌지 않는다).
+        "사번": {"width": 108, "minWidth": 96, "pinned": "left", "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY,
                 "cellClassRules": _cell_rules("사번", readonly=_IS_PROTECTED_JS)},
         # §1-E·H1 본문 14.5px — 공용 GRID_CSS(.ag-cell)가 이미 14.5px 이며, 아래 읽기 컬럼의
         # cellStyle fontSize 14.5px 는 동일값 명시(중복이나 무해). 사번/표시순서 등 별도 지정이
         # 없는 열도 공용 GRID_CSS 14.5px 를 그대로 따른다(더는 13px/13.5px 특례 없음).
-        "성명": {"width": 114, "minWidth": 96, "cellClass": "md-c-left",
+        "성명": {"width": 114, "minWidth": 96, "cellClass": "md-c-left",  # 명칭 열 공통 114
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellStyle": {"fontSize": "14.5px"},
                 "cellRenderer": _NAME_STATUS_RENDERER,
@@ -1528,11 +1544,11 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str = "", *,
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellClassRules": _cell_rules("퇴사일", readonly=_IS_PROTECTED_JS)},
         "표시순서": {"width": 74, "minWidth": 68, "maxWidth": 110, "cellClass": "md-c-center ms-num",
-                 "editable": _EDIT_UNLESS_PROTECTED,
+                 "editable": _EDIT_UNLESS_PROTECTED,  # 순서 열 공통 74(헤더 46px + 패딩 16)
                  "cellClassRules": _cell_rules("표시순서", readonly=_IS_PROTECTED_JS)},
         # 재직 = §1-E pill 렌더러(재직/퇴직, §2 팔레트) + 불리언 체크박스 편집(더블클릭). 값은 그대로
         # 반환되어 is_active 저장·2단계 삭제(퇴직) 경로 불변(pill 은 display-only).
-        "재직": {"width": 72, "minWidth": 66, "cellClass": "md-c-center",
+        "재직": {"width": 72, "minWidth": 66, "cellClass": "md-c-center",  # 사용 여부 토글 공통 72
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellRenderer": _ACTIVE_PILL_RENDERER,
                 "cellClassRules": _cell_rules("재직", readonly=_IS_PROTECTED_JS)},
@@ -1543,7 +1559,9 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str = "", *,
     return MasterGridSpec(
         page_id=PAGE_ID, columns=_GRID_COLUMNS, order=_USER_COLS, col_config=col_config,
         select_all=True, height=master_grid_height(nrows), row_class_rules=row_rules,
-        grid_options={"rowHeight": 42},  # §1-E 행 높이 비례 확대(14.5px 본문)
+        # rowHeight 는 공용 기본값(views/master/grid.py `_GRID_ROW_PX`=40)을 쓴다. 화면에서
+        # 42 로 덮으면 ① 조직 관리(40)와 행 높이가 어긋나고 ② 높이 계산(master_grid_height)이
+        # 40 기준이라 행마다 2px 씩 모자라 불필요한 내부 스크롤이 생긴다(2026-08-14 재검수).
     )
 
 

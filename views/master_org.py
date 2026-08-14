@@ -191,6 +191,19 @@ _ORG_PAGE_CSS = """
 .st-key-org_group__sheet, .st-key-org_dept__sheet, .st-key-org_unit__sheet {
   background:transparent !important; border:none !important; border-radius:0 !important;
   box-shadow:none !important; padding:.2rem .9rem .1rem !important; }
+/* 단일 시트가 된 부서 시트는 좌우 안쪽 여백을 두지 않는다 — .9rem(12.6px) + 바깥
+   `org__sheets` 의 공용 카드 패딩·1px 테두리가 겹쳐 표·상태 스트립만 제목·조건 줄보다
+   14.5px 안으로 들어가 있었다(2026-08-14 실측 x 268.5 vs 253.5). 사용자·근무형태 화면은
+   같은 자리에서 253.5 라 세 화면의 좌측 기준선이 어긋났다. 3열 시절의 잔재이므로
+   부서 시트에서만 걷고, 미라우팅 보존 시트(그룹·조)의 여백 규칙은 위 선언 그대로 둔다.
+   바깥 래퍼 `org__sheets` 는 이름에 "__sheet" 가 들어가 공용 카드 규칙
+   (views/master/style.py `[class*="__sheet"]`)에 **의도치 않게** 걸려 흰 배경+테두리+
+   radius+그림자를 뒤집어쓰고 있었다 — §0-5(카드로 섹션 감싸기 금지)에 어긋나고
+   사용자·근무형태 화면에는 없는 상자라 같이 걷는다. */
+.st-key-org__sheets {
+  background:transparent !important; border:none !important; border-radius:0 !important;
+  box-shadow:none !important; padding-left:0 !important; padding-right:0 !important; }
+.st-key-org_dept__sheet { padding-left:0 !important; padding-right:0 !important; }
 /* 단일 시트 전환(2026-08-07) — 부서 시트는 더 이상 2열이 아니므로 좌측 헤어라인을 걷는다.
    (조 시트 규칙은 미라우팅 보존 코드용으로만 남김) */
 .st-key-org_unit__sheet {
@@ -212,6 +225,20 @@ _ORG_PAGE_CSS = """
 .ms-ctx b.pin, .ms-ctx b.sel { background:#fdf3ec; border-color:#f0dfd0; color:#b4451a; }
 .ms-ctx .arw { font-size:.92rem; color:#cfc8bd; }
 .ms-ctx .none { font-style:normal; color:#6b665d; }
+
+/* ── 건수 행 타이포를 기준정보 3화면 공통값으로 맞춘다(2026-08-14 재검수) ──
+   이 화면만 공용 `sheet_head`(.ms-sheet-head)를 쓰는데 그 정의는 rem 기반이라 이 앱의
+   root(14px)에서 제목 12.88px/700 · 건수 9.8px 로 떨어져, 같은 자리의 사용자 관리
+   (.mu-crow 14px/600 + 12px/600 모노 pill)·근무형태 관리(.wt-crow 동일)와 크기가
+   달랐다(§0-6 라벨 11px 이하 금지 위반 포함). 공용 정의는 소유 밖이라 이 페이지
+   스코프에서만 같은 값으로 덮는다 — 구조·문구·계약은 그대로다. */
+.ms-sheet-head { padding:.55rem 0 .5rem; gap:10px; }
+.ms-sheet-head .t { font-size:14px; font-weight:600; }
+.ms-sheet-head .cnt { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
+  padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d;
+  border:none; font-variant-numeric:tabular-nums; }
+/* 상태·필터 칩도 근무형태 관리와 같은 12px/600 로 올린다(공용 .ms-chip 은 9.52px 로 렌더). */
+.ms-chip { font-size:12px; padding:2px 8px; font-variant-numeric:tabular-nums; }
 
 /* 잠김 상태 밀도 완화(기능 보존) — 슬림 플레이스홀더 + 잠긴 시트 액션바 숨김. */
 .st-key-org_dept__sheet .ms-locked, .st-key-org_unit__sheet .ms-locked {
@@ -506,16 +533,18 @@ def _dept_col_config(*, attendance_editable: bool = True) -> dict:
                  "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
         "중분류": {"flex": 0.9, "minWidth": 110, "cellClass": "md-c-left",
                  "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
-        "코드": {"flex": 0, "width": 112, "minWidth": 96, "cellClass": "md-c-left",
+        # 코드·순서·사용 폭은 기준정보 3화면 공통 규격(2026-08-14 재검수):
+        # 코드/식별 108 · 순서 74 · 사용 여부 토글 72.
+        "코드": {"flex": 0, "width": 108, "minWidth": 96, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
         "코드명": {"flex": 1.3, "minWidth": 150, "cellClass": "md-c-left",
                  "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
         _ATTENDANCE_COL: attendance,
-        "순서": {"flex": 0, "width": 72, "minWidth": 56, "maxWidth": 96,
+        "순서": {"flex": 0, "width": 74, "minWidth": 68, "maxWidth": 110,
                 "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
         "비고": {"flex": 1.0, "minWidth": 120, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED},
-        "사용": {"flex": 0, "width": 72, "minWidth": 60, "maxWidth": 90,
+        "사용": {"flex": 0, "width": 72, "minWidth": 66, "maxWidth": 90,
                 "cellClass": "md-c-center", "editable": _EDIT_UNLESS_PROTECTED},
     }
 

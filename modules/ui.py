@@ -56,6 +56,11 @@ html, body, .stApp,
 .stApp [data-testid="stMarkdownContainer"],
 .stApp [data-testid="stMarkdownContainer"] *,
 .stApp button, .stApp input, .stApp select, .stApp textarea,
+/* st.caption 은 마크다운 컨테이너 밖(stCaptionContainer)이라 위 규칙에 안 걸려 Streamlit
+   기본 Source Sans 로 렌더됐다 — 이 앱에서 유일한 비-Plex 서체였다(2026-08-14 전 화면
+   검수 실측: 평가 관리 "첨부된 사진이 없습니다" 등). 화면들이 개별 우회하던 것을 여기서 닫는다. */
+.stApp [data-testid="stCaptionContainer"],
+.stApp [data-testid="stCaptionContainer"] *,
 .stApp [data-baseweb="select"], .stApp [data-baseweb="input"] {
   font-family: var(--cd-sans);
 }

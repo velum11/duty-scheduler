@@ -423,7 +423,20 @@ _READ_BASE_CSS = {
     ".ag-header": {"background-color": "transparent",
                    "border-bottom": "1px solid " + TOKENS["line-strong"]},
     ".ag-header-cell": {"font-weight": "600", "font-size": "12.5px"},
-    ".ag-cell": {"font-size": "14.5px", "display": "flex", "align-items": "center"},
+    # overflow:hidden 은 아래 말줄임 규칙이 성립하기 위한 전제다.
+    # (셀 좌우 패딩은 7px 로 헤더 8px 와 1px 어긋나 있으나, AG 테마의 `.ag-ltr .ag-cell` 이
+    #  더 높은 특이도라 여기서 덮이지 않는다 — 실측으로 무효 확인 후 죽은 선언을 두지 않았다.
+    #  정합은 테마 오버라이드가 필요해 BACKLOG 로 넘긴다.)
+    ".ag-cell": {"font-size": "14.5px", "display": "flex", "align-items": "center",
+                 "overflow": "hidden"},
+    # 긴 값이 이웃 셀 위로 넘치지 않고 **말줄임(…)** 되게 한다. flex 자식은 기본
+    # min-width:auto 라 내용 폭 아래로 줄지 않아 text-overflow 가 발동하지 않는다 —
+    # 값 span 과 래퍼 **둘 다** min-width:0 을 걸어야 실제로 줄어든다(편성 화면에서
+    # 먼저 검증된 처방을 읽기 표 공통으로 올린 것: 월간 '중분류' 가 셀 우측에서 1.6px
+    # 하드 컷 되던 문제). 전문은 colDef 의 tooltipField 로 노출한다.
+    ".ag-cell-value": {"min-width": "0", "overflow": "hidden",
+                       "text-overflow": "ellipsis", "white-space": "nowrap"},
+    ".ag-cell-wrapper": {"min-width": "0"},
     ".ag-row": {"border-bottom": "1px solid " + TOKENS["line"]},
 }
 # 단일 선택 그리드(select_grid) 전용 — 네이티브 single-selection 의 선택행 이중부호화.
@@ -991,13 +1004,18 @@ def meta_col_html(pairs: list[tuple[str, str]]) -> str:
 
 
 def field_block(label: str, value: str) -> None:
-    """긴 서술 전폭 읽기 필드 렌더(라벨 ``--ink-2`` + 본문 ``--ink``, 줄바꿈 보존). 순수 표시."""
+    """긴 서술 전폭 읽기 필드 렌더(라벨 ``--ink-2`` + 본문 ``--ink``, 줄바꿈 보존). 순수 표시.
+
+    본문은 **14.5px/1.7** 이다 — DESIGN 부속서 A-3 이 "수용 기준 §8-6(본문 ≥14.5px)이 목업
+    픽셀 값보다 우선"이라고 못 박고 있는데 13px 로 렌더돼 있었다(2026-08-14 전 화면 검수).
+    읽는 서술문이라 행간도 1.5→1.7 로 넓힌다.
+    """
     body = escape(value) if str(value or "").strip() else "-"
     st.markdown(
         f"<div style='margin:6px 0 0;'>"
         f"<div style='color:{TOKENS['ink-2']};font-size:12.5px;font-weight:600;"
         f"margin-bottom:1px;'>{escape(label)}</div>"
-        f"<div style='color:{TOKENS['ink']};font-size:13px;line-height:1.5;"
+        f"<div style='color:{TOKENS['ink']};font-size:14.5px;line-height:1.7;"
         f"white-space:pre-wrap;'>{body}</div></div>",
         unsafe_allow_html=True,
     )

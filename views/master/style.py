@@ -270,6 +270,13 @@ _PAGE_CSS = """
 [class*="__del"] button { background:var(--ms-surface) !important; border:1px solid #E0CFC9 !important; color:var(--ms-danger) !important; }
 [class*="__del"] button:hover:not(:disabled) { background:var(--ms-danger-bg) !important; border-color:#C77B6B !important; }
 [class*="__del"] button:disabled { color:var(--ms-ink-3) !important; border-color:#E7E3DB !important; background:var(--ms-surface) !important; }
+/* 2단계 확인 바(취소/실행)의 히트영역 — 위 툴바 규칙이 `__del_` 접두를 **의도적으로 제외**해
+   30.1px 로 렌더되고 있었다(2026-08-14 전 화면 검수 실측). 파괴적 확정(삭제 실행)·폐기 이동
+   버튼이 하한(32px) 아래인 것은 오조작 위험이라, 형태(색·테두리)는 그대로 두고 높이만 올린다. */
+[class*="__del_ok"] div.stButton button,
+[class*="__del_cancel"] div.stButton button,
+[class*="__discard_ok"] div.stButton button,
+[class*="__discard_cancel"] div.stButton button { min-height:2.3rem; height:2.3rem; }
 /* 포커스 링(키보드) */
 [class*="__bar"] button:focus-visible { outline:2px solid var(--ms-navy) !important; outline-offset:1px; }
 /* ── 라이브 액션 밴드(사용자 관리 파일럿, master_screen_head(toolbar=True)) ──
@@ -372,7 +379,10 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 /* §20 상태 스트립(푸터) */
 /* 하단 상태 스트립 — 아래에 이어지는 안내 캡션(st.caption)과 2px 간격으로 붙어 한 덩어리로
    읽혔다(사용자 관리 실측). 아래 여백을 줘 '집계'와 '안내'를 분리한다. */
-.ms-count { font-size:.76rem; color:var(--ms-ink-2); margin:.4rem 0 .35rem; }
+/* 크기: rem 이 아니라 px 로 못 박는다 — 앱 root 가 14px 이라 .76rem 은 10.64px 로 떨어져
+   §0-6 "라벨 11px 이하 금지"를 위반했다(2026-08-14 전 화면 검수 실측). 12px 은 세 기준정보
+   화면이 이미 개별 패치로 수렴한 값이기도 하다. */
+.ms-count { font-size:12px; color:var(--ms-ink-2); margin:.4rem 0 .35rem; }
 .ms-count b { color:var(--ms-ink); font-weight:600; }
 /* §21/§22 배너 — 좌측 상태 바 + 아이콘 + 텍스트(색만으로 구분 금지) */
 .ms-banner { display:flex; align-items:flex-start; gap:.5rem; padding:.55rem .7rem; border-radius:8px;
@@ -384,8 +394,10 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 .ms-banner.danger  { background:var(--ms-danger-bg);  border-left:3px solid var(--ms-danger);  color:var(--ms-ink); }
 .ms-banner .keys { margin-top:.25rem; display:flex; flex-wrap:wrap; gap:.3rem; }
 /* 배지/칩 (텍스트 동반, 이모지 금지) */
+/* .68rem = 9.52px 로 §0-6 하한(11px)에 한참 못 미쳤다(2026-08-14 실측). 소비 화면들이
+   각자 12px 로 덮어쓰고 있었으므로 공용 기본값을 그 값으로 올려 개별 패치를 불필요하게 한다. */
 .ms-chip { display:inline-flex; align-items:center; gap:.25rem; padding:.05rem .4rem; border-radius:4px;
-  font-size:.68rem; font-weight:600; line-height:1.4; white-space:nowrap; }
+  font-size:12px; font-weight:600; line-height:1.4; white-space:nowrap; }
 .ms-chip.new    { background:var(--ms-info-bg);    color:var(--ms-info);    border:1px solid #C9DCEE; }
 .ms-chip.del    { background:var(--ms-danger-bg);  color:var(--ms-danger);  border:1px solid #E7CDC7; }
 .ms-chip.ok     { background:var(--ms-success-bg); color:var(--ms-success); border:1px solid #C7DfCF; }
@@ -546,8 +558,10 @@ GRID_CSS: dict[str, dict] = {
                                "color": TOKENS["ink-3"], "font-size": "10px", "pointer-events": "none"},
     # ---- 그리드 내부 칩(cellRenderer HTML 용) — iframe 은 --ms-* var 를 못 보므로 리터럴 색 ----
     # 페이지 크롬 .ms-chip 과 시각이 일치하도록 동일 팔레트. 색+텍스트 이중부호화(이모지 금지).
+    # 그리드 안 칩도 §0-6 하한(11px) 이상이어야 한다 — 10.5px 였다(2026-08-14 실측).
+    # iframe 안이라 root 14px 스케일과 무관하게 px 이 그대로 렌더된다.
     ".ms-chip": {"display": "inline-flex", "align-items": "center", "gap": "3px",
-                 "padding": "1px 7px", "border-radius": "5px", "font-size": "10.5px",
+                 "padding": "1px 7px", "border-radius": "5px", "font-size": "11.5px",
                  "font-weight": "600", "line-height": "1.5", "white-space": "nowrap"},
     ".ms-chip.new": {"background": TOKENS["info-bg"], "color": TOKENS["info"], "border": "1px solid #C9DCEE"},
     ".ms-chip.del": {"background": TOKENS["danger-bg"], "color": TOKENS["danger"], "border": "1px solid #E7CDC7"},

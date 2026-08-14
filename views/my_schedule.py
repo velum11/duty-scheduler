@@ -11,6 +11,8 @@ import pandas as pd
 import streamlit as st
 
 from modules import db
+from views.common import erp
+from views.common import scaffold
 from views.workspace import work_type_display
 
 
@@ -165,21 +167,29 @@ def _styles() -> str:
     # 텍스트는 #6b665d 이상(A-2). 근무 chip·합계 dot 색은 근무형태 DB hex(§2 예외 SoT).
     return """
 <style>
-.my-title { color:#1c1a17; font-size:25px; font-weight:600; letter-spacing:-0.025em; margin:0 0 8px; }
+/* 제목 블록(브레드크럼·제목 25/600·설명 13.5·모드 배지)은 근무표 편성·월간 근무표와
+   같은 공용 크롬(erp.screen_frame)이 소유한다 — 종전 .my-title 은 이 화면만의 사설
+   제목이라 높이(40 vs 30)·위치(top 96.8 vs 105.9)·설명 유무가 갈렸다(2026-08-14 검수). */
 /* 헤더 줄: 사용자·소속(좌) | 근무형태 합계 dot(우) — 하단 헤어라인 */
 .my-head { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px;
   padding:8px 0 14px; margin:2px 0 4px; border-bottom:1px solid #e0dbd2; }
 .my-emp { font-size:12.5px; color:#6b665d; line-height:1.45; }
 .my-emp strong { color:#1c1a17; font-weight:600; }
+/* 보조 안내 1줄 — st.caption 은 Streamlit 기본 글꼴(Source Sans)로 렌더돼 이 화면만
+   본문 글꼴(IBM Plex Sans KR)에서 벗어났다(2026-08-14 실측). 다른 두 근무표 화면의
+   보조 텍스트(.se-note/.sv-rotate)와 같은 12.5px·#4a453d 로 맞춘다. */
+.my-note { font-size:12.5px; color:#4a453d; margin:2px 0 6px; line-height:1.4; }
 .my-totals { margin-left:auto; display:flex; flex-wrap:wrap; gap:10px 14px; }
 .my-total { display:inline-flex; align-items:baseline; gap:6px; white-space:nowrap; }
 .my-total .dot { width:8px; height:8px; border-radius:3px; align-self:center; flex:0 0 auto; }
 .my-total .lab { font-size:12px; color:#6b665d; }
 .my-total .val { font-family:'IBM Plex Mono',monospace; font-size:13.5px; font-weight:600; color:#1c1a17; }
-/* 표시 방식(약칭/명칭) 전환 — 두 버튼 동일 폭(내용 길이 무관, 2026-08-11 사용자 요구) */
+/* 표시 방식(약칭/명칭) 전환 — 두 버튼 동일 폭(내용 길이 무관, 2026-08-11 사용자 요구).
+   min-height 32px: 데스크톱 ERP 조작 대상 하한(§0.6·§4)이다. 실측 28px 로 월 이동
+   버튼(30px)보다도 낮아 한 줄 안에서 높이가 어긋나 보였다. */
 div[data-testid="stSegmentedControl"] button,
 div[data-testid="stButtonGroup"] button {
-  min-width:84px; justify-content:center; }
+  min-width:84px; min-height:32px; justify-content:center; }
 /* ── 상단 한 행: 월 이동(좌) + 약칭/명칭 전환(우) ─────────────────────────────
    2026-08-13 실 DOM 실측으로 확인한 사실(추정 아님):
      · st.container(key="my_toprow") 는 flex 컨테이너 자신(stHorizontalBlock)에
@@ -202,27 +212,48 @@ div[data-testid="stButtonGroup"] button {
   margin-left:auto; }
 .my-calendar { width:100%; }
 .my-weekdays, .my-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
-.my-weekday { font-size:11.5px; font-weight:600; color:#6b665d; padding:6px 0 8px; text-align:center; }
+/* 요일 머리 = 표 헤더 역할 → 12.5/600(DESIGN §3, 근무표 편성·월간 표 헤더와 같은 값).
+   종전 11.5px 은 두 표 화면의 헤더보다 작아 같은 정보가 화면마다 다른 크기로 보였다. */
+.my-weekday { font-size:12.5px; font-weight:600; color:#6b665d; padding:6px 0 8px; text-align:center; }
 .my-weekday.sat { color:#2f4d99; } .my-weekday.sun { color:#9c3232; }
 /* 셀: 카드 아님 — 투명 배경 + 헤어라인 보더, 오늘만 오렌지 보더+옅은 틴트 */
 .my-day { min-width:0; min-height:72px; display:flex; flex-direction:column; gap:6px;
   border:1px solid #e0dbd2; border-radius:9px; padding:8px 6px; background:transparent; }
 .my-day.is-today { border-color:#c2410c; background:rgba(255,255,255,.75); }
 .my-day.empty { min-height:0; padding:0; border:0; }
-.my-date { font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; color:#6b665d; line-height:1; }
+/* 날짜 숫자 = 모노 수치(컨텍스트 줄 .se-ctx .num / .sv-ctx .num 과 같은 12.5/600 모노).
+   선택자를 .my-day .my-date(0,2,0)로 올린다 — 단일 클래스(0,1,0)로는 마크다운 컨테이너
+   본문 글꼴 규칙에 져서 모노가 sans 로 렌더됐다(2026-08-14 실측). */
+.my-day .my-date { font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-weight:600;
+  color:#6b665d; line-height:1; font-variant-numeric:tabular-nums; }
 .my-day.is-sat .my-date { color:#2f4d99; } .my-day.is-sun .my-date { color:#9c3232; }
+/* 근무형태 표시값 = 표 본문 역할 → 14.5px(DESIGN §8-6·부속서 A-3). 편성·월간 그리드 셀과
+   같은 값이다(종전 12.5px 은 같은 근무값이 화면마다 다른 크기로 보이던 원인).
+   긴 명칭은 말줄임 + title 툴팁으로 흡수한다(min-width:0 은 flex 축소 허용). */
 .my-duty { display:flex; align-items:center; justify-content:center; min-height:22px;
-  border-radius:6px; font-size:12.5px; font-weight:600; line-height:1; padding:4px 0;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  border-radius:6px; font-size:14.5px; font-weight:600; line-height:1.15; padding:4px 3px;
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .my-duty.is-empty { background:transparent; }
 @media (max-width:640px) {
-  .my-title { display:none; } .my-emp { font-size:12px; }
+  .my-emp { font-size:12px; }
   .my-head { padding:6px 0 10px; }
   /* 전환 버튼 min-width 84px 은 계약이라 못 줄인다 → 행 간격만 좁혀 한 줄을 지킨다. */
   .st-key-my_toprow { column-gap:4px; }
-  .my-weekdays, .my-calendar-grid { gap:3px; } .my-weekday { font-size:10.5px; padding:4px 0 6px; }
+  .my-weekdays, .my-calendar-grid { gap:3px; } .my-weekday { font-size:11.5px; padding:4px 0 6px; }
   .my-day { min-height:58px; padding:6px 3px; gap:4px; border-radius:7px; }
-  .my-date { font-size:10.5px; } .my-duty { font-size:11px; min-height:20px; padding:3px 0; }
+  .my-date { font-size:11.5px; } .my-duty { font-size:13px; min-height:20px; padding:3px 2px; }
+}
+/* 폰 가로(낮은 뷰포트): 달력이 화면을 최대로 쓰도록 상하 여백만 압축한다 — 월간 근무표
+   _SV_CSS 의 같은 미디어쿼리와 동일한 규율이다(폰트·색·히트영역은 그대로, 줄이는 것은
+   여백과 '한 줄 설명'뿐). 종전에는 max-width:640 만 있어 844×390 가로에서 데스크톱
+   치수 그대로 렌더돼 달력이 화면 밖으로 밀렸다(2026-08-14 실측: 달력 top 259.9·높이 416). */
+@media (orientation:landscape) and (max-height:540px) {
+  section[data-testid="stMain"] .block-container { padding-bottom:.5rem !important; }
+  .ms-desc { display:none !important; }
+  .my-head { padding:4px 0 8px !important; margin:0 !important; }
+  .my-weekday { padding:2px 0 4px !important; }
+  .my-weekdays, .my-calendar-grid { gap:3px !important; }
+  .my-day { min-height:44px !important; padding:4px 3px !important; gap:3px !important; }
 }
 </style>
 """
@@ -273,8 +304,11 @@ def _calendar_html(rows: pd.DataFrame, year: int, month: int, work_types: dict,
         elif duty_date.weekday() == 6:
             classes.append("is-sun")
         # 근무 chip = 근무형태 DB hex 배경(§2 예외 SoT) + WCAG 대비 텍스트(흰/검).
+        # title: 좁은 셀에서 말줄임된 명칭의 전문을 보증한다(편성·월간 그리드의
+        # tooltipField 와 같은 역할 — 길이 차이는 말줄임 + 툴팁으로 흡수).
         duty = (
-            f"<span class='my-duty' style='background:{escape(color)};color:{_text_on(color)}'>"
+            f"<span class='my-duty' title='{escape(str(label))}' "
+            f"style='background:{escape(color)};color:{_text_on(color)}'>"
             f"{escape(label)}</span>"
             if code else "<span class='my-duty is-empty'>&nbsp;</span>"
         )
@@ -351,8 +385,19 @@ def render(user: dict) -> None:
 
     # dc isMySched 순서: 제목 → 월 이동(‹ 월 ›) → 표시 방식(약칭/명칭) → 헤더 줄
     # (사용자·소속 | 근무형태 합계) → 7열 달력. 합계는 헤더 우측(항상 4그룹 기준).
+    #
+    # 제목 블록은 근무표 편성·월간 근무표와 **같은 공용 크롬**을 쓴다(브레드크럼·제목
+    # 25/600·설명 13.5·데이터 모드 배지). 종전 사설 .my-title 은 설명·배지가 없고 높이·
+    # 위치가 달라 세 화면을 오갈 때 제목 기준선이 흔들렸다(2026-08-14 검수). USER 셸에서도
+    # 다른 USER 화면(아차사고 등록·내 아차사고 등)이 이미 이 크롬을 쓴다.
+    erp.screen_frame(
+        SCREEN_ARCHETYPE,
+        title="내 근무표",
+        desc="본인 근무를 월 단위로 확인합니다.",
+        breadcrumb="근무표 › 내 근무표",
+        badges=scaffold.mode_badge(),
+    )
     st.markdown(_styles(), unsafe_allow_html=True)
-    st.markdown("<div class='my-title'>내 근무표</div>", unsafe_allow_html=True)
     # 구 세션 값('실제 근무'/'요약')이 남아 있으면 새 옵션과 충돌하므로 정리한다.
     if st.session_state.get(_MODE_KEY) not in (_MODE_SHORT, _MODE_NAME):
         st.session_state.pop(_MODE_KEY, None)
@@ -370,8 +415,18 @@ def render(user: dict) -> None:
         display_cal = _name_display_map(work_type_df, display_of)
     groups = _group_counts(rows, work_type_df) if not rows.empty else []
     st.markdown(_header_html(user, dept, team, groups), unsafe_allow_html=True)
+    # 보조 안내는 st.caption 대신 .my-note 로 그린다 — st.caption 은 Streamlit 기본 글꼴
+    # (Source Sans)로 렌더돼 이 화면만 본문 글꼴(IBM Plex Sans KR)에서 벗어났다.
+    # 문구·표시 조건은 그대로다(폰트·크기만 다른 두 근무표 화면의 보조 텍스트와 정합).
     if snapshot_failed:
-        st.caption("⚠ 편성 정보를 불러오지 못해 소속을 현재 정보로 표시합니다(달력은 정상).")
+        st.markdown(
+            "<div class='my-note'>편성 정보를 불러오지 못해 소속을 현재 정보로 표시합니다"
+            "(달력은 정상).</div>",
+            unsafe_allow_html=True,
+        )
     if rows.empty:
-        st.caption("해당 월에 저장된 근무내역이 없습니다.")
+        st.markdown(
+            "<div class='my-note'>해당 월에 저장된 근무내역이 없습니다.</div>",
+            unsafe_allow_html=True,
+        )
     st.markdown(_calendar_html(rows, year, month, work_types, display_cal, color_cal), unsafe_allow_html=True)

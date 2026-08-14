@@ -99,9 +99,13 @@ with _swap(db, "list_near_miss_improvements",
            lambda ids, **kw: (_ for _ in ()).throw(_Boom("boom"))):
     imps_q, lf_q = nmi._improvements_for(_QUEUE_REPORTS, _VIEWER)
 check("큐 조회 실패 → load_failed=True(오류 표면화)", lf_q is True)
-kpi_fail = nmi._kpi_strip_html(_QUEUE_REPORTS, imps_q, lf_q)
-check("KPI 파생 지표는 실패 시 '—'(0 위장 아님)", "—" in kpi_fail)
-check("KPI 종결 대기(큐 크기)는 실제 표시(2)", ">2<" in kpi_fail)
+# KPI 타일 렌더는 공용 kit(erp.metric_strip)이 소유하므로(2026-08-14 지표 어휘 통일) 화면은
+# 타일 **항목**만 만든다 — 계약(실패 시 '—', 큐 크기는 실수치)은 그 항목 값으로 검증한다.
+kpi_fail = nmi._kpi_items(_QUEUE_REPORTS, imps_q, lf_q)
+_kpi_by_label = {label: value for label, value, *_ in kpi_fail}
+check("KPI 파생 지표는 실패 시 '—'(0 위장 아님)",
+      [_kpi_by_label[k] for k in ("확인 완료", "진행·미작성", "기한초과")] == ["—", "—", "—"])
+check("KPI 종결 대기(큐 크기)는 실제 표시(2)", _kpi_by_label["종결 대기"] == 2)
 body_src = inspect.getsource(nmi._render_body)
 check("load_failed 시 별도 error 배너 표면화", "load_failed" in body_src and "st.error" in body_src)
 

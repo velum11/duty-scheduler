@@ -36,6 +36,7 @@ from views.common import erp, scaffold
 from views.common.photo_paths import normalize_photo_paths
 from views.common.photos import render_photo_thumbs
 from views.master import (
+    TOKENS,
     DraftState,
     Readiness,
     ReadinessState,
@@ -58,9 +59,25 @@ _STATUS_LABEL = {
     "REJECTED": "반려",
     "CLOSED": "종결",
 }
-# 발생원인 코드→한글 라벨(§3.1: 분류축=평문, 색 없음). near_miss_stats 와 동일.
+# 등급 색·순서 — 조회/내 아차사고와 **같은 매핑**(TOKENS 재사용, 새 색 없음). 상세 메타의
+# 등급을 공용 등급 마크(셰브런+색 텍스트)로 렌더하기 위한 값이다(2026-08-14 표기 통일).
+_GRADE_COLOR = {
+    "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
+    "C": TOKENS["info"], "D": TOKENS["ink-3"],
+}
+_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
+
+
+def _grade_mark(grade, empty: str) -> str:
+    """등급 마크 HTML(공용 kit primitive) — 빈 값은 중립 점 마커 + ``empty`` 라벨."""
+    g = str(grade or "").strip().upper()
+    if not g:
+        return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
+    return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
+# 발생원인 코드→한글 라벨(§3.1: 분류축=평문, 색 없음) — 아차사고 6화면 단일 어휘
+# (2026-08-14: HIT 충돌→부딪힘·DROP 낙하→낙하물, KOSHA 현행 용어 기준).
 _CAUSE_LABEL = {
-    "JAM": "끼임", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
+    "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘",
     "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
 
@@ -81,17 +98,17 @@ _EVAL_ACTIVE_KEY = "nm_eval_active_id"  # 직전 렌더의 활성 케이스 id(�
 # ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴로 고정해 새 색 유입을 원천 차단한다. ──
 _INK = "#1c1a17"          # 본문
 _INK2 = "#4a453d"         # 보조(섹션 라벨)
-# Codex P1: 이 파일의 _WEAK/_FAINT 는 모두 읽는 작은 텍스트(라벨·단위·모노 오버라인·메타)에
+# Codex P1: 이 파일의 _FAINT 는 모두 읽는 작은 텍스트(라벨·모노 오버라인·메타)에
 # 쓰이므로 #6b665d(5.1:1↑)로 상향한다 — #8b857c(3.27:1)·#a09a90(2.5:1)은 읽는 텍스트 금지.
-_WEAK = "#6b665d"         # 읽는 보조 텍스트(구 #8b857c)
 _FAINT = "#6b665d"        # 읽는 캡션·모노 오버라인(구 #a09a90)
-_LINE = "#e6e2da"         # 행 헤어라인
-_LINE_HDR = "#cfc8bd"     # 표 헤더 헤어라인
 _LINE_SEC = "#e0dbd2"     # 섹션 헤어라인
-_ACCENT = "#c2410c"
 _ACCENT_TEXT = "#b4451a"
 _ACCENT_TINT = "#fdf3ec"
-_MONO = "'IBM Plex Mono', monospace"
+# 인라인 style 속성 안에 그대로 들어가므로 **큰따옴표**로 감싼다(작은따옴표는 금지).
+# style='font-family:{_MONO};…' 에 작은따옴표 계열 값을 넣으면 속성이 첫 내부 따옴표에서
+# 끊겨 style 전체가 소실된다(2026-08-14 실측: <span ibm="" plex="">1</span> — 26px·600·
+# 모노·액센트색이 모두 무효화돼 KPI 숫자가 14px sans 로 렌더). CSS 블록 안에서도 유효.
+_MONO = '"IBM Plex Mono", monospace'
 
 # 화면 스코프 CSS(칩·세그먼트·나브·의견 입력) — 선택 상태는 색+형태 이중부호화(오렌지 배경
 # +굵기). 히트영역 ≥32px. primary=선택/CTA 는 전역 오렌지 액센트(modules/ui.py) 재사용.
@@ -177,18 +194,20 @@ def _render_body(user: dict) -> None:
         st.error("평가 대기 목록을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # ── 지표 스트립(제목 바로 아래 첫 블록 §0-4) — 좌측 2px 보더 + 26px 모노 숫자 ──
+    # ── 지표 스트립(제목 바로 아래 첫 블록 §0-4) — 좌측 2px 보더 + 26px 모노 숫자.
+    # 화면 로컬 HTML 대신 공용 kit(erp.metric_strip)을 쓴다: 조회·내 아차사고와 **같은 타일**
+    # (라벨 12px / 값 26px·600 모노 / 단위 11.5px)이 되어 6화면 지표 어휘가 하나로 모인다. ──
     subm = inrev = 0
     if reports is not None and not reports.empty:
         counts = reports["status"].astype(str).value_counts()
         subm = int(counts.get("SUBMITTED", 0))
         inrev = int(counts.get("IN_REVIEW", 0))
     total = subm + inrev
-    st.markdown(_metric_strip_html([
+    erp.metric_strip([
         ("평가 대기", subm, "건", "SUBMITTED", True),
         ("검토중", inrev, "건", "IN REVIEW", False),
         ("대기 합계", total, "건", "PENDING", False),
-    ]), unsafe_allow_html=True)
+    ])
     _hairline()
 
     ordered = _ordered_ids(reports)
@@ -243,24 +262,8 @@ def _reporter_label(emp_no) -> str:
 
 
 # ---------- 지표 스트립 ----------
-def _metric_strip_html(items) -> str:
-    """지표 스트립 HTML(§1-A) — 좌측 2px 보더 + 26px 모노 숫자. items=[(label,value,unit,note,accent)]."""
-    cells = []
-    for label, value, unit, _note, accent in items:  # _note(영문 오버라인) 미렌더 — 2줄 타일
-        border = _ACCENT if accent else _LINE_SEC
-        valcolor = _ACCENT_TEXT if accent else _INK
-        cells.append(
-            f"<div style='flex:1 1 150px;min-width:0;display:flex;flex-direction:column;gap:5px;"
-            f"padding:0 18px;border-left:2px solid {border};'>"
-            f"<span style='font-size:12px;color:{_WEAK};'>{escape(label)}</span>"
-            f"<div style='display:flex;align-items:baseline;gap:4px;'>"
-            f"<span style='font-family:{_MONO};font-size:26px;font-weight:600;letter-spacing:-0.03em;"
-            f"color:{valcolor};'>{int(value)}</span>"
-            f"<span style='font-size:11.5px;color:{_FAINT};'>{escape(unit)}</span></div></div>"
-        )
-    return (
-        f"<div style='display:flex;flex-wrap:wrap;gap:12px;padding:2px 0 14px;'>{''.join(cells)}</div>"
-    )
+# 지표 타일 렌더는 공용 kit(``erp.metric_strip``)이 소유한다 — 화면 로컬 HTML 복제를 제거해
+# 조회·내 아차사고·개선조치와 타일 지오메트리·폰트가 어긋날 여지를 없앴다(2026-08-14).
 
 
 def _hairline() -> None:
@@ -319,18 +322,19 @@ def _detail_read_html(report: dict, status: str) -> str:
     badge = lifecycle_badge_html(status, _STATUS_LABEL.get(status, status))
     title = escape(str(report.get("work_name") or "(제목 없음)"))
 
-    proposed = str(report.get("proposed_grade") or "").strip() or "미지정"
+    # 등급은 조회 화면과 같은 등급 마크(셰브런+색 텍스트, erp.grade_mark_html)로 렌더한다 —
+    # 같은 데이터(등급)가 화면마다 평문/마크로 갈리지 않게 한 어휘로 통일(2026-08-14).
     meta = [
-        ("발생일", str(report.get("incident_date") or "-")),
-        ("신고자", _reporter_label(report.get("reporter_emp_no"))),
-        ("부서", str(report.get("dept_code") or "-")),
-        ("제안등급", proposed),
+        ("발생일", escape(str(report.get("incident_date") or "-"))),
+        ("신고자", escape(_reporter_label(report.get("reporter_emp_no")))),
+        ("부서", escape(str(report.get("dept_code") or "-"))),
+        ("제안등급", _grade_mark(report.get("proposed_grade"), empty="미지정")),
     ]
     meta_cells = "".join(
         f"<div style='display:flex;flex-direction:column;gap:3px;'>"
         f"<span style='font-size:10.5px;letter-spacing:0.08em;color:{_FAINT};font-family:{_MONO};'>"
         f"{escape(label)}</span>"
-        f"<span style='font-size:13.5px;color:{_INK};'>{escape(str(value))}</span></div>"
+        f"<span style='font-size:13.5px;color:{_INK};line-height:1.35;'>{value}</span></div>"
         for label, value in meta
     )
     head = (

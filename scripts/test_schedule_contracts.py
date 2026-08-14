@@ -1548,7 +1548,17 @@ def test_schedule_edit_org_axis() -> None:
     grid_src = inspect.getsource(se.render)
     check("그리드 order 가 _FIXED 를 그대로 사용(숨김 열도 왕복)",
           "order=_FIXED + day_cols" in grid_src)
-    check("파생 열은 편집 불가", '_MAJOR: {"pinned"' in grid_src and '"editable": False' in grid_src)
+    # 파생 2열은 읽기 전용이고 신원 열은 sticky(pinned left)다. 폭·정렬·pinned 는
+    # 2026-08-14 시각 일관성 검수에서 근무표 3화면 공통 토큰
+    # (views.workspace.identity_col_config)으로 승격했으므로, 화면 소스는 '편집 불가'
+    # 지정만 확인하고 pinned 는 그 토큰의 반환값으로 확인한다(계약 내용 동일).
+    from views import workspace as _ws
+    check("파생 열은 편집 불가",
+          "col_config[_MAJOR].update({" in grid_src
+          and "col_config[_MINOR].update({" in grid_src
+          and '"editable": False' in grid_src)
+    check("신원 열은 3화면 공통 토큰으로 sticky 고정",
+          all(_ws.identity_col_config([c])[c]["pinned"] == "left" for c in se._FIXED))
 
     # (2) 대분류 라벨 파생 — 코드에 이름을 고정하지 않고 기준정보에서만 읽는다.
     catalog = {

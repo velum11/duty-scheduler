@@ -59,10 +59,18 @@ from modules import db, ui
 from views.common import erp
 from views.common import scaffold
 from views.workspace import (
+    DAY_COL_MAX_PX,
+    DAY_COL_MIN_PX,
+    compact_hidden_meta,
+    duty_legend_html,
     grid_bool,
+    identity_col_config,
+    month_grid_height,
+    mount_viewport_probe,
     selectable_master_grid,
     set_flash,
     show_flash,
+    viewport_state,
 )
 
 _MAJOR = "대분류"
@@ -130,10 +138,13 @@ _ROSTER_CSS = f"""
    경고가 아니라 사실 고지라 중립 잉크로 두고 숫자만 모노로 세운다(§0.6 한 줄). */
 .se-note {{ font-size:12.5px; color:{_INK2}; margin:2px 0 6px; }}
 .se-note .num {{ font-family:{_MONO}; font-weight:600; color:{_INK}; }}
-.se-legend {{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0 2px; }}
-.se-legend .lab {{ font-size:11px; letter-spacing:.1em; color:{_FAINT}; font-family:{_MONO}; margin-right:4px; }}
-.se-leg {{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:{_INK}; }}
-.se-leg .sw {{ width:11px; height:11px; border-radius:3px; flex:0 0 auto; }}
+/* 모바일 세로 한 줄 안내(가로 전환 제안) — 월간 근무표 .sv-rotate 와 같은 문구·크기·색. */
+.se-rotate {{ font-size:12.5px; color:{_WEAK}; margin:8px 0 6px; line-height:1.35; }}
+/* (근무형태 범례는 3화면 공통 views.workspace.duty_legend_html 이 마크업·CSS 를 소유한다 —
+   종전 .se-legend/.se-leg 는 월간 근무표의 색 pill 범례와 시각 언어가 갈렸다.) */
+/* 뷰포트 프로브(views.workspace.mount_viewport_probe) — 값만 읽는 0크기 요소라 흐름에서
+   뺀다(월간 근무표 _SV_CSS 의 같은 규칙과 동일 값). */
+.st-key-sv_vp {{ position:absolute; width:0; height:0; overflow:hidden; }}
 /* 미저장 변경 표시 — 0건은 '알릴 것 없음'이라 중립(ink-2·normal), 1건 이상일 때만
    액센트+굵게로 주의를 끈다. 종전엔 0건도 오렌지 굵게라 상시 경고처럼 읽혔다. */
 .se-dirty {{ text-align:right; color:{_INK2}; font-size:12.5px; font-weight:400; margin-top:6px; }}
@@ -492,12 +503,14 @@ def _day_header_component(day_col: str) -> JsCode:
     )
 
 
-#: 일자 열 폭 하한/상한(px). 하한은 종전 폭(44) — 짧은 표시값에서는 밀도가 그대로다.
+#: 일자 열 폭 하한/상한(px) — 월간 근무표와 **같은 값**을 쓴다(근무표 3화면 공통 토큰,
+#: views.workspace.DAY_COL_MIN_PX/MAX_PX). 종전에는 편성 44~56 / 월간 40~52 로 같은 성격
+#: 열의 밀도가 화면마다 달랐다(2026-08-14 검수).
 #: 상한은 밀도 보호선이다: 표시 축이 명칭으로 바뀌면서 '특근(주간)'·'경조(자녀결혼)'
 #: 처럼 긴 값이 생겼는데, 그 최댓값에 열을 맞추면 31일 매트릭스가 3천 px 를 넘겨 한
 #: 화면에서 볼 수 있는 날짜가 반토막 난다. 상한을 넘는 값은 셀에서 말줄임되고 전체
 #: 문자열은 셀 tooltip(enableBrowserTooltips)과 하단 범례가 보증한다.
-_DAY_W_MIN, _DAY_W_MAX = 44, 56
+_DAY_W_MIN, _DAY_W_MAX = DAY_COL_MIN_PX, DAY_COL_MAX_PX
 
 
 def _label_px(text: str) -> float:
@@ -545,12 +558,11 @@ def _context_html(q: dict, dept_name: str, team_name: str,
 
 
 def _legend_html(active: list[tuple[str, str, str]]) -> str:
-    """하단 범례 — 활성 근무형태 색·약칭(도메인 파생)."""
-    items = []
-    for _code, sl, color in active:
-        sw = f"<span class='sw' style='background:{color}'></span>" if color.startswith("#") else ""
-        items.append(f"<span class='se-leg'>{sw}{escape(sl)}</span>")
-    return ("<div class='se-legend'><span class='lab'>근무형태</span>" + "".join(items) + "</div>")
+    """하단 범례 — 활성 근무형태 색·표시값(도메인 파생).
+
+    마크업·CSS 는 근무표 3화면 공통(:func:`views.workspace.duty_legend_html`)이다.
+    """
+    return duty_legend_html([(sl, color) for _code, sl, color in active])
 
 
 def _visible_emp_order(rows: pd.DataFrame) -> list[str]:
@@ -614,7 +626,9 @@ def render(user: dict) -> None:
     # §1-C 스프레드시트 입력형(구조 교체) — 파랑 아이콘 밴드 제거(§0-3). 액션은 1행(필터 우측)
     # 으로 이전하고 셀 입력은 클릭 순환 + 숫자키(도메인 파생). 저장/dirty/검증/이탈가드/편성
     # 스냅샷 계약은 전부 불변(표현 계층만 교체).
-    st.markdown(_ROSTER_CSS, unsafe_allow_html=True)
+    # CSS 주입은 **크롬 뒤**에 둔다 — 앞에 두면 빈 마크다운 블록 하나가 제목 위에 생겨
+    # 세로 블록 gap(9.1px)만큼 이 화면만 아래로 밀렸다(2026-08-14 실측: 제목 top 편성
+    # 115 / 월간 105.9). 화면 간 제목 기준선을 맞추려면 크롬이 첫 블록이어야 한다.
     erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="근무표 편성",
@@ -622,6 +636,13 @@ def render(user: dict) -> None:
         breadcrumb="근무표 › 근무표 편성",
         badges=scaffold.mode_badge(),
     )
+    st.markdown(_ROSTER_CSS, unsafe_allow_html=True)
+
+    # 화면 폭/방향 — 좁은 폭에서 표시 신원 열·표 높이를 정한다(월간 근무표와 같은 규칙·
+    # 같은 프로브). 프로브 마운트는 본문 마지막이고 여기서는 세션 값을 읽기만 한다.
+    vp = viewport_state("schedule_edit")
+    compact = bool(vp.get("compact"))
+    landscape = bool(vp.get("landscape"))
 
     depts = db.get_departments()
     today = date.today()
@@ -792,57 +813,64 @@ def render(user: dict) -> None:
     # 조회 범위가 특정 대분류(또는 MANAGER 부서 잠금)로 좁혀졌는가 — 대분류 열 숨김 판단.
     dept_scope_fixed = _clean(q.get("dept")) not in ("", _ALL)
 
-    col_config = {
-        # Codex P2(§8-6): 신원 4열 본문 14.5px. 사번(10자리 모노)은 96px 폭을 좌우 패딩
-        # 4px 축소로 수용(잘림 없음 실측). 30px 행 높이·sticky(pinned left) 유지.
-        "사번": {"pinned": "left", "width": 96, "minWidth": 96,
-                "editable": _EMP_EDITABLE, "cellClass": "md-c-left",
-                "cellStyle": {"fontSize": "14.5px", "paddingLeft": "4px", "paddingRight": "4px"}},
-        "성명": {"pinned": "left", "width": 88, "minWidth": 76,
-                "editable": False, "cellClass": "md-c-left",
-                "cellStyle": {"fontSize": "14.5px"}},
-        # 대분류·중분류는 조직관리(부서 기준정보)에서 파생한 읽기 전용 표시다. 편집·저장의
-        # 원천은 '부서' 열 하나이며(중분류가 부서와 1:1 이 아니라 역산이 불가능하다),
-        # 여기서 값을 고칠 수 있게 하면 저장되지 않는 편집을 유도하게 된다.
-        # 대분류는 조회 조건이 특정 대분류로 좁혀지면 모든 행이 같은 값이라 숨긴다
-        # (§0.6 밀도 — 조건 줄·컨텍스트 줄이 이미 같은 값을 말하고 있다). 숨겨도 열은
-        # order 에 남아 편집 왕복에서 값이 사라지지 않는다(META 컬럼과 동일 방식).
-        # 폭은 실측 기준이다(1440/1366 공통, 14.5px 본문): 현재 분류 값의 최대 문자열이
-        # 70~73px 이라, 좌우 패딩 6px(사번 열과 같은 방식으로 인라인 지정 — 테마 기본
-        # 패딩을 덮는다)에서 88/92px 이면 잘림 없이 여유가 남는다. 신원 블록이 넓어질수록
-        # 근무 셀이 밀리므로 필요한 만큼만 쓴다.
-        _MAJOR: {"pinned": "left", "width": 88, "minWidth": 88, "editable": False,
-                 "cellClass": "md-c-left",
-                 "cellStyle": {"fontSize": "14.5px", "paddingLeft": "6px", "paddingRight": "6px"},
-                 "hide": dept_scope_fixed,
-                 "headerTooltip": "조직관리 대분류 — 부서 기준정보에서 관리합니다(여기서는 편집 불가)"},
-        _MINOR: {"pinned": "left", "width": 92, "minWidth": 88, "editable": False,
-                 "cellClass": "md-c-left",
-                 "cellStyle": {"fontSize": "14.5px", "paddingLeft": "6px", "paddingRight": "6px"},
-                 "headerTooltip": "조직관리 중분류 — 부서 기준정보에서 관리합니다(여기서는 편집 불가)"},
-        "부서": {"pinned": "left", "width": 108, "minWidth": 96, "cellClass": "md-c-left",
-                "cellStyle": {"fontSize": "14.5px"},
-                "headerTooltip": "이 달 편성 부서 — 부서명 또는 부서코드로 입력하면 대분류·중분류가 따라옵니다"},
-        # '조'(근무조)는 기준정보 조회가 아니라 자유 입력이며 한 글자만 치면 저장 시
-        # 'A' → 'A조' 로 보정된다(normalize_shift_group). 안내는 헤더 툴팁 + 하단 힌트
-        # 줄로만 한다 — 빈 셀 placeholder 렌더러는 두지 않는다: 셀 복사가 브라우저
-        # 네이티브 텍스트 선택이라 placeholder 문구('직접 입력')가 복사→붙여넣기로
-        # 실데이터가 되어 저장될 수 있다(code-review P2, 자유 입력이라 검증도 안 걸림).
-        # 폭 88 → 80: 'A조'(24px)·'원료실'(43.5px) 같은 짧은 값만 들어가는 열이라 남는
-        # 폭을 근무 셀에 돌려준다(§0.6 내용 맞춤 — 신원 블록이 넓어진 만큼 회수).
-        "조": {"pinned": "left", "width": 80, "minWidth": 72, "cellClass": "md-c-left",
-              "cellStyle": {"fontSize": "14.5px"},
-              "headerTooltip": _SHIFT_HINT},
-    }
+    # 신원 열 폭·정렬·좌우 패딩(8px)·툴팁은 근무표 3화면 공통 토큰이 소유한다
+    # (views.workspace.identity_col_config) — 월간 근무표와 같은 열은 같은 폭이다.
+    # 여기서는 이 화면 고유의 편집 계약(사번만 신규 행 편집 가능·파생 2열 읽기 전용·
+    # 좁은 폭 숨김·헤더 툴팁)만 덧붙인다.
+    #
+    # 대분류·중분류는 조직관리(부서 기준정보)에서 파생한 읽기 전용 표시다. 편집·저장의
+    # 원천은 '부서' 열 하나이며(중분류가 부서와 1:1 이 아니라 역산이 불가능하다),
+    # 여기서 값을 고칠 수 있게 하면 저장되지 않는 편집을 유도하게 된다.
+    # 대분류는 조회 조건이 특정 대분류로 좁혀지면 모든 행이 같은 값이라 숨긴다
+    # (§0.6 밀도 — 조건 줄·컨텍스트 줄이 이미 같은 값을 말하고 있다). 숨겨도 열은
+    # order 에 남아 편집 왕복에서 값이 사라지지 않는다(META 컬럼과 동일 방식).
+    #
+    # 좁은 폭(폰)에서는 월간 근무표와 **같은 방식**으로 신원 열을 접는다. 종전에는 신원
+    # 6열이 모두 pinned 라 390px 에서 고정 열이 280px 을 먹고 날짜 칸이 73px(=1.3일)만
+    # 남아 사실상 편성이 불가능했다(2026-08-14 실측). 숨김이라 편집 왕복·저장 payload 는
+    # 그대로다. 월간(읽기)은 '성명'만 남기지만 편성은 '사번'도 남긴다 — 신규 행 입력·
+    # 붙여넣기의 입력 축이라 접으면 좁은 폭에서 그 기능이 사라진다.
+    hidden_meta = set(compact_hidden_meta(_FIXED, compact=compact, keep=("사번",)))
+    col_config = dict(identity_col_config(_FIXED))
+    col_config["사번"]["editable"] = _EMP_EDITABLE
+    col_config["성명"]["editable"] = False
+    col_config[_MAJOR].update({
+        "editable": False,
+        "hide": dept_scope_fixed or _MAJOR in hidden_meta,
+        "headerTooltip": "조직관리 대분류 — 부서 기준정보에서 관리합니다(여기서는 편집 불가)",
+    })
+    col_config[_MINOR].update({
+        "editable": False, "hide": _MINOR in hidden_meta,
+        "headerTooltip": "조직관리 중분류 — 부서 기준정보에서 관리합니다(여기서는 편집 불가)",
+    })
+    col_config["부서"].update({
+        "hide": "부서" in hidden_meta,
+        "headerTooltip": "이 달 편성 부서 — 부서명 또는 부서코드로 입력하면 대분류·중분류가 따라옵니다",
+    })
+    # '조'(근무조)는 기준정보 조회가 아니라 자유 입력이며 한 글자만 치면 저장 시
+    # 'A' → 'A조' 로 보정된다(normalize_shift_group). 안내는 헤더 툴팁 + 하단 힌트
+    # 줄로만 한다 — 빈 셀 placeholder 렌더러는 두지 않는다: 셀 복사가 브라우저
+    # 네이티브 텍스트 선택이라 placeholder 문구('직접 입력')가 복사→붙여넣기로
+    # 실데이터가 되어 저장될 수 있다(code-review P2, 자유 입력이라 검증도 안 걸림).
+    col_config["조"].update({"hide": "조" in hidden_meta, "headerTooltip": _SHIFT_HINT})
     # 날짜 셀 색상 — work_types 기준정보 hex 를 약칭/코드에 매핑(도메인 SoT, 하드코딩 금지).
+    # 정렬은 값 길이에 따라 갈린다: 열에 들어가는 값(대부분의 근무형태 명칭)은 가운데,
+    # 열보다 긴 값('경조(자녀결혼)' 등)은 좌측이다. 가운데 정렬로 넘치면 브라우저가
+    # 양쪽을 잘라 '간 4시' 처럼 앞뒤가 다 사라지고 말줄임 '…' 도 뜨지 않는다(실측).
+    # 좌측 정렬이면 뒤쪽만 잘리고 ellipsis 가 살아나며 전문은 tooltipField 가 보증한다.
+    # 폭 추정은 파이썬 _label_px 와 같은 규칙(한글 1em·ASCII 0.55em)이다.
     day_style = JsCode(
         "function(p) {"
         f"  const colors = {json.dumps(st.session_state.get('se_colors', {}), ensure_ascii=False)};"
+        f"  const room = {json.dumps(max(int(_day_width(cycle_labels)) - 6, 24))};"
         "  const v = String(p.value == null ? '' : p.value).trim();"
+        "  let w = 0;"
+        "  for (let i = 0; i < v.length; i++) { w += v.charCodeAt(i) > 0x1100 ? 14.5 : 8.0; }"
+        "  const align = w <= room ? 'center' : 'left';"
         "  const c = colors[v];"
         # Codex P2(§8-6 우선): 근무 셀 본문 14.5px(목업 픽셀보다 §8-6). 30px 행 높이 유지.
-        "  if (!c) { return { textAlign: 'center', fontSize: '14.5px' }; }"
-        "  return { backgroundColor: c + '26', color: '#1c1a17', fontWeight: 600, textAlign: 'center', fontSize: '14.5px' };"
+        "  if (!c) { return { textAlign: align, fontSize: '14.5px' }; }"
+        "  return { backgroundColor: c + '26', color: '#1c1a17', fontWeight: 600, textAlign: align, fontSize: '14.5px' };"
         "}"
     )
     # 셀 클릭=근무 순환(빈값 포함) + 숫자키 1..N/0 = 근무형태/지움(도메인 파생). 값은
@@ -863,13 +891,24 @@ def render(user: dict) -> None:
     # se_feed 는 remount 시점 값으로 고정(편집 결과 재전송이 버튼 클릭 rerun 을 삼키는 것 방지).
     nonce = st.session_state.setdefault("se_nonce", 0)
     feed = st.session_state.get("se_feed", st.session_state["se_rows"])
+    if compact and not landscape:
+        # 좁은 폭 세로: 한 화면에 담기는 날짜가 적다 — 월간 근무표와 같은 문구·같은 자리
+        # (표 바로 위 보조 텍스트 1줄, 장식·아이콘 없음)로 가로 전환을 안내한다.
+        st.markdown(
+            "<div class='se-rotate'>가로로 돌리면 한 번에 더 많은 날짜를 볼 수 있습니다</div>",
+            unsafe_allow_html=True,
+        )
     with st.container(key="se_gridwrap"):
         grid_df = selectable_master_grid(
             feed,
             key=f"se_grid_{nonce}",
             columns={c: "text" for c in _FIXED + day_cols},
             order=_FIXED + day_cols,
-            height=min(max(210, 30 * len(feed) + 96), 500),  # ≈62vh 내부 스크롤
+            # ≈62vh 내부 스크롤. 좁은 폭에서는 월간 근무표와 같은 뷰포트 클램프를 쓴다
+            # (행 피치 30px·하한 210 은 이 화면 값 — §1-C).
+            height=month_grid_height(len(feed), compact=compact, landscape=landscape,
+                                     viewport_h=int(vp.get("h") or 0),
+                                     row_px=30, pad_px=96, min_px=210),
             col_config=col_config,
             select_all_header=True,  # 표시 중인 기존 행만 대상 (신규 행 제외)
             # 셀 높이 30px(§1-C). 클릭 순환 제거(피드백) → suppressClickEdit 해제해 더블클릭
@@ -963,6 +1002,11 @@ def render(user: dict) -> None:
         _mark_delete(live, row_cols)
     if st.session_state.pop("se_add_req", False):
         _add_row(live, row_cols, day_cols)
+
+    # 화면 폭/방향 프로브는 본문의 **맨 끝**에 둔다(월간 근무표와 같은 이유 —
+    # mount_viewport_probe 주석: 조건 위젯이 모두 만들어진 뒤에만 리런이 걸리게 한다).
+    # 넓은 폭에서는 값이 표시에 쓰이지 않아 추가 리런을 만들지 않는다(_layout 판정).
+    mount_viewport_probe("schedule_edit")
 
     # 발행값을 헤더가 따라오게 한다 — **액션 flag 소비 뒤**에 둔다(위 세 handler 는 각자
     # st.rerun() 으로 끝나므로 실행된 run 에서는 여기까지 오지 않는다). 여기보다 앞에서

@@ -34,12 +34,15 @@ from views.master.lifecycle import Readiness, ReadinessState
 
 _PAGE_ID = "near_miss_stats"
 
+# 상태 라벨 — 6화면 단일 어휘(2026-08-14: '제출'→'제출됨', DESIGN §2 배지 표기).
 _STATUS_LABEL = {
-    "SUBMITTED": "제출", "IN_REVIEW": "검토중", "EVALUATED": "평가완료",
+    "SUBMITTED": "제출됨", "IN_REVIEW": "검토중", "EVALUATED": "평가완료",
     "CLOSED": "종결", "REJECTED": "반려",
 }
+# 발생원인 라벨 — 6화면 단일 어휘(2026-08-14). 분포 블록의 라벨 트랙은 76px(≤768px 64px)라
+# 4자(미끄러짐)를 넘는 복합 라벨은 말줄임된다 — 단문 용어 고정이 이 그리드 계약과도 정합.
 _CAUSE_LABEL = {
-    "JAM": "끼임", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
+    "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘",
     "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
 
@@ -55,7 +58,10 @@ _ACCENT_TEXT = "#b4451a"  # 액센트 값 텍스트
 _MUT = "#6b665d"          # 지표 라벨·단위·note·차트 meta·비중 캡션
 # 모노 폰트는 인라인으로 못박는다 — 전역 `.stApp [data-testid=stMarkdownContainer] *`(특이도
 # 0,2,0)가 클래스 규칙(0,1,0)을 덮어 숫자가 sans 로 떨어지므로, 인라인(최상위)으로 강제한다.
-_MONO = "font-family:'IBM Plex Mono',monospace;"
+# 값은 **큰따옴표**로 감싼다: `style='...'` 안에 작은따옴표를 넣으면 속성이 그 지점에서 끊겨
+# style 전체가 사라진다(2026-08-14 실측 — 이 화면은 클래스 규칙이 받쳐줘 증상이 없었지만
+# 같은 패턴을 쓴 평가·개선조치·내 아차사고의 26px 모노 숫자가 14px sans 로 렌더됐다).
+_MONO = 'font-family:"IBM Plex Mono",monospace;'
 # 분포 카테고리 단색(§1-F): 등급 오렌지·상태 초록·원인 황토·추이 파랑.
 _C_GRADE = "#c2410c"
 _C_STATUS = "#2f6b45"

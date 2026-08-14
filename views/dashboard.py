@@ -566,11 +566,16 @@ def _inject_style() -> None:
   height:34px !important; min-height:34px !important; padding:0 13px;
   border:1px solid #e2ddd4 !important; border-radius:8px; background:#fff !important;
   color:#4a453d !important; font-size:13px; }
+/* 라벨 글자는 button 이 아니라 내부 <p> 가 그린다 — 앱 전역 버튼 규칙(.85rem=11.9px)이
+   button 선언을 이기므로 실측 11.9px 였다(2026-08-14 재검수). 옆 칩(13px)·일자(14px)와
+   한 줄에서 어긋나 보이던 원인이라 <p> 에 직접 지정한다. */
+.st-key-dash_today button p { font-size:13px !important; }
 .st-key-dash_today button:hover { background:#f1eee8 !important; color:#1c1a17 !important; }
-/* 부서 필터 칩(st.pills = stButtonGroup) — 선택은 오렌지 틴트 pill, 비선택은 중립 테두리. */
+/* 부서 필터 칩(st.pills = stButtonGroup) — 선택은 오렌지 틴트 pill, 비선택은 중립 테두리.
+   높이는 히트영역 하한 32px(§0.6·§4) — 종전 28px 는 세그먼트(34)·[오늘](34)과도 어긋났다. */
 .st-key-dash_chips div[data-testid="stButtonGroup"] { gap:6px; flex-wrap:wrap; }
 .st-key-dash_chips div[data-testid="stButtonGroup"] button {
-  min-height:28px; padding:5px 12px; border-radius:999px;
+  min-height:32px; padding:5px 12px; border-radius:999px;
   border:1px solid #e2ddd4 !important; background:#fff !important; color:#6b665d !important;
   font-size:13px !important; font-weight:500; }
 .st-key-dash_chips div[data-testid="stButtonGroup"] button p { font-size:13px !important; }
@@ -581,14 +586,18 @@ def _inject_style() -> None:
   font-weight:600; }
 .st-key-dash_chips div[data-testid="stButtonGroup"] button:focus-visible {
   outline:2px solid #c2410c; outline-offset:1px; }
-/* ===== ③ 지표 스트립 — 좌측 2px 보더 + 모노 값(카드 없음) ===== */
+/* ===== ③ 지표 스트립 — 좌측 2px 보더 + 모노 값(카드 없음) =====
+   치수는 공용 키트 지표 타일(views/common/erp/kit.py `.erp-metric*`)과 같은 값으로 맞춘다
+   (라벨 12 · 값 26 · 단위 11.5 · padding 2/18) — DESIGN §1-A "26px 모노 숫자"의 값이며,
+   같은 지표 어휘가 화면마다 1px 씩 다르게 보이던 것을 없앤다(2026-08-14 재검수).
+   wrap 기준(flex-basis 168px)은 ≤640px 2열 배치 계약이라 그대로 둔다. */
 .dash-kpis { display:flex; flex-wrap:wrap; gap:12px; margin:.1rem 0 1rem; }
 .dash-kpi { flex:1 1 168px; min-width:0; display:flex; flex-direction:column; gap:3px;
-  padding:2px 16px; }
-.dash-klabel { font-size:13px; color:#6b665d; }
+  padding:2px 18px; }
+.dash-klabel { font-size:12px; color:#6b665d; }
 .dash-kval-row { display:flex; align-items:baseline; gap:4px; }
-.dash-kval { font-size:27px; font-weight:600; letter-spacing:-0.03em; line-height:1.15; }
-.dash-kunit { font-size:13px; color:#6b665d; }
+.dash-kval { font-size:26px; font-weight:600; letter-spacing:-0.03em; line-height:1.15; }
+.dash-kunit { font-size:11.5px; color:#6b665d; }
 /* ===== ④ 부서별 근무자 — 부서 → 조직 → 주간·야간·휴무 3열 ===== */
 .dorg-major { font-size:15px; font-weight:600; color:#1c1a17; padding-bottom:6px;
   border-bottom:1px solid #cfc8bd; margin-top:14px; }
@@ -621,12 +630,15 @@ def _inject_style() -> None:
 }
 @media (max-width:640px) {
   /* 폰 폭: 주간·야간·휴무 3열이 항상 한 줄에 들어가도록 백분율 기반으로 전환.
-     150px 고정 basis 는 3열 합이 폰 폭을 넘어 줄바꿈을 만든다(2026-08-13 사용자 신고). */
+     150px 고정 basis 는 3열 합이 폰 폭을 넘어 줄바꿈을 만든다(2026-08-13 사용자 신고).
+     글자 크기는 줄이지 않는다 — 3열 유지는 백분율 basis 가 담당하며, 종전의 축소값
+     (이름 13.5 · 건수 11)은 DESIGN §0-6(라벨 11px 이하 금지)·부속서 A-3(본문 ≥14.5px)
+     하한을 밑돌아 폰에서만 본문이 작아졌다(2026-08-14 재검수). */
   .dorg-cols { gap:8px 10px; }
   .dorg-col { flex:1 1 calc(33.333% - 7px); max-width:calc(33.333% - 7px); }
   .dorg-clabel { font-size:12px; }
-  .dorg-cnum { font-size:11px; }
-  .dorg-name { font-size:13.5px; padding:5px 0; }
+  .dorg-cnum { font-size:11.5px; }
+  .dorg-name { padding:5px 0; }
 }
 </style>
 """,

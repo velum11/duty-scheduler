@@ -34,6 +34,7 @@ from modules import auth, db
 from views import workspace
 from views.common import erp, scaffold
 from views.master import (
+    TOKENS,
     DraftState,
     Readiness,
     ReadinessState,
@@ -59,24 +60,39 @@ _CONFIRMED = "CONFIRMED"
 # 발생원인 코드→한글 라벨(H2) — 평가/조회 화면과 동일 매핑. 표시 전용이며 DB 코드·필터·저장
 # payload 는 불변(코드값 유지). 미등록 코드는 원문 fallback(라벨 누락이 화면을 깨지 않게).
 _CAUSE_LABEL = {
-    "JAM": "끼임", "FALL": "추락", "DROP": "낙하", "HIT": "충돌",
+    "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘",
     "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
+# 등급 색·순서 — 조회/내 아차사고/평가와 **같은 매핑**(TOKENS 재사용, 새 색 없음).
+# 상세 메타의 확정등급을 공용 등급 마크(셰브런+색 텍스트)로 렌더한다(2026-08-14 표기 통일).
+_GRADE_COLOR = {
+    "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
+    "C": TOKENS["info"], "D": TOKENS["ink-3"],
+}
+_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
+
+
+def _grade_mark(grade, empty: str) -> str:
+    """등급 마크 HTML(공용 kit primitive) — 빈 값은 중립 점 마커 + ``empty`` 라벨."""
+    g = str(grade or "").strip().upper()
+    if not g:
+        return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
+    return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
 
 # ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴 고정으로 새 색 유입 차단. ──
 _INK = "#1c1a17"          # 본문
 _INK2 = "#4a453d"         # 보조(섹션 라벨)
-# Codex P1: 이 파일의 _WEAK/_FAINT 는 모두 읽는 작은 텍스트(라벨·단위·모노 오버라인·메타)에
+# Codex P1: 이 파일의 _FAINT 는 모두 읽는 작은 텍스트(라벨·모노 오버라인·메타)에
 # 쓰이므로 #6b665d(5.1:1↑)로 상향한다 — #8b857c(3.27:1)·#a09a90(2.5:1)은 읽는 텍스트 금지.
-_WEAK = "#6b665d"         # 읽는 보조 텍스트(구 #8b857c)
 _FAINT = "#6b665d"        # 읽는 캡션·모노 오버라인(구 #a09a90)
-_LINE = "#e6e2da"         # 행 헤어라인
 _LINE_SEC = "#e0dbd2"     # 섹션 헤어라인
-_ACCENT = "#c2410c"
 _ACCENT_TEXT = "#b4451a"
 _ACCENT_TINT = "#fdf3ec"
 _NEUTRAL = "#5c564d"      # §2 종결 배지 텍스트(중립, 6.4:1) — 비-§2 회색(#6b665d) 대체
-_MONO = "'IBM Plex Mono', monospace"
+# 인라인 style 속성 안에 그대로 들어가므로 **큰따옴표**로 감싼다(작은따옴표는 금지) —
+# style='font-family:{_MONO};…' 가 첫 내부 따옴표에서 끊겨 style 전체가 소실되는 것을 막는다
+# (2026-08-14 실측). CSS 블록(<style>) 안에서도 동일하게 유효하다.
+_MONO = '"IBM Plex Mono", monospace'
 
 # 상태 배지 색(§2 배지 텍스트색 — status_badge_html 이 옅은 배경/테두리를 파생). 모두 §2 값.
 _SUBMIT_COLOR = {"DRAFT": _NEUTRAL, "SUBMITTED": "#2f4d99"}
@@ -175,7 +191,7 @@ def _render_body(user: dict) -> None:
 
     # ── KPI 스트립(제목 바로 아래 첫 블록 §0-4) — 기존 요약 지표를 상단으로 이동 + 기한초과. ──
     # KPI 는 항상 전체 스코프 큐 기준(실제 종결 대기·기한초과 총량) — 필터로 왜곡하지 않는다.
-    st.markdown(_kpi_strip_html(scoped, improvements, load_failed), unsafe_allow_html=True)
+    erp.metric_strip(_kpi_items(scoped, improvements, load_failed))
     _hairline()
 
     # ── 큐 위 필터(조치 단계·담당자·기간) — 뷰단 필터링(facade 파라미터 없음, 코디 B-2). ──
@@ -367,20 +383,23 @@ def _confirm_state_of(imp) -> str:
 
 
 # ---------- KPI 스트립 ----------
-def _kpi_strip_html(scoped: pd.DataFrame, improvements: dict, load_failed: bool) -> str:
-    """KPI 4종(§1-A: 좌측 2px 보더 + 26px 모노 숫자). 전부 기존 데이터에서 파생.
+def _kpi_items(scoped: pd.DataFrame, improvements: dict, load_failed: bool) -> list[tuple]:
+    """KPI 4종 타일 항목(§1-A: 좌측 2px 보더 + 26px 모노 숫자). 전부 기존 데이터에서 파생.
 
     종결 대기(scoped 큐 크기, accent) · 확인 완료(CONFIRMED) · 진행·미작성(대기-확인완료) ·
-    기한초과(due_date 경과 & 미확인). 조회 실패 시 파생 3종은 '—'(오류≠0)."""
+    기한초과(due_date 경과 & 미확인). 조회 실패 시 파생 3종은 '—'(오류≠0).
+
+    렌더는 공용 kit(``erp.metric_strip``)이 소유한다 — 화면 로컬 타일 HTML 복제를 없애
+    조회·내 아차사고·평가 관리와 **같은 타일**(라벨 12px / 값 26px·600 모노 / 단위 11.5px)을
+    쓴다(2026-08-14 6화면 지표 어휘 통일)."""
     total = 0 if scoped is None or scoped.empty else len(scoped)
     if load_failed:
-        items = [
+        return [
             ("종결 대기", total, "건", "PENDING CLOSE", True),
             ("확인 완료", "—", "건", "VERIFIED", False),
             ("진행·미작성", "—", "건", "IN PROGRESS", False),
             ("기한초과", "—", "건", "OVERDUE", False),
         ]
-        return _metric_strip_html(items)
     confirmed = sum(1 for imp in improvements.values()
                     if imp and str(imp.get("confirm_status") or "") == _CONFIRMED)
     in_progress = max(total - confirmed, 0)
@@ -392,30 +411,12 @@ def _kpi_strip_html(scoped: pd.DataFrame, improvements: dict, load_failed: bool)
         due = str(imp.get("due_date") or "").strip()
         if due and due < today:  # ISO 날짜 문자열 사전식 비교(안전)
             overdue += 1
-    return _metric_strip_html([
+    return [
         ("종결 대기", total, "건", "PENDING CLOSE", True),
         ("확인 완료", confirmed, "건", "VERIFIED", False),
         ("진행·미작성", in_progress, "건", "IN PROGRESS", False),
         ("기한초과", overdue, "건", "OVERDUE", False),
-    ])
-
-
-def _metric_strip_html(items) -> str:
-    cells = []
-    for label, value, unit, _note, accent in items:  # _note(영문 오버라인) 미렌더 — 2줄 타일
-        border = _ACCENT if accent else _LINE_SEC
-        valcolor = _ACCENT_TEXT if accent else _INK
-        val = escape(str(value)) if not isinstance(value, (int, float)) else str(int(value))
-        cells.append(
-            f"<div style='flex:1 1 150px;min-width:0;display:flex;flex-direction:column;gap:5px;"
-            f"padding:0 18px;border-left:2px solid {border};'>"
-            f"<span style='font-size:12px;color:{_WEAK};'>{escape(label)}</span>"
-            f"<div style='display:flex;align-items:baseline;gap:4px;'>"
-            f"<span style='font-family:{_MONO};font-size:26px;font-weight:600;letter-spacing:-0.03em;"
-            f"color:{valcolor};'>{val}</span>"
-            f"<span style='font-size:11.5px;color:{_FAINT};'>{escape(unit)}</span></div></div>"
-        )
-    return f"<div style='display:flex;flex-wrap:wrap;gap:12px;padding:2px 0 14px;'>{''.join(cells)}</div>"
+    ]
 
 
 def _hairline() -> None:
@@ -529,8 +530,25 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
 
     # ── 부차 참조 서술(작업 내용·현장 설명)은 기본 접힘으로 상세 높이 bound(§0.4 네이티브 expander). ──
     with st.expander("보고서 원문 더 보기", expanded=False):
-        erp.field_block("작업 내용", str(report.get("work_content") or ""))
-        erp.field_block("현장 설명", str(report.get("site_description") or ""))
+        _read_field("작업 내용", str(report.get("work_content") or ""))
+        _read_field("현장 설명", str(report.get("site_description") or ""))
+
+
+def _read_field(label: str, value: str) -> None:
+    """전폭 읽기 필드(라벨 12.5/600 + 본문 **14.5px**/1.7) — 이 화면 상단 본문 블록과 같은 크기.
+
+    공용 ``erp.field_block`` 은 본문 13px 이라 같은 화면 안에서도 상단 블록(14.5px)과 크기가
+    달랐다(DESIGN 부속서 A-3 본문 ≥14.5px 미달). kit 은 이 작업의 수정 범위 밖이라 화면
+    로컬로 맞추고 kit 정합은 별도 보고 항목으로 남긴다(2026-08-14)."""
+    body = escape(value) if str(value or "").strip() else "-"
+    st.markdown(
+        "<div style='margin:8px 0 0;'>"
+        f"<div style='font-size:12.5px;font-weight:600;color:{_INK2};margin-bottom:2px;'>"
+        f"{escape(label)}</div>"
+        f"<div style='font-size:14.5px;line-height:1.7;color:{_INK};white-space:pre-wrap;"
+        f"text-wrap:pretty;'>{body}</div></div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _detail_read_html(report: dict, imp, status: str) -> str:
@@ -547,7 +565,8 @@ def _detail_read_html(report: dict, imp, status: str) -> str:
         _CONFIRM_LABEL.get(confirm_status, confirm_status),
         _CONFIRM_COLOR.get(confirm_status, _NEUTRAL))
     title = escape(str(report.get("work_name") or "(제목 없음)"))
-    grade = escape(str(report.get("confirmed_grade") or "-"))
+    # 등급은 조회·평가와 같은 등급 마크(셰브런+색 텍스트)로 렌더한다(2026-08-14 표기 통일).
+    grade = _grade_mark(report.get("confirmed_grade"), empty="미정")
 
     lbl = f"font-size:11.5px;color:{_INK2};"
     head_left = (
@@ -561,16 +580,16 @@ def _detail_read_html(report: dict, imp, status: str) -> str:
         "</div>"
     )
     meta = [
-        ("신고자", _user_label(report.get("reporter_emp_no"))),
-        ("발생일", str(report.get("incident_date") or "-")),
-        ("부서", str(report.get("dept_code") or "-")),
+        ("신고자", escape(_user_label(report.get("reporter_emp_no")))),
+        ("발생일", escape(str(report.get("incident_date") or "-"))),
+        ("부서", escape(str(report.get("dept_code") or "-"))),
         ("확정등급", grade),
     ]
     meta_cells = "".join(
         f"<div style='display:flex;flex-direction:column;gap:3px;'>"
         f"<span style='font-size:10.5px;letter-spacing:0.08em;color:{_FAINT};font-family:{_MONO};'>"
         f"{escape(label)}</span>"
-        f"<span style='font-size:13.5px;color:{_INK};'>{escape(str(value))}</span></div>"
+        f"<span style='font-size:13.5px;color:{_INK};line-height:1.35;'>{value}</span></div>"
         for label, value in meta
     )
     head = (

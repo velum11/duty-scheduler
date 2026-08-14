@@ -54,9 +54,12 @@ _STATUS_LABEL = {
     "SUBMITTED": "제출됨", "IN_REVIEW": "검토중", "EVALUATED": "평가완료",
     "REJECTED": "반려", "CLOSED": "종결",
 }
+# 발생원인 라벨 — 6화면 단일 어휘(2026-08-14 통일, 조회/평가/개선조치/분석/등록과 동일 dict).
+# 종전 이 화면만 쓰던 복합 라벨('부딪힘·충돌'·'미끄러짐·넘어짐'·'화상·고온')은 KOSHA 현행
+# 단문 용어로 정리했다 — 같은 코드가 화면마다 다른 문구로 보이던 불일치 제거 + 원인 열 폭 통일.
 _CAUSE_LABEL = {
-    "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘·충돌",
-    "SLIP": "미끄러짐·넘어짐", "BURN": "화상·고온", "PINCH": "협착", "ETC": "기타",
+    "JAM": "끼임", "FALL": "추락", "DROP": "낙하물", "HIT": "부딪힘",
+    "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
 _EDITABLE_STATUS = "SUBMITTED"
 
@@ -73,14 +76,20 @@ _LINE = "#e6e2da"
 _LINE_SEC = "#e0dbd2"
 _ACCENT = "#c2410c"
 _ACCENT_TINT = "#fdf3ec"
-_MONO = "'IBM Plex Mono', monospace"
+# 인라인 style 속성 안에 그대로 들어가므로 **큰따옴표**로 감싼다(작은따옴표는 금지) —
+# style='font-family:{_MONO};…' 가 첫 내부 따옴표에서 끊겨 style 전체가 소실되는 것을 막는다
+# (2026-08-14 실측: 상세 보고번호 16px/600 모노와 사진 오버라인 11px 이 무효화돼 14px sans 로
+# 렌더되고, 그 결과 사진 오버라인이 본문 블록과 5px 겹쳤다).
+_MONO = '"IBM Plex Mono", monospace'
 # 상태 색 — 상세 진행 단계 pill·상태 배지·표 상태 열 색 규칙 공용. 조회 화면
 # (near_miss_view)과 **같은 토큰**을 쓴다: 같은 상태가 화면마다 다른 색이면 안 된다.
+# 2026-08-14: DESIGN §2 상태 배지(= views/master/style.py::LIFECYCLE_BADGE, 평가·개선조치가
+# 쓰는 값)와 일치시킨다. 종전에는 제출됨=파랑·검토중=황토로 두 상태가 서로 바뀌어 있었다.
 _STATUS_COLOR = {
-    "SUBMITTED": TOKENS["info"],       # #2f4d99
-    "IN_REVIEW": TOKENS["gold"],       # #8a6212
+    "SUBMITTED": TOKENS["gold"],       # #8a6212 (§2 제출됨)
+    "IN_REVIEW": TOKENS["info"],       # #2f4d99 (§2 검토중)
     "EVALUATED": TOKENS["success"],    # #2f6b45
-    "CLOSED": TOKENS["ink-3"],         # #6b665d
+    "CLOSED": "#5c564d",               # §2 종결 배지 텍스트
     "REJECTED": TOKENS["danger"],      # #9c3232
 }
 # 등급 색(S 가 가장 중대 → 옅어질수록 경미) — 조회 화면과 동일 매핑.
@@ -88,6 +97,16 @@ _GRADE_COLOR = {
     "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
     "C": TOKENS["info"], "D": TOKENS["ink-3"],
 }
+# 등급 마크(§3.1 셰브런+색 텍스트) 순서 — 조회·평가·개선조치와 동일.
+_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
+
+
+def _grade_mark(grade, empty: str) -> str:
+    """등급 마크 HTML(공용 kit primitive) — 빈 값은 중립 점 마커 + ``empty`` 라벨."""
+    g = str(grade or "").strip().upper()
+    if not g:
+        return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
+    return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
 
 # ── 표시 컬럼(조회 화면 9열에서 신고자·소속만 제외한 7열) ──
 # 본인 전용 화면이라 신고자는 항상 본인이고 소속도 사실상 한 값이라, 두 열은 스캔에
@@ -105,14 +124,16 @@ _COL_CONFIG = {
     "보고번호": {"width": 112, "cellStyle": {"fontFamily": "'IBM Plex Mono', monospace",
                                           "letterSpacing": "0.01em"}},
     "작업명": {"flex": 2, "minWidth": 150},
-    "발생일": {"width": 104},
+    # 발생일 104→96: ISO 값 실측 74px + 셀 좌우 패딩 14px = 88px 라 8px 여유가 남는다. 8px 를
+    # 줄이면 좁은 폭에서 다음 열(상태)이 그만큼 먼저 들어온다 — 430px 실측에서 '제출됨'이
+    # 잘리지 않고 첫 화면에 들어온다(390px 은 여전히 가로 스크롤 1회 필요 — 보고 참조).
+    "발생일": {"width": 96},
     "제안등급": {"width": 84},
     "확정등급": {"width": 84},
     "상태": {"width": 88},
-    # 원인만 조회(92px)보다 넓다 — 이 화면의 원인 라벨(_CAUSE_LABEL)이 조회 화면보다 길어
-    # ('미끄러짐·넘어짐' 8자 vs 조회 '미끄러짐' 4자) 92px 에서는 끝이 잘린다. 두 화면의
-    # 원인 라벨 어휘 불일치 자체는 별건(보고 대상)이라 여기서 문구를 바꾸지 않고 폭을 맞춘다.
-    "원인": {"width": 140},
+    # 2026-08-14: 원인 라벨 어휘를 6화면 단일 어휘로 통일해(최대 4자 '미끄러짐' = 53px @14.5px)
+    # 조회 화면과 **같은 92px**로 맞췄다(종전 140px — 이 화면만 쓰던 8자 복합 라벨 때문).
+    "원인": {"width": 92},
 }
 
 _MINE_CSS = """
@@ -397,12 +418,22 @@ def _detail_blocks_html(report: dict) -> str:
     """펼친 영역 본문 블록(§1-B) — 좌측 2px 보더 + 모노 오버라인 + 라벨 + 본문 14.5px/1.7.
 
     상단에 제안등급·확정등급 메타를 한 줄로 덧붙인다(행 요약엔 없는 등급 컨텍스트)."""
-    pg = _clean(report.get("proposed_grade")) or "없음"
-    cg = _clean(report.get("confirmed_grade")) or "미정"
+    # 등급 메타 — 조회·평가·개선조치 상세와 **같은 메타 셀**(10.5px 모노 오버라인 라벨 위 /
+    # 13.5px 값 아래) + 공용 등급 마크(셰브런+색 텍스트)로 통일한다(2026-08-14). 종전에는 이
+    # 화면만 '제안등급 D' 한 줄 12.5px 평문이라 같은 데이터가 화면마다 다른 형식으로 보였다.
+    meta_cells = "".join(
+        f"<div style='display:flex;flex-direction:column;gap:3px;min-width:0;'>"
+        f"<span style='font-size:10.5px;letter-spacing:0.08em;color:{_MUT};"
+        f"font-family:{_MONO};'>{escape(label)}</span>"
+        f"<span style='font-size:13.5px;color:{_INK};line-height:1.35;'>{value}</span></div>"
+        for label, value in (
+            ("제안등급", _grade_mark(report.get("proposed_grade"), empty="없음")),
+            ("확정등급", _grade_mark(report.get("confirmed_grade"), empty="미정")),
+        )
+    )
     meta = (
-        f"<div style='display:flex;flex-wrap:wrap;gap:6px 20px;margin:0 0 14px;font-size:12.5px;color:{_INK2};'>"
-        f"<span>제안등급 <b style='color:{_INK};'>{escape(pg)}</b></span>"
-        f"<span>확정등급 <b style='color:{_INK};'>{escape(cg)}</b></span></div>"
+        "<div style='display:flex;flex-wrap:wrap;gap:12px 26px;margin:0 0 14px;'>"
+        f"{meta_cells}</div>"
     )
     cause = _clean(report.get("cause_code"))
     cause_detail = _clean(report.get("cause_detail"))

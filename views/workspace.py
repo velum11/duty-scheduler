@@ -56,8 +56,10 @@ _SV_CSS = """
    컴포넌트 마운트 여부를 브라우저 구현에 맡기게 되므로 쓰지 않고, 흐름에서만 빼
    (absolute) 세로 리듬(블록 gap)에 영향을 주지 않게 한다. */
 .st-key-sv_vp { position:absolute; width:0; height:0; overflow:hidden; }
-/* 모바일 세로 한 줄 안내(가로 전환 제안) — 장식·아이콘 없이 보조 텍스트 1줄(§A-2 #6b665d). */
-.sv-rotate { font-size:12.5px; color:#6b665d; margin:0 0 6px; line-height:1.35; }
+/* 모바일 세로 한 줄 안내(가로 전환 제안) — 장식·아이콘 없이 보조 텍스트 1줄(§A-2 #6b665d).
+   margin-top 8px 은 장식이 아니라 겹침 차단이다: 좁은 폭에서 컨텍스트 줄이 4줄로 접히면
+   이 안내 줄의 요소 컨테이너가 컨텍스트 마지막 줄 위로 1.9px 올라탔다(390·430 실측). */
+.sv-rotate { font-size:12.5px; color:#6b665d; margin:8px 0 6px; line-height:1.35; }
 /* 모바일 가로(낮은 뷰포트): 표가 화면을 최대로 쓰도록 상하 여백을 압축한다.
    폰트·색·컨트롤 크기(히트영역)는 그대로다(§3 타이포·§4 44px 불변) — 줄이는 것은
    여백과 '한 줄 설명'뿐이다(제목·조건·표·범례는 모두 남는다). 이 화면이 렌더되는
@@ -71,16 +73,12 @@ _SV_CSS = """
   [class*="st-key-erpcond_"] { padding-bottom:6px !important; margin-bottom:6px !important; }
   [class*="st-key-erpcond_"] [data-testid="stVerticalBlock"] { gap:2px !important; }
   .st-key-sv_ctxrow .sv-ctx { margin:0 !important; }
-  .duty-legend { margin-top:4px !important; }
+  .duty-legend2 { margin-top:4px !important; }
 }
 </style>
 """
-# 일자 열 밀도(§1-C "셀 min-width 34px" + 편성표 col_config 실값 44/34 정합). 읽기 표는
-# 헤더가 "31(일)" 한 줄이라 편성표(2줄 헤더 컴포넌트)보다 하한이 조금 크다 — 아래 값은
-# 실렌더 측정(헤더 라벨 잘림 없음)으로 잡았다. 상한은 넓은 화면에서 표가 다시 벌어지지
-# 않게 하는 캡이다.
-_DAY_COL_MIN_PX = 40
-_DAY_COL_MAX_PX = 52
+# (일자 열 밀도 상수는 근무표 3화면 공통 토큰 DAY_COL_MIN_PX/DAY_COL_MAX_PX 로 승격했다 —
+#  아래 정의 참조. 종전 이름은 이 모듈 안에서만 쓰던 사설 상수였다.)
 # 표 높이 — 행 수에 따라 늘되 §1-C(≈62vh) 상한 안에서 내부 스크롤(편성표와 같은 규칙).
 _GRID_MIN_PX, _GRID_MAX_PX = 240, 500
 # 좁은 폭(모바일)에서의 표 높이 하한 — 폰 가로는 뷰포트 높이가 ~390px 라 데스크톱 하한
@@ -148,6 +146,107 @@ RETIRED_LABEL = "(퇴직)"
 # 퇴직 행 배경/글자색 — master_users.py 의 .ms-row-inactive 와 동일 토큰
 # (surface-3 / ink-2, views/master/style.py TOKENS) 로 화면 간 시각 일관성을 맞춘다.
 _RETIRED_ROW_CSS = "background-color:#F1EEE7; color:#5F5C55"
+
+# ── 근무표 3화면 공통 그리드 토큰 (2026-08-14 시각 일관성 검수) ─────────────────
+# "같은 성격 열은 화면 간 같은 폭·정렬"이 이 블록의 존재 이유다. 종전에는 근무표 편성과
+# 월간 근무표가 같은 열(사번·성명·대분류·중분류·조)을 **서로 다른 폭**으로 그렸다
+# (실측 1440: 사번 96/84 · 성명 88/100 · 대분류 88/104 · 중분류 92/140 · 조 80/60).
+# 폭은 실렌더 폰트(IBM Plex Sans KR / Mono 14.5px)로 canvas measureText 한 값 + 좌우
+# 패딩 8px×2 에서 잡았다:
+#   사번 mono 10자리 87.0 · 성명 '황봉준(퇴직)' 74.4 · 대분류 5자 64.7 ·
+#   중분류 'PET생산팀' 64.3 · 부서 'PET생산부(원료실)' 112.9 · 조 '원료실' 38.8
+# 상한을 넘는 값(예: 4자 이름 + 퇴직 접미)은 말줄임 + tooltip 으로 보증한다(폭을 최댓값에
+# 맞추면 31일 매트릭스가 화면 밖으로 밀린다).
+IDENTITY_CELL_PAD_PX = 8
+IDENTITY_COL_PX: dict[str, tuple[int, int]] = {
+    "사번": (104, 96),
+    "성명": (96, 88),
+    "대분류": (96, 88),
+    "중분류": (112, 96),
+    "부서": (132, 104),
+    "조": (72, 64),
+}
+# 일자 열 밀도(§1-C "셀 min-width 34px") — 편성·월간 공통 하한/상한. 편성은 표시 축이
+# 명칭이라 값이 길지만 상한을 넘는 값은 어차피 말줄임되므로, 두 화면이 같은 범위를 쓴다.
+DAY_COL_MIN_PX = 40
+DAY_COL_MAX_PX = 52
+
+
+def identity_col_config(columns, *, pinned: bool = True,
+                        tooltip: bool = True) -> dict[str, dict]:
+    """신원 열의 화면 공통 colDef 조각 — 폭·최소폭·좌우 패딩·정렬·툴팁 (순수).
+
+    ``columns`` 중 :data:`IDENTITY_COL_PX` 에 있는 열만 돌려준다(모르는 열은 화면이
+    직접 정한다). 두 근무표 화면이 이 한 곳을 소비하므로 폭이 갈라지지 않는다.
+    """
+    pad = f"{IDENTITY_CELL_PAD_PX}px"
+    out: dict[str, dict] = {}
+    for name in columns:
+        spec = IDENTITY_COL_PX.get(name)
+        if spec is None:
+            continue
+        width, min_width = spec
+        cfg: dict = {
+            "width": width, "minWidth": min_width,
+            "cellClass": "md-c-left", "headerClass": "md-h-left",
+            "cellStyle": {"fontSize": "14.5px", "paddingLeft": pad, "paddingRight": pad},
+        }
+        if pinned:
+            cfg["pinned"] = "left"
+        if tooltip:
+            # 말줄임된 값의 전문 보증(길이 차이는 말줄임 + 툴팁으로 흡수).
+            cfg["tooltipField"] = name
+        out[name] = cfg
+    return out
+
+
+def compact_hidden_meta(meta_cols, *, compact: bool, keep=()) -> tuple[str, ...]:
+    """좁은 폭에서 **숨길** 신원 열 (순수) — :func:`month_grid_columns` 규칙의 여집합.
+
+    편성(MATRIX)과 월간(READ)이 같은 방식으로 좁아지게 하기 위한 단일 출처다. 표시만
+    줄이며 열 자체는 그대로 남는다(편집 왕복·CSV 원본 무영향).
+
+    ``keep`` 은 그 화면에서 추가로 남겨야 하는 열이다 — 편성은 '사번'이 신규 행 입력
+    축이라(붙여넣기·행 추가) 접으면 좁은 폭에서 그 기능이 사라진다. 접는 **방식**은
+    같고 남기는 최소 집합만 화면 역할에 따라 다르다.
+    """
+    if not compact:
+        return ()
+    shown = set(month_grid_columns(list(meta_cols), [], compact=True)) | set(keep)
+    return tuple(c for c in meta_cols if c not in shown)
+
+
+# ── 근무형태 범례(3화면 공통) ────────────────────────────────────────────────
+# 종전: 편성은 '색 스와치 + 잉크 라벨 12px/400', 월간은 '색 배경 pill 11.2px/600'
+# (modules/ui.badge_html) 로 **같은 정보에 두 가지 시각 언어**를 썼다. 셀은 두 화면 모두
+# 색 틴트 + 잉크 텍스트라 스와치 쪽이 셀 표현과도 정합해 그쪽으로 통일한다.
+DUTY_LEGEND_CSS = """
+<style>
+.duty-legend2 { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0 2px; }
+.duty-legend2 .lab { font-size:11px; letter-spacing:.1em; color:#6b665d;
+  font-family:'IBM Plex Mono',monospace; margin-right:4px; }
+.duty-legend2 .item { display:inline-flex; align-items:center; gap:6px; font-size:12px;
+  color:#1c1a17; min-width:0; }
+.duty-legend2 .sw { width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
+</style>
+"""
+
+
+def duty_legend_html(items, *, label: str = "근무형태") -> str:
+    """근무형태 범례 HTML — ``items`` 는 ``(표시값, hex색)`` 시퀀스 (순수).
+
+    색은 근무형태 기준정보(work_types.color)가 원천이며 여기서 만들지 않는다.
+    자체 완결형(``<style>`` 동봉)이라 소비 화면이 CSS 주입 순서를 신경 쓰지 않는다.
+    """
+    chips = []
+    for text, color in items:
+        color = str(color or "")
+        swatch = (f"<span class='sw' style='background:{escape(color)}'></span>"
+                  if color.startswith("#") else "")
+        chips.append(f"<span class='item'>{swatch}{escape(str(text))}</span>")
+    return (DUTY_LEGEND_CSS
+            + f"<div class='duty-legend2'><span class='lab'>{escape(label)}</span>"
+            + "".join(chips) + "</div>")
 
 
 def work_type_display(wt_df: pd.DataFrame | None = None) -> tuple[dict, dict]:
@@ -625,14 +724,34 @@ _MASTER_GRID_CSS = {
     ".ag-header-cell": {"border-right": "1px solid rgba(30, 30, 30, 0.12)"},
     # Codex P2(§3·§8-6): 표 헤더 12.5px — AG 테마 기본(12px)이 .ag-header-cell-text 에
     # 걸려 있어 라벨·텍스트 둘 다 12.5px 로 못박는다(신원 헤더가 셀 14.5 와 정합).
-    ".ag-header-cell-label": {"justify-content": "center", "font-size": "12.5px"},
-    ".ag-header-cell-text": {"font-size": "12.5px"},
+    # 굵기도 못박는다 — AG 테마 기본은 700 이라 읽기 표(키트 _READ_BASE_CSS: 600)와
+    # 헤더 굵기가 화면마다 달라 보였다(2026-08-14 실측 편성 700 / 월간 600). DESIGN §3
+    # "표 헤더 12.5/600" 이 두 화면 공통 기준이다.
+    ".ag-header-cell-label": {"justify-content": "center", "font-size": "12.5px",
+                              "font-weight": "600"},
+    ".ag-header-cell-text": {"font-size": "12.5px", "font-weight": "600"},
+    # 헤더 라벨 정렬은 셀 정렬을 따른다 — 좌측 정렬 셀(신원 열) 위에 가운데 헤더가 오면
+    # 열 경계가 눈으로 안 맞는다. 읽기 표(월간 근무표)의 좌측 정렬 헤더와도 정합.
+    ".md-h-left .ag-header-cell-label": {"justify-content": "flex-start"},
     ".ag-cell": {
         "border-right": "1px solid rgba(30, 30, 30, 0.10)",
         "display": "flex",
         "align-items": "center",
         "line-height": "normal",
+        # 셀 밖으로 새는 텍스트 차단(아래 min-width:0 과 한 쌍) — AG Grid 기본은
+        # overflow:visible 이라 값이 열보다 길면 **이웃 셀 글자 위로 그대로 겹쳐** 보였다.
+        "overflow": "hidden",
     },
+    # 값 span 은 .ag-cell 의 flex item 인데 min-width 기본값이 auto 라 콘텐츠 폭 아래로
+    # 줄지 않는다 → flex:1 1 auto 를 줘도 못 줄고 그대로 넘쳤다(2026-08-14 실측: 편성
+    # '부서' 열 PET생산부(원료실) 이 오른쪽 셀로 17.9px 침범). 0 으로 낮추면 span 자신이
+    # 줄면서 이미 걸려 있는 text-overflow:ellipsis 가 살아난다(말줄임 + tooltipField).
+    # 래퍼(.ag-cell-wrapper)에도 같이 걸어야 한다 — enableCellTextSelection 때문에 **모든
+    # 셀**에 래퍼가 생기고(아래 _action 규칙 주석 참조), 실제 flex item 은 값 span 이 아니라
+    # 그 래퍼다. 래퍼가 안 줄면 안쪽 span 도 못 줄어 말줄임이 걸리지 않는다(실측: 52px 열
+    # 안에서 값 span clientWidth 65px).
+    ".ag-cell-value": {"min-width": "0"},
+    ".ag-cell-wrapper": {"min-width": "0", "overflow": "hidden"},
     ".ag-row": {"border-bottom": "1px solid rgba(30, 30, 30, 0.08)"},
     ".md-c-left": {"justify-content": "flex-start", "padding-left": "10px"},
     ".md-c-center": {"justify-content": "center", "padding-left": "0", "padding-right": "0"},
@@ -746,7 +865,9 @@ def selectable_master_grid(
         # 핸들은 셀 렌더러(체크박스/− 버튼) 앞에 들어간다 — 폭을 그만큼 넓혀 잘림을 막는다.
         action_col["rowDrag"] = True
         action_col["headerTooltip"] = "행 앞 핸들을 잡고 끌어 순서를 바꿉니다"
-        action_col.update({"width": 88, "minWidth": 80, "maxWidth": 96})
+        # 폭 88 → 72: 핸들 + 체크박스의 실제 렌더 폭은 33px 이라(2026-08-14 실측) 88px 은
+        # 신원 블록에서 놀고 있었다. 매트릭스 화면은 그 폭이 곧 보이는 날짜 수다.
+        action_col.update({"width": 72, "minWidth": 64, "maxWidth": 88})
     column_defs = [action_col]
     # 폭/정렬 기본값 — 문자 열은 flex 로 남는 폭 배분, 숫자/불리언은 좁은 고정
     widths = {
@@ -1173,15 +1294,22 @@ def month_grid_columns(meta_cols: list[str], day_cols: list[str], *, compact: bo
     return (kept or list(meta_cols)) + list(day_cols)
 
 
-def month_grid_height(nrows: int, *, compact: bool, landscape: bool, viewport_h: int) -> int:
+def month_grid_height(nrows: int, *, compact: bool, landscape: bool, viewport_h: int,
+                      row_px: int = 34, pad_px: int = 52,
+                      min_px: int | None = None) -> int:
     """표 높이 — 행 수만큼 늘되 화면(뷰포트) 밖으로 넘치지 않게 자른다(순수).
 
     데스크톱은 종전 규칙(행 34px + 여백, 240~500) 그대로다. 좁은 폭에서는 뷰포트 높이에서
     화면 크롬을 뺀 '남는 높이'로 한 번 더 자른다 — 폰 가로처럼 낮은 뷰포트에서 표가 화면
     밖으로 밀리지 않고, 표 안 스크롤로 날짜를 보게 된다.
+
+    ``row_px``/``pad_px``/``min_px`` 는 편성(MATRIX, 행 30px·헤더등 96px·하한 210)이 같은
+    뷰포트 클램프 규칙을 쓰기 위한 열림이다 — 기본값은 월간(READ)의 종전 값이라 이 화면
+    동작은 불변이다.
     """
-    natural = 34 * max(int(nrows), 1) + 52
-    height = max(_GRID_MIN_PX, min(natural, _GRID_MAX_PX))
+    natural = int(row_px) * max(int(nrows), 1) + int(pad_px)
+    floor = _GRID_MIN_PX if min_px is None else int(min_px)
+    height = max(floor, min(natural, _GRID_MAX_PX))
     if not compact:
         return height
     chrome = _COMPACT_CHROME_LANDSCAPE_PX if landscape else _COMPACT_CHROME_PORTRAIT_PX
@@ -1433,14 +1561,14 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         # 지나치게 벌어진다. 신원 5열은 sticky left(pinned)로 고정 폭을, 일자 열은 §1-C 밀도
         # (셀 min-width 34px)에 맞춘 좁은 폭을 준다. read_grid col_config 는 colDef 로 그대로
         # 전달되므로 pinned·cellStyle 도 jscode 없이 지원된다.
-        # 폭은 실렌더 측정(scrollWidth>clientWidth = 잘림)으로 잡았다: 성명은 퇴직 접미사
-        # 포함, 중분류는 분류 미입력 시의 부서명 폴백(가장 긴 값)까지 수용한다.
+        # 폭·정렬·패딩은 근무표 3화면 공통 토큰(identity_col_config)이 소유한다 — 종전에는
+        # 이 화면과 편성 화면이 같은 열을 다른 폭으로 그렸다(2026-08-14 검수).
+        # overflow:hidden 은 겹침 차단이다: 키트 읽기 표의 .ag-cell 은 overflow:visible 이라
+        # 값이 열보다 길면 오른쪽 셀 글자 위로 겹쳐 그려진다. 셀에서 잘라 두고 전문은
+        # tooltipField 로 보증한다(말줄임 '…' 자체는 키트 CSS 소관 — 보고 항목).
         meta_col_config = {
-            "사번": {"width": 84, "minWidth": 84, "pinned": "left"},
-            "성명": {"width": 100, "minWidth": 100, "pinned": "left"},
-            "대분류": {"width": 104, "minWidth": 104, "pinned": "left"},
-            "중분류": {"width": 140, "minWidth": 140, "pinned": "left"},
-            "조": {"width": 60, "minWidth": 60, "pinned": "left"},
+            name: {**cfg, "cellStyle": {**cfg["cellStyle"], "overflow": "hidden"}}
+            for name, cfg in identity_col_config(meta_cols).items()
         }
         # 일자 열: 고정 폭이 아니라 flex + 상·하한 — 좁은 화면에서는 하한(밀도)을 지키고,
         # 넓은 화면에서는 남는 폭을 균등 배분하되 상한을 넘겨 벌어지지 않게 한다.
@@ -1448,20 +1576,19 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         # 일자 헤더와 같은 표현). **표시 라벨만** 바꾸므로 field(=CSV 열 이름 "1(수)")는
         # 그대로다 — 엑셀 다운로드 스키마 불변.
         day_col_config = {
-            c: {"flex": 1, "minWidth": _DAY_COL_MIN_PX, "maxWidth": _DAY_COL_MAX_PX,
+            c: {"flex": 1, "minWidth": DAY_COL_MIN_PX, "maxWidth": DAY_COL_MAX_PX,
                 "headerName": c.replace("(", " ").replace(")", ""),
                 "wrapHeaderText": True, "autoHeaderHeight": True,
                 "cellStyle": {"paddingLeft": "2px", "paddingRight": "2px",
-                              "justifyContent": "center"}}
+                              "justifyContent": "center", "overflow": "hidden"}}
             for c in day_cols
         }
         # 표시 열 — 좁은 폭(모바일)은 성명 + 일자만(2026-08-13 사용자 요구). 프레임과 CSV
-        # 원본은 그대로이고 **표시만** 줄인다(신원 5열 합계 488px 이 폰 폭 390px 을 넘어
-        # 날짜가 화면 밖으로 밀리는 문제). 좁은 폭에서는 성명 열 폭도 한 단계 줄인다.
+        # 원본은 그대로이고 **표시만** 줄인다(신원 5열이 폰 폭 390px 을 넘어 날짜가 화면
+        # 밖으로 밀리는 문제). 좁은 폭에서도 성명 열 폭은 공통 토큰 그대로 둔다 — 편성
+        # 화면의 좁은 폭 성명 열과 같은 폭이어야 두 화면이 같은 방식으로 보인다.
         shown_meta = month_grid_columns(meta_cols, [], compact=compact)
         if compact:
-            meta_col_config = {**meta_col_config, "성명": {"width": 84, "minWidth": 84,
-                                                          "pinned": "left"}}
             # 모바일 세로: 한 화면에 담기는 날짜가 적으므로 가로 전환을 한 줄로 안내한다
             # (표 위, 보조 텍스트 1줄 — 장식·아이콘 없음).
             if not landscape:
@@ -1924,12 +2051,16 @@ def _view_context_html(q: dict, dept_names: dict, team_names: dict,
 
 
 def _label_legend_html(display_of: dict, color_of: dict) -> str:
-    """근무 약칭 범례 (표 하단). 셀 표시값(약칭)과 색을 그대로 보여준다."""
-    seen, badges = set(), []
+    """근무 약칭 범례 (표 하단). 셀 표시값(약칭)과 색을 그대로 보여준다.
+
+    시각 언어는 근무표 3화면 공통(:func:`duty_legend_html` — 색 스와치 + 잉크 라벨)이다.
+    종전의 색 배경 pill(``ui.badge_html``)은 같은 정보에 편성 화면과 다른 표현을 써
+    화면을 오갈 때 다른 표처럼 보였다(2026-08-14 검수).
+    """
+    seen, items = set(), []
     for code, disp in display_of.items():
         if disp in seen:
             continue
         seen.add(disp)
-        color = color_of.get(disp) or color_of.get(code) or "#9AA0A6"
-        badges.append(ui.badge_html(disp, color))
-    return f"<div class='duty-legend'>{''.join(badges)}</div>"
+        items.append((disp, color_of.get(disp) or color_of.get(code) or "#9AA0A6"))
+    return duty_legend_html(items)
