@@ -997,12 +997,73 @@ def master_download(view: pd.DataFrame, name: str, key: str) -> None:
         )
 
 
+# ---------- 근태(근무표) 등록 대상 부서 범위 ----------
+# 조직 관리에서 지정한 근태 등록 대상 부서(departments.tracks_attendance, migration 011)를
+# 이 조회 화면의 범위로 쓴다(2026-08-14 사용자 요구: "근태에서는 해당 조직만 목록이나 조회").
+# 데이터 계층 계약(modules/db)은 그대로 소비만 한다.
+#
+# 이 화면의 판단(조회 화면 = 과거 이력 보존 우선):
+#   1) 대상 집합은 ``db.attendance_dept_codes(is_active=None)`` 을 쓴다 — **사용 중지된
+#      부서라도 근태 대상 지정이 남아 있으면 과거 근무 기록을 계속 조회**한다. 조직이
+#      폐지됐다는 이유로 그 달의 저장된 근무표가 사라지면 자료가 소실된 것처럼 보인다.
+#      (편성 같은 쓰기 화면은 반대로 활성 대상만 써야 한다 — 화면별 판단이다.)
+#   2) 제한은 '허용 목록'이 아니라 **차단 목록**으로 표현한다: 부서 마스터에 있으면서
+#      근태 대상이 아닌 부서만 감춘다. 마스터에 없는 부서코드(삭제된 부서의 과거 편성
+#      스냅샷)와 부서 미배정(빈 코드) 행은 **지정 여부를 판정할 수 없으므로 감추지
+#      않는다** — org_labels 의 "무분류로 접되 행을 감추지 않는다"(근무 기록을 조용히
+#      버리지 않는다)와 같은 규율이며, db 파사드의 fail-open 방향과도 일치한다.
+#   3) 지정 컬럼을 판독할 수 없는 배포(``db.attendance_flag_ready() is False``)에서는
+#      차단 목록이 비어 종전과 동일하게 전 부서를 조회한다.
+def attendance_dept_options(dept_names: dict, tracked: set | None) -> dict:
+    """부서 조회 옵션 — 근태 등록 대상 부서만 남긴 {코드: 부서명}(순수).
+
+    ``tracked`` 가 ``None`` 이면(지정 컬럼 미적용 폴백) 원본을 그대로 돌려준다.
+    """
+    if tracked is None:
+        return dict(dept_names)
+    return {code: name for code, name in dept_names.items() if _clean(code) in tracked}
+
+
+def attendance_blocked_depts(dept_names: dict, tracked: set | None) -> tuple[str, ...]:
+    """조회에서 감출 부서코드 — 마스터에 있으면서 근태 대상이 **아닌** 부서만(순수).
+
+    반환은 정렬 고정 튜플이다(조회 지문·표시 흔들림 방지). ``tracked`` 가 ``None``
+    이면 빈 튜플 = 제한 없음(종전 동작).
+    """
+    if tracked is None:
+        return ()
+    return tuple(sorted(
+        code for code in (_clean(c) for c in dept_names) if code and code not in tracked
+    ))
+
+
+def month_empty_message(q: dict, tracked: set | None) -> str:
+    """빈 결과 안내 문구 — 근태 대상 지정 때문에 비었으면 이유와 다음 행동을 알린다(순수).
+
+    행이 0건인 이유가 "조건에 맞는 사람이 없음"인지 "그 부서가 근태 대상이 아님"인지
+    구분되지 않으면 사용자는 자료가 사라진 것으로 읽는다. 한 줄 안내 안에서만 구분한다
+    (§0.6 빈 상태 1줄 — 별도 배너·박스를 만들지 않는다).
+    """
+    if tracked is not None:
+        if not tracked:
+            return ("근태 등록 대상 부서가 아직 지정되지 않았습니다. "
+                    "조직 관리에서 대상 부서를 지정하면 조회됩니다.")
+        dept = _clean(q.get("dept"))
+        if dept and dept != ALL and dept not in tracked:
+            return ("선택한 부서는 근태 등록 대상이 아닙니다. "
+                    "조직 관리에서 지정하면 조회됩니다.")
+    return "조회 조건에 해당하는 직원이 없습니다."
+
+
 # ---------- 좁은 폭(모바일) 레이아웃 · 조회조건 기본값 ----------
 def scope_defaults(user: dict, dept_names: dict, assigns: pd.DataFrame | None) -> tuple[str, str]:
     """최초 진입 시 심을 (부서, 조) 기본값 — 없으면 빈 문자열(= 전체 폴백)을 돌려준다(순수).
 
-    **부서**: 사용자 레코드(`users.dept_code`)다. 부서 마스터에 없는 코드(미배정·삭제)면
-    시드하지 않는다 — 조회 결과가 0건이 되는 조건을 기본값으로 심지 않기 위해서다.
+    **부서**: 사용자 레코드(`users.dept_code`)다. ``dept_names`` 에 없는 코드면 시드하지
+    않는다 — 조회 결과가 0건이 되는 조건을 기본값으로 심지 않기 위해서다. 호출부가 넘기는
+    ``dept_names`` 는 **부서 조회 옵션과 같은 집합**(근태 등록 대상 부서)이므로, 로그인
+    사용자의 부서가 근태 비대상이면 시드 자체가 일어나지 않고 '(전체)'로 열린다 — 옵션에
+    없는 값이 조건에 실려 빈 화면이 되는 경로를 위젯 생성 전에 차단한다.
 
     **조**: 조 축은 기준정보가 아니라 편성 스냅샷(`schedule_assignments.shift_group_code`)
     이므로 대상 월 **본인 편성**을 1순위 원천으로 쓴다. 해석 순서는 이 화면이 표에서 쓰는
@@ -1151,6 +1212,16 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
     years = sorted({int(m[:4]) for m in months} | {today.year})
 
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
+    # 근태 등록 대상 부서(조직 관리 지정) — 이 화면의 조회 범위. 판단 근거는 위
+    # '근태(근무표) 등록 대상 부서 범위' 절 주석 참조(이력 보존: is_active=None,
+    # 판정 불가 코드 미차단, 지정 컬럼 미적용 배포는 전 부서).
+    tracked_depts = (
+        db.attendance_dept_codes(is_active=None) if db.attendance_flag_ready() else None
+    )
+    # 옵션·시드는 대상 부서만, 라벨(dept_names)은 전 부서 그대로 — 과거 기록의 부서명이
+    # 컨텍스트 줄·MANAGER 판정에서 코드로 깨져 보이지 않게 한다(권한 계약 무변경).
+    option_dept_names = attendance_dept_options(dept_names, tracked_depts)
+    blocked_depts = attendance_blocked_depts(dept_names, tracked_depts)
     manager_locked = user["role"] == "MANAGER" and user.get("dept_code")
 
     st.markdown(_SV_CSS, unsafe_allow_html=True)
@@ -1177,7 +1248,9 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
     # 조회조건 기본값(2026-08-13 사용자 요구) — 선택값이 없을 때 내 부서·조를 심는다.
     # 사용자가 바꾼 선택은 덮어쓰지 않는다(위젯 상태 계약). MANAGER 는 아래에서 본인
     # 부서로 잠기고 fail-closed 재적용도 그대로라 이 시드가 권한범위를 넓히지 않는다.
-    _seed_scope_defaults(user, page_id, dept_names,
+    # 시드 원천은 **부서 조회 옵션과 같은 집합**이다 — 내 부서가 근태 비대상이면 시드하지
+    # 않고 '(전체)'로 열린다(옵션 밖 값이 조건에 실려 빈 화면이 되는 경로 차단).
+    _seed_scope_defaults(user, page_id, option_dept_names,
                          int(st.session_state[y_key]), int(st.session_state[m_key]))
 
     # 부서→조 종속 옵션: 조 Field 를 만들기 전에 "현재" 부서 선택을 세션 상태에서
@@ -1196,14 +1269,15 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
             format_func=lambda c: dept_names.get(c, c),
         )
     else:
-        # 삭제·비활성으로 사라진 부서가 위젯에 남아 있으면 '(전체)'로 되돌린다(조 필터와
-        # 동일 규칙 — 없어진 조건이 남아 결과가 0건이 되는 혼선 방지).
-        if st.session_state.get(d_key) not in ([None, ALL] + list(dept_names)):
+        # 삭제·비활성으로 사라진 부서 **또는 근태 대상에서 해제된 부서**가 위젯에 남아
+        # 있으면 '(전체)'로 되돌린다(조 필터와 동일 규칙 — 없어진 조건이 남아 결과가
+        # 0건이 되는 혼선 방지). 시드가 심은 값도 이 게이트를 함께 통과한다.
+        if st.session_state.get(d_key) not in ([None, ALL] + list(option_dept_names)):
             st.session_state.pop(d_key, None)
         cur_dept = st.session_state.get(d_key, ALL)
         dept_field = erp.Field(
             key="d", label="부서", kind="select",
-            options=[ALL] + list(dept_names), width=220,
+            options=[ALL] + list(option_dept_names), width=220,
             # '(전체)' 센티널은 라벨을 명시한다(근무표 편성 화면과 동일 표기) — 원값
             # 그대로 노출하면 코드 같은 괄호 문자열이 부서명 자리에 섞여 읽힌다.
             format_func=lambda c: "전체 부서" if c == ALL else dept_names.get(c, c),
@@ -1212,10 +1286,12 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
     # teams 마스터만 보면 실DB(teams 0행)에서 옵션이 '(전체)'뿐이 되고, 부서=(전체) 에서는
     # 종전 코드가 옵션을 통째로 비웠다. 연/월 위젯 값은 세션 키에서 선-조회한다(부서와 동일
     # 패턴) — 위젯 렌더 순서와 무관하게 같은 rerun 에서 옵션이 갱신된다.
+    # 조 옵션도 같은 범위로 좁힌다 — 근태 비대상 부서에만 있는 조가 목록에 남으면 고를
+    # 수는 있는데 결과는 0건이 되어, 조건 줄이 적용되지 않은 조건을 단언하게 된다.
     team_names = _team_filter_options(
         int(st.session_state.get(y_key, today.year)),
         int(st.session_state.get(m_key, today.month)),
-        cur_dept, teams,
+        cur_dept, teams, blocked_depts,
     )
     # 옵션 집합이 바뀌어 이전 선택이 사라졌으면 '(전체)'로 되돌린다(위젯 생성 전이라
     # 세션 키 수정이 허용된다). 없어진 조가 조건에 남아 결과가 0건이 되는 혼선을 막는다.
@@ -1253,6 +1329,9 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
         "dept": v["d"],
         "team": v["t"],
         "keyword": str(v["kw"] or "").strip(),
+        # 근태 비대상 부서(마스터에 있고 지정되지 않은 부서)는 표 행에서도 제외한다.
+        # 빈 튜플이면 종전과 완전히 동일한 조회다(폴백·전 부서 지정 포함).
+        "excluded_depts": blocked_depts,
     }
 
     # MANAGER 권한범위 fail-closed 재적용: 위젯에서 온 조회조건(잔존 세션 값·타 부서·
@@ -1297,7 +1376,7 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
     def _render_body(loaded):
         wt_df, display_of, color_of, grid, month_rows = loaded
         if grid.empty:
-            ui.empty_state("조회 조건에 해당하는 직원이 없습니다.", head="월별 근무표")
+            ui.empty_state(month_empty_message(q, tracked_depts), head="월별 근무표")
             return
 
         # §1-C 컨텍스트 라인 — YYYY-MM · 부서 · 조 · 인원·근무·실근무·휴무(모노 수치).
@@ -1315,7 +1394,8 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
                           vertical_alignment="center"):
             st.markdown(
                 _view_context_html(q, dept_names, team_names,
-                                   len(grid), len(month_rows), n_work),
+                                   len(grid), len(month_rows), n_work,
+                                   tracked_depts),
                 unsafe_allow_html=True,
             )
             with st.container(key="sv_ctxdl", width="content"):
@@ -1440,7 +1520,7 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
 
 
 def team_filter_options(assigns: pd.DataFrame | None, teams: pd.DataFrame | None,
-                        dept: str) -> dict:
+                        dept: str, blocked_depts=None) -> dict:
     """조 필터 옵션 {값: 표시라벨} — 대상 월 편성 스냅샷의 조 축을 우선 원천으로 만든다(순수).
 
     조 축이 ``teams``(운영단위 마스터)에서 ``schedule_assignments.shift_group_code``
@@ -1457,19 +1537,29 @@ def team_filter_options(assigns: pd.DataFrame | None, teams: pd.DataFrame | None
 
     ``dept`` 가 ``ALL`` 이 아니면 스냅샷은 그 부서 편성 행만, teams 는 그 부서 조만 본다.
     반환 순서는 정렬 고정(표시 흔들림 방지)이며, 값은 매칭 축과 같은 원본 문자열이다.
+
+    ``blocked_depts`` (근태 비대상 부서코드)에 속한 부서의 조는 옵션에서 제외한다 —
+    표 행 필터(:func:`_build_month_grid` 의 ``excluded_depts``)와 **같은 집합**이라
+    "고를 수는 있는데 결과가 0건"인 조가 목록에 남지 않는다. 라벨 맵(teams 마스터)은
+    차단 여부와 무관하게 채워, 과거 편성의 조 이름 표시는 그대로 유지한다.
     """
     options: dict[str, str] = {}
     labels: dict[str, str] = {}
+    blocked = set(blocked_depts or ())
     if teams is not None and not teams.empty:
         for _, t in teams.iterrows():
             code = _clean(t.get("team_code"))
             if not code:
                 continue
             labels.setdefault(code, _clean(t.get("team_name")) or code)
+            if _clean(t.get("dept_code")) in blocked:
+                continue
             if dept == ALL or _clean(t.get("dept_code")) == dept:
                 options[code] = labels[code]
     if assigns is not None and not assigns.empty:
         for _, a in assigns.iterrows():
+            if _clean(a.get("dept_code")) in blocked:
+                continue
             if dept != ALL and _clean(a.get("dept_code")) != dept:
                 continue
             shift = _clean(a.get("shift_group_code"))
@@ -1481,7 +1571,8 @@ def team_filter_options(assigns: pd.DataFrame | None, teams: pd.DataFrame | None
     return {code: options[code] for code in sorted(options)}
 
 
-def _team_filter_options(year: int, month: int, dept: str, teams: pd.DataFrame) -> dict:
+def _team_filter_options(year: int, month: int, dept: str, teams: pd.DataFrame,
+                         blocked_depts=None) -> dict:
     """:func:`team_filter_options` 의 조회 래퍼 — 대상 월 편성 스냅샷을 읽어 넘긴다.
 
     ``db.get_month_assignments`` 는 supabase 모드에서 30초 캐시(``modules/db``)라 같은
@@ -1489,7 +1580,9 @@ def _team_filter_options(year: int, month: int, dept: str, teams: pd.DataFrame) 
     삼키지 않고 그대로 올린다 — 옵션이 조용히 빈 상태로 위장되면 사용자가 '조 없음'을
     데이터 사실로 오독한다(모듈 계약: 오류를 sample/빈 결과로 숨기지 않는다).
     """
-    return team_filter_options(db.get_month_assignments(int(year), int(month)), teams, dept)
+    return team_filter_options(
+        db.get_month_assignments(int(year), int(month)), teams, dept, blocked_depts
+    )
 
 
 def _clean(value) -> str:
@@ -1600,6 +1693,10 @@ def _month_assignment_snapshot(year: int, month: int) -> dict:
 def _build_month_grid(q: dict, display_of: dict | None = None):
     """해당 월/부서/조의 가로형 근무표 DataFrame 과 세로형 원본 레코드를 반환.
 
+    ``q["excluded_depts"]`` (근태 비대상 부서코드, 선택)이 있으면 그 부서 소속으로 판정된
+    행을 먼저 제외한다 — 조직 관리에서 지정한 근태 등록 대상 부서만 조회하기 위함이다
+    (기본값 없음 = 종전과 동일한 전 부서 조회).
+
     부서·조는 대상 월의 편성 스냅샷(schedule_assignments)을 우선 사용하고, 없으면
     현재 사용자 소속으로 폴백한다(표시 전용·자동저장/백필 없음 — requirements.md §5).
     조회 조건의 부서·조 필터도 같은 스냅샷 기준으로 일관 적용해, 과거 월 조회 시
@@ -1652,6 +1749,14 @@ def _build_month_grid(q: dict, display_of: dict | None = None):
     users["_eff_dept"] = eff_depts
     users["_eff_team"] = eff_teams
     users["_eff_shift"] = eff_shifts
+
+    # 근태 등록 대상 부서 범위(조직 관리 지정) — 부서 조건보다 **먼저** 적용한다.
+    # 차단 목록 방식이라 마스터에 없는 부서코드·부서 미배정 행은 감추지 않는다(판정
+    # 불가는 이력 보존 쪽으로 — 위 '근태(근무표) 등록 대상 부서 범위' 절 참조).
+    # 스냅샷 기준(_eff_dept)이라 과거 월은 그 당시 부서로 판정된다.
+    blocked_depts = set(q.get("excluded_depts") or ())
+    if blocked_depts:
+        users = users[~users["_eff_dept"].isin(blocked_depts)]
 
     if q["dept"] != ALL:
         users = users[users["_eff_dept"] == q["dept"]]
@@ -1790,10 +1895,18 @@ def _retired_row_style(row: pd.Series) -> list[str]:
 
 
 def _view_context_html(q: dict, dept_names: dict, team_names: dict,
-                       n_people: int, n_rows: int, n_work: int) -> str:
-    """§1-C 컨텍스트 라인 — YYYY-MM · 부서 · 조 · 인원·근무·실근무·휴무(모노 수치)."""
+                       n_people: int, n_rows: int, n_work: int,
+                       tracked: set | None = None) -> str:
+    """§1-C 컨텍스트 라인 — YYYY-MM · 부서 · 조 · 인원·근무·실근무·휴무(모노 수치).
+
+    ``tracked`` 가 있으면(근태 대상 지정이 살아 있는 배포) '(전체)' 선택의 표기를
+    '근태 대상 부서'로 쓴다 — 대상 부서만 담은 화면에 '전체 부서'라고 쓰면 컨텍스트 줄이
+    사실과 다른 말을 한다(dashboard._scope_label 의 '근태 대상' 스탬프와 같은 규율).
+    폴백(지정 판독 불가)에서는 종전대로 '전체 부서'다.
+    """
     ym = f"{int(q['year'])}-{int(q['month']):02d}"
-    dept = "전체 부서" if q.get("dept") == ALL else (dept_names.get(q.get("dept"), q.get("dept")) or "전체 부서")
+    all_label = "근태 대상 부서" if tracked is not None else "전체 부서"
+    dept = all_label if q.get("dept") == ALL else (dept_names.get(q.get("dept"), q.get("dept")) or all_label)
     team = "전체 조" if q.get("team") == ALL else (team_names.get(q.get("team"), q.get("team")) or "전체 조")
     n_off = n_rows - n_work
     return (

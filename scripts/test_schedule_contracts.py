@@ -846,6 +846,128 @@ def test_dashboard_render_scope_gate() -> None:
         dash._duty_board = orig
 
 
+def test_dashboard_attendance_target_scope() -> None:
+    print("views.dashboard 근태 등록 대상 부서 한정(모집단 = 칩·명단·지표 공통, 폴백 보존)")
+    from datetime import date as _date
+    from views import dashboard as dash
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    day_date = _date(2026, 7, 1)
+    day = db.get_day_schedules(day_date)
+    merged = day.merge(db.get_users(), on="emp_no", how="left")
+    dept_of = merged["dept_code"].astype(str)
+
+    # (a) 모집단 해석 — 지정 가능한 환경에서는 대상 부서 집합.
+    tracked = dash._attendance_scope()
+    check("sample 지정 그대로(대상 부서만)", tracked == db.attendance_dept_codes(is_active=None))
+    check("대상 아닌 부서는 모집단 밖", "MGT" not in tracked and {"PET1", "PET2"} <= tracked)
+
+    saved_codes, saved_ready = db.attendance_dept_codes, db.attendance_flag_ready
+    seen: dict = {}
+
+    def _spy_codes(is_active=True):
+        seen["is_active"] = is_active
+        return {"PET1"}
+
+    try:
+        db.attendance_dept_codes = _spy_codes
+        check("대상이면 비활성 부서도 포함해 조회(과거 일자 조회 보존)",
+              dash._attendance_scope() == {"PET1"} and seen["is_active"] is None)
+        # (b) 폴백 — 지정을 판독할 수 없으면 필터 자체를 걸지 않는다(종전 전 부서).
+        db.attendance_flag_ready = lambda: False
+        check("ready=False → 무필터(None), 대상 조회도 하지 않음",
+              dash._attendance_scope() is None)
+    finally:
+        db.attendance_dept_codes, db.attendance_flag_ready = saved_codes, saved_ready
+
+    # (c) 집계 — 명단과 지표가 같은 트리에서 나오므로 모집단이 갈릴 수 없다.
+    base_tree, _ = dash._duty_board(day_date, tracked=None)
+    check("무필터(폴백)는 종전 전체 집계 그대로", len(_board_names(base_tree)) == len(day))
+    t_pet1, _ = dash._duty_board(day_date, tracked={"PET1"})
+    expect1 = int((dept_of == "PET1").sum())
+    check("대상 부서 근무자만 명단에 남는다",
+          len(_board_names(t_pet1)) == expect1 and expect1 < len(day))
+    totals1, _ = dash._summarize(t_pet1)
+    check("지표도 같은 모집단(지표 = 명단 합)",
+          sum(totals1.values()) == len(_board_names(t_pet1)))
+    t_pet2, _ = dash._duty_board(day_date, tracked={"PET2"})
+    check("대상 밖 부서 인원은 명단에도 지표에도 없다",
+          not (set(_board_names(t_pet2)) & set(_board_names(t_pet1)))
+          and sum(dash._summarize(t_pet2)[0].values()) == len(_board_names(t_pet2)))
+
+    # (d) 부서 필터 칩 — 대상 부서의 대분류만. '미분류'도 대상 안으로 좁혀진다.
+    depts = db.get_org_departments().copy()
+    depts.loc[depts["dept_code"] == "PET1",
+              ["major_category", "minor_category"]] = ["PET생산부", "PET생산팀"]
+    depts.loc[depts["dept_code"] == "PET2", ["major_category", "minor_category"]] = ["", ""]
+    _, chips_all = dash._duty_board(day_date, depts=depts, tracked=None)
+    check("전제: 폴백에서는 두 축(분류·미분류) 모두 칩",
+          chips_all == ["PET생산부", dash._UNCLASSIFIED_LABEL])
+    _, chips_pet1 = dash._duty_board(day_date, depts=depts, tracked={"PET1"})
+    check("대상 밖 부서의 대분류 칩은 사라진다", chips_pet1 == ["PET생산부"])
+    _, chips_pet2 = dash._duty_board(day_date, depts=depts, tracked={"PET2"})
+    check("'미분류' 칩 = 근태 대상인데 대분류가 빈 부서만",
+          chips_pet2 == [dash._UNCLASSIFIED_LABEL])
+
+    # (e) 지정 0건 — 빈 계층·빈 칩·지표 0(조용한 전 부서 노출 아님).
+    tree0, chips0 = dash._duty_board(day_date, tracked=set())
+    check("지정 0건 → 명단·칩 없음, 지표 0(fail-open 아님)",
+          tree0 == [] and chips0 == [] and sum(dash._summarize(tree0)[0].values()) == 0)
+
+    # (f) 소속을 해석하지 못한 근무행 — 대상 화면에서는 빠지고, 폴백에서는 종전대로 남는다.
+    ghost = day.iloc[[0]].copy()
+    ghost["emp_no"] = "9999"
+    rows = pd.concat([day, ghost], ignore_index=True)
+    t_ghost, _ = dash._duty_board(day_date, day_rows=rows, tracked={"PET1", "PET2"})
+    check("소속 미해석 근무행은 대상 부서 모집단 밖", len(_board_names(t_ghost)) == len(day))
+    t_ghost_fb, _ = dash._duty_board(day_date, day_rows=rows, tracked=None)
+    check("폴백에서는 종전대로 미분류에 남는다",
+          len(_board_names(t_ghost_fb)) == len(day) + 1)
+
+    # (g) 헤더 스탬프·빈 상태 문구.
+    check("스탬프: 필터가 살아 있으면 '전사' 아님",
+          dash._scope_label(dash._ALL_MAJORS, None, {"PET1"}) == "근태 대상")
+    check("스탬프: 폴백은 종전 '전사'",
+          dash._scope_label(dash._ALL_MAJORS, None, None) == "전사")
+    check("스탬프: 대분류 선택·MANAGER 표기는 무변경",
+          dash._scope_label("PET생산부", None, {"PET1"}) == "PET생산부"
+          and dash._scope_label(dash._ALL_MAJORS, "PET1", {"PET1"}) == db.dept_name("PET1"))
+    check("빈 상태: 지정 0건은 조직 관리 다음 행동을 가리킨다",
+          "조직 관리" in dash._empty_message(day_date, set(), None))
+    check("빈 상태: 담당 부서가 대상 아님을 구분",
+          "근태 등록 대상이 아닙니다" in dash._empty_message(day_date, {"PET1"}, "MGT"))
+    check("빈 상태: 그 외는 종전 '등록된 근무가 없습니다'",
+          "등록된 근무가 없습니다" in dash._empty_message(day_date, {"PET1"}, "PET1")
+          and "등록된 근무가 없습니다" in dash._empty_message(day_date, None, None))
+
+    # (h) render 회귀 가드 — 화면이 실제로 모집단을 집계에 넘기는가.
+    captured: dict = {}
+    orig_board = dash._duty_board
+
+    def _spy_board(*a, **k):
+        captured.update(k)
+        return ([], [])
+
+    st.session_state["dashboard_date"] = day_date
+    st.session_state["dash_date_input"] = day_date
+    dash._duty_board = _spy_board
+    try:
+        dash.render({"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"})
+        check("render 가 근태 대상 모집단을 집계에 전달",
+              captured.get("tracked") == dash._attendance_scope())
+        captured.clear()
+        db.attendance_flag_ready = lambda: False
+        dash.render({"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"})
+        check("폴백 배포에서는 무제한(None)으로 전달", captured.get("tracked") is None)
+    finally:
+        dash._duty_board = orig_board
+        db.attendance_flag_ready = saved_ready
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+
+
 def test_schedule_view_manager_scope_enforced() -> None:
     print("schedule_view MANAGER 잔존 조회조건 fail-closed(권한범위 재적용)")
     from streamlit.testing.v1 import AppTest
@@ -1088,6 +1210,189 @@ def test_month_view_scope_defaults() -> None:
           at_m.session_state["schedule_view_d"] == "PET1")
 
 
+def test_month_view_attendance_scope() -> None:
+    """월간 근무표 — 근태 등록 대상 부서만 목록·조회(2026-08-14 사용자 요구).
+
+    - 부서 옵션 · 조 옵션 · 표 행이 **같은 집합**으로 좁혀진다(고를 수는 있는데 0건인
+      조건을 남기지 않는다).
+    - 조회 화면이라 이력 보존이 우선이다: 대상 지정이 남아 있으면 **사용 중지 부서도**
+      조회하고(``is_active=None``), 지정 여부를 판정할 수 없는 부서코드(마스터에 없음·
+      미배정)는 감추지 않는다 — 차단 목록 방식.
+    - 로그인 사용자의 부서가 비대상이면 조회조건 시드가 일어나지 않는다(옵션 밖 값이
+      조건에 실려 빈 화면이 되는 경로 차단).
+    - 지정 컬럼을 판독할 수 없으면(``attendance_flag_ready()==False``) 종전 전 부서.
+    """
+    print("월간 근무표 — 근태 대상 부서 한정(옵션·조·행 동일 집합 · 이력 보존 · 시드 폴백)")
+    import inspect
+    from streamlit.testing.v1 import AppTest
+    from views import workspace
+
+    ALL = workspace.ALL
+    dept_names = {"PET1": db.dept_name("PET1"), "PET2": db.dept_name("PET2"),
+                  "MGT": db.dept_name("MGT")}
+
+    # (a) 옵션·차단 목록(순수) — 폴백은 원본 그대로.
+    check("폴백(None): 부서 옵션은 원본 그대로",
+          workspace.attendance_dept_options(dept_names, None) == dept_names)
+    check("대상 부서만 옵션에 남는다",
+          list(workspace.attendance_dept_options(dept_names, {"PET1", "PET2"}))
+          == ["PET1", "PET2"])
+    check("폴백(None): 차단 목록 없음(= 종전 전 부서 조회)",
+          workspace.attendance_blocked_depts(dept_names, None) == ())
+    check("차단은 '마스터에 있으면서 대상이 아닌' 부서만",
+          workspace.attendance_blocked_depts(dept_names, {"PET1", "PET2"}) == ("MGT",))
+    check("지정 0건이면 마스터 전 부서가 차단(조용한 전체 노출 아님)",
+          workspace.attendance_blocked_depts(dept_names, set())
+          == ("MGT", "PET1", "PET2"))
+
+    # (b) 조 옵션도 같은 집합 — 차단 부서에만 있는 조는 목록에서 사라진다.
+    teams = pd.DataFrame([
+        {"dept_code": "PET1", "team_code": "A", "team_name": "A조"},
+        {"dept_code": "MGT", "team_code": "M", "team_name": "관리조"},
+    ])
+    assigns = pd.DataFrame([
+        {"emp_no": "1", "dept_code": "PET1", "team_code": "A", "shift_group_code": "가조"},
+        {"emp_no": "2", "dept_code": "MGT", "team_code": "M", "shift_group_code": "관리"},
+    ])
+    check("차단 부서의 조(마스터·스냅샷 양축)는 옵션에서 제외",
+          set(workspace.team_filter_options(assigns, teams, ALL, ("MGT",))) == {"A", "가조"})
+    check("차단 목록이 없으면 종전 조 옵션 그대로",
+          set(workspace.team_filter_options(assigns, teams, ALL))
+          == {"A", "가조", "M", "관리"})
+
+    # (c) 표 행 — 스냅샷 기준(_eff_dept)으로 차단하며, 차단 목록 방식이라 판정 불가
+    #     부서코드(마스터에 없음·미배정)는 감추지 않는다.
+    check("행 필터는 차단 목록(허용 목록이 아니다 — 판정 불가 코드를 감추지 않음)",
+          '~users["_eff_dept"].isin(blocked_depts)'
+          in inspect.getsource(workspace._build_month_grid))
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    disp, _ = workspace.work_type_display()
+
+    def grid_for(excluded):
+        g, _rows = workspace._build_month_grid(
+            {"year": 2026, "month": 7, "dept": ALL, "team": ALL, "keyword": "",
+             "excluded_depts": excluded}, disp)
+        return set(g["사번"].astype(str)) if not g.empty else set()
+
+    base = grid_for(())
+    check("전제: 무제한 조회에 PET1·PET2 근무자가 함께 있다",
+          {"1003", "1005"} <= base)
+    scoped = grid_for(("PET2",))
+    check("차단 부서 근무자는 표 행에서 제외", "1005" not in scoped)
+    check("대상 부서 근무자는 그대로", "1003" in scoped and scoped < base)
+    check("지정 0건(전 부서 차단)이면 표가 비고, 데이터는 그대로 남는다",
+          grid_for(("MGT", "PET1", "PET2")) == set() and grid_for(()) == base)
+
+    # (d) 빈 상태 문구 — '사람이 없음'과 '대상이 아님'을 구분한다.
+    check("빈 상태: 지정 0건은 조직 관리 다음 행동을 가리킨다",
+          "조직 관리" in workspace.month_empty_message({"dept": ALL}, set()))
+    check("빈 상태: 선택 부서가 대상이 아님을 구분",
+          "근태 등록 대상이 아닙니다"
+          in workspace.month_empty_message({"dept": "MGT"}, {"PET1"}))
+    check("그 밖(폴백·정상 조건)은 종전 문구 그대로",
+          workspace.month_empty_message({"dept": ALL}, None)
+          == "조회 조건에 해당하는 직원이 없습니다."
+          and workspace.month_empty_message({"dept": "PET1"}, {"PET1"})
+          == "조회 조건에 해당하는 직원이 없습니다.")
+
+    # (e) 컨텍스트 줄 — 대상만 담은 화면에 '전체 부서'라고 쓰지 않는다.
+    ctx_q = {"year": 2026, "month": 7, "dept": ALL, "team": ALL}
+    check("컨텍스트 줄: 지정이 살아 있으면 '근태 대상 부서'",
+          "근태 대상 부서"
+          in workspace._view_context_html(ctx_q, {}, {}, 1, 1, 1, {"PET1"}))
+    check("컨텍스트 줄: 폴백은 종전 '전체 부서'",
+          "전체 부서" in workspace._view_context_html(ctx_q, {}, {}, 1, 1, 1, None))
+
+    # (f) 실렌더 — 비대상 부서(MGT) 사용자의 첫 진입. 시드가 옵션 밖 값을 심지 않는다.
+    def run(user, ready=None):
+        saved = db.attendance_flag_ready
+        if ready is not None:
+            db.attendance_flag_ready = lambda: ready
+        try:
+            at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
+            at.session_state["user"] = user
+            at.session_state["nav_page"] = "schedule_view"
+            at.session_state["schedule_view_y"] = 2026
+            at.session_state["schedule_view_m"] = 7
+            at.run()
+            return at
+        finally:
+            db.attendance_flag_ready = saved
+
+    def dept_options(at):
+        return next(
+            list(sb.options) for sb in at.selectbox if sb.key == "schedule_view_d"
+        )
+
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    admin_mgt = {"role": "ADMIN", "dept_code": "MGT", "team_code": "",
+                 "emp_no": "9001", "name": "관리자", "is_active": True}
+    at = run(admin_mgt)
+    check("비대상 부서 사용자: 렌더 예외 없음", not at.exception)
+    check("비대상 부서는 조회조건에 시드되지 않는다(빈 화면 방지)",
+          at.session_state["schedule_view_d"] == ALL)
+    check("부서 옵션에 비대상 부서 없음", db.dept_name("MGT") not in dept_options(at))
+    check("부서 옵션에 대상 부서는 그대로",
+          {db.dept_name("PET1"), db.dept_name("PET2")} <= set(dept_options(at)))
+    check("표가 비지 않는다(대상 부서 근무자 조회)",
+          any(d.label == "엑셀 다운로드" for d in at.get("download_button")))
+
+    # (g) 폴백(ready=False) — 종전과 동일하게 전 부서(옵션·시드 모두 복귀).
+    at_fb = run(admin_mgt, ready=False)
+    check("ready=False: 렌더 예외 없음", not at_fb.exception)
+    check("ready=False: 부서 옵션에 전 부서 복귀",
+          db.dept_name("MGT") in dept_options(at_fb))
+    check("ready=False: 시드도 종전대로 내 부서",
+          at_fb.session_state["schedule_view_d"] == "MGT")
+
+    # (h) 이력 보존 — 대상 집합 조회는 is_active=None(사용 중지 부서의 과거 근무 보존).
+    seen: dict = {}
+    saved_codes = db.attendance_dept_codes
+
+    def _spy(is_active=True):
+        seen["is_active"] = is_active
+        return {"PET1"}
+
+    captured: dict = {}
+    orig_build = workspace._build_month_grid
+
+    def _spy_build(q, display_of=None):
+        result = orig_build(q, display_of)
+        captured["q"] = dict(q)
+        captured["grid"] = result[0]
+        return result
+
+    try:
+        db.attendance_dept_codes = _spy
+        workspace._build_month_grid = _spy_build
+        at_h = run({"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"})
+    finally:
+        db.attendance_dept_codes = saved_codes
+        workspace._build_month_grid = orig_build
+    check("대상 집합 조회는 is_active=None(사용 중지 부서 이력 보존)",
+          seen.get("is_active") is None)
+    check("화면이 계산에 넘기는 차단 목록 = 마스터 − 대상",
+          captured.get("q", {}).get("excluded_depts") == ("MGT", "PET2"))
+    if "grid" in captured:
+        shown = set(captured["grid"]["사번"].astype(str))
+        check("대상(PET1) 근무자만 표에 남는다", "1003" in shown and "1005" not in shown)
+    check("실렌더 예외 없음", not at_h.exception)
+
+    # (i) 비대상 부서 MANAGER — 권한 게이트(부서 유효성)는 그대로 통과하고, 빈 이유를
+    #     '부서가 유효하지 않음'이 아니라 '근태 대상이 아님'으로 구분해 안내한다.
+    at_m = run({"role": "MANAGER", "dept_code": "MGT", "team_code": "",
+                "emp_no": "9002", "name": "관리팀장", "is_active": True})
+    md_m = " ".join(str(m.value) for m in at_m.markdown)
+    check("비대상 부서 MANAGER: 렌더 예외 없음", not at_m.exception)
+    check("비대상 부서 MANAGER: 권한 차단 문구가 아니라 근태 대상 안내",
+          "소속 부서가 유효하지 않아" not in md_m
+          and "근태 등록 대상이 아닙니다" in md_m)
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+
+
 def test_month_view_compact_layout() -> None:
     """좁은 폭(모바일)에서 성명 + 일자만 표시하고 표 높이를 뷰포트에 맞춘다.
 
@@ -1313,6 +1618,326 @@ def test_schedule_edit_org_axis() -> None:
           at.session_state["se_dirty"] is False)
 
 
+def test_schedule_edit_attendance_scope() -> None:
+    """근무표 편성 — 근태 등록 대상 부서만 목록·조회 (2026-08-14 사용자 지시).
+
+    "조직 관리에 근태 등록하는 부서만 지정 / 근태에서는 해당 조직만 목록이나 조회"
+      ① 조회 조건 '부서'(대분류)·'조' 선택지와 그리드 행이 **같은 기준**(근태 대상 부서)
+         으로 좁혀진다 — 선택지와 행이 어긋나면 '고르면 0건'인 죽은 선택지가 생긴다.
+      ② 지정 기능을 쓸 수 없으면(attendance_flag_ready False) 종전대로 전 부서다(fail-open).
+      ③ 비대상 부서로 저장된 기존 편성은 조용히 사라지지 않고 '제외 N명'으로 드러난다.
+      ④ MANAGER 부서 잠금은 근태 지정과 무관하다 — 잠금이 풀리면 전체가 열린다.
+    """
+    print("근무표 편성 — 근태 등록 대상 부서 필터(선택지·행·폴백·MANAGER)")
+    import inspect
+    from streamlit.testing.v1 import AppTest
+    from views import schedule_edit as se
+
+    src = (ROOT / "views" / "schedule_edit.py").read_text(encoding="utf-8")
+    render_src = inspect.getsource(se.render)
+
+    # (1) 순수 판정 — None(폴백)은 '필터 없음'이며 빈 집합으로 접히지 않는다.
+    check("폴백(None)은 전 부서 통과", se._tracked_dept("PET1", None))
+    check("지정 집합 안은 통과(공백 정규화)", se._tracked_dept(" PET1 ", {"PET1"}))
+    check("지정 밖은 제외", not se._tracked_dept("PET2", {"PET1"}))
+    check("지정 0건이면 어떤 부서도 통과하지 않음", not se._tracked_dept("PET1", set()))
+
+    # (2) 판정 원천은 파사드 하나 — 화면이 부서 플래그를 직접 읽거나 복제하지 않는다.
+    check("근태 대상 판정은 db 파사드", "db.attendance_dept_codes(" in src)
+    check("폴백 판정도 파사드", "db.attendance_flag_ready()" in src)
+    check("과거 편성 조회용으로 비활성 부서도 포함(is_active=None)",
+          "db.attendance_dept_codes(is_active=None)" in src)
+    check("화면이 부서 플래그 컬럼을 직접 인덱싱하지 않음(파사드 경유)",
+          '["tracks_attendance"]' not in src)
+    check("MANAGER 잠금 판정은 근태 지정과 무관(잠금 해제 = 전체 개방)",
+          'manager_locked = user["role"] == "MANAGER" and user.get("dept_code") in dept_names'
+          in render_src)
+    i_slot = render_src.find('st.container(key="se_notice")')
+    i_note = render_src.find("_scope_notice(")
+    i_grid = render_src.find('st.container(key="se_gridwrap")')
+    check("범위 안내는 알림 슬롯 안에서 렌더(그리드 위 새 최상위 요소 금지)",
+          0 <= i_slot < i_note < i_grid)
+
+    # (3) 선택지 유도 — 부서(대분류)·조 모두 근태 대상에서만.
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    base = db.get_org_departments().copy()
+    injected = base.copy()
+    injected.loc[injected["dept_code"] == "PET1",
+                 ["major_category", "minor_category"]] = ["PET생산부", "PET생산팀"]
+    injected.loc[injected["dept_code"] == "PET2",
+                 ["major_category", "minor_category"]] = ["PVC생산부", "PVC생산팀"]
+    injected["tracks_attendance"] = injected["dept_code"].astype(str).isin(["PET1"])
+    teams = db.get_teams()
+    t1 = str(teams[teams["dept_code"] == "PET1"].iloc[0]["team_code"])
+    t2 = str(teams[teams["dept_code"] == "PET2"].iloc[0]["team_code"])
+    try:
+        db.save_org_departments(injected[db.ORG_DEPT_COLUMNS])
+        # require_shift=False — 편성 화면과 같은 자유 텍스트 근무조 경로(2026-08-07 결정).
+        db.upsert_month_assignments([
+            {"emp_no": "1003", "schedule_month": "2026-07", "dept_code": "PET1",
+             "team_code": t1, "shift_group_code": "A"},
+            {"emp_no": "1005", "schedule_month": "2026-07", "dept_code": "PET2",
+             "team_code": t2, "shift_group_code": "B"},
+        ], require_shift=False)
+        dept_store = st.session_state[db._DEPTS_STORE].copy()
+        assign_store = st.session_state[db._ASSIGNMENTS_STORE].copy()
+
+        catalog = se._dept_catalog()
+        tracked = se._attendance_scope()
+        check("근태 대상 집합 = 지정 부서만", tracked == {"PET1"})
+        check("대분류 선택지는 근태 대상 부서의 대분류만",
+              se._major_options(2026, 7, catalog, tracked) == ["PET생산부"])
+        check("폴백은 종전 선택지(전 부서)",
+              se._major_options(2026, 7, catalog, None) == ["PET생산부", "PVC생산부"])
+        check("조 선택지도 근태 대상 부서에서만 유도",
+              se._shift_options(2026, 7, catalog, se._ALL, tracked) == ["A조"])
+        check("폴백 조 선택지는 종전대로 전 부서",
+              se._shift_options(2026, 7, catalog, se._ALL, None) == ["A조", "B조"])
+
+        # 이름 기반 제외(_EXCLUDED_MAJORS)와 명시 지정이 부딪히면 지정이 이긴다 —
+        # 사용자가 근태 대상으로 고른 부서를 화면이 대분류 이름으로 다시 감추지 않는다.
+        catalog_mgmt = {
+            "org_of": {"PET1": ("PET생산부", ""), "PET2": (se._EXCLUDED_MAJORS[0], "")},
+            "major_order": {"PET생산부": 1, se._EXCLUDED_MAJORS[0]: 2},
+            "name_codes": {}, "codes": {"PET1", "PET2"},
+        }
+        check("폴백에서는 이름 기반 대분류 제외를 유지",
+              se._major_options(2026, 7, catalog_mgmt, None) == ["PET생산부"])
+        check("지정이 동작하면 지정 부서는 이름 규칙보다 우선해 선택 가능",
+              se._major_options(2026, 7, catalog_mgmt, {"PET1", "PET2"})
+              == ["PET생산부", se._EXCLUDED_MAJORS[0]])
+
+        # (4) 실렌더 — AppTest 는 별도 세션이므로 sample backing store 를 함께 심는다.
+        def run_as(user, depts=None, ready=True):
+            original = db.attendance_flag_ready
+            if not ready:
+                db.attendance_flag_ready = lambda: False
+            try:
+                at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
+                at.session_state["user"] = user
+                at.session_state["nav_page"] = "schedule_edit"
+                at.session_state["se_y"] = 2026
+                at.session_state["se_m"] = 7
+                at.session_state[db._DEPTS_STORE] = \
+                    (dept_store if depts is None else depts).copy()
+                at.session_state[db._ASSIGNMENTS_STORE] = assign_store.copy()
+                return at.run()
+            finally:
+                db.attendance_flag_ready = original
+
+        def emps(at):
+            rows = at.session_state["se_rows"]
+            return [str(v).strip() for v in rows["사번"] if str(v).strip()]
+
+        def md(at):
+            return " ".join(str(m.value) for m in at.markdown)
+
+        admin = {"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"}
+        at = run_as(admin)
+        check("근태 필터 렌더 예외 없음", not at.exception)
+        check("행 목록이 근태 대상 부서 소속만",
+              sorted(emps(at)) == ["1002", "1003", "1004", "1007"])
+        check("비대상 부서(PET2) 편성 인원은 행에서 제외", "1005" not in emps(at))
+        check("제외 인원수를 세션에 남김", at.session_state["se_untracked"]["count"] == 1)
+        check("제외 사실을 안내 1줄로 드러냄(조용히 감추지 않음)",
+              "목록에서 제외했습니다" in md(at))
+        check("안내에 '저장된 근무는 남아 있다'를 함께 적음", "저장된 근무는 그대로" in md(at))
+        options = [list(sb.options) for sb in at.selectbox if sb.key == "se_d"]
+        check("부서 선택지에 근태 대상 대분류만",
+              options and "PET생산부" in options[0] and "PVC생산부" not in options[0])
+        check("부서 선택지의 [전체 부서]는 유지", options and "전체 부서" in options[0])
+
+        # (5) 폴백(attendance_flag_ready False) — 종전과 동일하게 전 부서.
+        at_fb = run_as(admin, ready=False)
+        check("폴백 렌더 예외 없음", not at_fb.exception)
+        check("폴백은 전 부서 행 복귀(비대상 필터 없음)",
+              sorted(emps(at_fb)) == ["1002", "1003", "1004", "1005", "1007"])
+        check("폴백에서는 제외 안내를 그리지 않음", "목록에서 제외했습니다" not in md(at_fb))
+        opts_fb = [list(sb.options) for sb in at_fb.selectbox if sb.key == "se_d"]
+        check("폴백 부서 선택지는 종전대로 전 대분류",
+              opts_fb and {"PET생산부", "PVC생산부"} <= set(opts_fb[0]))
+
+        # (6) MANAGER 소속 부서가 비대상 — 잠금은 유지하고 빈 화면의 사유를 밝힌다.
+        at_m = run_as({"role": "MANAGER", "dept_code": "PET2",
+                       "emp_no": "1006", "name": "강책임"})
+        check("MANAGER 비대상 부서 렌더 예외 없음", not at_m.exception)
+        check("MANAGER 비대상 부서: 기존 행 없음(신규 입력 행만)",
+              set(at_m.session_state["se_rows"]["_row_state"]) == {"new"})
+        check("MANAGER 비대상 부서: 사유를 경고로 안내(빈 화면 방치 금지)",
+              any("근태 등록 대상이 아닙니다" in str(w.value) for w in at_m.warning))
+        check("MANAGER 부서 잠금 유지(선택지는 자기 부서 1개 — 대분류로 넓히지 않음)",
+              any(sb.key == "se_d" and list(sb.options) == [db.dept_name("PET2")]
+                  for sb in at_m.selectbox))
+
+        # (7) 지정 0건 — 목록을 임의로 열지 않고 다음 행동을 안내한다.
+        none_store = dept_store.copy()
+        none_store["tracks_attendance"] = False
+        at_z = run_as(admin, depts=none_store)
+        check("지정 0건 렌더 예외 없음", not at_z.exception)
+        check("지정 0건: 기존 행 없음",
+              set(at_z.session_state["se_rows"]["_row_state"]) == {"new"})
+        check("지정 0건: 사유와 다음 행동 안내",
+              any("근태 등록 대상으로 지정된 부서가 없습니다" in str(w.value)
+                  for w in at_z.warning))
+        check("지정 0건에서도 제외 인원수는 그대로 드러냄",
+              at_z.session_state["se_untracked"]["count"] == 5)
+    finally:
+        db.save_org_departments(base[db.ORG_DEPT_COLUMNS])  # 다른 테스트 격리(원복)
+        st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+        st.session_state.pop(db._SCHEDULES_STORE, None)
+
+
+def test_schedule_edit_row_add_and_paste() -> None:
+    """근무표 편성 — 행 추가(헤더 아이콘) 실동작 + 다중 행 붙여넣기 자동 확장.
+
+    2026-08-14 사용자 신고 2건.
+      ① "행 추가가 먹통": 앱 셸이 헤더를 본문보다 먼저 그려서 render 말미의
+         publish_header_actions 발행값이 한 run 늦게 반영된다. [추가]는 미발행
+         기본값이 음영이라, 화면에 들어와 아무것도 만지지 않으면 발행값을 실을 rerun
+         자체가 생기지 않아 + 아이콘이 계속 음영으로 남았다 → 기준정보 3화면과 같은
+         따라잡기(_sync_header)로 닫는다.
+      ② "여러 줄 붙여넣으면 행이 자동 확장돼야 한다": 확장 자체는 공용 그리드의
+         네이티브 paste 핸들러가 클라이언트에서 수행하고(부족분 applyTransaction),
+         서버는 무명 행에 행 상태를 부여해 같은 저장 계약에 태운다(_sync_rows).
+         두 절반이 모두 살아 있어야 동작하므로 양쪽을 고정한다.
+    """
+    print("근무표 편성 — 행 추가 헤더 따라잡기 · 다중 행 붙여넣기 확장")
+    import inspect
+    from streamlit.testing.v1 import AppTest
+    from views import schedule_edit as se
+    from views import workspace as ws
+
+    render_src = inspect.getsource(se.render)
+
+    # (1) 따라잡기 배선 — 발행 뒤, **액션 flag 소비 뒤**에 호출해야 한다.
+    #     앞에서 rerun 하면 헤더 클릭으로 세팅된 flag 가 소비되기 전에 프레임이 끝난다.
+    i_pub = render_src.find("ui.publish_header_actions(")
+    i_add = render_src.find('st.session_state.pop("se_add_req"')
+    i_sync = render_src.find("_sync_header(header_states)")
+    check("헤더 발행 → 액션 flag 소비 → 따라잡기 순서", 0 <= i_pub < i_add < i_sync)
+    sync_src = inspect.getsource(se._sync_header)
+    check("발행값이 바뀐 run 에서만 재실행", "st.rerun()" in sync_src and "== payload" in sync_src)
+    check("폭주 방지 가드(연속 보정 상한)", "tries < 2" in sync_src)
+
+    # (2) 붙여넣기 확장의 클라이언트 절반 — 공용 핸들러가 부족한 행을 만들고,
+    #     편성 그리드가 그 핸들러를 실제로 물고 있어야 한다(둘 중 하나만 있어도 무용).
+    paste_src = str(ws._NATIVE_PASTE_HANDLER.js_code)
+    check("붙여넣기 핸들러가 부족분만큼 행을 생성", "missing > 0" in paste_src
+          and "applyTransaction" in paste_src)
+    check("확장은 편집 가능한 열에만 값을 쓴다(기존 행 읽기전용 열 보호)",
+          "editable" in paste_src)
+    grid_src = inspect.getsource(ws.selectable_master_grid)
+    check("편성 그리드가 공용 붙여넣기 핸들러를 물고 있음",
+          '"onGridReady": _NATIVE_PASTE_HANDLER' in grid_src)
+    check("화면이 onGridReady 를 덮어쓰지 않음(확장 무력화 방지)",
+          "onGridReady" not in render_src)
+
+    # (3) 붙여넣기 확장의 서버 절반 — 무명 행에 행 상태 부여 + 사번 자동 조회.
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    day_cols = ["1(수)"]
+    row_cols = se._META + se._FIXED + day_cols
+    st.session_state["se_rows"] = pd.DataFrame(
+        [{**{c: "" for c in row_cols}, "_row_id": "n:1", "_row_state": "new", "_sel": False}],
+        columns=row_cols,
+    )
+    st.session_state["se_days"] = [("1(수)", "2026-07-01")]
+    st.session_state["se_rid"] = 1
+    st.session_state.pop("se_users_map", None)
+    pasted = pd.DataFrame([
+        {"_row_id": "n:1", "_row_state": "new", "_sel": False, "_removed": "",
+         "사번": "1002", "성명": "", "대분류": "", "중분류": "", "부서": "", "조": "", "1(수)": ""},
+        # 붙여넣기로 생긴 행: 클라이언트 applyTransaction 은 필드가 비어 있다.
+        {"_row_id": "", "_row_state": "", "_sel": False, "_removed": "",
+         "사번": "1004", "성명": "", "대분류": "", "중분류": "", "부서": "", "조": "", "1(수)": ""},
+        {"_row_id": "", "_row_state": "", "_sel": False, "_removed": "",
+         "사번": "1007", "성명": "", "대분류": "", "중분류": "", "부서": "", "조": "", "1(수)": ""},
+    ])
+    changed = se._sync_rows(pasted, row_cols)
+    rows = st.session_state["se_rows"]
+    check("붙여넣기 행이 권위 상태에 그대로 남는다(버려지지 않음)", len(rows) == 3)
+    check("무명 행에 행 식별자 부여", all(str(v).strip() for v in rows["_row_id"]))
+    check("무명 행은 신규 행 상태(기존 행으로 둔갑 금지)",
+          set(rows["_row_state"]) == {"new"})
+    check("사번으로 성명 자동 조회", all(str(v).strip() for v in rows["성명"]))
+    check("사번으로 부서 자동 채움(저장 검증 통과 조건)",
+          all(str(v).strip() for v in rows["부서"]))
+    check("구조 변경이므로 재마운트 신호", changed is True)
+    for key in ("se_rows", "se_feed", "se_days", "se_rid", "se_nonce", "se_users_map"):
+        st.session_state.pop(key, None)
+
+    # (4) 실렌더 — 진입 직후(아무 상호작용 없이) + 아이콘이 활성이어야 한다.
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90)
+    at.session_state["user"] = {"role": "ADMIN", "dept_code": "", "emp_no": "9001", "name": "관리자"}
+    at.session_state["nav_page"] = "schedule_edit"
+    at.session_state["se_y"] = 2026
+    at.session_state["se_m"] = 7
+    at.run()
+    check("행 추가 렌더 예외 없음", not at.exception)
+    add_btns = [b for b in at.button if b.key == "app_hdr_add"]
+    check("헤더 [추가] 아이콘 존재", bool(add_btns))
+    check("진입 직후 [추가] 아이콘이 활성(먹통 회귀 차단)",
+          bool(add_btns) and not add_btns[0].disabled)
+    before = len(at.session_state["se_rows"])
+    at.session_state["se_add_req"] = True
+    at.run()
+    check("[추가] 1회 = 신규 행 1개", len(at.session_state["se_rows"]) == before + 1)
+    check("추가된 행은 신규 상태", str(at.session_state["se_rows"].iloc[-1]["_row_state"]) == "new")
+
+
+def test_schedule_edit_work_type_name_axis() -> None:
+    """근무표 편성 — 날짜 셀 표시·입력 축을 약칭에서 **명칭**으로 (2026-08-14 사용자 지시).
+
+    실데이터에서 약칭은 여러 근무형태가 공유해(한 약칭에 십수 개 코드) 왕복 변환이
+    모호해졌고, 기존 안전장치가 발동해 셀에 내부 코드가 보였다. 명칭은 유일하므로
+    모호성이 사라진다. **안전장치는 유지**한다: 명칭이 겹치면 코드로 표시하고, 입력이
+    여러 코드에 걸리면 저장을 막는다(AMBIG). 저장은 종전대로 내부 코드로 기록한다.
+    """
+    print("근무표 편성 — 근무형태 명칭 표시·입력 축")
+    from views import schedule_edit as se
+
+    st.session_state.pop(db._WORK_TYPES_STORE, None)
+    base = db.get_work_types().copy()
+    try:
+        display_of, codes, input_codes = se._label_maps()
+        by_code = {str(r["code"]).strip(): r for _, r in base.iterrows() if bool(r["is_active"])}
+        check("표시값이 약칭이 아니라 명칭",
+              all(display_of[c] == str(by_code[c]["name"]).strip() for c in by_code))
+        check("표시값과 약칭이 실제로 다른 케이스가 있다(축 전환 확인)",
+              any(display_of[c] != str(by_code[c]["short_label"]).strip() for c in by_code))
+        check("입력은 명칭을 받는다",
+              se._resolve_work(str(by_code["주"]["name"]).strip(), codes, input_codes) == "주")
+        check("입력은 약칭도 계속 받는다(하위 호환)",
+              se._resolve_work("주", codes, input_codes) == "주")
+        check("입력은 코드도 계속 받는다", se._resolve_work("OFF", codes, input_codes) == "OFF")
+        check("미등록 입력은 None(저장 차단)",
+              se._resolve_work("없는근무", codes, input_codes) is None)
+        check("색은 코드에 귀속(명칭으로 바뀌어도 같은 색)",
+              se._day_color_map(display_of).get(display_of["주"])
+              == str(by_code["주"]["color"]).strip())
+
+        # 명칭이 겹치는 데이터에서는 코드 폴백 + 모호 입력 차단(안전장치 유지).
+        dup = base.copy()
+        dup.loc[dup["code"] == "야", "name"] = str(by_code["주"]["name"]).strip()
+        st.session_state[db._WORK_TYPES_STORE] = dup
+        d2, c2, i2 = se._label_maps()
+        check("명칭 중복이면 코드로 표시(왕복 모호성 방지)",
+              d2["주"] == "주" and d2["야"] == "야")
+        check("모호한 입력은 AMBIG(저장 차단)",
+              se._resolve_work(str(by_code["주"]["name"]).strip(), c2, i2) == "AMBIG")
+    finally:
+        st.session_state[db._WORK_TYPES_STORE] = base
+
+    # 일자 열 폭은 표시값에서 유도하되 밀도 상한을 지킨다(하드코딩 폭 아님).
+    check("짧은 표시값에서는 종전 폭 유지", se._day_width(["주", "야", "OFF"]) == se._DAY_W_MIN)
+    check("긴 명칭은 상한에서 멈춘다(31일 매트릭스 밀도 보호)",
+          se._day_width(["경조(자녀결혼)"]) == se._DAY_W_MAX)
+    check("중간 길이는 내용에 맞춰 늘어난다",
+          se._DAY_W_MIN <= se._day_width(["야간"]) <= se._DAY_W_MAX)
+    check("빈 목록도 안전(하한)", se._day_width([]) == se._DAY_W_MIN)
+
+
 def main() -> int:
     for test in (
         test_normalize_schedule_month,
@@ -1327,15 +1952,20 @@ def main() -> int:
         test_dashboard_board_contracts,
         test_dashboard_scope_and_safety,
         test_dashboard_render_scope_gate,
+        test_dashboard_attendance_target_scope,
         test_month_grid_snapshot,
         test_month_grid_org_labels_and_order,
         test_retired_employee_month_display,
         test_schedule_view_manager_scope_enforced,
         test_month_view_top_actions,
         test_month_view_scope_defaults,
+        test_month_view_attendance_scope,
         test_month_view_compact_layout,
         test_schedule_edit_row_reorder,
         test_schedule_edit_org_axis,
+        test_schedule_edit_attendance_scope,
+        test_schedule_edit_row_add_and_paste,
+        test_schedule_edit_work_type_name_axis,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")

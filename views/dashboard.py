@@ -15,6 +15,11 @@ USER 는 본인 근무 현황을 표시한다. 데이터는 db 파사드를 통�
 "조직"은 중분류(minor_category)다(migration 009). 인원은 **중분류 단위로 합산**하므로
 1팀/2팀·1파트/2파트 같은 하위 분할은 화면에 나타나지 않는다. 어떤 분류명도 코드에
 고정하지 않으며, 유일한 예외는 사용자가 지정한 제외 규칙(아래 상수)이다.
+
+모집단: 조직 관리에서 지정한 **근태(근무표) 등록 대상 부서**뿐이다(migration 011 ·
+``db.attendance_dept_codes``). 지표·부서 필터 칩·명단이 모두 이 한 모집단에서 나오므로
+셋이 서로 다른 말을 하지 않는다. 지정 컬럼을 판독할 수 없는 배포에서는 종전처럼 전
+부서를 본다(``db.attendance_flag_ready()`` 폴백 — 조회 한정 fail-open).
 """
 # DESIGN.md §0 화면 유형 규약 — 대시보드형.
 SCREEN_ARCHETYPE = "DASHBOARD"
@@ -104,6 +109,24 @@ def _scope_for(user: dict) -> tuple[str, str | None]:
     return ("blocked", None)
 
 
+def _attendance_scope() -> set[str] | None:
+    """이 화면의 부서 모집단(근태 등록 대상). ``None`` 이면 제한 없음(종전 전 부서).
+
+    - 지정 컬럼을 쓸 수 있으면 근태 등록 대상 부서코드 집합을 돌려준다. **비활성 부서도
+      포함**한다(``is_active=None``) — 이 화면은 과거 일자도 조회하고, 지금도 비활성
+      부서로 등록된 근무행을 버리지 않는다(:func:`_dept_index`). 새로 좁히는 축은
+      '근태 대상 여부' 하나뿐이며 사용 여부 축의 거동은 종전 그대로다.
+    - ``attendance_flag_ready()`` 가 False 면(스키마 미적용 배포) ``None`` 을 돌려
+      **필터 자체를 걸지 않는다**. 이 상태에서 ``attendance_dept_codes()`` 는 전 부서를
+      True 로 폴백하지만, 그 결과로 ``isin`` 필터를 걸면 부서 기준정보에 없는 코드의
+      근무행이 조용히 사라진다(종전에는 미분류로 남았다). 폴백은 "종전과 동일"이어야
+      하므로 집합이 아니라 무필터로 표현한다.
+    """
+    if not db.attendance_flag_ready():
+        return None
+    return db.attendance_dept_codes(is_active=None)
+
+
 def render(user: dict) -> None:
     role = _clean(user.get("role")).upper()
     if role == "USER":
@@ -130,10 +153,11 @@ def render(user: dict) -> None:
         return
 
     the_date = _resolve_date()
-    # 조직 조회(부서 기준정보·편성 스냅샷)도 오류 처리 범위에 포함한다 — 근무 조회만
-    # 감싸면 계층 구성 중 데이터소스 오류가 화면 전체 예외가 된다.
+    # 조직 조회(부서 기준정보·근태 대상 지정·편성 스냅샷)도 오류 처리 범위에 포함한다 —
+    # 근무 조회만 감싸면 계층 구성 중 데이터소스 오류가 화면 전체 예외가 된다.
     try:
-        tree, majors = _duty_board(the_date, manager_dept=manager_dept)
+        tracked = _attendance_scope()
+        tree, majors = _duty_board(the_date, manager_dept=manager_dept, tracked=tracked)
     except db.DATA_SOURCE_ERRORS as exc:
         st.error(f"근무 데이터를 불러오지 못했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
         return
@@ -149,7 +173,7 @@ def render(user: dict) -> None:
     # 상단 52px 헤더 우측 스탬프 — 조회 행과 **같은 run 에서** 같은 값을 채운다(슬롯 방식).
     ui.header_stamp(
         f"{the_date.isoformat()} ({ui.weekday_kr(the_date)}) · "
-        f"{_scope_label(picked, manager_dept)}"
+        f"{_scope_label(picked, manager_dept, tracked)}"
     )
 
     # ③ 지표 스트립(제목·조회 행 아래 첫 블록, §0-4). 값은 ④ 명단과 같은 집계에서
@@ -159,18 +183,41 @@ def render(user: dict) -> None:
     # ④ 부서별 근무자.
     if not shown:
         ui.empty_state(
-            f"{the_date.isoformat()}({ui.weekday_kr(the_date)}) 등록된 근무가 없습니다.",
-            head="부서별 근무자",
+            _empty_message(the_date, tracked, manager_dept), head="부서별 근무자"
         )
         return
     st.markdown(_people_html(shown, columns), unsafe_allow_html=True)
 
 
-def _scope_label(picked: str, manager_dept: str | None) -> str:
-    """헤더 스탬프의 범위 표기 — MANAGER 는 담당 부서, ADMIN 은 선택 대분류(기본 전사)."""
+def _scope_label(picked: str, manager_dept: str | None,
+                 tracked: set | None = None) -> str:
+    """헤더 스탬프의 범위 표기 — MANAGER 는 담당 부서, ADMIN 은 선택 대분류.
+
+    ADMIN 이 '전체' 칩을 고른 상태에서 화면이 실제로 담는 것은 근태 등록 대상 부서
+    전부다. 그래서 필터가 살아 있으면 '전사' 대신 '근태 대상'이라고 쓴다 — 4개 부서만
+    보이는 화면에 '전사'라고 쓰면 스탬프가 사실과 다른 말을 한다. 필터가 없는 폴백
+    상태에서는 종전대로 '전사'다.
+    """
     if manager_dept:
         return db.dept_name(manager_dept) or manager_dept
-    return "전사" if picked == _ALL_MAJORS else picked
+    if picked != _ALL_MAJORS:
+        return picked
+    return "전사" if tracked is None else "근태 대상"
+
+
+def _empty_message(the_date: date, tracked: set | None,
+                   manager_dept: str | None) -> str:
+    """명단이 비었을 때의 한 줄 안내 — '근무가 없다'와 '대상 부서가 아니다'는 다르다.
+
+    지정이 하나도 없거나 담당 부서가 대상이 아니면 조회 결과가 아니라 조직 관리에서
+    할 일이 남은 상태이므로, 다음 행동을 가리키는 문구를 쓴다(§6 카피: 한 줄·실무체).
+    """
+    if tracked is not None:
+        if not tracked:
+            return "조직 관리에서 근태 등록 대상 부서를 지정하면 근무 현황이 표시됩니다."
+        if manager_dept and manager_dept not in tracked:
+            return "담당 부서가 근태 등록 대상이 아닙니다. 조직 관리에서 지정을 확인하세요."
+    return f"{the_date.isoformat()}({ui.weekday_kr(the_date)}) 등록된 근무가 없습니다."
 
 
 # ---------- ② 조회 행 ----------
@@ -214,6 +261,11 @@ def _query_row(the_date: date, majors: list) -> str:
     칩은 대분류 데이터에서 만든다('전체' + 근무자가 있는 대분류) — 대분류명을 코드에
     박지 않으므로 조직 개편이 그대로 반영되고, 근무자가 없는 대분류는 칩도 생기지
     않는다. 선택값은 canonical 키에 보관해 화면을 떠났다 돌아와도 유지한다.
+
+    칩 목록은 :func:`_duty_board` 가 돌려준 계층에서 그대로 나오므로 **근태 등록 대상
+    부서의 대분류만** 남는다(별도 필터를 두 번 걸지 않는다). '미분류' 칩도 같은 이유로
+    "근태 대상인데 대분류가 비어 있는 부서"만 뜻하게 좁혀진다 — 감추지 않는 이유는
+    종전과 같다(조직 관리에서 채워야 할 입력 누락을 관리자가 발견해야 한다).
     """
     options = [_ALL_MAJORS] + list(majors)
     stored = st.session_state.get(_DASHBOARD_MAJOR)
@@ -317,7 +369,8 @@ def _dept_index(depts) -> tuple[dict, set]:
     return index, excluded
 
 
-def _duty_board(the_date, *, manager_dept=None, depts=None, users=None, day_rows=None):
+def _duty_board(the_date, *, manager_dept=None, tracked=None,
+                depts=None, users=None, day_rows=None):
     """선택 일자의 근무행을 부서(대분류) → 조직(중분류) → 버킷별 명단으로 모은다.
 
     - 소속 판정: 그 달 편성 스냅샷 우선, 없으면 현재 users 소속 폴백(표시용·저장 금지).
@@ -326,7 +379,10 @@ def _duty_board(the_date, *, manager_dept=None, depts=None, users=None, day_rows
       부서명을 조직 라벨로 쓴다.
     - 근무자가 없는 조직·부서는 애초에 생기지 않는다(근무행에서만 계층을 만든다).
     - ``manager_dept`` 가 지정되면 그 부서 근무자만 집계한다(MANAGER 범위).
-    - depts/users/day_rows 는 테스트 주입용.
+    - ``tracked`` 가 부서코드 집합이면 그 부서(근태 등록 대상)만 집계한다. ``None``
+      (기본)이면 제한이 없다 — 화면은 :func:`_attendance_scope` 로 값을 만들어 넘긴다.
+      **지표·칩·명단이 모두 이 한 트리에서 파생**하므로 모집단이 갈릴 수 없다.
+    - tracked/depts/users/day_rows 는 화면(및 테스트)이 주입한다.
 
     반환: ``(tree, majors)``
       - tree: ``[{name, unclassified, orgs:[{name, people:{버킷:[{name, emp_no}]}}]}]``
@@ -352,6 +408,11 @@ def _duty_board(the_date, *, manager_dept=None, depts=None, users=None, day_rows
             continue  # MANAGER 담당 부서 범위 밖
         if dept in excluded or dept.upper() in _EXCLUDED_DEPT_CODES:
             continue  # 제외 규칙(시스템 부서·제외 대분류)
+        # 근태 등록 대상 지정(조직 관리 · migration 011). 소속을 해석하지 못한 근무행
+        # (dept 공백)도 여기서 빠진다 — 어느 대상 부서에도 속하지 않는 근무를 '대상
+        # 부서만' 보는 화면에 남길 근거가 없다. 지표는 명단의 합이므로 같이 빠진다.
+        if tracked is not None and dept not in tracked:
+            continue
         major, minor, order, dept_name = index.get(
             dept, ("", "", _TAIL_ORDER, db.dept_name(dept) or dept)
         )

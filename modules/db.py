@@ -95,9 +95,12 @@ ORG_GROUP_COLUMNS = ["group_code", "group_name", "sort_order", "description", "i
 # major_category/minor_category: 사람이 직접 입력하는 조직 계층 2단 (migration 009).
 # 그룹 시트 폐지(2026-08-07 사용자 결정)로 계층 표현의 주역이 group_code 에서 이 둘로
 # 넘어왔다. group_code 는 계약에 남겨두되 화면에서 편집하지 않는다 — 기존 값 보존용.
+# tracks_attendance: 근태(근무표) 등록 대상 부서 지정 (도입: migration 011).
+# 근무를 실제로 편성·등록하는 조직만 True 이며, 편성/월간 근무표/대시보드의 조직
+# 목록·조회를 이 값으로 좁힌다. 집행은 화면이 attendance_dept_codes() 로 한다.
 ORG_DEPT_COLUMNS = [
     "dept_code", "dept_name", "group_code", "major_category", "minor_category",
-    "description", "sort_order", "is_active",
+    "description", "sort_order", "is_active", "tracks_attendance",
 ]
 ORG_TEAM_COLUMNS = [
     "dept_code", "team_code", "team_name", "unit_type", "description", "sort_order", "is_active",
@@ -130,7 +133,7 @@ SCHEDULE_ASSIGNED_COLUMNS = SCHEDULE_COLUMNS + [
     "schedule_month", "dept_code", "team_code", "shift_group_code",
 ]
 
-_BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance"}
+_BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance", "tracks_attendance"}
 _INTEGER_COLUMNS = {"sort_order"}
 
 # 로컬 샘플 모드에서 편집 결과를 담아 세션 동안 유지하는 스토어 키.
@@ -436,11 +439,19 @@ def _emp_no_by_id() -> dict:
 
 # --- 기준정보 조회 ---
 def _base_departments() -> pd.DataFrame:
-    """샘플 CSV 를 화면용 부서 컬럼(DEPT_COLUMNS)으로 정리한 원본."""
+    """샘플 CSV 를 화면용 부서 컬럼(DEPT_COLUMNS)으로 정리한 원본.
+
+    근태 대상 지정(tracks_attendance)은 DEPT_COLUMNS 가 아니라 조직 화면 계약
+    (ORG_DEPT_COLUMNS)의 컬럼이지만, sample 부서 backing store 는 하나뿐이므로
+    (store 이원화 금지) CSV 에 있으면 seed 단계에서 함께 싣는다.
+    """
     df = sample_data.departments()
     if df.empty:
         return _typed_empty_frame(DEPT_COLUMNS)
-    return df[DEPT_COLUMNS].reset_index(drop=True).copy()
+    columns = list(DEPT_COLUMNS)
+    if "tracks_attendance" in df.columns:
+        columns.append("tracks_attendance")
+    return df[columns].reset_index(drop=True).copy()
 
 
 def _dept_store() -> pd.DataFrame:
@@ -624,6 +635,8 @@ def reset_org_schema_cache() -> None:
         # 009(부서 분류·재직기간) probe 도 함께 재확인한다 — 앱이 009 적용 전에 기동한
         # 경우 이 경로 없이는 프로세스 재시작 전까지 폴백 분기에 갇힌다.
         supabase_repository.reset_org_category_readiness()
+        # 근태 대상 지정(011) probe 도 같은 이유로 함께 재확인한다.
+        supabase_repository.reset_attendance_flag_readiness()
         # readiness 가 바뀌면 조직 조회의 분기(폴백↔완전 조직 뷰)가 달라지므로 관련
         # 읽기·매핑 캐시를 함께 비워 다음 렌더가 새 분기로 재조회하게 한다.
         _invalidate_all()
@@ -684,6 +697,12 @@ def _org_dept_view(store: pd.DataFrame) -> pd.DataFrame:
         if col not in frame.columns:
             frame[col] = ""
         frame[col] = frame[col].fillna("").astype(str)
+    # 근태 대상 지정(011). 레거시 스토어(이 컬럼 이전에 만들어진 세션)에 없으면
+    # supabase 미적용 폴백과 같은 방향으로 True = 전 부서 대상으로 시작한다 —
+    # 값을 모른다고 근무표 조직 목록을 비우지 않는다(sample/live 동형).
+    if "tracks_attendance" not in frame.columns:
+        frame["tracks_attendance"] = True
+    frame["tracks_attendance"] = frame["tracks_attendance"].fillna(True).astype(bool)
     return frame[ORG_DEPT_COLUMNS].reset_index(drop=True)
 
 
@@ -823,6 +842,8 @@ def get_org_departments(
         df["description"] = ""
         df["major_category"] = ""
         df["minor_category"] = ""
+        # 근태 대상 지정(011)을 확인할 수 없는 경로 — 전 부서 대상으로 폴백한다.
+        df["tracks_attendance"] = True
     if group_code is not None and not df.empty:
         df = df[df["group_code"].astype(str).str.strip() == str(group_code).strip()]
     if is_active is not None and not df.empty:
@@ -830,19 +851,53 @@ def get_org_departments(
     return _empty_contract(df[ORG_DEPT_COLUMNS].reset_index(drop=True), ORG_DEPT_COLUMNS)
 
 
+def _org_dept_write_frame(df: pd.DataFrame, current: pd.DataFrame) -> pd.DataFrame:
+    """조직 화면 부서 저장 입력을 ORG_DEPT_COLUMNS 계약으로 정규화한다.
+
+    핵심은 근태 대상 지정(tracks_attendance)의 **왕복 보존**이다. 편집 그리드가 아직
+    이 컬럼을 다루지 않으면 저장 입력에 컬럼이 아예 없거나 값이 비어 들어온다. 그
+    상태를 boolean 으로 접으면(빈 값 → False) 조직 화면 저장 한 번에 전 부서 지정이
+    풀린다. 그래서 값이 없는 행은 **현재 저장된 값**으로 되돌려 채운다.
+
+    현재 값이 없는(=신규) 부서는 False 로 시작한다 — 근태 대상은 명시 지정이 원칙이며
+    migration 011 의 컬럼 기본값과 같은 방향이다. sample/supabase 두 모드에 같은
+    정규화를 적용해 저장 거동을 동형으로 유지한다.
+    """
+    keep = [c for c in ORG_DEPT_COLUMNS if c in df.columns]
+    normalized = df[keep].reset_index(drop=True).copy()
+    if normalized.empty:
+        if "tracks_attendance" not in normalized.columns:
+            normalized["tracks_attendance"] = pd.Series(dtype="bool")
+        return normalized
+    stored: dict[str, bool] = {}
+    if not current.empty and "tracks_attendance" in current.columns:
+        stored = {
+            str(code).strip(): bool(flag)
+            for code, flag in zip(current["dept_code"], current["tracks_attendance"])
+        }
+    if "tracks_attendance" not in normalized.columns:
+        normalized["tracks_attendance"] = pd.NA
+    codes = normalized["dept_code"].astype(str).str.strip()
+    fallback = codes.map(lambda code: stored.get(code, False))
+    flags = normalized["tracks_attendance"]
+    normalized["tracks_attendance"] = flags.where(flags.notna(), fallback).astype(bool)
+    return normalized[[c for c in ORG_DEPT_COLUMNS if c in normalized.columns]]
+
+
 def save_org_departments(df: pd.DataFrame) -> None:
     """조직 관리 화면의 부서 편집 결과를 저장한다 (변경 행만 upsert).
 
     부서→그룹 귀속은 group_code(내부 group_id FK)로 저장한다. 저장코드(dept_code)는
-    수정 불가이며, 신규 부서만 새 코드로 insert 한다.
+    수정 불가이며, 신규 부서만 새 코드로 insert 한다. 근태 대상 지정은 값이 없으면
+    현재 저장값을 보존한다(_org_dept_write_frame).
     """
-    keep = [c for c in ORG_DEPT_COLUMNS if c in df.columns]
-    normalized = df[keep].reset_index(drop=True).copy()
+    current = get_org_departments()
+    normalized = _org_dept_write_frame(df, current)
     if is_sample_mode():
         st.session_state[_DEPTS_STORE] = normalized
         return
     changed = _changed_records(
-        get_org_departments(), normalized, ["dept_code"], ORG_DEPT_COLUMNS
+        current, normalized, ["dept_code"], ORG_DEPT_COLUMNS
     )
     try:
         supabase_repository.upsert_departments_org(changed)
@@ -855,13 +910,13 @@ def save_org_departments_report(df: pd.DataFrame) -> BatchWriteResult:
 
     조직 스키마 capability(도입: migration 004) 미준비 supabase 모드에서는 repository 가 전체
     failed(비재시도) 원장을 반환한다."""
-    keep = [c for c in ORG_DEPT_COLUMNS if c in df.columns]
-    normalized = df[keep].reset_index(drop=True).copy()
+    current = get_org_departments()
+    normalized = _org_dept_write_frame(df, current)
     if is_sample_mode():
         st.session_state[_DEPTS_STORE] = normalized
         return _sample_report(normalized.to_dict("records"), ["dept_code"])
     changed = _changed_records(
-        get_org_departments(), normalized, ["dept_code"], ORG_DEPT_COLUMNS
+        current, normalized, ["dept_code"], ORG_DEPT_COLUMNS
     )
     if not changed:
         return BatchWriteResult()
@@ -869,6 +924,42 @@ def save_org_departments_report(df: pd.DataFrame) -> BatchWriteResult:
         return supabase_repository.upsert_departments_org_reported(changed)
     finally:
         _invalidate_departments()
+
+
+# --- 근태(근무표) 등록 대상 부서 조회 헬퍼 (도입: migration 011) ----------------
+def attendance_flag_ready() -> bool:
+    """근태 대상 지정 값을 실제로 저장/판독할 수 있는지 여부.
+
+    sample 모드는 항상 True. supabase 모드는 라이브 스키마를 read-only 로 확인한다.
+    False 이면 ``attendance_dept_codes()`` 가 전 부서를 반환하는 폴백 상태다.
+    """
+    if is_sample_mode():
+        return True
+    return supabase_repository.attendance_flag_ready()
+
+
+def attendance_dept_codes(is_active: bool | None = True) -> set[str]:
+    """근태(근무표) 등록 대상 부서코드 집합.
+
+    편성·월간 근무표·대시보드가 조직 목록과 조회 범위를 좁히는 단일 기준이다.
+    화면은 ``df[df["dept_code"].isin(db.attendance_dept_codes())]`` 형태로 쓴다.
+
+    - ``is_active=True``(기본): 사용 중이면서 근태 대상인 부서만.
+    - ``is_active=None``: 사용 여부와 무관하게 근태 대상인 부서 전부(과거 자료 조회용).
+
+    **폴백 계약**: 근태 대상 지정 컬럼이 없는 환경(스키마 미적용 배포)에서는 조회
+    계층이 전 부서를 True 로 폴백하므로 이 함수도 전 부서 코드를 반환한다. 플래그를
+    모른다고 빈 집합을 돌려주면 근무표·편성·대시보드가 통째로 비어 더 큰 사고가 된다.
+    이 fail-open 은 **조회 한정**이며, 지정값 저장은 여전히 fail-closed 다
+    (supabase_repository._departments_org_payload).
+    """
+    frame = get_org_departments(is_active=is_active)
+    if frame.empty or "tracks_attendance" not in frame.columns:
+        return set()
+    tracked = frame[frame["tracks_attendance"].fillna(True).astype(bool)]
+    return {
+        code for code in tracked["dept_code"].astype(str).str.strip() if code
+    }
 
 
 # --- 운영단위(teams, dept_code→department_id FK) ---

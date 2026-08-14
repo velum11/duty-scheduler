@@ -1,4 +1,4 @@
-id,dept_code,dept_name,sort_order,is_active
-1,PET1,PET생산부(본동),1,true
-2,PET2,PET생산부(원료실),2,true
-3,MGT,생산관리팀,3,true
+id,dept_code,dept_name,sort_order,is_active,tracks_attendance
+1,PET1,PET생산부(본동),1,true,true
+2,PET2,PET생산부(원료실),2,true,true
+3,MGT,생산관리팀,3,true,false

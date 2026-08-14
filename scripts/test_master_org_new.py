@@ -448,19 +448,24 @@ def _dirty_probe():
     import pandas as pd
     import streamlit as st
     from views import master_org as mo
-    # baseline 튜플은 _DEPT_COLS 순서(대분류·중분류·코드·코드명·순서·비고·사용)를 따른다.
+    # baseline 튜플은 _DEPT_COLS 순서(대분류·중분류·코드·코드명·근태 등록 대상·순서·
+    # 비고·사용)를 따른다 — 근태 등록 대상(011)은 코드명 뒤 다섯째 칸이다.
+    _ATT = mo._ATTENDANCE_COL
     st.session_state[mo._OD.key("baseline")] = {
-        "e:D1": ("", "", "D1", "PET생산부", "1", "", "True"),
+        "e:D1": ("", "", "D1", "PET생산부", "True", "1", "", "True"),
     }
     live = pd.DataFrame([
         {"_row_id": "e:D1", "_row_state": "existing", "_sel": False, "대분류": "", "중분류": "",
-         "코드": "D1", "코드명": "PET생산부수정", "순서": "1", "비고": "", "사용": True},   # 기존 변경 1
+         "코드": "D1", "코드명": "PET생산부수정", _ATT: True,
+         "순서": "1", "비고": "", "사용": True},                                          # 기존 변경 1
         {"_row_id": "e:D2", "_row_state": "existing", "_sel": False, "대분류": "", "중분류": "",
-         "코드": "D2", "코드명": "원료실", "순서": "2", "비고": "", "사용": True},          # 변경 없음(집계 제외)
+         "코드": "D2", "코드명": "원료실", _ATT: True,
+         "순서": "2", "비고": "", "사용": True},                                          # 변경 없음(집계 제외)
         {"_row_id": "n:1", "_row_state": "new", "_sel": False, "대분류": "", "중분류": "",
-         "코드": "NEW", "코드명": "새부서", "순서": "3", "비고": "", "사용": True},          # 신규 1
+         "코드": "NEW", "코드명": "새부서", _ATT: False,
+         "순서": "3", "비고": "", "사용": True},                                          # 신규 1
     ])
-    st.session_state[mo._OD.key("baseline")]["e:D2"] = ("", "", "D2", "원료실", "2", "", "True")
+    st.session_state[mo._OD.key("baseline")]["e:D2"] = ("", "", "D2", "원료실", "True", "2", "", "True")
     new_cnt, changed_cnt = mo._dirty_counts(mo._OD, live, mo._DEPT_COLS)
     st.write(f"NEW={new_cnt};CHANGED={changed_cnt};TOTAL={mo.dirty_total(new_cnt, changed_cnt)}")
 
@@ -718,6 +723,212 @@ check("(f) 3시트 save 가 partial 에서만 reconcile 호출(3건)", src.count
 check("(f) 3시트 save 가 unknown 분기에서 ledger_banner 만(재조회 필요)",
       src.count('if outcome.status == "unknown":') == 3)
 check("(f) 성공분만 save_ledger 세션 보관 후 rerun(3건)", src.count('.key("save_ledger")] = outcome.result') == 3)
+
+
+# ===== 9) 근태 등록 대상 지정 열(migration 011) =====
+# 2026-08-14 사용자 지시: "조직 관리에 근태 등록하는 부서만 지정할 수 있게".
+# 계약: (1) 보이는 편집 열이다(숨김 금지 — 왕복하지 않으면 저장이 지정을 못 싣는다),
+# (2) `사용`(is_active)은 계속 마지막 열이고 지정 열은 코드명 뒤에 온다,
+# (3) 신규 행 기본값은 미지정(False), (4) 저장 왕복에서 다른 컬럼이 소실되지 않는다.
+print("근태 등록 대상(011) — 열 계약·기본값·저장 왕복·상태 칩")
+_ATT = master_org._ATTENDANCE_COL
+check("정본 용어 그대로 사용(requirements §6 · docs/database.md)", _ATT == "근태 등록 대상")
+check("부서 시트에 보이는 데이터 열로 존재(숨김 컬럼 아님)", _ATT in master_org._DEPT_COLS)
+check("열 위치: 코드명 다음", master_org._DEPT_COLS.index(_ATT) == master_org._DEPT_COLS.index("코드명") + 1)
+check("`사용`(is_active)은 종전대로 마지막 열", master_org._DEPT_COLS[-1] == "사용")
+check("타 컬럼 순서·구성 보존(대분류·중분류·코드·코드명 / 순서·비고·사용)",
+      [c for c in master_org._DEPT_COLS if c != _ATT]
+      == ["대분류", "중분류", "코드", "코드명", "순서", "비고", "사용"])
+check("bool 열로 선언(native 체크박스 — JsCode 렌더러 미사용)",
+      master_org._DEPT_GRID_COLUMNS.get(_ATT) == "bool" and "_BOOL_RENDERER" not in src)
+check("행 컬럼 계약에도 반영(_DEPT_ROW_COLS)", _ATT in master_org._DEPT_ROW_COLS)
+_att_cfg = master_org._dept_col_config()[_ATT]
+check("헤더 잘림 방지 폭 + 내용 맞춤(체크박스라 flex 확장 없음)",
+      _att_cfg.get("flex") == 0 and _att_cfg.get("minWidth", 0) >= 96)
+check("체크박스 열 가운데 정렬(사용 열과 같은 어휘)", "md-c-center" in _att_cfg.get("cellClass", ""))
+check("보호 행(ADMIN)은 지정도 편집 불가(사용 열과 같은 규칙)",
+      _att_cfg.get("editable") is master_org._EDIT_UNLESS_PROTECTED)
+check("지정 스키마 미준비면 읽기전용 어포던스로 내림",
+      master_org._dept_col_config(attendance_editable=False)[_ATT].get("editable") is False
+      and "ms-cell-readonly"
+      in master_org._dept_col_config(attendance_editable=False)[_ATT].get("cellClass", ""))
+check("화면 설명이 지정의 결과를 알린다(근무표 노출 범위)",
+      "근태 등록 대상" in src and "근무표 편성·조회에 나타납니다" in src)
+
+# 조회 → 편집 행 매핑(실제 bool) + 컬럼 없는 옛 프레임 폴백.
+_att_rows = master_org.build_dept_rows(pd.DataFrame([
+    {"dept_code": "D1", "dept_name": "PET생산부", "group_code": "PET", "major_category": "",
+     "minor_category": "", "description": "", "sort_order": 1, "is_active": True,
+     "tracks_attendance": True},
+    {"dept_code": "D2", "dept_name": "관리팀", "group_code": "PET", "major_category": "",
+     "minor_category": "", "description": "", "sort_order": 2, "is_active": True,
+     "tracks_attendance": False},
+]))
+check("조회값이 편집 행으로 그대로 매핑(bool)",
+      list(_att_rows[_ATT]) == [True, False])
+check("지정 컬럼 없는 옛 프레임도 렌더 가능(미지정 폴백)",
+      list(master_org.build_dept_rows(pd.DataFrame([
+          {"dept_code": "D9", "dept_name": "옛계약", "group_code": "", "major_category": "",
+           "minor_category": "", "description": "", "sort_order": 1, "is_active": True},
+      ]))[_ATT]) == [False])
+
+# 저장 레코드 계약 — 전 행이 명시값을 실어야 저장 계층이 반영한다(payload all 판정).
+_att_recs, _ = master_org._validate_depts(pd.DataFrame([
+    {"_row_id": "e:D1", "_row_state": "existing", "_sel": False, "대분류": "", "중분류": "",
+     "코드": "D1", "코드명": "PET생산부", _ATT: True, "순서": "1", "비고": "", "사용": True},
+    {"_row_id": "n:1", "_row_state": "new", "_sel": False, "대분류": "", "중분류": "",
+     "코드": "D2", "코드명": "새부서", _ATT: False, "순서": "2", "비고": "", "사용": True},
+]))
+check("저장 레코드에 tracks_attendance 를 전 행 명시",
+      all("tracks_attendance" in r for r in _att_recs)
+      and [r["tracks_attendance"] for r in _att_recs] == [True, False])
+
+
+def _new_row_probe():
+    import streamlit as st
+    from views import master_org as mo
+    if st.session_state.get("_nr"):
+        return
+    st.session_state["_nr"] = True
+    mo._load_depts({"active": "전체", "search": ""})
+    grid = mo._OD.get_rows().copy()
+    grid["_removed"] = ""
+    try:
+        mo._add_dept_row(grid)   # 내부에서 st.rerun()
+    except BaseException:
+        pass
+
+
+at_nrow = AppTest.from_function(_new_row_probe, default_timeout=45).run()
+_nrows = at_nrow.session_state["org_dept:rows"] if "org_dept:rows" in at_nrow.session_state else None
+_new_only = _nrows[_nrows["_row_state"] == "new"] if _nrows is not None else None
+check("신규 행 기본값 = 미지정(명시 지정 원칙)",
+      _new_only is not None and len(_new_only) == 1
+      and bool(_new_only.iloc[0][_ATT]) is False)
+check("신규 행의 다른 기본값은 종전 그대로(사용=True)",
+      _new_only is not None and bool(_new_only.iloc[0]["사용"]) is True)
+
+
+# 저장 왕복(sample 세션 저장) — 지정 변경이 보존되고 다른 컬럼이 소실되지 않는다.
+def _roundtrip_probe():
+    import streamlit as st
+    from modules import db as adb
+    from views import master_org as mo
+    _ATT = mo._ATTENDANCE_COL  # AppTest.from_function 은 대상 함수만 실행 — 전역 참조 금지
+    if st.session_state.get("_rt_done"):
+        return
+    st.session_state["_rt_done"] = True
+    q = {"active": "전체", "search": ""}
+    mo._load_depts(q)
+    before = adb.get_org_departments()
+    st.session_state["_rt_before"] = {
+        str(r["dept_code"]): (
+            str(r["dept_name"]), str(r["major_category"]), str(r["minor_category"]),
+            str(r["description"]), int(r["sort_order"]), bool(r["is_active"]),
+            bool(r["tracks_attendance"]),
+        ) for _, r in before.iterrows()
+    }
+    grid = mo._OD.get_rows().copy()
+    grid["_removed"] = ""
+    # 지정 상태를 뒤집는다: 대상(True) 하나 해제 + 비대상(False) 하나 지정.
+    on = grid.index[grid[_ATT].map(bool)]
+    off = grid.index[~grid[_ATT].map(bool)]
+    st.session_state["_rt_flip"] = (str(grid.loc[on[0], "코드"]), str(grid.loc[off[0], "코드"]))
+    grid.loc[on[0], _ATT] = False
+    grid.loc[off[0], _ATT] = True
+    try:
+        mo._save_depts(grid, q)   # 성공 경로 끝에서 st.rerun()
+    except BaseException:
+        pass
+    after = adb.get_org_departments()
+    st.session_state["_rt_after"] = {
+        str(r["dept_code"]): (
+            str(r["dept_name"]), str(r["major_category"]), str(r["minor_category"]),
+            str(r["description"]), int(r["sort_order"]), bool(r["is_active"]),
+            bool(r["tracks_attendance"]),
+        ) for _, r in after.iterrows()
+    }
+    st.session_state["_rt_codes"] = sorted(adb.attendance_dept_codes(is_active=None))
+
+
+at_rt = AppTest.from_function(_roundtrip_probe, default_timeout=45).run()
+check("저장 왕복 probe 예외 없음", not at_rt.exception)
+_before = _sess(at_rt, "_rt_before", {})
+_after = _sess(at_rt, "_rt_after", {})
+_flip_on, _flip_off = _sess(at_rt, "_rt_flip", ("", ""))
+check("재조회에서 해제가 보존", bool(_before) and _after.get(_flip_on, (None,) * 7)[6] is False)
+check("재조회에서 신규 지정이 보존", _after.get(_flip_off, (None,) * 7)[6] is True)
+check("지정을 바꾸지 않은 부서의 지정값 보존",
+      all(_after[c][6] == _before[c][6] for c in _before if c not in (_flip_on, _flip_off)))
+check("타 컬럼(코드명·대분류·중분류·비고·순서·사용) 소실 없음",
+      set(_after) == set(_before) and all(_after[c][:6] == _before[c][:6] for c in _before))
+check("db.attendance_dept_codes 가 지정 결과를 그대로 반영",
+      _flip_off in _sess(at_rt, "_rt_codes", []) and _flip_on not in _sess(at_rt, "_rt_codes", []))
+
+
+# 상태 칩 — 지정 건수(0이면 warn)·저장 전 해제 건수·지정 잠김 사유.
+def _att_chip_probe():
+    import pandas as pd
+    import streamlit as st
+    from views import master_org as mo
+    _ATT = mo._ATTENDANCE_COL  # AppTest.from_function 은 대상 함수만 실행 — 전역 참조 금지
+    rows = pd.DataFrame([
+        {"_row_id": "e:D1", "_row_state": "existing", "_sel": False, "대분류": "", "중분류": "",
+         "코드": "D1", "코드명": "가", _ATT: True, "순서": "1", "비고": "", "사용": True},
+        {"_row_id": "e:D2", "_row_state": "existing", "_sel": False, "대분류": "", "중분류": "",
+         "코드": "D2", "코드명": "나", _ATT: False, "순서": "2", "비고": "", "사용": True},
+    ])
+    st.write("A:")
+    mo._summary_chips(rows, {"active": "전체", "search": ""})
+    st.write("B:")
+    zero = rows.copy(); zero[_ATT] = False
+    mo._summary_chips(zero, {"active": "전체", "search": ""})
+    st.write("C:")
+    mo._summary_chips(rows, {"active": "전체", "search": ""}, dirty=1, untracked=2)
+    st.write("D:")
+    mo._summary_chips(rows, {"active": "전체", "search": ""}, attendance_locked=True)
+    # 해제 건수 계산(기준선 True → 현재 False 인 기존 행만).
+    st.session_state[mo._OD.key("baseline")] = {
+        "e:D1": ("", "", "D1", "가", "True", "1", "", "True"),
+        "e:D2": ("", "", "D2", "나", "False", "2", "", "True"),
+    }
+    live = rows.copy(); live.loc[0, _ATT] = False   # D1 해제, D2 는 원래 미지정
+    st.write(f"UNTRACKED={mo._untracked_count(live)}")
+
+
+at_ac = AppTest.from_function(_att_chip_probe, default_timeout=45).run()
+check("칩 probe 예외 없음", not at_ac.exception)
+_ac = " ".join(str(m.value) for m in at_ac.markdown)
+check("지정 건수 칩(분포 칩과 같은 어휘·스코프)", f"{_ATT} 1</span>" in _ac)
+check("지정 0건은 warn 톤으로 표면화(근무표 부서 목록이 비는 상태)",
+      f"ms-chip warn'>{_ATT} 0</span>" in _ac)
+check("저장 전 해제 건수 칩(미저장 칩 옆)", f"{_ATT} 해제 2건" in _ac)
+check("지정 스키마 미준비 사유 칩(편집 불가)", f"{_ATT}: 지정 스키마 준비 전" in _ac)
+check("해제 건수 = 기준선 지정 → 현재 미지정 기존 행", "UNTRACKED=1" in _ac)
+
+
+# 배포·핫리로드 경계 — 지정 열이 없던 옛 draft 는 폐기하고 스토어에서 다시 읽는다.
+def _stale_draft_probe():
+    import streamlit as st
+    from modules import db as adb
+    from views import master_org as mo
+    _ATT = mo._ATTENDANCE_COL  # AppTest.from_function 은 대상 함수만 실행 — 전역 참조 금지
+    if not st.session_state.get("_sd"):
+        st.session_state["_sd"] = True
+        mo._load_depts({"active": "사용 중", "search": ""})
+        old = mo._OD.get_rows().drop(columns=[_ATT])   # 옛 컬럼 계약 draft 재현
+        mo._OD.set_rows(old)
+        mo._OD.commit_query({"active": "사용 중", "search": ""})
+    mo.render(adb.find_user_by_emp_no("1001"))
+
+
+at_sd = AppTest.from_function(_stale_draft_probe, default_timeout=45).run()
+check("옛 컬럼 계약 draft 에서도 렌더 예외 없음", not at_sd.exception)
+_sd_rows = _sess(at_sd, "org_dept:rows")
+check("옛 draft 는 폐기·재적재되어 지정 열을 되찾는다",
+      _sd_rows is not None and _ATT in list(_sd_rows.columns))
+check("재적재된 지정값이 스토어 값과 일치(전부 미지정으로 뒤집히지 않음)",
+      _sd_rows is not None and bool(_sd_rows[_ATT].map(bool).any()))
 
 
 print()

@@ -36,6 +36,10 @@ def departments() -> pd.DataFrame:
         return df
     df["is_active"] = _to_bool(df["is_active"])
     df["sort_order"] = _to_int(df["sort_order"])
+    # 근태(근무표) 등록 대상 부서 지정. supabase 의 departments.tracks_attendance 와
+    # 같은 계약이며, 컬럼이 없는 옛 CSV 는 db 파사드가 폴백을 적용한다.
+    if "tracks_attendance" in df.columns:
+        df["tracks_attendance"] = _to_bool(df["tracks_attendance"])
     return df.sort_values("sort_order").reset_index(drop=True)
 
 

@@ -29,6 +29,8 @@
 - 자연키: `dept_code`
 - 기본 정보: `dept_name`, `sort_order`, `is_active`
 - 조직 확장(004): `group_id`(FK → `organization_groups.id`, `on delete restrict`), `description`
+- 계층 텍스트 2단(009): `major_category`, `minor_category` (`departments_minor_requires_major` 제약)
+- 근태 대상 지정(011): `tracks_attendance`(boolean, `not null default false`) — 근무표를 실제로 편성·등록하는 부서만 `true`입니다. 편성·월간 근무표·대시보드의 조직 목록과 조회 범위를 이 값으로 좁히며, 집행은 앱 계층(`modules/db.py::attendance_dept_codes`)이 합니다. DB는 비대상 부서에 근무 행이 생기는 것을 막지 않습니다(과거 데이터·운영 예외 보존).
 - 003의 `department_group`/`group_sort_order` 컬럼 서술은 004로 대체되었습니다(위 `organization_groups` 참고).
 
 ### `teams`
@@ -137,6 +139,7 @@ near_miss_reports
 | `008_password_auth.sql` | `users` 비밀번호 컬럼 6개 + `login_sessions` | guarded DDL, 기존 행 값 무기록, RLS enable(policyless) | DRAFT — **미적용**(2026-08-07 live 확인: `users.password_hash` 없음·`login_sessions` 없음). 적용 전까지 로그인은 고정 예외 계정만 가능 |
 | `009_org_category_and_tenure.sql` | `departments.major_category/minor_category` + `users.hire_date/resign_date` + 대분류 그룹명 백필 | guarded DDL, no-drop(teams·organization_groups 보존), 빈 값에만 백필 | 2026-08-07 테스트 프로젝트 **적용·검증**(컬럼 존재 + 백필 결과 확인). 회사 계정 이전 시 새 프로젝트에 재적용 필요 |
 | `010_capabilities_and_emails.sql` | `user_capabilities`(담당 권한 M:N) + `user_emails`(복수 수신 이메일, 업무 scope, `lower(email)` 유니크) | guarded DDL, no-drop, 행 무기록, RLS enable(policyless). 담당 신설은 migration 없이 앱 코드(`config.CAPABILITIES`) 등록만으로 확장 | 2026-08-07 테스트 프로젝트 **적용·왕복 검증**(부여/회수·대소문자 중복 차단·수신자 계산). recon 우수사례 조사(OWASP·Django·Discourse 선례) 반영 설계 |
+| `011_dept_attendance_target.sql` | `departments.tracks_attendance`(근태 등록 대상 부서 지정) + 근무 기록 보유 부서 1회성 백필 | guarded DDL, no-drop, RLS 변경 없음(001에서 이미 enable), 백필은 `true` 지정이 하나도 없을 때만 실행하고 `true → false` 강등 없음 | DRAFT — **미적용**(2026-08-14 테스트 프로젝트 read-only probe: `departments.tracks_attendance` 없음). 적용 전에도 앱은 동작하며 조회가 전 부서를 대상으로 폴백합니다 |
 
 위의 환경 상태는 마지막 검증 기록입니다. 새로운 세션에서 적용 또는 미적용을 단정하기 전에 반드시 live schema를 다시 확인합니다.
 
@@ -151,7 +154,8 @@ near_miss_reports
 - migration 실행·운영 DB 쓰기의 **승인 게이트는 `AGENTS.md` 안전경계 정본**을 따릅니다(여기서 재서술하지 않음). 이 절은 그 아래 적용 메커니즘만 정의합니다.
 - 부분 적용이 의심되면 DROP으로 맞추지 않고 read-only probe 후 forward completion 가능성을 먼저 판단합니다.
 - 002는 기존 근무를 현재 사용자 소속으로 자동 백필하지 않습니다.
-- 004 적용 뒤에는 앱 프로세스를 재시작하거나 화면의 "스키마 재확인" 동작으로 조직 그룹 확장(`organization_groups` + `departments.group_id`) readiness cache를 다시 확인합니다.
+- 004 적용 뒤에는 앱 프로세스를 재시작하거나 화면의 "스키마 재확인" 동작으로 조직 그룹 확장(`organization_groups` + `departments.group_id`) readiness cache를 다시 확인합니다. 같은 경로가 부서 분류·재직기간(009)과 근태 대상 지정(011) probe 캐시도 함께 비웁니다.
+- 011의 백필은 "근무 기록이 있는 부서만 대상"이라는 초기값 규칙이며, `schedule_assignments.department_id`와 `work_schedules → users.department_id`의 합집합을 씁니다. 이미 대상으로 지정된 부서가 있으면 재실행 시 백필 전체를 건너뛰어 운영자의 지정을 덮지 않습니다.
 
 ## 6. Sample 데이터
 

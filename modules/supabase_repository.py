@@ -28,7 +28,8 @@ _MAP_CACHE_TTL = 30
 PAGE_SIZE = 1000
 WRITE_BATCH_SIZE = 500
 REQUIRED_TABLES = ("departments", "teams", "users", "work_types", "work_schedules")
-_BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance"}
+# tracks_attendance: 근태(근무표) 등록 대상 부서 지정 (도입: migration 011).
+_BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance", "tracks_attendance"}
 _INTEGER_COLUMNS = {"sort_order"}
 
 # 운영단위 유형 내부값 (migration 003 teams.unit_type CHECK 와 동일).
@@ -339,6 +340,32 @@ def _clean_bool(value) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"true", "1", "yes", "y", "t", "on"}
+
+
+def _optional_bool(value) -> bool | None:
+    """명시된 boolean 만 True/False 로, '값 없음'은 None 으로 구분한다.
+
+    ``_clean_bool`` 은 None/NaN/'' 를 전부 False 로 접기 때문에 "지정 안 함"과
+    "대상 아님"을 구분할 수 없다. 편집 그리드가 아직 어떤 boolean 컬럼을 다루지
+    않을 때 그 컬럼이 조용히 False 로 덮이는 것을 막는 데 쓴다.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text in {"true", "1", "yes", "y", "t", "on"}:
+        return True
+    if text in {"false", "0", "no", "n", "f", "off"}:
+        return False
+    return None
 
 
 def _clean_int(value) -> int:
@@ -705,6 +732,39 @@ def reset_org_category_readiness() -> None:
     _TENURE_READY = None
 
 
+# --- 근태 등록 대상 부서 지정 (departments.tracks_attendance, 도입: migration 011) ---
+# 이 capability 는 다른 조직 확장과 **fail-safe 방향이 반대**다.
+#   * 읽기: 컬럼이 없으면 "전 부서가 근태 대상"으로 폴백한다(True). 미적용 배포에서
+#     플래그를 알 수 없다고 목록을 비우면 근무표·편성·대시보드가 통째로 비어
+#     실사용이 멈춘다 — 스키마 미적용의 대가가 기능 정지가 되면 안 된다.
+#   * 쓰기: 컬럼이 없는데 "대상 아님(False)"을 저장하려 하면 **차단**한다. 지정 의도가
+#     조용히 사라지는(저장했는데 전 부서 노출) 사고를 막는다. 즉 fail-open 은 조회
+#     한정이고 지정 의미의 유실은 fail-closed 다.
+_ATTENDANCE_READY: bool | None = None
+_ATTENDANCE_NOT_READY_MESSAGE = (
+    "근태 등록 대상 부서 지정 스키마가 아직 준비되지 않아 저장할 수 없습니다. "
+    "해당 스키마를 적용한 뒤 다시 시도하세요."
+)
+
+
+def attendance_flag_ready() -> bool:
+    """근태 등록 대상 지정 컬럼(departments.tracks_attendance) 사용 가능 여부(1회 probe 후 캐시)."""
+    global _ATTENDANCE_READY
+    if _ATTENDANCE_READY is None:
+        try:
+            client().table("departments").select("tracks_attendance").limit(1).execute()
+            _ATTENDANCE_READY = True
+        except Exception:
+            _ATTENDANCE_READY = False
+    return _ATTENDANCE_READY
+
+
+def reset_attendance_flag_readiness() -> None:
+    """근태 대상 지정 컬럼 probe 캐시를 비운다(실행 중 적용 반영 경로)."""
+    global _ATTENDANCE_READY
+    _ATTENDANCE_READY = None
+
+
 # --- 그룹(organization_groups) — 조직 1급 테이블 ---
 @st.cache_data(ttl=_MAP_CACHE_TTL, show_spinner=False)
 def _group_maps() -> tuple[dict[str, int], dict[str, str]]:
@@ -786,15 +846,20 @@ def get_departments_org() -> pd.DataFrame:
     """부서 목록 + 소속 그룹코드(group_id FK→group_code) + 비고. 조직 스키마 capability(도입: migration 004) 준비 후 호출.
 
     자연키 계약: dept_code, dept_name, group_code, major_category, minor_category,
-    description, sort_order, is_active.
+    description, sort_order, is_active, tracks_attendance.
     group_id 가 NULL(미배정)인 부서는 group_code 를 빈 문자열로 반환한다.
     대분류/중분류는 009 미적용 환경에서 빈 문자열로 폴백한다(조회는 계속 동작).
+    근태 대상 지정(tracks_attendance)은 미적용 환경에서 True 로 폴백한다 —
+    플래그를 모른다고 근무표 조직 목록을 비우지 않기 위한 의도적 fail-safe.
     """
     _, group_by_id = _group_maps()
     with_category = org_category_ready()
+    with_attendance = attendance_flag_ready()
     select_cols = "dept_code,dept_name,group_id,description,sort_order,is_active"
     if with_category:
         select_cols += ",major_category,minor_category"
+    if with_attendance:
+        select_cols += ",tracks_attendance"
     rows = _select_all(
         "departments",
         select_cols,
@@ -812,11 +877,14 @@ def get_departments_org() -> pd.DataFrame:
             "description": str(row.get("description") or ""),
             "sort_order": _clean_int(_required(row, "departments", "sort_order")),
             "is_active": _clean_bool(_required(row, "departments", "is_active")),
+            "tracks_attendance": (
+                _clean_bool(row.get("tracks_attendance")) if with_attendance else True
+            ),
         })
     return _frame(
         natural,
         ["dept_code", "dept_name", "group_code", "major_category", "minor_category",
-         "description", "sort_order", "is_active"],
+         "description", "sort_order", "is_active", "tracks_attendance"],
         "departments",
     )
 
@@ -828,6 +896,12 @@ def _departments_org_payload(records: list[dict]) -> list[dict]:
     (2026-08-07 사용자 결정 — 대분류/중분류 텍스트 2단이 계층을 대신한다). group_code 를
     아무도 주지 않으면 `group_id` 키 자체를 payload 에서 빼서 **기존 값을 보존**한다.
     PostgREST upsert 는 배치 내 키가 균일해야 하므로 전부 넣거나 전부 빼는 두 경우만 둔다.
+
+    근태 대상 지정(tracks_attendance)도 같은 '키 생략 = 기존 값 보존' 규칙을 쓰되
+    판정을 **any 가 아니라 all** 로 둔다. boolean 은 빈 값과 False 가 구분되지 않아,
+    일부 행만 값을 준 배치에 키를 넣으면 값을 주지 않은 행이 False 로 덮인다(지정
+    유실). 전 행이 명시값을 줄 때만 저장하고, 하나라도 비면 이 배치는 플래그를
+    건드리지 않는다.
     """
     if not org_extensions_ready():
         raise SupabaseDataError(_ORG_NOT_READY_MESSAGE)
@@ -838,10 +912,18 @@ def _departments_org_payload(records: list[dict]) -> list[dict]:
     ):
         raise SupabaseDataError(_TENURE_NOT_READY_MESSAGE)
 
+    attendance_values = [_optional_bool(row.get("tracks_attendance")) for row in records]
+    attendance_given = all(value is not None for value in attendance_values)
+    if not attendance_flag_ready():
+        # 스키마 미적용에서 조회는 True 로 폴백하므로, False 지정만이 '유실될 의도'다.
+        if any(value is False for value in attendance_values):
+            raise SupabaseDataError(_ATTENDANCE_NOT_READY_MESSAGE)
+        attendance_given = False
+
     group_by_code, _ = _group_maps()
     with_group = any(_clean_text(row.get("group_code")) for row in records)
     payload = []
-    for row in records:
+    for index, row in enumerate(records):
         dept_code = _clean_text(row.get("dept_code"))
         dept_name = _clean_text(row.get("dept_name"))
         if not dept_code or not dept_name:
@@ -868,6 +950,8 @@ def _departments_org_payload(records: list[dict]) -> list[dict]:
         if with_category:
             record["major_category"] = major
             record["minor_category"] = minor
+        if attendance_given:
+            record["tracks_attendance"] = bool(attendance_values[index])
         payload.append(record)
     return payload
 

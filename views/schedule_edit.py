@@ -15,6 +15,15 @@
     비표준 표기→빈 조) ③ 부서그룹 순서 ④ 표시순서(display_order, 미지정 뒤) ⑤ 사번.
     이 화면 로컬 규칙이며 modules/db.py 의 공용 정렬(sort_users_for_display)을 쓰지 않는다.
 
+근태 등록 대상 부서 필터(2026-08-14 사용자 지시 — "근태에서는 해당 조직만 목록이나 조회"):
+  - 조회 조건 '부서'(대분류) 선택지·'조' 선택지·그리드 행을 모두 근태 등록 대상 부서
+    (departments.tracks_attendance)로 좁힌다. 판정 원천은 db.attendance_dept_codes()
+    하나이며 이 화면에 부서 목록을 복제하지 않는다.
+  - db.attendance_flag_ready() 가 False 면(지정 스키마 미적용 배포) 필터를 걸지 않는다 —
+    플래그를 모른다고 근무표를 통째로 비우지 않는 의도적 fail-open(파사드와 같은 방향).
+  - 비대상 부서로 저장된 기존 편성 행은 목록에서 빼되 '제외 N명'을 알림 슬롯에 남긴다.
+    조용히 사라지면 근무가 지워진 것으로 읽히기 때문이며, 저장된 근무는 그대로 있다.
+
 행 상태 계약(_row_id/_row_state/_sel — views/workspace.selectable_master_grid):
   - 기존 행: 첫 열 선택 체크박스 → [행 삭제]로 저장 시 삭제 예정 지정(취소 가능)
   - 신규 행: 첫 열 − 버튼 → 즉시 개별 제거 (DB 작업 없음)
@@ -72,6 +81,11 @@ _DEPT_SCOPE = "dept:"
 _UNCLASSIFIED = "미분류"
 #: 조회 조건에서 제외할 대분류(대시보드 _EXCLUDED_MAJORS 와 같은 사용자 지정 규칙).
 #: 데이터·다른 화면은 건드리지 않고 이 화면 필터 선택지에서만 감춘다.
+#: 근태 등록 대상 지정(tracks_attendance)이 동작하는 환경에서는 이 이름 기반 규칙을
+#: **적용하지 않는다** — 어느 조직이 근태 대상인지는 조직 관리에서 명시 지정한 값이
+#: 답이고, 그 위에 화면이 대분류 이름으로 한 번 더 감추면 사용자가 지정한 부서가
+#: 필터에서 사라진다(행에는 나오는데 좁힐 수는 없는 상태). 지정 기능을 쓸 수 없는
+#: 폴백에서만 종전 규칙을 그대로 유지한다.
 _EXCLUDED_MAJORS = ("관리",)
 _TAIL_ORDER = 10 ** 6  # 기준정보에 없는 부서·대분류의 정렬 자리(항상 뒤)
 _META = ["_row_id", "_row_state", "_sel"]
@@ -112,6 +126,10 @@ _ROSTER_CSS = f"""
 .se-ctx .loc {{ font-weight:600; color:{_INK}; }}
 .se-ctx .num {{ font-family:{_MONO}; font-weight:600; color:{_INK}; }}
 .se-ctx .op {{ color:{_WEAK}; }}
+/* 범위 안내 1줄(알림 슬롯 전용) — 근태 비대상 부서 편성을 목록에서 뺐다는 사실과 건수.
+   경고가 아니라 사실 고지라 중립 잉크로 두고 숫자만 모노로 세운다(§0.6 한 줄). */
+.se-note {{ font-size:12.5px; color:{_INK2}; margin:2px 0 6px; }}
+.se-note .num {{ font-family:{_MONO}; font-weight:600; color:{_INK}; }}
 .se-legend {{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0 2px; }}
 .se-legend .lab {{ font-size:11px; letter-spacing:.1em; color:{_FAINT}; font-family:{_MONO}; margin-right:4px; }}
 .se-leg {{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:{_INK}; }}
@@ -242,7 +260,32 @@ def _in_scope(token: str, dept_code: str, catalog: dict) -> bool:
     return catalog["org_of"].get(code, ("", ""))[0] == scope
 
 
-def _major_options(year: int, month: int, catalog: dict) -> list[str]:
+def _attendance_scope() -> set[str] | None:
+    """근태(근무표) 등록 대상 부서코드 집합. ``None`` 이면 '필터 없음'(폴백 상태).
+
+    - 지정 기능을 읽고 쓸 수 없는 환경(db.attendance_flag_ready() False)에서는 ``None``
+      을 돌려 종전처럼 전 부서를 보여준다. 스키마 미적용의 대가가 "근무표가 통째로
+      빈다"가 되면 안 된다(파사드 docstring 의 fail-open 계약과 같은 방향).
+    - 비활성 부서도 포함한다(``is_active=None``). 이 화면은 그 달 편성에 남아 있는
+      부서를 계층 해석해 제자리에 보여주는 계약이라(_dept_catalog), 부서를 나중에
+      비활성화했다고 과거 편성 행이 사라지면 안 된다.
+    - 지정된 부서가 하나도 없으면 빈 집합이다. 이때는 '아직 지정하지 않았다'가 사실
+      이므로 목록을 비우고 사유를 안내한다(_scope_notice) — 임의로 전 부서를 열지 않는다.
+    """
+    if not db.attendance_flag_ready():
+        return None
+    return db.attendance_dept_codes(is_active=None)
+
+
+def _tracked_dept(dept_code: str, tracked: set[str] | None) -> bool:
+    """이 부서가 근태 등록 대상인가 (순수). ``tracked`` 가 None 이면 항상 True(폴백)."""
+    if tracked is None:
+        return True
+    return _clean(dept_code) in tracked
+
+
+def _major_options(year: int, month: int, catalog: dict,
+                   tracked: set[str] | None = None) -> list[str]:
     """조회 조건 '부서'(대분류) 선택지 — 해당 월 편성에 실제로 존재하는 대분류만.
 
     부서 마스터 전체에서 뽑지 않는 이유: 이 화면은 그 달 근무표가 저장된 직원만
@@ -250,13 +293,22 @@ def _major_options(year: int, month: int, catalog: dict) -> list[str]:
     대분류가 비어 있는(미분류) 부서는 선택지를 만들지 않는다 — 이름이 아니기 때문이며,
     해당 행은 [전체 부서]에서 보이고 정렬은 마지막이다.
     순서는 대분류에 속한 부서의 최소 표시순서(조직관리 시트 순서)를 따른다.
+
+    ``tracked`` 가 주어지면 근태 등록 대상 부서에서만 대분류를 유도한다 — 그리드 행과
+    같은 기준이어야 "고르면 0건"인 선택지가 생기지 않는다.
     """
     assigns = _month_assignments(year, month)
     found: dict = {}
     if assigns is not None and not assigns.empty and "dept_code" in assigns.columns:
         for value in assigns["dept_code"]:
-            major = catalog["org_of"].get(_clean(value), ("", ""))[0]
-            if not major or major in _EXCLUDED_MAJORS:
+            code = _clean(value)
+            if not _tracked_dept(code, tracked):
+                continue
+            major = catalog["org_of"].get(code, ("", ""))[0]
+            if not major:
+                continue
+            # 이름 기반 제외는 지정 기능을 못 쓰는 폴백에서만 쓴다(_EXCLUDED_MAJORS 주석).
+            if tracked is None and major in _EXCLUDED_MAJORS:
                 continue
             found[major] = catalog["major_order"].get(major, _TAIL_ORDER)
     return [name for name, _order in sorted(found.items(), key=lambda kv: (kv[1], kv[0]))]
@@ -276,17 +328,23 @@ def _shift_rank(value: str) -> tuple:
     return (1, text)
 
 
-def _shift_options(year: int, month: int, catalog: dict, scope: str) -> list[str]:
+def _shift_options(year: int, month: int, catalog: dict, scope: str,
+                   tracked: set[str] | None = None) -> list[str]:
     """조회 조건 '조' 선택지 — 해당 월·선택 대분류 범위의 편성에 실제로 있는 근무조.
 
     조는 기준정보 축이 아니라 편성표 자유 입력(shift_group_code)이므로 선택지도
     스냅샷에서만 유도한다. 표기 흔들림('A' 등)은 normalize_shift_group 으로 접는다.
+    부서 축과 같은 근태 대상 필터(``tracked``)를 적용한다 — 비대상 부서에만 있는 조가
+    선택지에 남으면 고르는 순간 0건이 된다.
     """
     assigns = _month_assignments(year, month)
     values: set = set()
     if assigns is not None and not assigns.empty and "shift_group_code" in assigns.columns:
         for _, row in assigns.iterrows():
-            if not _in_scope(scope, _clean(row.get("dept_code")), catalog):
+            dept_code = _clean(row.get("dept_code"))
+            if not _tracked_dept(dept_code, tracked):
+                continue
+            if not _in_scope(scope, dept_code, catalog):
                 continue
             code = normalize_shift_group(row.get("shift_group_code"))
             if code:
@@ -303,6 +361,78 @@ def _scope_label(token: str, dept_names: dict) -> str:
         code = scope[len(_DEPT_SCOPE):]
         return dept_names.get(code, code)
     return scope
+
+
+def _scope_notice(manager_dept: str, tracked: set[str] | None) -> None:
+    """근태 대상 범위 안내 — **알림 슬롯(se_notice) 안에서만** 호출한다.
+
+    본문 최상위에 조건부 요소를 새로 두면 저장 직후 그리드 높이만큼 빈 블록이 남는
+    회귀가 재발한다(se_notice 주석 참조). 여기서 그리는 것은 세 가지다.
+
+    1. 지정된 부서가 하나도 없음 → 화면이 빈 이유와 다음 행동(조직 관리에서 지정).
+    2. MANAGER 소속 부서가 비대상 → 잠긴 범위가 통째로 비는 이유. 잠금 자체는 풀지
+       않는다(푸는 순간 전체가 열려 fail-open 이 된다).
+    3. 비대상 부서 편성을 목록에서 뺐음 → 제외 인원수와 부서. "근무가 지워졌다"로
+       읽히지 않게 저장된 근무가 남아 있다는 사실을 함께 적는다.
+    폴백(tracked None)에서는 아무것도 그리지 않는다 — 적용되지 않은 규칙을 안내하면
+    사용자가 지정이 걸린 줄 안다.
+    """
+    if tracked is None:
+        return
+    if not tracked:
+        st.warning(
+            "근태 등록 대상으로 지정된 부서가 없습니다. "
+            "조직 관리에서 근태 등록 대상 부서를 지정하면 이 화면에 편성 대상이 나타납니다."
+        )
+    elif manager_dept and manager_dept not in tracked:
+        st.warning(
+            f"소속 부서({db.dept_name(manager_dept)})는 근태 등록 대상이 아닙니다. "
+            "조직 관리에서 근태 등록 대상으로 지정해야 이 화면에서 편성할 수 있습니다."
+        )
+    hidden = st.session_state.get("se_untracked") or {}
+    count = int(hidden.get("count") or 0)
+    if not count:
+        return
+    names = [n for n in hidden.get("depts", []) if n]
+    shown = ", ".join(names[:3]) + (f" 외 {len(names) - 3}개" if len(names) > 3 else "")
+    where = f" · {escape(shown)}" if shown else ""
+    st.markdown(
+        "<div class='se-note'>근태 등록 대상이 아닌 부서의 편성 "
+        f"<span class='num'>{count}</span>명은 목록에서 제외했습니다{where} — "
+        "저장된 근무는 그대로 남아 있습니다.</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ── 헤더 아이콘 따라잡기(기준정보 3화면과 같은 보정) ─────────────────────────────
+#: 직전 run 에 발행한 헤더 상태 거울 / 연속 보정 횟수 가드.
+_HDR_MIRROR = "se_hdr_mirror"
+_HDR_GUARD = "se_hdr_sync_n"
+
+
+def _sync_header(states: dict) -> None:
+    """헤더 아이콘 발행값이 바뀐 run 에서만 1회 재실행해 상단 아이콘을 따라오게 한다.
+
+    앱 셸(modules/ui)은 본문보다 **먼저** 헤더를 그리므로, 이 화면이 render 말미에
+    ``publish_header_actions`` 로 발행한 활성/사유는 **다음 run 부터** 헤더에 반영된다.
+    본문 액션 버튼을 없애고 헤더가 유일한 진입점이 된 뒤로 이 지연은 실동작 결함이다.
+
+    특히 [추가]는 미발행 기본값이 음영(``ui._HDR_DEFAULT_DISABLED``)이라, 화면에 들어와
+    아무것도 만지지 않으면 발행값을 반영할 rerun 자체가 생기지 않아 **+ 아이콘이 계속
+    음영**으로 남는다(2026-08-14 "행 추가 먹통" 신고의 실측 원인 — 진입 직후 + 는 눌리지
+    않고, 셀을 한 번 편집해 rerun 이 나면 그때부터 활성이 되는 것으로 재현했다).
+    발행값이 직전 run 과 다르면 즉시 재실행하고, 같은 값이면 멈춘다. 폭주 방지로 연속
+    보정은 2회로 제한한다(정상 경로에서는 상태 전이당 1회).
+    """
+    payload = {str(k): (bool(v[0]), v[1]) for k, v in dict(states).items()}
+    if st.session_state.get(_HDR_MIRROR) == payload:
+        st.session_state[_HDR_GUARD] = 0
+        return
+    st.session_state[_HDR_MIRROR] = payload
+    tries = int(st.session_state.get(_HDR_GUARD) or 0)
+    if tries < 2:
+        st.session_state[_HDR_GUARD] = tries + 1
+        st.rerun()
 
 
 def _active_ordered() -> list[tuple[str, str, str]]:
@@ -360,6 +490,29 @@ def _day_header_component(day_col: str) -> JsCode:
         f"font-size:12.5px;color:{_INK}'>\"+{num_j}+\"</div><div style='font-size:10px;color:{_INK2}'>\""
         f"+{wd_j}+\"</div>\";}}getGui(){{return this.eGui;}}}}"
     )
+
+
+#: 일자 열 폭 하한/상한(px). 하한은 종전 폭(44) — 짧은 표시값에서는 밀도가 그대로다.
+#: 상한은 밀도 보호선이다: 표시 축이 명칭으로 바뀌면서 '특근(주간)'·'경조(자녀결혼)'
+#: 처럼 긴 값이 생겼는데, 그 최댓값에 열을 맞추면 31일 매트릭스가 3천 px 를 넘겨 한
+#: 화면에서 볼 수 있는 날짜가 반토막 난다. 상한을 넘는 값은 셀에서 말줄임되고 전체
+#: 문자열은 셀 tooltip(enableBrowserTooltips)과 하단 범례가 보증한다.
+_DAY_W_MIN, _DAY_W_MAX = 44, 56
+
+
+def _label_px(text: str) -> float:
+    """표시값의 대략 렌더 폭(px, 본문 14.5px 기준) — 한글·기호는 1em, ASCII 는 약 0.55em."""
+    return sum(14.5 if ord(ch) > 0x1100 else 8.0 for ch in str(text))
+
+
+def _day_width(labels) -> int:
+    """일자 열 폭 — 실제 표시값(도메인 파생)에서 유도하되 §밀도 상한을 지킨다 (순수).
+
+    하드코딩한 고정 폭이 아니라 활성 근무형태의 표시값에서 계산한다: 약칭처럼 짧은
+    값만 쓰는 환경에서는 종전 44px 그대로이고, 명칭이 길어진 만큼만 넓어진다.
+    """
+    longest = max((_label_px(label) for label in labels if str(label).strip()), default=0.0)
+    return int(max(_DAY_W_MIN, min(_DAY_W_MAX, longest + 14)))
 
 
 def _hint_html(number_labels: list[str], colors: dict) -> str:
@@ -515,11 +668,17 @@ def render(user: dict) -> None:
     # 있는지 확인해 벗어나면 전체로 되돌린다 — 안 하면 Streamlit selectbox 가 값 없음
     # 예외를 낸다.
     catalog = _dept_catalog()
+    # 근태 등록 대상 부서(조직 관리 지정) — 부서 선택지·조 선택지·행 로딩이 같은 기준을
+    # 쓴다. None 이면 지정 기능을 쓸 수 없는 폴백이라 종전대로 전 부서를 대상으로 둔다.
+    tracked = _attendance_scope()
     year_sel = int(st.session_state.get("se_y") or today.year)
     month_sel = int(st.session_state.get("se_m") or today.month)
     if manager_locked:
         # MANAGER 는 자기 **부서**로 잠금(fail-closed). 대분류로 넓히면 같은 대분류의
         # 다른 부서까지 열리므로 조회 범위 계약을 바꾸지 않고 부서 잠금을 유지한다.
+        # 그 부서가 근태 비대상이어도 잠금을 풀지 않는다 — manager_locked 가 False 가
+        # 되는 순간 조회 조건이 전체 대분류로 열려 권한 범위가 넓어진다(fail-open).
+        # 대신 화면이 비는 사유를 알림 슬롯에서 밝힌다(_scope_notice).
         locked = f"{_DEPT_SCOPE}{user['dept_code']}"
         st.session_state["se_d"] = locked
         dept_field = erp.Field(
@@ -528,7 +687,7 @@ def render(user: dict) -> None:
             disabled=True, widget_key="se_d", width=200,
         )
     else:
-        dept_options = [_ALL] + _major_options(year_sel, month_sel, catalog)
+        dept_options = [_ALL] + _major_options(year_sel, month_sel, catalog, tracked)
         if st.session_state.get("se_d") not in dept_options:
             st.session_state["se_d"] = _ALL
         dept_field = erp.Field(
@@ -540,7 +699,7 @@ def render(user: dict) -> None:
     # 읽는다(위젯 렌더 순서가 아니라 세션 상태로 종속을 해석해, 사용자가 부서를 바꾼 그
     # rerun 에서 조 옵션이 갱신되게 한다 — workspace.schedule_screen 과 동일).
     team_options = [_ALL] + _shift_options(
-        year_sel, month_sel, catalog, st.session_state.get("se_d") or _ALL
+        year_sel, month_sel, catalog, st.session_state.get("se_d") or _ALL, tracked
     )
     if st.session_state.get("se_t") not in team_options:
         st.session_state["se_t"] = _ALL
@@ -597,15 +756,18 @@ def render(user: dict) -> None:
     day_cols = [c for c, _ in st.session_state["se_days"]]
     row_cols = _META + _FIXED + day_cols
 
-    # ── 도메인 파생(하드코딩 금지): 활성 근무형태 순서·색·약칭 → 순환 목록·숫자키·힌트·범례 ──
+    # ── 도메인 파생(하드코딩 금지): 활성 근무형태 순서·색·표시값 → 순환 목록·숫자키·힌트·범례 ──
+    #    표시값의 원천은 _label_maps 하나다(명칭 우선·중복 시 코드 폴백). 숫자키·힌트·범례·
+    #    셀 색·일자 열 폭이 전부 같은 값을 쓰게 해 셀에 보이는 문자열과 안내가 갈리지 않는다.
     active = _active_ordered()
     display_of, _codes, _lc = _label_maps()
-    number_labels = [display_of.get(code, sl) for code, sl, _c in active][:9]
-    cycle_labels = [display_of.get(code, sl) for code, sl, _c in active] + [""]  # 빈값 포함(지움)
+    labeled = [(code, display_of.get(code, sl), color) for code, sl, color in active]
+    number_labels = [label for _code, label, _c in labeled][:9]
+    cycle_labels = [label for _code, label, _c in labeled] + [""]  # 빈값 포함(지움)
     hint_colors = {}
-    for code, sl, color in active:
+    for _code, label, color in labeled:
         if color.startswith("#"):
-            hint_colors[display_of.get(code, sl)] = color
+            hint_colors[label] = color
 
     # ── 알림 슬롯(se_notice): 저장/삭제 배너 + 삭제 예정 패널 + 입력 단축키 줄을 **한 컨테이너**로
     #    묶는다. 배너·패널은 rerun 마다 있거나 없으므로 본문 최상위에 맨몸 요소로 두면 그 유무에
@@ -619,6 +781,9 @@ def render(user: dict) -> None:
     with st.container(key="se_notice"):
         show_flash("schedule_edit")
         _deleted_panel(q)
+        # 근태 대상 범위 안내(지정 없음·MANAGER 비대상 부서·비대상 편성 제외 건수).
+        # 그리드 **위의 새 최상위 요소가 아니라** 이 슬롯 안이어야 한다(위 주석).
+        _scope_notice(str(user.get("dept_code") or "").strip() if manager_locked else "", tracked)
         # 입력 단축키 힌트 라인
         st.markdown(_hint_html(number_labels, hint_colors), unsafe_allow_html=True)
     # 컨텍스트 라인(값은 그리드 뒤 채움) → 표
@@ -683,10 +848,15 @@ def render(user: dict) -> None:
     # 셀 클릭=근무 순환(빈값 포함) + 숫자키 1..N/0 = 근무형태/지움(도메인 파생). 값은
     # setDataValue→cellValueChanged→기존 dirty/검증/저장 경로 그대로(계약 불변).
     handlers = _day_cell_handlers(cycle_labels, number_labels)
+    # 일자 열 폭은 실제 표시값에서 유도한다(_day_width) — 명칭 축 전환으로 값이 길어진
+    # 만큼만 넓히고 상한에서 멈춘다. 상한을 넘는 값은 말줄임되므로 tooltipField 로
+    # 전체 문자열을 보증한다(그리드가 enableBrowserTooltips 로 네이티브 title 렌더).
+    day_w = _day_width(cycle_labels)
     for c in day_cols:
         col_config[c] = {
-            "width": 44, "minWidth": 34, "cellClass": "md-c-center", "cellStyle": day_style,
+            "width": day_w, "minWidth": 34, "cellClass": "md-c-center", "cellStyle": day_style,
             "headerComponent": _day_header_component(c),  # 일자 헤더 2줄(숫자/요일)
+            "tooltipField": c,
             **handlers,
         }
 
@@ -763,7 +933,9 @@ def render(user: dict) -> None:
         _leave_dialog(pending, q)
 
     # ── 하단: 범례(근무형태 색) + 미저장 변경 N건 ──
-    st.markdown(_legend_html(active), unsafe_allow_html=True)
+    #    범례도 셀과 **같은 표시값**(labeled)을 쓴다 — 셀은 명칭인데 범례만 약칭이면
+    #    말줄임된 셀을 범례로 되짚을 수 없다.
+    st.markdown(_legend_html(labeled), unsafe_allow_html=True)
     order_base = st.session_state.get("se_order_base")
     order_changed = bool(order_base) and _order_moved(list(order_base), _visible_emp_order(live))
     changed = _change_count(
@@ -776,12 +948,13 @@ def render(user: dict) -> None:
 
     # ── 헤더 아이콘 음영 상태를 화면 스코프로 발행(다음 rerun 의 헤더가 읽음) — 삭제는
     #    선택 0, 저장은 dirty 0 일 때 음영. 사유 문구는 tooltip 으로 함께 노출한다. ──
-    ui.publish_header_actions("schedule_edit", {
+    header_states = {
         "add": (False, None),
         "refresh": (False, None),
         "delete": (n_sel == 0, "삭제할 기존 행을 먼저 선택하세요" if n_sel == 0 else None),
         "save": (not dirty, "저장할 변경이 없습니다" if not dirty else None),
-    })
+    }
+    ui.publish_header_actions("schedule_edit", header_states)
 
     # 헤더 아이콘이 발화한 플래그 처리 (최신 live 기준) — 실행 경로·확인 게이트 불변.
     if st.session_state.pop("se_save_req", False):
@@ -790,6 +963,11 @@ def render(user: dict) -> None:
         _mark_delete(live, row_cols)
     if st.session_state.pop("se_add_req", False):
         _add_row(live, row_cols, day_cols)
+
+    # 발행값을 헤더가 따라오게 한다 — **액션 flag 소비 뒤**에 둔다(위 세 handler 는 각자
+    # st.rerun() 으로 끝나므로 실행된 run 에서는 여기까지 오지 않는다). 여기보다 앞에서
+    # rerun 하면 헤더 클릭으로 세팅된 flag 가 소비되기 전에 프레임이 끝난다.
+    _sync_header(header_states)
 
 
 # ---------- 행 상태 헬퍼 ----------
@@ -1039,7 +1217,8 @@ def _deleted_panel(q: dict) -> None:
 # ---------- 이탈 확인 ----------
 def _discard_draft() -> None:
     for key in ("se_rows", "se_feed", "se_days", "se_orig", "se_orig_cells",
-                "se_orig_assign", "se_order_base", "se_deleted", "se_dirty"):
+                "se_orig_assign", "se_order_base", "se_deleted", "se_dirty",
+                "se_untracked"):
         st.session_state.pop(key, None)
     st.session_state.pop("nav_guard", None)
 
@@ -1067,33 +1246,50 @@ def _leave_dialog(pending: dict, q: dict) -> None:
 
 # ---------- 적재 ----------
 def _label_maps():
-    """근무형태 약칭 표시/입력 매핑.
+    """근무형태 표시/입력 매핑 — 표시는 **명칭(name)**, 입력은 명칭·약칭·코드를 받는다.
 
-    반환: (display_of: 코드→표시값, codes: 유효 코드 집합, label_codes: 약칭→코드집합)
-    약칭이 비어 있으면 코드를 그대로 표시하고, 같은 약칭이 여러 코드에 걸리면
-    표시도 코드로 대체한다(왕복 변환 모호성 방지). 입력 시 모호한 약칭은 저장 차단.
+    2026-08-14 사용자 지시로 이 화면의 셀 표시·입력 축을 약칭(short_label)에서
+    명칭(name)으로 옮긴다. 실데이터에서 약칭은 여러 근무형태가 공유해(한 약칭을 십수
+    개 코드가 사용) 왕복 변환이 모호해졌고, 그때 코드로 표시하는 기존 안전장치가
+    발동해 화면에 내부 코드가 그대로 보였다. 명칭은 근무형태마다 유일하므로 이 모호성이
+    원천 제거된다.
+
+    **안전장치는 그대로 유지한다** — 축만 옮기는 것이지 보호를 없애는 게 아니다:
+      - 명칭이 비었거나 다른 근무형태와 겹치면 그 코드는 **코드로 표시**한다.
+      - 입력은 명칭·약칭·코드를 모두 받되, 값 하나가 여러 코드에 걸리면 저장을 막는다
+        (:func:`_resolve_work` 의 ``AMBIG``). 종전처럼 약칭을 치던 사용자는 그 약칭이
+        유일할 때 그대로 통과하고, 겹치는 약칭이면 "여러 근무형태에 매핑" 오류로 막힌다
+        — 조용히 아무 코드나 고르는 것이 이 화면에서 가장 위험한 동작이기 때문이다.
+
+    반환: (display_of: 코드→표시값, codes: 유효 코드 집합, input_codes: 입력값→코드집합)
     """
     wt = db.get_work_types()
     active = wt[wt["is_active"]] if not wt.empty else wt
-    codes, label_codes = set(), {}
+    codes: set = set()
+    name_codes: dict = {}   # 표시 유일성 판정(명칭 축)
+    input_codes: dict = {}  # 입력 해석(명칭 + 약칭 병합)
     for _, r in active.iterrows():
         code = str(r["code"]).strip()
         if not code:
             continue
         codes.add(code)
-        sl = str(r["short_label"]).strip()
-        if sl:
-            label_codes.setdefault(sl, set()).add(code)
+        name = str(r.get("name") or "").strip()
+        if name:
+            name_codes.setdefault(name, set()).add(code)
+            input_codes.setdefault(name, set()).add(code)
+        label = str(r.get("short_label") or "").strip()
+        if label:
+            input_codes.setdefault(label, set()).add(code)
     display_of = {}
     for _, r in active.iterrows():
         code = str(r["code"]).strip()
-        sl = str(r["short_label"]).strip()
-        display_of[code] = sl if sl and len(label_codes.get(sl, set())) == 1 else code
-    return display_of, codes, label_codes
+        name = str(r.get("name") or "").strip()
+        display_of[code] = name if name and len(name_codes.get(name, set())) == 1 else code
+    return display_of, codes, input_codes
 
 
 def _resolve_work(value: str, codes: set, label_codes: dict):
-    """입력값(약칭 또는 코드) → 내부 코드. 미등록 None, 모호 약칭 'AMBIG' 반환."""
+    """입력값(명칭·약칭 또는 코드) → 내부 코드. 미등록 None, 모호한 값 'AMBIG' 반환."""
     if value in codes:
         return value
     matched = label_codes.get(value)
@@ -1154,6 +1350,9 @@ def _load_grid(q: dict) -> None:
     필터는 **화면에 보이는 값 기준**이다: 부서는 그 달 편성 스냅샷의 부서(없으면 users
     현재 소속)에서 유도한 대분류로, 조는 편성 스냅샷의 근무조로 거른다. users 마스터로
     먼저 거르지 않는 이유는 인사이동 뒤에도 그 달 편성이 진실이기 때문이다.
+
+    마지막으로 근태 등록 대상 부서(_attendance_scope)로 한 번 더 거른다. 제외한 행은
+    사라진 것처럼 두지 않고 부서별 인원수를 se_untracked 에 남겨 알림 슬롯이 밝힌다.
     """
     ndays = calendar.monthrange(q["year"], q["month"])[1]
     days = []
@@ -1182,6 +1381,8 @@ def _load_grid(q: dict) -> None:
     snaps = _assignment_snapshots(q, sorted(with_rows))
     catalog = _dept_catalog()
     group_of = db.dept_group_map()
+    tracked = _attendance_scope()  # None 이면 필터 없음(폴백)
+    untracked_counts: dict = {}  # dept_code -> 근태 비대상으로 제외한 인원수
 
     keyed = []  # (정렬키, row) — 정렬은 이 화면 로컬 규칙(_row_sort_key)이다
     orig_assign = {}  # rid -> (dept_code, team_code, shift) 로드 스냅샷 (편성 변경 판정용)
@@ -1199,6 +1400,12 @@ def _load_grid(q: dict) -> None:
         shift_label = normalize_shift_group(shift_code)
         if q.get("team") != _ALL and shift_label != _clean(q.get("team")):
             continue  # 조회 조건: 근무조 범위 밖
+        if not _tracked_dept(dept_code, tracked):
+            # 근태 등록 대상이 아닌 부서의 편성 — 목록에서 빼되 '몇 명을 뺐는지'는 남긴다.
+            # (조회 조건·조 필터를 통과한 행만 세므로 안내 건수가 화면 범위와 일치한다.)
+            code = _clean(dept_code)
+            untracked_counts[code] = untracked_counts.get(code, 0) + 1
+            continue
         major, minor = _org_labels(dept_code, catalog)
         rid = f"e:{emp}"
         orig_assign[rid] = (dept_code, team_code, shift_code)
@@ -1242,6 +1449,11 @@ def _load_grid(q: dict) -> None:
     st.session_state["se_rows"] = frame
     st.session_state["se_days"] = days
     st.session_state["se_deleted"] = []
+    # 근태 비대상으로 제외한 편성 — 알림 슬롯이 '제외 N명'으로 드러낸다(감춘 채 두지 않음).
+    st.session_state["se_untracked"] = {
+        "count": sum(untracked_counts.values()),
+        "depts": [db.dept_name(code) or code for code in untracked_counts],
+    }
     # 행 순서 영속(users.display_order)의 기준선 — 이 순서와 최종 화면 순서가 다를 때만
     # 저장 단계에서 슬롯 재배정을 쓴다(순서를 안 바꾼 저장은 users 를 건드리지 않는다).
     st.session_state["se_order_base"] = _visible_emp_order(frame)

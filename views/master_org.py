@@ -11,8 +11,17 @@
 스토어 백필 — 화면이 그룹을 편집하지도, 지우지도 않는다).
 
 부서 시트 계약:
-  - 컬럼: 대분류 / 중분류 / 코드 / 코드명 / 순서 / 비고 / 사용. 중분류는 대분류 없이
-    쓸 수 없다(DB departments_minor_requires_major 와 동일 규칙을 저장 전 검증).
+  - 컬럼: 대분류 / 중분류 / 코드 / 코드명 / 근태 등록 대상 / 순서 / 비고 / 사용.
+    중분류는 대분류 없이 쓸 수 없다(DB departments_minor_requires_major 와 동일 규칙을
+    저장 전 검증).
+  - **근태 등록 대상**(departments.tracks_attendance · migration 011)은 근무표를 실제로
+    편성·등록하는 부서만 체크하는 지정 열이다. 편성·월간 근무표·대시보드가 이 값으로
+    조직 목록을 좁히며(집행: ``db.attendance_dept_codes``), 신규 행 기본값은 **미지정**
+    이다(명시 지정 원칙 — requirements §6 · migration 011 컬럼 기본값과 같은 방향).
+    이 열은 반드시 **보이는 편집 열**이어야 한다: 그리드가 값을 왕복시키지 않으면 저장
+    배치가 지정을 싣지 못해 전 부서 지정이 풀릴 수 있고, 그 사고는 지금 저장 계층
+    (``db._org_dept_write_frame`` · ``supabase_repository._departments_org_payload``)이
+    "값 없으면 기존값 유지"로 막고 있을 뿐이다. 숨김 컬럼으로 두지 않는다.
   - 행 추가·삭제·저장·새로고침의 진입점은 **상단 52px 헤더 아이콘 하나뿐**이다
     (2026-08-14 사용자 지시 · DESIGN §0-3 "아이콘 툴바는 최상단 헤더 바 안에만").
     인페이지 액션바(master_action_bar)는 이 시트에서 제거했고, 활성/음영·툴팁 사유는
@@ -117,11 +126,23 @@ _GROUP_GRID_COLUMNS = {"코드": "text", "코드명": "text", "순서": "text", 
 
 # 부서 시트 — 대분류/중분류는 사람이 직접 입력하는 조직 계층 2단(migration 009).
 # 그룹 시트 폐지(2026-08-07 사용자 결정)로 계층 표현이 이 두 칸으로 넘어왔다.
-_DEPT_COLS = ["대분류", "중분류", "코드", "코드명", "순서", "비고", "사용"]
+#
+# 근태 등록 대상(migration 011) 열의 **라벨·위치**:
+#   * 라벨은 requirements §6·docs/database.md 의 정본 용어 "근태 등록 대상" 그대로 쓴다
+#     (화면 전용 약어를 새로 만들지 않는다 — 칩·안내 문구도 같은 말을 쓴다).
+#   * 위치는 코드명 다음, 순서·비고·사용 앞이다. 근거 두 가지:
+#     (1) 근무형태 관리(_USER_COLS: …약칭·시작·종료·색상·**실근무·특근수당**·설명·표시순서·
+#         사용)와 같은 배치 규칙 — 도메인 boolean 은 식별 열 뒤 속성 자리에 두고, 레코드
+#         수명 상태인 `사용`(is_active)은 어느 기준정보 화면에서도 **마지막 열**로 고정한다.
+#     (2) 편집 안전 — `사용` 바로 옆에 두면 같은 모양의 체크박스 두 개가 붙어 오클릭이
+#         곧 "부서가 근무표에서 사라짐"이 된다. 순서·비고가 사이에 있어 두 토글이 섞이지
+#         않고, 읽는 순서도 "부서명 → 근태 등록 대상?"이라 스캔 동선과 맞는다.
+_ATTENDANCE_COL = "근태 등록 대상"
+_DEPT_COLS = ["대분류", "중분류", "코드", "코드명", _ATTENDANCE_COL, "순서", "비고", "사용"]
 _DEPT_ROW_COLS = ["_row_id", "_row_state", "_sel", *_DEPT_COLS]
 _DEPT_GRID_COLUMNS = {
     "대분류": "text", "중분류": "text", "코드": "text", "코드명": "text",
-    "순서": "text", "비고": "text", "사용": "bool",
+    _ATTENDANCE_COL: "bool", "순서": "text", "비고": "text", "사용": "bool",
 }
 
 # 조 시트 — field 명은 교차 화면 테스트가 참조하는 ``_validate_units`` 의 키(명칭/표시순서)를
@@ -238,7 +259,13 @@ _DRILL_CLICK = JsCode(
 
 
 def render(user: dict) -> None:
-    _ORG_DESC = "부서를 대분류·중분류로 묶어 관리합니다. 계층 두 칸은 직접 입력합니다."
+    # 화면 설명(§6 카피 — 담백한 실무체 2문장). 계층 두 칸이 자유 입력이라는 사실은
+    # 괄호로 압축하고, 새로 생긴 지정 열의 **결과**(근무표에 나타나는 부서가 달라진다)를
+    # 한 문장으로 알린다 — 열 이름만으로는 파급을 알 수 없기 때문이다.
+    _ORG_DESC = (
+        "부서를 대분류·중분류(직접 입력)로 묶어 관리합니다. "
+        "근태 등록 대상으로 지정한 부서만 근무표 편성·조회에 나타납니다."
+    )
     # §1-E 표형(구조 교체) — 본문 아이콘 밴드 없음(§0-3 "아이콘 툴바는 최상단 헤더 바
     # (52px) 안에만"). 추가·삭제·저장·새로고침은 그 헤더 아이콘이 유일한 진입점이고
     # (2026-08-14 사용자 지시), 화면은 활성/음영 규칙만 발행한다 — 저장·삭제 실행 경로와
@@ -260,6 +287,7 @@ def render(user: dict) -> None:
 
     # 새로고침 의도는 렌더 시작에서 소비(재적재 판단). 나머지 액션은 그리드 렌더 뒤 소비.
     refresh_dept = _OD.take_action(REFRESH)
+    _drop_stale_dept_draft()  # 컬럼 계약이 바뀐 코드로 갱신된 세션의 옛 draft 폐기
 
     cond = erp.condition_panel(
         "org",
@@ -320,6 +348,19 @@ def _head_badges() -> str:
         badges += readiness.badge_html()
     badges += mode_badge_html(connected=True, sample=db.is_sample_mode())
     return badges
+
+
+def _attendance_ready() -> bool:
+    """근태 등록 대상 지정을 실제로 **저장**할 수 있는 환경인가(migration 011 적용 여부).
+
+    조회는 미적용 환경에서도 전 부서 True 로 폴백하지만(db.attendance_dept_codes 계약),
+    "대상 아님" 지정의 저장은 fail-closed 다. 그래서 이 화면은 미준비면 해당 열을
+    읽기전용으로 내리고 사유 칩을 붙인다 — 저장 실패로 알려주는 대신 미리 막는다.
+    """
+    try:
+        return bool(db.attendance_flag_ready())
+    except db.DATA_SOURCE_ERRORS:
+        return False
 
 
 def _readiness() -> ReadinessState:
@@ -440,13 +481,26 @@ def _code_name_config() -> dict:
     }
 
 
-def _dept_col_config() -> dict:
+def _dept_col_config(*, attendance_editable: bool = True) -> dict:
     """부서 단일 시트(전폭) 컬럼 설정 — 2026-08-07 단일 시트 전환 후 전용.
 
     구 3분할 시절 초협폭 설정(_code_name_config, 코드 54px 등)은 1/3 폭 시트용이라
     전폭에서는 8~9자리 부서코드가 잘리고 비율이 무너진다. 대분류/중분류(009)를
     포함해 전폭 기준으로 다시 잡는다 — 명칭·분류는 flex, 수치·토글은 고정폭.
+
+    ``attendance_editable=False`` (근태 대상 지정 스키마 미준비)면 그 열만 읽기전용
+    으로 내린다 — 저장이 fail-closed 로 막히는 편집을 눌러보게 두지 않는다(§17 편집
+    안전). 값은 그대로 보여 준다(폴백 = 전 부서 대상).
     """
+    attendance = {
+        # 헤더 "근태 등록 대상"(12.5px, 6자+공백 ≈ 95px)이 잘리지 않는 최소폭 + 체크박스
+        # 토글이라 flex 로 늘리지 않는다(§0.6 내용 맞춤 폭).
+        "flex": 0, "width": 108, "minWidth": 96, "maxWidth": 132,
+        "cellClass": "md-c-center",
+        "editable": _EDIT_UNLESS_PROTECTED if attendance_editable else False,
+    }
+    if not attendance_editable:
+        attendance["cellClass"] = "md-c-center ms-cell-readonly"
     return {
         "대분류": {"flex": 0.9, "minWidth": 110, "cellClass": "md-c-left",
                  "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
@@ -456,6 +510,7 @@ def _dept_col_config() -> dict:
                 "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
         "코드명": {"flex": 1.3, "minWidth": 150, "cellClass": "md-c-left",
                  "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
+        _ATTENDANCE_COL: attendance,
         "순서": {"flex": 0, "width": 72, "minWidth": 56, "maxWidth": 96,
                 "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
         "비고": {"flex": 1.0, "minWidth": 120, "cellClass": "md-c-left",
@@ -530,7 +585,47 @@ def _publish_header_actions(specs: list[dict]) -> bool:
     return resync
 
 
-def _summary_chips(rows: pd.DataFrame, params: dict, *, dirty: int = 0, sel: int = 0) -> None:
+def _drop_stale_dept_draft() -> None:
+    """컬럼 계약이 바뀐 코드로 갱신된 세션의 옛 부서 draft 를 폐기한다(배포·핫리로드 경계).
+
+    근태 등록 대상 열이 없던 시절의 draft 를 그대로 그리면 그리드 준비 단계가 bool
+    기본값(False)으로 채워 **전 부서가 해제된 것처럼** 보이고, 그 화면에서 저장하면
+    지정이 실제로 풀린다. 사용자가 만지지 않은 값이 조용히 뒤집히는 것보다 스토어에서
+    다시 읽는 편이 안전하다(재적재 = 이 화면의 정상 경로).
+    """
+    rows = _OD.get_rows()
+    if rows is None or _ATTENDANCE_COL in getattr(rows, "columns", []):
+        return
+    st.session_state.pop(_OD.rows_key, None)
+    st.session_state.pop(_OD.key("baseline"), None)
+    _OD.set_dirty(False)
+
+
+def _untracked_count(live: pd.DataFrame) -> int:
+    """저장 전 **근태 등록 대상 해제** 건수 — 적재 시점 지정(True) → 현재 미지정 기존 행.
+
+    해제는 "이 부서가 근무표에서 사라진다"는 결과로 이어지는데, 표에서는 체크 하나가
+    빠진 모습일 뿐이라 저장 직전에 알아채기 어렵다. 그래서 미저장 건수와 같은 자리에서
+    건수로 읽히게 한다(칩만 사용 — 별도 장식·모달 없음).
+    """
+    base = st.session_state.get(_OD.key("baseline")) or {}
+    if live is None or getattr(live, "empty", True) or not base:
+        return 0
+    idx = _DEPT_COLS.index(_ATTENDANCE_COL)
+    count = 0
+    for _, row in live.iterrows():
+        if str(row.get("_row_state")) != "existing":
+            continue
+        prior = base.get(str(row.get("_row_id")))
+        if not prior or len(prior) <= idx:
+            continue
+        if prior[idx] == str(True) and not grid_bool(row.get(_ATTENDANCE_COL)):
+            count += 1
+    return count
+
+
+def _summary_chips(rows: pd.DataFrame, params: dict, *, dirty: int = 0, sel: int = 0,
+                   untracked: int = 0, attendance_locked: bool = False) -> None:
     """표 위 요약 스트립 — 좌: 활성 필터 칩(사용 여부·검색), 우: 분포 + 편집 상태 칩.
 
     사용자 관리(_render_summary_chips)와 동일 규칙: **현재 스코프/필터 결과** 기준으로 세고
@@ -543,6 +638,12 @@ def _summary_chips(rows: pd.DataFrame, params: dict, *, dirty: int = 0, sel: int
     그 **활성/음영의 근거**를 표 바로 위에서 읽게 한다(근무형태 관리 건수 행과 같은 어휘).
     0이면 렌더하지 않아 평상시 밀도는 종전과 같다. 그리드 반환 뒤에 계산되는 값이라
     호출부가 슬롯(placeholder)에 지연 렌더한다.
+
+    부서 시트에는 근태 등록 대상(011) 신호가 더 붙는다 — 지정 건수는 분포 칩과 같은
+    스코프(현재 필터 결과)로 세고, **0이면 warn 톤**으로 둔다: 지정이 하나도 없으면
+    근무표·편성·대시보드의 부서 목록이 통째로 비는데 그 사실을 읽을 수 있는 곳이 이
+    화면뿐이기 때문이다("이 부서를 왜 근무표에서 못 찾지?"의 사전 답). ``untracked`` 는
+    저장 전 해제 건수, ``attendance_locked`` 는 지정 스키마 미준비(편집 불가) 사유다.
     """
     existing = rows[rows["_row_state"].astype(str) == "existing"] if rows is not None and not rows.empty \
         else pd.DataFrame(columns=["사용"])
@@ -551,6 +652,8 @@ def _summary_chips(rows: pd.DataFrame, params: dict, *, dirty: int = 0, sel: int
         left += chip_html(f"사용 여부: {params['active']}", "lock")
     if params.get("search"):
         left += chip_html(f"검색: {params['search']}", "lock")
+    if attendance_locked:
+        left += chip_html(f"{_ATTENDANCE_COL}: 지정 스키마 준비 전(편집 불가)", "lock")
     right = ""
     if not existing.empty:
         on = int(existing["사용"].map(grid_bool).sum())
@@ -558,8 +661,13 @@ def _summary_chips(rows: pd.DataFrame, params: dict, *, dirty: int = 0, sel: int
         right = chip_html(f"사용 중 {on}", "ok")
         if off:
             right += chip_html(f"사용 안 함 {off}", "mute")
+        if _ATTENDANCE_COL in existing.columns:
+            tracked = int(existing[_ATTENDANCE_COL].map(grid_bool).sum())
+            right += chip_html(f"{_ATTENDANCE_COL} {tracked}", "ok" if tracked else "warn")
     if int(dirty):
         right += chip_html(f"미저장 {int(dirty)}건", "warn")
+    if int(untracked):
+        right += chip_html(f"{_ATTENDANCE_COL} 해제 {int(untracked)}건", "warn")
     if int(sel):
         right += chip_html(f"선택 {int(sel)}건", "mute")
     if not left and not right:
@@ -852,6 +960,12 @@ def build_dept_rows(df: pd.DataFrame) -> pd.DataFrame:
         "중분류": frame["minor_category"].astype("string"),
         "코드": frame["dept_code"].fillna("").astype("string"),
         "코드명": frame["dept_name"].fillna("").astype("string"),
+        # 근태 등록 대상(011). 파사드가 bool dtype 을 보장하지만, 이 컬럼 이전 계약으로
+        # 만들어진 프레임(교차 화면 테스트 fixture 등)도 그대로 렌더되게 폴백한다.
+        _ATTENDANCE_COL: (
+            frame["tracks_attendance"].map(grid_bool)
+            if "tracks_attendance" in frame else False
+        ),
         "순서": frame["_o"].astype(str).astype("string"),
         "비고": frame.get("description", "").fillna("").astype("string") if "description" in frame else "",
         "사용": frame["is_active"].fillna(True).astype(bool),
@@ -908,9 +1022,13 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str 
     chips_slot = st.container()    # 요약(필터·분포) + 편집 상태(미저장·선택) 칩 — deferred
     banner_slot = st.container()   # 확인/폐기 배너 — 칩 줄 뒤·그리드 앞
 
+    # 근태 등록 대상(011) 지정 스키마가 없는 배포에서는 그 열만 읽기전용으로 내린다
+    # (조회 폴백 = 전 부서 대상 · 저장은 fail-closed).
+    attendance_editable = _attendance_ready()
     spec = MasterGridSpec(
         page_id=_OD.page_id, columns=_DEPT_GRID_COLUMNS, order=_DEPT_COLS,
-        col_config=_dept_col_config(), select_all=True, include_linked_rows=True,
+        col_config=_dept_col_config(attendance_editable=attendance_editable),
+        select_all=True, include_linked_rows=True,
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
     grid_df = render_master_grid(spec, _dept_display(rows, sel_dept), key=_OD.grid_key(suffix=group_code))
@@ -924,7 +1042,9 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str 
     can_write = readiness.write_enabled and not pending
     reason = _write_reason(readiness) or ("미저장 변경 안내를 먼저 처리하세요." if pending else None)
     with chips_slot:
-        _summary_chips(rows, params, dirty=total, sel=sel_count)
+        _summary_chips(rows, params, dirty=total, sel=sel_count,
+                       untracked=_untracked_count(live),
+                       attendance_locked=not attendance_editable)
     # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)이 이 화면의 유일한 액션 진입점이다.
     # 활성/음영·툴팁 사유는 종전 인페이지 액션바와 **같은 규칙**(page_action_specs 순수
     # 계산 — readiness NOT_READY/PROBE_ERROR·폐기 게이트·선택 0·변경 0 전부 동일)이며,
@@ -962,8 +1082,11 @@ def _add_dept_row(grid_df: pd.DataFrame, group_code: str = "") -> None:
     live = live_rows(grid_df)
     row = {
         "_row_id": _OD.next_rid(), "_row_state": "new", "_sel": False,
-        "대분류": "", "중분류": "",
-        "코드": "", "코드명": "", "순서": str(_next_order(live)), "비고": "", "사용": True,
+        "대분류": "", "중분류": "", "코드": "", "코드명": "",
+        # 근태 등록 대상은 **명시 지정**이 원칙이라 신규 행은 미지정으로 시작한다
+        # (migration 011 컬럼 기본값 · requirements §6 와 같은 방향).
+        _ATTENDANCE_COL: False,
+        "순서": str(_next_order(live)), "비고": "", "사용": True,
     }
     _OD.set_rows(pd.concat([live[_DEPT_ROW_COLS], pd.DataFrame([row])], ignore_index=True)[_DEPT_ROW_COLS])
     _OD.bump_nonce()
@@ -1007,6 +1130,10 @@ def _validate_depts(live: pd.DataFrame, group_code: str = ""):
             "major_category": major, "minor_category": minor,
             "description": str(row.get("비고") or "").strip(), "sort_order": order_val,
             "is_active": grid_bool(row.get("사용")),
+            # 근태 등록 대상(011)은 배치 전 행이 명시값을 실어야 저장 계층이 반영한다
+            # (일부만 실으면 지정 유실 방지를 위해 통째로 무시된다 —
+            # supabase_repository._departments_org_payload 의 all 판정).
+            "tracks_attendance": grid_bool(row.get(_ATTENDANCE_COL)),
         })
     return records, errors
 
