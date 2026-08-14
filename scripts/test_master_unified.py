@@ -36,6 +36,7 @@ os.environ["DUTY_DATA_MODE"] = "sample"
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 from modules import db, nav  # noqa: E402
+from modules import ui as app_ui  # noqa: E402 — 헤더 발행 스코프(_HDR_STATE_PREFIX) 확인용
 from views import (  # noqa: E402
     master_departments,
     master_org,
@@ -198,19 +199,22 @@ def _render_org():
     _m.render(_db.find_user_by_emp_no("1001"))
 
 
+# 2026-08-14 사용자 지시로 액션 진입점을 상단 52px 헤더 아이콘 **하나**로 일원화했다.
+# 종전에는 세 화면이 인페이지 액션 버튼(`{page}__{add,delete,save,refresh}`)을 함께
+# 렌더했고 이 테스트가 그 키의 존재를 계약으로 박아 두었다. 이제 계약은 "화면이 헤더에
+# 발행한 상태"(modules.ui.publish_header_actions → hdr_state:{page})이며, 세 번째 튜플
+# 원소는 버튼 키가 아니라 **발행 스코프 page id** 다(플래그 접두 org_dept 와 다름 — 조직
+# 관리의 page id 는 master_org).
 _RENDERS = {
-    "사용자 관리": (_render_users, "사용자 관리", ("master_users__save", "master_users__add",
-                                             "master_users__delete", "master_users__refresh")),
-    "근무형태 관리": (_render_work_types, "근무형태 관리",
-                 ("master_work_types__save", "master_work_types__add",
-                  "master_work_types__delete", "master_work_types__refresh")),
+    "사용자 관리": (_render_users, "사용자 관리", "master_users"),
+    "근무형태 관리": (_render_work_types, "근무형태 관리", "master_work_types"),
     # 2026-08-07: 그룹·운영단위 시트 폐지 — 조직 관리는 부서 단일 시트(org_dept)만 남는다.
-    "조직 관리": (_render_org, "조직 관리", ("org_dept__save", "org_dept__add",
-                                       "org_dept__delete", "org_dept__refresh")),
+    "조직 관리": (_render_org, "조직 관리", "master_org"),
 }
+_HDR_ICONS = ("add", "refresh", "delete", "save")
 
 _bodies: dict[str, str] = {}
-for label, (fn, title, keys) in _RENDERS.items():
+for label, (fn, title, page_id) in _RENDERS.items():
     at = AppTest.from_function(fn, default_timeout=60).run()
     check(f"{label}: 렌더 예외 없음", not at.exception)
     body = " ".join(str(m.value) for m in at.markdown)
@@ -223,16 +227,24 @@ for label, (fn, title, keys) in _RENDERS.items():
     check(f"{label}: 본문 크롬에 연결 pill 렌더 없음(상단 헤더 소유)",
           "샘플 데이터" not in body and "Supabase 연결" not in body)
     check(f"{label}: 상태 스트립(ms-count)", "ms-count" in body)
+    # 진입점 단일화: 인페이지 액션 버튼이 남아 있으면 안 된다(상단 헤더 아이콘이 유일).
     btn_keys = {b.key for b in at.button}
-    for k in keys:
-        check(f"{label}: page-scoped 액션 버튼 키 [{k}]", k in btn_keys)
-    # 갓 로드(변경 0) → 저장 버튼 비활성 — 세 화면 공통 §8 계약.
-    save_key = keys[0]
-    save_btn = next((b for b in at.button if b.key == save_key), None)
-    if save_btn is not None and hasattr(save_btn, "disabled"):
-        check(f"{label}: 갓 로드 시 저장 비활성(변경 없음)", bool(save_btn.disabled))
-    else:
-        check(f"{label}: 저장 버튼 존재(비활성 속성 미노출)", save_btn is not None)
+    stale = [k for k in btn_keys
+             if isinstance(k, str) and k.endswith(("__add", "__delete", "__save", "__refresh"))]
+    check(f"{label}: 인페이지 액션 버튼 없음(상단 헤더로 일원화)", stale == [])
+    # 화면은 헤더 아이콘 4종의 음영/사유를 발행해야 한다 — 발행이 없으면 헤더가
+    # _HDR_DEFAULT_DISABLED(전부 음영)로 남아 유일 진입점이 통째로 죽는다.
+    # AppTest 의 session_state 프록시는 .get() 을 노출하지 않는다 — in/[] 로 읽는다.
+    _hdr_key = app_ui._HDR_STATE_PREFIX + page_id
+    published = at.session_state[_hdr_key] if _hdr_key in at.session_state else {}
+    for icon in _HDR_ICONS:
+        check(f"{label}: 헤더 아이콘 상태 발행 [{icon}]", icon in published)
+    # 갓 로드(선택 0·변경 0) → 저장·삭제 음영, 추가·새로고침 활성 — 세 화면 공통 §8 계약.
+    if published:
+        check(f"{label}: 갓 로드 시 저장 음영(변경 없음)", bool(published.get("save", (False,))[0]))
+        check(f"{label}: 갓 로드 시 삭제 음영(선택 없음)", bool(published.get("delete", (False,))[0]))
+        check(f"{label}: 갓 로드 시 추가 활성", not published.get("add", (True,))[0])
+        check(f"{label}: 갓 로드 시 새로고침 활성", not published.get("refresh", (True,))[0])
 
 # 크로스스크린 일관성 — 세 화면이 정확히 같은 크롬 클래스 집합을 렌더한다.
 # (ms-mode 연결 pill 은 상단 셸 헤더로 이전 — 본문 공통 크롬에서 제외)

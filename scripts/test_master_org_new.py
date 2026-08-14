@@ -5,6 +5,10 @@
 
 - 공통 기반(``views/master``) 위에 재구현: DraftState/MasterGridSpec/render_master_grid/
   run_save/ReadinessState/master_action_bar/ledger_banner/sheet_head 를 실제로 사용하는가.
+- **액션 진입점은 상단 52px 헤더 아이콘 하나**(2026-08-14 사용자 지시 · DESIGN §0-3):
+  화면 안 액션 버튼(``org_dept__add/delete/save/refresh``)은 렌더되지 않고, 활성/음영·
+  사유는 종전과 같은 규칙(page_action_specs)으로 헤더에 발행된다
+  (``modules.ui.publish_header_actions`` → ``hdr_state:master_org``).
 - page-scoped 부서 시트 상태(org_dept) — 공용 ``ms_*`` action key 누수 없음.
 - 그룹/조 시트가 렌더되지 않는다(버튼 키·시트 제목 부재). 보존된 그룹/조 시트
   함수·CSS 는 소스에 남아 있을 수 있다(라우팅되지 않음 — 데이터·테이블은 보존).
@@ -30,11 +34,27 @@ import pandas as pd  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 from modules import db  # noqa: E402
+from modules import ui as app_ui  # noqa: E402
 from views import master_org  # noqa: E402
 from views import master as master_pkg  # noqa: E402
 
 PASS = 0
 FAIL: list[str] = []
+
+#: 화면이 상단 52px 헤더 아이콘에 발행하는 세션 키(modules.ui.publish_header_actions).
+_HDR_KEY = app_ui._HDR_STATE_PREFIX + "master_org"
+
+
+def _hdr(app_test) -> dict:
+    """발행된 헤더 아이콘 상태 ``{role: (disabled, help)}``. 미발행이면 빈 dict."""
+    if _HDR_KEY not in app_test.session_state:
+        return {}
+    return dict(app_test.session_state[_HDR_KEY])
+
+
+def _sess(app_test, key, default=None):
+    """AppTest session_state 는 ``.get`` 을 노출하지 않는다 — 존재 확인 후 읽는다."""
+    return app_test.session_state[key] if key in app_test.session_state else default
 
 
 def check(name: str, cond: bool) -> None:
@@ -97,9 +117,10 @@ check("본문에 연결 pill 렌더 없음(상단 헤더 소유)",
 check("상태 스트립(ms-count)", "ms-count" in body)
 keys = {b.key for b in at.button}
 for k in ("org_dept__save", "org_dept__add", "org_dept__delete", "org_dept__refresh"):
-    check(f"page-scoped 버튼 키 존재: {k}", k in keys)
+    check(f"인페이지 액션 버튼 부재(진입점=상단 헤더 아이콘): {k}", k not in keys)
 for k in ("org_group__save", "org_group__add", "org_unit__save", "org_unit__add"):
     check(f"폐지 시트 버튼 키 부재: {k}", k not in keys)
+check("인페이지 액션바 컨테이너 미렌더(__bar)", "org_dept__bar" not in body)
 
 
 def _save_button(app_test, key):
@@ -109,13 +130,26 @@ def _save_button(app_test, key):
     return None
 
 
-# 갓 로드된 화면은 dirty=0 → 저장 비활성
-sv = _save_button(at, "org_dept__save")
-check("갓 로드 시 org_dept__save 존재", sv is not None)
-if sv is not None and hasattr(sv, "disabled"):
-    check("갓 로드 시 org_dept__save 비활성(변경 없음)", bool(sv.disabled))
-else:
-    check("갓 로드 시 org_dept__save 라벨에 변경 badge 없음", sv is not None and sv.label == "저장")
+# ===== 2a) 액션 진입점 = 상단 52px 헤더 아이콘 4종(발행 상태로 검증) =====
+# 헤더 아이콘 자체는 앱 셸(modules/ui.py)이 그리므로 화면 계약은 "무엇을 발행했는가"다.
+print("액션 진입점 — 상단 헤더 아이콘 4종 발행(활성/음영/사유)")
+hdr0 = _hdr(at)
+check("헤더에 4종(add/delete/save/refresh) 발행",
+      set(hdr0) == {"add", "delete", "save", "refresh"})
+check("갓 로드: 추가 활성", hdr0.get("add", (True, None))[0] is False)
+check("갓 로드: 새로고침 활성", hdr0.get("refresh", (True, None))[0] is False)
+check("갓 로드: 저장 음영 + 사유(변경 없음)",
+      hdr0.get("save", (False, None))[0] is True
+      and "저장할 변경이 없습니다" in (hdr0.get("save", (False, ""))[1] or ""))
+check("갓 로드: 삭제 음영 + 사유(선택 없음)",
+      hdr0.get("delete", (False, None))[0] is True
+      and "선택" in (hdr0.get("delete", (False, ""))[1] or ""))
+check("발행 규칙은 인페이지와 같은 순수 계산(page_action_specs) 재사용",
+      "page_action_specs(" in src and "_publish_header_actions(" in src)
+# 헤더는 본문보다 먼저 그려진다 → 발행 지문이 바뀐 런만 1회 따라잡기 재실행(루프 금지).
+check("헤더 따라잡기 지문 보관", master_org._HDR_FINGERPRINT_KEY in at.session_state)
+check("따라잡기 재실행 플래그는 소비돼 남지 않음(루프 없음)",
+      not _sess(at, master_org._HDR_RESYNC_KEY, False))
 
 
 # ===== 2b) 단일 시트 — 드릴다운·상위 잠금 제거 =====
@@ -127,11 +161,78 @@ check("사용 여부 필터 selectbox 는 유지", "og_active" in sb_keys)
 # 문구 부재 검사는 공통 style CSS 주석에 같은 문구가 있어 오탐한다 — 렌더된 잠금
 # 컴포넌트의 실제 HTML 마커(class='ms-locked')로 검사한다.
 check("잠금 시트 렌더 없음(sheet_locked HTML 부재)", "class='ms-locked'" not in body)
-check("부서 시트는 갓 로드에도 편집 가능(행추가 활성)", (
-    lambda _b: _b is not None and not getattr(_b, "disabled", True)
-)(_save_button(at, "org_dept__add")))
+check("부서 시트는 갓 로드에도 편집 가능(헤더 추가 아이콘 활성)",
+      _hdr(at).get("add", (True, None))[0] is False)
 check("부서 시트에 대분류/중분류 편집 칼럼(009) 계약",
       master_org._DEPT_COLS[:2] == ["대분류", "중분류"])
+
+
+# ===== 2c) 상태별 헤더 아이콘 — 선택 1건 · 미저장 1건 =====
+# 인페이지 버튼이 사라진 뒤에도 "선택/미저장 → 삭제·저장 활성"이 종전과 같아야 한다.
+# AppTest 에서 그리드 컴포넌트는 입력 프레임을 그대로 돌려주므로, 세션 rows 로 선택·
+# 편집 상태를 만들면 실제 렌더 경로(page_action_specs)를 그대로 통과한다.
+print("상태별 헤더 아이콘 — 선택 1건·미저장 1건 → 삭제·저장 활성 + 상태 칩")
+
+
+def _state_probe():
+    import streamlit as st
+    from modules import db as adb
+    from views import master_org as mo
+    # 화면 기본 필터(사용 여부=사용 중)와 같은 params 로 적재·commit 해야 render 가
+    # 재적재하지 않고 이 draft 를 그대로 그린다.
+    _q = {"active": "사용 중", "search": ""}
+    if not st.session_state.get("_ssetup"):
+        st.session_state["_ssetup"] = True
+        mo._load_depts(_q)
+        rows = mo._OD.get_rows().copy()
+        rows.loc[rows.index[0], "코드명"] = "편집됨ABC"  # 기존 변경 1건
+        rows.loc[rows.index[0], "_sel"] = True           # 선택 1건
+        mo._OD.set_rows(rows)
+        mo._OD.set_dirty(True)
+        mo._OD.commit_query(_q)
+    mo.render(adb.find_user_by_emp_no("1001"))
+
+
+at_s = AppTest.from_function(_state_probe, default_timeout=45).run()
+check("상태 probe 렌더 예외 없음", not at_s.exception)
+s_body = " ".join(str(m.value) for m in at_s.markdown)
+hdr_s = _hdr(at_s)
+check("미저장 1건 → 헤더 저장 활성", hdr_s.get("save", (True, None))[0] is False)
+check("선택 1건 → 헤더 삭제 활성", hdr_s.get("delete", (True, None))[0] is False)
+check("추가·새로고침은 계속 활성",
+      hdr_s.get("add", (True, None))[0] is False and hdr_s.get("refresh", (True, None))[0] is False)
+check("표 위 상태 칩에 미저장 건수 표기(저장 badge 승계)", "미저장 1건" in s_body)
+check("표 위 상태 칩에 선택 건수 표기", "선택 1건" in s_body)
+check("표 아래 상태 스트립도 종전대로 유지(총/기존 변경/선택)",
+      "ms-count" in s_body and "기존 변경" in s_body)
+check("헤더 따라잡기 후 재실행 플래그 잔류 없음",
+      not _sess(at_s, master_org._HDR_RESYNC_KEY, False))
+
+
+# ===== 2d) 결과 배너가 헤더 따라잡기 재실행에 삼켜지지 않는다 =====
+# 저장/삭제 결과 flash 는 1회성이라, 헤더 상태가 바뀐 런(=따라잡기 재실행 예정)에서
+# 소비하면 화면에 남지 않는다. 실측으로 잡은 회귀라 계약으로 고정한다.
+print("결과 배너 유실 방지 — flash 는 재실행 예정 런에서 소비하지 않는다")
+
+
+def _flash_probe():
+    import streamlit as st
+    from modules import db as adb
+    from views import master_org as mo
+    if not st.session_state.get("_fsetup"):
+        st.session_state["_fsetup"] = True
+        mo._OD.set_flash("success", "부서를 저장했습니다. (신규 0 · 수정 1)")
+    mo.render(adb.find_user_by_emp_no("1001"))
+
+
+at_f = AppTest.from_function(_flash_probe, default_timeout=45).run()
+check("flash probe 렌더 예외 없음", not at_f.exception)
+f_body = " ".join(str(m.value) for m in at_f.markdown)
+check("저장 결과 flash 가 화면에 남는다(따라잡기 재실행에도 유실 없음)",
+      "부서를 저장했습니다" in f_body)
+check("flash 는 표시 후 소비(중복 표시 없음)", master_org._OD.flash_key not in at_f.session_state)
+check("flash 는 배너 슬롯에서 렌더(1회성 상태 소비 가드)",
+      "if not resync:" in src and "show_flash(_OD)" in src)
 
 
 # ===== 3) migration readiness 3-state =====
@@ -140,18 +241,21 @@ check("_readiness 가 3-state db.org_schema_readiness() 를 사용", "org_schema
 check("PROBE_ERROR 시 reset_org_schema_cache 재probe 동작", "reset_org_schema_cache" in src)
 
 
-def _all_disabled(app_test, keys):
-    for k in keys:
-        b = _save_button(app_test, k)
-        if b is None:
-            return False
-        if hasattr(b, "disabled") and not b.disabled:
+def _hdr_disabled(app_test, roles) -> bool:
+    """발행된 헤더 아이콘 상태에서 ``roles`` 가 전부 음영인가."""
+    states = _hdr(app_test)
+    for r in roles:
+        if r not in states or not states[r][0]:
             return False
     return True
 
 
-# 2026-08-07 단일 시트: write 게이트 대상은 부서 시트 3버튼이다.
-_WRITE_KEYS = ("org_dept__save", "org_dept__add", "org_dept__delete")
+def _hdr_reason(app_test, role) -> str:
+    return (_hdr(app_test).get(role, (False, "")) or (False, ""))[1] or ""
+
+
+# 2026-08-07 단일 시트 · 2026-08-14 헤더 단일 진입점: write 게이트 대상은 헤더 3아이콘이다.
+_WRITE_KEYS = ("add", "delete", "save")
 _orig_readiness = db.org_schema_readiness
 try:
     db.org_schema_readiness = lambda: db.READINESS_NOT_READY
@@ -163,9 +267,12 @@ try:
     # 셸 헤더)과 의미·위치가 분리된다. P1 에서 헤더 배지 슬롯은 제거됐고 배너가 정본 신호다.
     check("NOT_READY 스키마 신호는 배너로 표면화(연결 pill 과 분리)",
           "조직 스키마" in nr_body and "조회만 가능" in nr_body)
-    check("NOT_READY 부서 시트 write 버튼 전부 비활성", _all_disabled(at_nr, _WRITE_KEYS))
+    check("NOT_READY 헤더 write 아이콘(추가·삭제·저장) 전부 음영",
+          _hdr_disabled(at_nr, _WRITE_KEYS))
+    check("NOT_READY 음영 사유 = readiness 메시지(툴팁 동일 문구)",
+          all(master_org._NOT_READY_MSG in _hdr_reason(at_nr, r) for r in _WRITE_KEYS))
     check("NOT_READY 에도 새로고침(조회)은 활성",
-          not _all_disabled(at_nr, ("org_dept__refresh",)))
+          not _hdr_disabled(at_nr, ("refresh",)))
 
     db.org_schema_readiness = lambda: db.READINESS_PROBE_ERROR
     at_pe = AppTest.from_function(_screen_render, default_timeout=45).run()
@@ -173,7 +280,10 @@ try:
     pe_body = " ".join(str(m.value) for m in at_pe.markdown)
     check("PROBE_ERROR 상태 확인 실패 배너/배지", "확인 실패" in pe_body)
     check("PROBE_ERROR 재확인 버튼 노출", any(b.key == "org__recheck" for b in at_pe.button))
-    check("PROBE_ERROR 부서 시트 write 버튼 전부 비활성", _all_disabled(at_pe, _WRITE_KEYS))
+    check("PROBE_ERROR 헤더 write 아이콘 전부 음영", _hdr_disabled(at_pe, _WRITE_KEYS))
+    check("PROBE_ERROR 음영 사유 = 확인 실패 메시지",
+          all("확인" in _hdr_reason(at_pe, r) for r in _WRITE_KEYS))
+    check("PROBE_ERROR 에도 새로고침(조회)은 활성", not _hdr_disabled(at_pe, ("refresh",)))
 finally:
     db.org_schema_readiness = _orig_readiness
 
@@ -190,15 +300,15 @@ try:
     lock_body = " ".join(str(m.value) for m in at_lock.markdown)
     check("그룹 0개에도 잠금 렌더 없음", "class='ms-locked'" not in lock_body)
     check("그룹 0개에도 부서 write 활성(단일 시트 — 그룹 의존 없음)",
-          not _all_disabled(at_lock, ("org_dept__add",)))
+          not _hdr_disabled(at_lock, ("add",)))
 finally:
     db.get_org_groups = _orig_groups
 
 
 # ===== 3c) 반응형/nowrap + 시트 카드 컨테이너 =====
-print("반응형 시트 스택(공통) + 액션바 nowrap + 시트 카드 컨테이너")
+print("반응형 시트 스택(공통) + 시트 안 버튼 nowrap + 시트 카드 컨테이너")
 check("부서 시트 카드 컨테이너 키(org_dept__sheet)", "org_dept__sheet" in src)
-check("액션바 버튼 white-space:nowrap(눌림 방지)", "white-space:nowrap" in src)
+check("시트 안 버튼 white-space:nowrap(확인 바 라벨 눌림 방지)", "white-space:nowrap" in src)
 
 
 # ===== 3c-2) Wave B 통일 디자인 폴리시 마커 =====
@@ -225,13 +335,19 @@ check("bool(사용) native 유지 — JsCode bool 렌더러 미사용(3.14 배�
 
 
 # ===== 3c-3) Codex 디자인 리뷰 2차 — ERP 밀도·일관성 =====
-# 액션바는 표 위(placeholder) 통일 / 필터결과 요약 상단 통일(사용자 관리와 동일) /
+# 표 위 슬롯(placeholder) 통일 / 필터결과 요약 상단 통일(사용자 관리와 동일) /
 # ▸ 열림 중복칩 제거(행 강조로 충분) / 최소 열폭 축소로 1366·1280px 3열 적합.
-print("Codex 2차 — 액션바 표 위·필터결과 요약·중복칩 제거·열폭 축소")
-check("액션바 표 위(placeholder)로 3시트 통일(그리드 렌더 앞 bar_slot)",
-      src.count("bar_slot = st.container()") == 3 and src.count("with bar_slot, st.container") == 3)
+print("Codex 2차 — 표 위 슬롯·필터결과 요약·중복칩 제거·열폭 축소")
+# 2026-08-14: 부서(라우팅) 시트의 표 위 슬롯은 액션바가 아니라 **상태 칩 줄**이다
+# (액션=상단 헤더 아이콘 단일 진입점). 미라우팅 보존 시트(그룹·조)만 bar_slot 을 갖는다.
+check("부서 시트 표 위 슬롯 = 상태 칩(chips_slot), 액션바 아님",
+      "chips_slot = st.container()" in src and "with chips_slot:" in src
+      and src.count("bar_slot = st.container()") == 2
+      and src.count("with bar_slot, st.container") == 2)
 check("필터/스코프 결과 요약 상단 통일(_summary_chips + chip_html, 3시트)",
-      "chip_html" in src and src.count("_summary_chips(rows, params)") == 3)
+      "chip_html" in src and src.count("_summary_chips(rows, params") == 3)
+check("인페이지 액션바가 들고 있던 상태 신호를 칩으로 승계(미저장·선택)",
+      "미저장 {int(dirty)}건" in src and "선택 {int(sel)}건" in src)
 check("요약칩 분포 어휘를 필터 옵션(사용 중/사용 안 함)과 통일 — 옛 사용/미사용 칩 제거",
       "사용 중 {on}" in src and "사용 안 함 {off}" in src
       and "미사용 {off}" not in src and "사용 {on}" not in src)
@@ -242,9 +358,9 @@ check("▸ 열림 중복칩 제거 — 행 강조(ms-row-linked)로 충분",
       "_LINK_CHIP" not in src and "▸ 열림" not in src and "include_linked_rows=True" in src)
 check("최소 열폭 축소(1366·1280px 3열 가로스크롤·잘림 방지) — 코드명 minWidth 완화",
       "minWidth\": 116" not in src and "minWidth\": 106" not in src)
-check("액션바 keyed __bar 컨테이너로 3시트 통일(공통 여백·포커스 재사용)",
-      src.count(".page_id}__bar\")") == 3)
-check("표준 배너 순서 — 확인/폐기 배너를 액션바 뒤 banner_slot 로 이동(3시트)",
+check("액션바 keyed __bar 컨테이너는 미라우팅 보존 시트에만(부서는 액션바 없음)",
+      src.count(".page_id}__bar\")") == 2)
+check("표준 배너 순서 — 확인/폐기 배너를 표 위 슬롯 뒤 banner_slot 으로(3시트)",
       src.count("banner_slot = st.container()") == 3 and src.count("with banner_slot:") == 3)
 
 
@@ -411,11 +527,12 @@ atb = AppTest.from_function(_gate_block_probe, default_timeout=45).run()
 check("게이트 render 예외 없음", not atb.exception)
 gbody = " ".join(str(m.value) for m in atb.markdown)
 check("폐기 확인 게이트 표시", "저장되지 않은 변경" in gbody)
-for k in ("org_dept__save", "org_dept__add", "org_dept__delete"):
-    b = _save_button(atb, k)
-    check(f"게이트중 {k} 비활성(유실 방지)", b is not None and getattr(b, "disabled", False))
-rb = _save_button(atb, "org_dept__refresh")
-check("게이트중에도 새로고침(조회)은 유지", rb is not None and not getattr(rb, "disabled", True))
+for r in _WRITE_KEYS:
+    check(f"게이트중 헤더 {r} 아이콘 음영(유실 방지)", _hdr_disabled(atb, (r,)))
+check("게이트중 음영 사유 = 안내 처리 요구", "먼저 처리" in _hdr_reason(atb, "save"))
+check("게이트중에도 새로고침(조회)은 유지", not _hdr_disabled(atb, ("refresh",)))
+check("게이트 배너 버튼(폐기/취소)은 화면 안에 유지",
+      {"org_dept__discard_ok", "org_dept__discard_cancel"} <= {b.key for b in atb.button})
 
 
 def _gate_discard_probe():

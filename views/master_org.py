@@ -13,6 +13,12 @@
 부서 시트 계약:
   - 컬럼: 대분류 / 중분류 / 코드 / 코드명 / 순서 / 비고 / 사용. 중분류는 대분류 없이
     쓸 수 없다(DB departments_minor_requires_major 와 동일 규칙을 저장 전 검증).
+  - 행 추가·삭제·저장·새로고침의 진입점은 **상단 52px 헤더 아이콘 하나뿐**이다
+    (2026-08-14 사용자 지시 · DESIGN §0-3 "아이콘 툴바는 최상단 헤더 바 안에만").
+    인페이지 액션바(master_action_bar)는 이 시트에서 제거했고, 활성/음영·툴팁 사유는
+    종전과 같은 순수 규칙(page_action_specs)이 계산해 헤더에 발행한다 — 계산 원천이
+    하나라 두 진입점 시절의 불일치 여지가 없다. 클릭 플래그(`org_dept:action:*`)와
+    실행 경로(확인 게이트·저장·재적재)는 무변경이다.
   - page-scoped DraftState = ``org_dept``(_OD). dirty draft 상태에서 필터를 바꾸면
     폐기/계속 게이트를 태운다.
   - 저장된 코드는 수정 불가(신규 등록 시에만 입력), 저장 실패 시 draft 를 보존한다.
@@ -96,6 +102,8 @@ _PROBE_ERROR_MSG = "조직 스키마 상태 확인 실패 — 재확인이 필�
 _SYSTEM_CODES = {"ADMIN"}  # 화면 보호 대상(코드수정·미사용·삭제 차단)
 
 # 조직 액션바 비율 — [행 추가][삭제][저장] · 스페이서 · [새로고침].
+# 2026-08-14 이후 라우팅되는 부서 시트는 인페이지 액션바를 쓰지 않는다(액션=상단 헤더
+# 아이콘 단일 진입점). 이 비율은 미라우팅 보존 시트(그룹·조) 호출부만 사용한다.
 # 구 값 (1.28,1.0,1.12,0.2,1.42) 은 시트가 화면의 1/3 폭이던 3분할 시절 값이라, 2026-08-07
 # 단일 시트(전폭) 전환 뒤에는 스페이서(0.2)가 거의 없어 버튼이 1440px 에서 220~315px 로
 # 부풀었다(실측). 사용자·근무형태 관리의 액션 열 비율(1.15/1.05/1.35/1.15)과 같은
@@ -148,7 +156,9 @@ _EDIT_UNLESS_PROTECTED = JsCode(
 # 3시트 세로 스택(≤1100px)은 공통 style 의 `stHorizontalBlock:has([class*="__sheet"])` 규칙.
 _ORG_PAGE_CSS = """
 <style>
-/* 시트 액션바 버튼 nowrap(4버튼 라벨 유지) — 기능 규칙 보존(후손 셀렉터로 disabled 래퍼도 커버). */
+/* 시트 안 버튼 nowrap — 부서 시트는 액션바를 폐지(액션=상단 헤더 아이콘)했으므로 이제
+   폐기/삭제 확인 바 버튼에 적용되고, 미라우팅 보존 시트(그룹·조)의 4버튼 라벨도 유지한다.
+   (후손 셀렉터라 disabled 래퍼도 커버) */
 .st-key-org_group__sheet div.stButton button,
 .st-key-org_dept__sheet div.stButton button,
 .st-key-org_unit__sheet div.stButton button {
@@ -229,9 +239,10 @@ _DRILL_CLICK = JsCode(
 
 def render(user: dict) -> None:
     _ORG_DESC = "부서를 대분류·중분류로 묶어 관리합니다. 계층 두 칸은 직접 입력합니다."
-    # §1-E 표형(구조 교체) — 아이콘 밴드 제거(§0-3, 6단계와 동일). 추가·삭제·저장·새로고침은
-    # 각 시트(그룹·부서·조)가 자기 인페이지 액션바로 소유(3독립 저장 계약)하므로 밴드가 필요
-    # 없었다 — 밴드만 제거하고 시트별 액션바·저장 경로는 전부 보존.
+    # §1-E 표형(구조 교체) — 본문 아이콘 밴드 없음(§0-3 "아이콘 툴바는 최상단 헤더 바
+    # (52px) 안에만"). 추가·삭제·저장·새로고침은 그 헤더 아이콘이 유일한 진입점이고
+    # (2026-08-14 사용자 지시), 화면은 활성/음영 규칙만 발행한다 — 저장·삭제 실행 경로와
+    # 확인 게이트는 종전 그대로다.
     erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="조직 관리",
@@ -285,11 +296,18 @@ def render(user: dict) -> None:
         # 폐기 확인 게이트가 떠 있는 동안 들어온 쓰기 의도는 **소비하지 않고 버린다**.
         # 종전에는 소비도 하지 않아 flag 가 세션에 남았고, 게이트를 해소한 다음 rerun 에서
         # 뒤늦게 발화할 수 있었다(사용자가 누른 적 없는 시점의 저장·삭제). 게이트 중에는
-        # 두 진입점(인페이지 버튼·헤더 아이콘) 모두 음영이라 정상 경로에서는 설 수 없는
-        # 상태지만, 음영 판정이 1 rerun 늦게 반영되는 구간을 fail-closed 로 막는다.
+        # 헤더 아이콘이 음영이라 정상 경로에서는 설 수 없는 상태지만, 음영 판정이 1 rerun
+        # 늦게 반영되는 구간을 fail-closed 로 막는다(_publish_header_actions 의 따라잡기와
+        # 별개인 이중 방어 — 헤더 아이콘은 클릭 시점의 음영만 보장할 수 있다).
         _OD.clear_actions(ADD, DELETE, SAVE)
 
     if dept_grid is not None and _sync_rows(_OD, dept_grid, _DEPT_ROW_COLS):
+        st.rerun()
+
+    # 헤더 아이콘 따라잡기(_publish_header_actions 주석 참조) — 액션 소비·구조 동기화가
+    # 모두 끝난 뒤 마지막에 한 번만. 이 시점에는 이번 런의 쓰기 의도가 이미 처리됐으므로
+    # 재실행이 클릭을 삼키지 않는다.
+    if st.session_state.pop(_HDR_RESYNC_KEY, False):
         st.rerun()
 
 
@@ -472,19 +490,59 @@ def _write_reason(readiness: ReadinessState) -> str | None:
 
 
 def _locked_action_bar(state: DraftState, readiness: ReadinessState) -> None:
-    """상위 미선택 잠금 시트의 액션바 — 모든 write 비활성(버튼 키는 유지)."""
+    """상위 미선택 잠금 시트의 액션바 — 모든 write 비활성(버튼 키는 유지).
+
+    라우팅되지 않는 조 시트 전용 보존 코드다(부서 단일 시트는 잠기지 않으며 액션
+    진입점이 상단 헤더 아이콘 하나다).
+    """
     reason = _write_reason(readiness) or "상위 항목을 먼저 선택하세요."
     master_action_bar(state, sel_count=0, dirty_total=0, can_write=False,
                       write_disabled_reason=reason, ratios=_ORG_BAR_RATIOS)
 
 
-def _summary_chips(rows: pd.DataFrame, params: dict) -> None:
-    """표 위 요약 스트립 — 좌: 활성 필터 칩(사용 여부·검색), 우: 결과 사용 중/사용 안 함 분포.
+# 헤더 아이콘 동기화 — 상단 52px 헤더는 본문보다 **먼저** 그려지므로,
+# ``publish_header_actions`` 로 발행한 활성/음영은 그 다음 런부터 헤더에 반영된다.
+# 인페이지 액션바가 함께 있던 동안에는 이 한 런 지연이 가려졌지만(버튼이 즉시 반영),
+# 진입점이 헤더 하나가 된 뒤에는 "셀을 고쳤는데 저장 아이콘이 아직 음영 → 클릭 불가"
+# 로 그대로 막힘이 된다(실측: 편집 직후 인페이지 저장=활성인데 헤더 저장=음영).
+# 그래서 이번 런 헤더가 그린 상태와 방금 계산한 상태가 다를 때만 **한 번** 재실행해
+# 헤더를 따라잡게 한다. 지문이 같아지면 재실행하지 않으므로 루프가 생기지 않고,
+# 그리드 클라이언트 상태(편집 중인 셀 값)는 리마운트 없는 재실행에서 보존된다.
+_HDR_FINGERPRINT_KEY = "org_dept:hdr_fingerprint"
+_HDR_RESYNC_KEY = "org_dept:hdr_resync"
+
+
+def _publish_header_actions(specs: list[dict]) -> bool:
+    """액션 스펙을 헤더에 발행하고, 헤더가 옛 상태로 그려졌으면 재실행을 예약한다.
+
+    반환값이 True 면 **이번 런의 출력은 버려진다** — 호출부는 flash·저장 원장 같은
+    1회성 상태를 이 런에서 소비하면 안 된다(소비 후 재실행하면 결과 배너가 화면에
+    남지 않는다). 게이트/확인 바처럼 세션에 남는 상태는 그대로 렌더해도 무방하다.
+    """
+    header_actions_from_specs("master_org", specs)
+    fingerprint = tuple(
+        (s.get("role"), bool(s.get("disabled")), s.get("help")) for s in specs
+    )
+    # 매 런 덮어쓴다(누적 아님) — 다른 이유로 재실행돼 이미 따라잡혔으면 False 가 된다.
+    resync = st.session_state.get(_HDR_FINGERPRINT_KEY) != fingerprint
+    st.session_state[_HDR_RESYNC_KEY] = resync
+    st.session_state[_HDR_FINGERPRINT_KEY] = fingerprint
+    return resync
+
+
+def _summary_chips(rows: pd.DataFrame, params: dict, *, dirty: int = 0, sel: int = 0) -> None:
+    """표 위 요약 스트립 — 좌: 활성 필터 칩(사용 여부·검색), 우: 분포 + 편집 상태 칩.
 
     사용자 관리(_render_summary_chips)와 동일 규칙: **현재 스코프/필터 결과** 기준으로 세고
     (전체수 아님), 분포 칩 어휘는 필터 옵션어(사용 중/사용 안 함)와 통일한다. 결과가 0건이어도
     활성(비기본) 필터 칩은 남겨 "왜 비었는지"를 알리고, 분포 칩만 결과가 있을 때 렌더한다.
     모든 필터가 기본이고 결과도 없으면 비운다.
+
+    ``dirty``/``sel`` 은 인페이지 액션바가 들고 있던 상태 신호(저장 badge "저장 · N",
+    삭제 활성 근거)를 이어받는 편집 상태 칩이다 — 액션이 상단 헤더 아이콘으로 옮겨간 뒤
+    그 **활성/음영의 근거**를 표 바로 위에서 읽게 한다(근무형태 관리 건수 행과 같은 어휘).
+    0이면 렌더하지 않아 평상시 밀도는 종전과 같다. 그리드 반환 뒤에 계산되는 값이라
+    호출부가 슬롯(placeholder)에 지연 렌더한다.
     """
     existing = rows[rows["_row_state"].astype(str) == "existing"] if rows is not None and not rows.empty \
         else pd.DataFrame(columns=["사용"])
@@ -500,11 +558,16 @@ def _summary_chips(rows: pd.DataFrame, params: dict) -> None:
         right = chip_html(f"사용 중 {on}", "ok")
         if off:
             right += chip_html(f"사용 안 함 {off}", "mute")
+    if int(dirty):
+        right += chip_html(f"미저장 {int(dirty)}건", "warn")
+    if int(sel):
+        right += chip_html(f"선택 {int(sel)}건", "mute")
     if not left and not right:
         return
-    # 위 시트 헤더(.ms-sheet-head 하단 패딩)와 아래 액션바 사이에 실제 여백을 준다 —
-    # 구 margin(.1rem/.2rem)은 헤더 패딩과 3px 겹치고 액션바와는 0px 로 붙어, 칩 줄이
-    # 두 블록 사이에 끼인 것처럼 읽혔다(실측 t313–329, 헤더 b316, 바 t329).
+    # 위 시트 헤더(.ms-sheet-head 하단 패딩)와 아래 블록 사이에 실제 여백을 준다 —
+    # 구 margin(.1rem/.2rem)은 헤더 패딩과 3px 겹치고 아래와는 0px 로 붙어, 칩 줄이
+    # 두 블록 사이에 끼인 것처럼 읽혔다(실측 t313–329, 헤더 b316). 액션바가 있던
+    # 자리를 이 줄이 이어받은 뒤에도 같은 여백으로 그리드와 분리한다.
     st.markdown(
         "<div style='display:flex;justify-content:space-between;align-items:center;"
         "gap:.5rem;margin:.35rem 0 .45rem'>"
@@ -830,17 +893,20 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str 
     group_code/group_name/sel_dept 는 교차 화면 테스트가 참조하는 시그니처라 선택
     인자로 보존한다 — 현재 화면 경로에서는 모두 빈 값으로 호출된다.
     """
-    show_flash(_OD)
+    # flash(저장·삭제 결과)는 배너 슬롯에서 렌더한다 — 헤더 따라잡기 재실행이 걸린
+    # 런에서 소비하면 결과 배너가 화면에 남지 않기 때문이다(_publish_header_actions).
     # 미저장 draft 폐기 게이트(필터 변경 등). 해소 전까지 write 를 비활성한다(§17).
     pending = _OD.has_pending_reload()
     plan = st.session_state.get(_OD.delete_plan_key)
     rows = _OD.get_rows()
     sheet_head("부서", count=_existing_count(rows), context=group_name or None)
 
-    # 표준 순서(users/worktype 통일): 요약칩 → __bar 액션바 → 확인/결과 배너 → 그리드.
-    _summary_chips(rows, params)
-    bar_slot = st.container()      # 액션바(keyed __bar) — 건수 계산 후 채운다
-    banner_slot = st.container()   # 확인/폐기 배너 — 액션바 뒤·그리드 앞
+    # 표준 순서(users/worktype 통일): 요약·상태 칩 줄 → 확인/결과 배너 → 그리드.
+    # 인페이지 액션바가 있던 자리는 **버튼이 아니라 상태**가 이어받는다(액션은 상단
+    # 헤더 아이콘 단일 진입점). 칩 줄은 그리드 반환 뒤 계산되는 미저장·선택 건수를
+    # 포함하므로 슬롯만 잡아 두고 건수 계산 후 채운다.
+    chips_slot = st.container()    # 요약(필터·분포) + 편집 상태(미저장·선택) 칩 — deferred
+    banner_slot = st.container()   # 확인/폐기 배너 — 칩 줄 뒤·그리드 앞
 
     spec = MasterGridSpec(
         page_id=_OD.page_id, columns=_DEPT_GRID_COLUMNS, order=_DEPT_COLS,
@@ -857,21 +923,25 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str 
     _OD.set_dirty(total > 0)
     can_write = readiness.write_enabled and not pending
     reason = _write_reason(readiness) or ("미저장 변경 안내를 먼저 처리하세요." if pending else None)
-    with bar_slot, st.container(key=f"{_OD.page_id}__bar"):
-        master_action_bar(
-            _OD, sel_count=sel_count, dirty_total=total,
-            can_write=can_write, write_disabled_reason=reason, ratios=_ORG_BAR_RATIOS,
-        )
-    # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)에 **인페이지 액션바와 같은 규칙**을
-    # 발행한다. page_action_specs 는 master_action_bar 와 동일 규칙의 순수 계산이라 두
-    # 진입점의 활성/사유가 갈릴 수 없다. 헤더 화면 id 는 nav 기준 'master_org'(DraftState
-    # page_id 'org_dept' 와 다름 — 단일 시트 전환 후에도 화면 id 는 그대로다).
-    header_actions_from_specs("master_org", page_action_specs(
+    with chips_slot:
+        _summary_chips(rows, params, dirty=total, sel=sel_count)
+    # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)이 이 화면의 유일한 액션 진입점이다.
+    # 활성/음영·툴팁 사유는 종전 인페이지 액션바와 **같은 규칙**(page_action_specs 순수
+    # 계산 — readiness NOT_READY/PROBE_ERROR·폐기 게이트·선택 0·변경 0 전부 동일)이며,
+    # 클릭은 종전과 같은 page-scoped flag 를 쏘므로 실행 경로·확인 게이트는 하나 그대로다.
+    # 헤더 화면 id 는 nav 기준 'master_org'(DraftState page_id 'org_dept' 와 다름 —
+    # 단일 시트 전환 후에도 화면 id 는 그대로다).
+    resync = _publish_header_actions(page_action_specs(
         sel_count=sel_count, dirty_total=total,
         can_write=can_write, write_disabled_reason=reason,
     ))
     with banner_slot:
-        _render_saved_ledger(_OD)  # 직전 partial 저장 원장(성공/실패 칩) 1회 표시
+        # 1회성 상태(flash·저장 원장)는 이번 런의 출력이 실제로 남을 때만 소비한다 —
+        # 헤더 따라잡기 재실행이 예약된 런에서 pop 하면 "저장했습니다" 배너가 사라진다.
+        # (재실행 뒤 런에서 그대로 소비·표시된다 — 유실 없이 한 프레임 늦을 뿐이다.)
+        if not resync:
+            show_flash(_OD)            # §21 저장·삭제 결과 flash
+            _render_saved_ledger(_OD)  # 직전 partial 저장 원장(성공/실패 칩) 1회 표시
         if pending:
             gate = discard_confirm_bar(_OD)
             if gate == "discard":

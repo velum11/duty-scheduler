@@ -11,9 +11,19 @@
 행·열(탭/줄바꿈)을 그대로 붙여넣을 수 있고, [행 추가]로 신규 사용자를 추가한다.
 사용자는 물리 삭제하지 않고 재직 여부(is_active)로 관리한다([삭제]=퇴직/미사용 처리).
 
+액션 진입점(2026-08-14 사용자 지시): 실행 버튼은 **앱 상단 52px 헤더 아이콘 4종
+(추가·삭제·저장·새로고침) 하나뿐**이다. 화면 안 액션 버튼 바는 제거했고, 활성/음영·
+툴팁 사유는 종전과 같은 ``page_action_specs`` 계산을 그대로 헤더에 발행한다(규칙 불변,
+진입점만 단일화). 앱 셸이 본문보다 먼저 헤더를 그리므로 발행은 한 프레임 늦게 반영되는데,
+헤더가 유일한 진입점이 된 뒤로는 그 지연이 곧 '눌리지 않는 아이콘'이라 발행값이 바뀐
+run 에서 1회 재실행해 헤더를 따라오게 한다(``_sync_header``).
+
 화면 표시 원칙:
 - 부서는 부서명(중복 시 코드 병기)으로 표시하고 저장 시 dept_code 로 변환한다. 부서 셀에는
   소속 그룹명을 보조 라벨로 병기해 표시순서가 어느 그룹 범위에서 검증되는지 알린다.
+- 이메일(010 user_emails)은 **전 업무 수신(scope=ALL) 대표 주소 1건**만 그리드 열로
+  편집한다. 1인 다중 이메일(M:N) 계약은 유지되며, 담당별(scope=capability) 주소와 추가
+  ALL 주소는 저장 시 보존하고 하단 '담당 권한·알림 이메일' 편집기가 계속 소유한다.
 - 조(운영단위) 편집 칼럼은 2026-08-07 제거 — A/B/C 근무조는 기준정보가 아니라 근무편성표에서
   직접 입력한다. 기존 행의 team_code 는 _save 가 저장 직전 권위 스토어에서 백필해 보존한다
   (그리드가 spec.order+META 외 컬럼을 잘라내므로 숨김 컬럼 왕복은 불가).
@@ -86,13 +96,20 @@ _STATUS = ["전체", "재직", "퇴직"]
 # 조(운영단위) 칼럼은 2026-08-07 사용자 결정으로 제거됐다 — A/B/C조는 기준정보가 아니라
 # 근무편성표에서 직접 입력한다(schedule_assignments.shift_group_code).
 # 입사일/퇴사일은 migration 009. 퇴사일이 지나면 로그인 차단 + 편성 명단에서 숨긴다.
-_USER_COLS = ["사번", "성명", "부서", "직급", "권한", "입사일", "퇴사일", "표시순서", "재직"]
+#: 알림 이메일 열(migration 010 user_emails) — scope=ALL 대표 주소 1건 편집 슬롯.
+#: 공용 그리드는 ``spec.order + META_COLUMNS`` 만 왕복시키므로(숨김 컬럼은 잘려 나간다)
+#: 이메일도 **보이는 열**로 두어야 저장 경로까지 값이 살아 온다 — team_code 소실 사고
+#: (2026-08-07 P1)와 같은 함정을 반복하지 않기 위한 배치다.
+EMAIL_COL = "이메일"
+_USER_COLS = ["사번", "성명", "부서", "직급", "권한", EMAIL_COL,
+              "입사일", "퇴사일", "표시순서", "재직"]
 # 기존 조(운영단위) 배정은 그리드로 왕복시키지 않는다 — 공용 그리드는 spec.order+META
 # 컬럼만 통과시키므로 숨김 컬럼은 잘려 나간다. 보존은 _save 의 스토어 백필이 담당한다.
 _ROW_COLS = ["_row_id", "_row_state", "_sel", *_USER_COLS]
 _GRID_COLUMNS = {
     "사번": "text", "성명": "text", "부서": "text",
-    "직급": "text", "권한": "text", "입사일": "text", "퇴사일": "text",
+    "직급": "text", "권한": "text", EMAIL_COL: "text",
+    "입사일": "text", "퇴사일": "text",
     "표시순서": "text", "재직": "bool",
 }
 # validate 가 필수/참조를 확인하는 텍스트 필드(재직/표시순서 제외) — 완전 빈 행 판별과 동일.
@@ -118,16 +135,34 @@ _PROBE_ERROR_MSG = (
     "스키마 상태를 확인하지 못했습니다(권한·네트워크). '스키마 재확인' 후 다시 시도하세요."
 )
 
-# §1-E 건수 행 CSS(사용자 제목 + 건수 pill + 재직/퇴직 분해). §2 팔레트 리터럴.
+# §1-E 건수 행 CSS(사용자 제목 + 건수 pill + 재직/퇴직 분해 + 우측 상태 텍스트).
+# 액션 버튼이 헤더로 올라간 뒤 비는 우측 공간은 저장 필요 여부(미저장)·선택 건수와
+# 진입점 안내가 채운다 — 상태 신호를 잃지 않으면서 빈 영역도 만들지 않는다(§6).
+# §2 팔레트 리터럴 + 부속서 A-2(작은 의미 텍스트 #6b665d 하한).
 _MU_CSS = """
 <style>
 .mu-crow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .mu-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
 .mu-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
-.mu-crow .dist { font-size:11.5px; color:#6b665d; white-space:nowrap; }
+.mu-crow .dist { font-size:11.5px; color:#6b665d; white-space:nowrap;
+  font-variant-numeric:tabular-nums; }
+.mu-crow .gap { flex:1 1 auto; min-width:8px; }
+.mu-crow .wip, .mu-crow .calm, .mu-crow .sel, .mu-crow .hint {
+  font-size:12.5px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.mu-crow .wip { font-weight:600; color:#b4451a; }
+.mu-crow .wip .sub { font-weight:500; color:#6b665d; margin-left:4px; }
+.mu-crow .calm { color:#6b665d; }
+.mu-crow .sel { font-weight:600; color:#4a453d; }
+.mu-crow .hint { color:#6b665d; }
+.mu-crow .sep { color:#cfc8bd; }
 </style>
 """
+
+# 이메일 열이 조회 전용으로 내려가는 사유(스키마 미준비 / 조회 실패) 안내.
+_EMAIL_NOT_READY_MSG = (
+    "담당 권한·알림 이메일 스키마가 아직 준비되지 않았습니다"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +221,90 @@ def _order_text(value) -> str:
 def _date_text(value) -> str:
     """저장소 날짜 → 편집기 표시 문자열 ('' = 미지정)."""
     return supabase_repository._clean_date(value) or ""
+
+
+# ---------------------------------------------------------------------------
+# 알림 이메일(migration 010 user_emails) — 그리드 1열 = scope=ALL 대표 주소 슬롯
+# ---------------------------------------------------------------------------
+# 계약 유지 원칙: user_emails 는 (user, email, scope) 행 단위 M:N 이고 한 사람이 복수
+# 주소·업무별 상이한 주소를 가질 수 있다. 그리드는 그중 **전 업무 수신(scope=ALL)
+# 대표 주소 1건**만 편집 슬롯으로 노출하고, 저장은 그 1건만 교체한다 — 다른 ALL 주소와
+# 담당별(scope=capability) 주소는 읽고 그대로 되돌려 써서 보존한다(파괴적 전체 교체 금지).
+def _valid_email(value) -> bool:
+    """파사드(db.set_user_emails)와 **같은 규칙**의 형식 판정 — 저장 전 화면 방어."""
+    email = str(value or "").strip().lower()
+    return bool(email) and "@" in email and "." in email.split("@")[-1]
+
+
+def _primary_email(rows) -> str:
+    """이메일 목록에서 그리드 슬롯에 실을 대표 ALL 주소(정렬 최소값, 없으면 '').
+
+    sample(세션 삽입순)·supabase(scope,email 정렬) 어느 모드에서도 같은 값을 고르도록
+    정렬 최소값으로 못 박는다 — 대표 주소가 모드마다 달라지면 저장 대상도 달라진다.
+    """
+    candidates = sorted(
+        str(r.get("email") or "").strip()
+        for r in (rows or [])
+        if str(r.get("scope") or "").strip().upper() == config.EMAIL_SCOPE_ALL
+        and str(r.get("email") or "").strip()
+    )
+    return candidates[0] if candidates else ""
+
+
+def _extra_email_count(rows) -> int:
+    """대표 주소를 뺀 나머지 등록 주소 수(담당별 주소 + 추가 ALL 주소)."""
+    total = len([r for r in (rows or []) if str(r.get("email") or "").strip()])
+    return max(total - (1 if _primary_email(rows) else 0), 0)
+
+
+def _merge_email_rows(current, new_email: str) -> list[dict]:
+    """기존 목록에서 **대표 ALL 주소 1건만** 교체한 새 목록(저장 payload).
+
+    - 빈 값 입력 = 대표 주소 삭제(나머지 주소는 유지)
+    - 나머지 행(다른 ALL 주소·담당별 주소)은 순서·scope 그대로 남긴다
+    소문자 정규화는 파사드 계약이지만 여기서도 맞춰 둔다(재조회 전 표시 일관).
+    """
+    previous = _primary_email(current)
+    rows = [
+        {"email": str(r.get("email") or "").strip(),
+         "scope": str(r.get("scope") or config.EMAIL_SCOPE_ALL).strip().upper()}
+        for r in (current or [])
+        if str(r.get("email") or "").strip()
+    ]
+    if previous:
+        for idx, row in enumerate(rows):
+            if (row["scope"] == config.EMAIL_SCOPE_ALL
+                    and row["email"].lower() == previous.lower()):
+                rows.pop(idx)
+                break
+    email = str(new_email or "").strip().lower()
+    if email:
+        rows.insert(0, {"email": email, "scope": config.EMAIL_SCOPE_ALL})
+    return rows
+
+
+def _email_map(emp_nos) -> tuple[dict[str, str], dict[str, int], str]:
+    """사번 목록 → ({사번: 대표 주소}, {사번: 추가 주소 수}, 오류 사유).
+
+    010 미적용이거나 조회가 실패하면 값을 만들어내지 않고 사유를 돌려준다 — 화면은
+    그 사유로 이메일 열을 조회 전용으로 내려 **모르는 상태를 빈 값으로 덮어쓰지**
+    않는다(sample fallback 으로 오류를 감추지 않는 계약과 같은 취지).
+    """
+    primary: dict[str, str] = {}
+    extra: dict[str, int] = {}
+    emps = [str(e).strip() for e in (emp_nos if emp_nos is not None else []) if str(e).strip()]
+    if not emps:
+        return primary, extra, ""
+    if not db.capabilities_ready():
+        return {}, {}, _EMAIL_NOT_READY_MSG
+    try:
+        for emp in emps:
+            rows = db.get_user_emails(emp)
+            primary[emp] = _primary_email(rows)
+            extra[emp] = _extra_email_count(rows)
+    except db.DATA_SOURCE_ERRORS as exc:
+        return {}, {}, f"알림 이메일을 불러오지 못했습니다: {exc}"
+    return primary, extra, ""
 
 
 def _role_resolver() -> dict[str, str]:
@@ -322,6 +441,13 @@ def _scan(live, dept_resolver, team_resolve):
             errors.append(f"{tag}: 권한을 선택하세요. (관리자/조장/조원)")
             mark(rid, "권한", "권한을 선택하세요. (관리자/조장/조원)")
 
+        # 이메일(선택 입력) — 형식만 화면에서 먼저 막는다. 값 자체는 users 레코드가
+        # 아니라 user_emails 로 따로 저장하므로 records 계약(USER_COLUMNS)에 넣지 않는다.
+        email_raw = str(row.get(EMAIL_COL) or "").strip()
+        if email_raw and not _valid_email(email_raw):
+            errors.append(f"{tag}: 이메일 형식이 올바르지 않습니다. (입력값: {email_raw})")
+            mark(rid, EMAIL_COL, "이메일 형식이 올바르지 않습니다.")
+
         # 표시순서: 빈 값=미지정(NULL), 정수만 허용, 1 이상 권장.
         display_order = None
         order_raw = str(row.get("표시순서") or "").strip()
@@ -438,6 +564,41 @@ def _dept_renderer(hint_json: str) -> JsCode:
           refresh(){ return false; }
         })
         """ % hint_json
+    )
+
+
+def _email_renderer(extra_json: str) -> JsCode:
+    """이메일 셀: 대표 주소 + (다른 주소가 더 있으면) '+N' 보조 배지.
+
+    그리드 슬롯은 scope=ALL 대표 1건이라, 같은 사람의 담당별·추가 주소가 화면에서
+    사라진 것처럼 보이지 않게 건수를 병기한다(편집은 하단 '담당 권한·알림 이메일').
+    ``_dept_renderer`` 와 같은 component class + textContent 계약(HTML 조합 금지).
+    """
+    return JsCode(
+        """
+        (class {
+          init(p){
+            var X = %s;
+            var e = document.createElement('span');
+            e.style.display = 'inline-flex'; e.style.alignItems = 'center';
+            e.style.gap = '4px'; e.style.paddingRight = '10px';
+            var v = (p.value == null) ? '' : String(p.value);
+            if(v){ e.appendChild(document.createTextNode(v)); }
+            var d = p.data || {};
+            var n = X[(d['사번'] == null) ? '' : String(d['사번'])];
+            if(n){
+              var s = document.createElement('span');
+              s.style.color = '#5F5C55'; s.style.fontSize = '11px';
+              s.title = '담당별·추가 주소 ' + String(n) + '건 — 아래 담당 권한·알림 이메일에서 편집';
+              s.textContent = '+' + String(n);
+              e.appendChild(s);
+            }
+            this.eGui = e;
+          }
+          getGui(){ return this.eGui; }
+          refresh(){ return false; }
+        })
+        """ % extra_json
     )
 
 
@@ -657,6 +818,11 @@ def _load_editor(state: DraftState, q: dict, dept_names: dict, team_display: dic
     df = df.sort_values(["dept_code", "team_code", "emp_no"]).reset_index(drop=True)
 
     labels = _dept_labels(dept_names)
+    # 알림 이메일(010) — 표시 대상 사번만 조회한다. 실패/미준비는 값을 만들지 않고
+    # 사유를 남겨 이메일 열을 조회 전용으로 내린다(빈 값 덮어쓰기 방지).
+    emails, extra, email_error = _email_map([] if df.empty else df["emp_no"])
+    st.session_state[state.key("email_extra")] = extra
+    st.session_state[state.key("email_error")] = email_error
     if df.empty:
         rows = pd.DataFrame(columns=_ROW_COLS)
     else:
@@ -669,6 +835,7 @@ def _load_editor(state: DraftState, q: dict, dept_names: dict, team_display: dic
             "부서": df["dept_code"].map(labels).fillna("").astype("string"),
             "직급": df["position"].fillna("").astype("string"),
             "권한": df["role"].map(_ROLE_TO_LABEL).fillna("").astype("string"),
+            EMAIL_COL: [emails.get(str(e).strip(), "") for e in df["emp_no"]],
             "입사일": [_date_text(v) for v in df.get("hire_date", pd.Series([None] * len(df)))],
             "퇴사일": [_date_text(v) for v in df.get("resign_date", pd.Series([None] * len(df)))],
             "표시순서": [_order_text(v) for v in df.get("display_order", pd.Series([None] * len(df)))],
@@ -774,11 +941,48 @@ def _execute_delete(state: DraftState, emps: list, q: dict, dept_names: dict, te
     st.rerun()
 
 
-def _save(state, grid_df, q, dept_names, team_resolve, team_display, ready: bool) -> None:
+def _persist_emails(state, live: pd.DataFrame, allowed, actor: str) -> list[str]:
+    """그리드 이메일 슬롯(scope=ALL 대표 1건)을 저장한다 — 실패 사번 사유 목록 반환.
+
+    **사용자 저장이 끝난 뒤에만** 호출한다: 신규 행은 그때 비로소 계정(user_id)이
+    존재하고, 이메일 파사드는 사번으로 그 id 를 해석한다(사용자 저장 → id 확보 →
+    이메일 저장). ``allowed`` 가 주어지면(부분 성공) 실제로 저장된 사번만 반영한다.
+
+    변경된 행만 건드린다 — 로드 시점 값(baseline)과 같으면 조회·쓰기 모두 생략하므로,
+    손대지 않은 사용자의 다중 이메일이 저장 때문에 재작성되는 일이 없다. 쓸 때도
+    기존 목록에서 대표 주소 1건만 교체한다(``_merge_email_rows``).
+    """
+    if st.session_state.get(state.key("email_error")):
+        return []  # 현재 목록을 못 읽은 상태 — 덮어쓰지 않는다(조회 전용 열)
+    if live is None or live.empty or EMAIL_COL not in live.columns:
+        return []
+    baseline = st.session_state.get(state.key("baseline")) or {}
+    allow = None if allowed is None else {str(k).strip() for k in allowed}
+    failures: list[str] = []
+    for _, row in live.iterrows():
+        emp = str(row.get("사번") or "").strip()
+        if not emp or (allow is not None and emp not in allow):
+            continue
+        value = str(row.get(EMAIL_COL) or "").strip()
+        was = str((baseline.get(str(row.get("_row_id") or "")) or {}).get(EMAIL_COL, "")).strip()
+        if value.lower() == was.lower():
+            continue
+        try:
+            db.set_user_emails(emp, _merge_email_rows(db.get_user_emails(emp), value),
+                               actor_emp_no=actor)
+        except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
+            failures.append(f"{emp}: {exc}")
+    return failures
+
+
+def _save(state, grid_df, q, dept_names, team_resolve, team_display, ready: bool,
+          actor: str = "") -> None:
     """편집 결과를 검증하고 사번 기준 upsert 로 병합해 저장한다(오류 시 전체 차단).
 
     필터로 보이지 않는 기존 사용자를 자동 퇴직 처리하지 않는다(loaded_keys 비움).
     검증 실패는 persist 미호출로 초안을 유지하고, 저장 예외는 '결과 불명'으로 초안을 보존한다.
+    이메일은 users 레코드가 아니라 별도 테이블이라, 사용자 저장이 성공한 뒤 성공한
+    사번에 대해서만 이어서 반영한다(``_persist_emails``).
     """
     live = live_rows(grid_df)
     records, row_errors, cell_errors = _scan(live, _dept_resolver(dept_names), team_resolve)
@@ -828,20 +1032,85 @@ def _save(state, grid_df, q, dept_names, team_resolve, team_display, ready: bool
     )
 
     if outcome.status == "saved":
+        # 사용자 저장 성공 → 이메일 반영(신규 행도 이 시점엔 계정이 있다) → 재조회.
+        mail_failed = _persist_emails(state, live, None, actor)
         _load_editor(state, q, dept_names, team_display)  # 저장된 스토어 기준 재조회
-        state.set_flash("success", f"사용자를 저장했습니다. (신규 {ctx.get('n_c', 0)} · 수정 {ctx.get('n_u', 0)})")
+        saved_msg = f"사용자를 저장했습니다. (신규 {ctx.get('n_c', 0)} · 수정 {ctx.get('n_u', 0)})"
+        if mail_failed:
+            state.set_flash("warning", saved_msg + " 다만 알림 이메일은 저장하지 못했습니다 — "
+                            + "; ".join(mail_failed))
+        else:
+            state.set_flash("success", saved_msg)
     elif outcome.status == "invalid":
         _store_errors(state, outcome.errors, cell_errors)
     elif outcome.status == "partial":
         # 성공 자연키만 reconcile(초안 clean), 실패 key draft/재시도는 보존(§22).
+        # 이메일도 **성공한 사번만** 반영한다(실패 사번은 계정이 없을 수 있다).
+        mail_failed = _persist_emails(state, live, outcome.result.succeeded_keys, actor)
         _reconcile_partial(state, live, outcome.result.succeeded_keys)
         _store_result(state, outcome.result)
+        if mail_failed:
+            state.set_flash("warning", "알림 이메일을 저장하지 못했습니다 — " + "; ".join(mail_failed))
     else:  # unknown / failed — 초안 보존, 결과 원장 배너로 표기
         if outcome.result is not None:
             _store_result(state, outcome.result)
         else:
             _store_errors(state, outcome.errors, cell_errors)
     st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# 건수 행 / 헤더 아이콘 동기화
+# ---------------------------------------------------------------------------
+def _count_row_html(total: int, active: int, retired: int,
+                    new: int, changed: int, sel: int) -> str:
+    """건수 행 HTML — 좌: 사용자 건수·재직/퇴직, 우: 저장 필요 여부·선택·진입점 안내.
+
+    액션 버튼이 상단 헤더로 올라가면서 사라진 두 신호(저장 badge 의 미저장 건수,
+    삭제 활성으로 읽던 선택 건수)를 텍스트로 남긴다 — 저장이 필요한지, 왜 삭제가
+    활성인지 화면에서 계속 읽을 수 있어야 한다. 모든 값이 정수라 이스케이프 불필요.
+    """
+    dist = (f"<span class='dist'>재직 {int(active)} · 퇴직 {int(retired)}</span>"
+            if int(total) else "")
+    dirty = int(new) + int(changed)
+    if dirty:
+        parts = [p for p in (f"신규 {int(new)}" if new else "",
+                             f"변경 {int(changed)}" if changed else "") if p]
+        status = (f"<span class='wip'>미저장 {dirty}건"
+                  f"<span class='sub'>({' · '.join(parts)})</span></span>")
+    else:
+        status = "<span class='calm'>미저장 변경 없음</span>"
+    if int(sel):
+        status += f"<span class='sep'>|</span><span class='sel'>선택 {int(sel)}건</span>"
+    status += ("<span class='sep'>|</span>"
+               "<span class='hint'>추가·삭제·저장·새로고침은 상단 아이콘</span>")
+    return (f"<div class='mu-crow'><span class='t'>사용자</span>"
+            f"<span class='pill'>{int(total)}</span>{dist}"
+            f"<span class='gap'></span>{status}</div>")
+
+
+def _sync_header(specs: list[dict]) -> None:
+    """헤더 아이콘 발행값이 바뀐 run 에서만 1회 재실행해 상단 아이콘을 따라오게 한다.
+
+    앱 셸(``modules/ui.app_shell``)은 본문보다 **먼저** 헤더를 그리므로, 화면이 지금
+    발행하는 활성/사유는 다음 run 부터 반영된다. 화면 안 버튼이 있던 동안에는 그 지연이
+    보이지 않았지만(같은 run 에 정상 버튼이 있었다), 헤더가 유일한 진입점이 된 뒤로는
+    "선택했는데 삭제 아이콘이 계속 음영" 같은 실동작 결함이 된다. 그래서 발행값이 직전
+    run 과 다르면 즉시 재실행한다 — 같은 입력이면 두 번째 run 에서 값이 같아져 멈춘다.
+
+    ``modules/ui`` 를 수정하지 않고 화면 쪽에서만 닫는 보정이며, 폭주 방지로 연속
+    보정 횟수를 2회로 제한한다(정상 경로에서는 상태 전이당 1회).
+    """
+    payload = {s["role"]: (bool(s.get("disabled")), s.get("help")) for s in specs}
+    mirror_key, guard_key = f"{PAGE_ID}:hdr_mirror", f"{PAGE_ID}:hdr_sync_n"
+    if st.session_state.get(mirror_key) == payload:
+        st.session_state[guard_key] = 0
+        return
+    st.session_state[mirror_key] = payload
+    tries = int(st.session_state.get(guard_key) or 0)
+    if tries < 2:
+        st.session_state[guard_key] = tries + 1
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -958,7 +1227,17 @@ def render(user: dict) -> None:
     disp["_error"] = ids.map(lambda i: json.dumps(err_cells.get(i, {}), ensure_ascii=False) if err_cells.get(i) else "")
     disp["_dirty_fields"] = ids.map(lambda i: json.dumps(prev_dirty.get(i, []), ensure_ascii=False) if prev_dirty.get(i) else "")
 
-    spec = _grid_spec(state, hint_json)
+    # 이메일 열: 대표 주소는 값으로, 나머지 등록 주소 수는 셀 보조 배지로 알린다(편집은
+    # 대표 1건만 — 담당별 주소는 하단 편집기 소유). 조회 실패/미준비면 조회 전용으로 내린다.
+    email_error = str(st.session_state.get(state.key("email_error")) or "")
+    extra_json = json.dumps(
+        {str(k): int(v) for k, v in (st.session_state.get(state.key("email_extra")) or {}).items()
+         if int(v or 0) > 0},
+        ensure_ascii=False,
+    )
+
+    spec = _grid_spec(state, hint_json, email_extra_json=extra_json,
+                      email_editable=not email_error)
     grid_df = render_master_grid(spec, disp, key=state.grid_key())
 
     # ---- 건수/변경 계산(그리드 반환 = 현재 편집 상태) ----
@@ -978,11 +1257,11 @@ def render(user: dict) -> None:
 
     state.set_dirty(total_dirty > 0)
 
-    # ---- §1-E 건수 행 채움(deferred) — 좌: 사용자 + 건수 pill + 재직/퇴직, 우: 행 추가·삭제·
-    #      저장·새로고침. 활성/사유/라벨은 page_action_specs(인페이지 규칙 그대로), 클릭은 동일
-    #      on_click 플래그(state.action_requester) + {page_id}__{role} 키(저장/삭제/추가/새로고침
-    #      경로·2단계 삭제 확인 무변경 — 렌더 위치만 §1-E 건수 행으로 이전). §8 색 규칙은 role-key
-    #      class([class*="__save"] 등)로 자동 적용(저장=오렌지 primary·삭제=위험 outline).
+    # ---- 건수 행 채움(deferred) — 좌: 사용자 + 건수 pill + 재직/퇴직, 우: 저장 필요 여부·
+    #      선택 건수·진입점 안내. 액션 버튼은 2026-08-14 사용자 지시로 화면에서 제거하고
+    #      상단 52px 헤더 아이콘 하나로 일원화했다. 활성/사유 계산(page_action_specs)과
+    #      클릭 플래그(page-scoped action key)는 종전 그대로라 저장·2단계 삭제 확인·재적재
+    #      경로는 전부 불변이다 — 진입점만 둘에서 하나로 줄었다.
     can_save = ready or not has_order
     specs = page_action_specs(
         sel_count=sel_count, dirty_total=total_dirty, can_save=can_save,
@@ -990,40 +1269,17 @@ def render(user: dict) -> None:
             None if can_save else "표시순서 기능이 준비되면 저장할 수 있습니다 — 시스템 관리자에게 문의하세요"
         ),
     )
-    by_role = {s["role"]: s for s in specs}
     active_ct = int(existing["재직"].map(grid_bool).sum()) if not existing.empty else 0
     retired_ct = len(existing) - active_ct
     with count_row_slot:
-        ci, ca, cd, cs, cr = st.columns([4.8, 1.15, 1.05, 1.35, 1.15],
-                                        vertical_alignment="center")
-        with ci:
-            dist = (f"<span class='dist'>재직 {active_ct} · 퇴직 {retired_ct}</span>"
-                    if not existing.empty else "")
-            st.markdown(
-                f"<div class='mu-crow'><span class='t'>사용자</span>"
-                f"<span class='pill'>{len(existing)}</span>{dist}</div>",
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            _count_row_html(len(existing), active_ct, retired_ct,
+                            new_filled, changed_count, sel_count),
+            unsafe_allow_html=True,
+        )
 
-        def _act(colobj, role: str, name: str, primary: bool = False) -> None:
-            s = by_role[role]
-            colobj.button(
-                s["label"] if role in (SAVE,) else name,
-                key=f"{PAGE_ID}__{role}", width="stretch",
-                type="primary" if primary else "secondary",
-                icon=s.get("icon"), disabled=s["disabled"],
-                help=(s["help"] or name) if s["disabled"] else None,
-                on_click=state.action_requester(role),
-            )
-
-        _act(ca, ADD, "행 추가")
-        _act(cd, DELETE, "삭제")
-        _act(cs, SAVE, "저장", primary=True)
-        _act(cr, REFRESH, "새로고침")
-
-    # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)에 **같은 활성 규칙**을 발행한다 —
-    # 클릭은 같은 page-scoped flag 를 쏘므로 실행 경로·확인 게이트는 하나다(두 진입점,
-    # 한 경로). specs 를 그대로 쓰기 때문에 헤더와 인페이지의 활성/사유가 갈릴 수 없다.
+    # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)에 활성 규칙을 발행한다 — 이제 이
+    # 아이콘이 **유일한 진입점**이며, 클릭은 종전과 같은 page-scoped flag 를 쏜다.
     header_actions_from_specs(PAGE_ID, specs)
 
     # ---- 배너(우선순위: 삭제 확인 > 폐기 확인 > 결과 원장 > 오류 > flash) ----
@@ -1039,12 +1295,18 @@ def render(user: dict) -> None:
             "표시순서 기능이 아직 준비되지 않아, 표시순서를 입력하면 저장이 차단됩니다 — "
             "시스템 관리자에게 표시순서 사용 설정을 요청한 뒤 이용하세요."
         )
+    if email_error:
+        st.caption(
+            f"{email_error} — 이메일 열은 조회 전용이며 저장 대상에서 제외됩니다. "
+            "등록된 주소는 그대로 유지됩니다."
+        )
 
     # ---- 액션 처리(셀 편집 blur 와 경합해도 다음 rerun 에서 반드시 처리) ----
     acts = take_actions(state)
     if acts[SAVE]:
         _save(grid_df=grid_df, state=state, q=params, dept_names=dept_names,
-              team_resolve=team_resolve, team_display=team_display, ready=ready)
+              team_resolve=team_resolve, team_display=team_display, ready=ready,
+              actor=str(user.get("emp_no") or ""))
     if acts[DELETE]:
         _handle_delete(state, grid_df)
     if acts[ADD]:
@@ -1057,6 +1319,28 @@ def render(user: dict) -> None:
 
     # ---- 담당 권한·알림 이메일 (ADMIN 전용, migration 010) ----
     _render_capability_editor(user, existing)
+
+    # ---- 헤더 아이콘 동기화(마지막) — 발행값이 바뀐 run 에서만 1회 재실행 ----
+    _sync_header(specs)
+
+
+def _target_options(existing: pd.DataFrame) -> list[str]:
+    """ADMIN 전용 편집기(비밀번호 초기화·담당 권한/이메일)의 대상 사용자 선택지.
+
+    입력은 **그리드 표시 프레임**이라 컬럼이 한글(사번/성명)이다 — 저장소 컬럼명
+    (emp_no/name)으로 읽으면 항상 빈 목록이 돼 두 편집기가 캡션만 남고 조용히
+    사라진다(2026-08-14 실화면 검증에서 발견한 기존 결함). 표시 컬럼으로 읽는다.
+    """
+    if existing is None or existing.empty:
+        return []
+    out = []
+    for _, row in existing.iterrows():
+        emp = str(row.get("사번") or "").strip()
+        if not emp:
+            continue
+        name = str(row.get("성명") or "").strip()
+        out.append(f"{emp} · {name}" if name else emp)
+    return out
 
 
 def _render_capability_editor(user: dict, existing: pd.DataFrame) -> None:
@@ -1082,11 +1366,7 @@ def _render_capability_editor(user: dict, existing: pd.DataFrame) -> None:
             "이메일을 등록합니다. 이메일은 여러 개 등록할 수 있고, 수신 범위를 '전체'로 "
             "두면 모든 담당 업무의 알림을, 특정 담당으로 두면 그 업무만 받습니다."
         )
-        options = [
-            f"{r['emp_no']} · {r['name']}"
-            for _, r in existing.iterrows()
-            if str(r.get("emp_no") or "").strip()
-        ]
+        options = _target_options(existing)
         if not options:
             return
         picked = st.selectbox("대상 사용자", options, key=f"{PAGE_ID}__cap_target")
@@ -1150,11 +1430,7 @@ def _render_password_reset(user: dict, existing: pd.DataFrame) -> None:
             f"{config.INITIAL_PASSWORD_VALID_DAYS}일 안에 로그인해 새 비밀번호를 설정해야 합니다. "
             "진행 중인 로그인 세션은 모두 해제됩니다."
         )
-        options = [
-            f"{r['emp_no']} · {r['name']}"
-            for _, r in existing.iterrows()
-            if str(r.get("emp_no") or "").strip()
-        ]
+        options = _target_options(existing)
         if not options:
             return
         picked = st.selectbox(
@@ -1196,56 +1472,67 @@ def _cell_rules(field: str, readonly: str | None = None) -> dict:
     return rules
 
 
-def _grid_spec(state: DraftState, hint_json: str, teams_json: str = "") -> MasterGridSpec:
+def _grid_spec(state: DraftState, hint_json: str, teams_json: str = "", *,
+               email_extra_json: str = "{}", email_editable: bool = True) -> MasterGridSpec:
     # teams_json 은 조 편집 칼럼 제거(2026-08-07)로 미사용 — 교차 테스트 시그니처 호환용.
     # 데이터셀 편집 게이트: 사번(자연키)=신규행만, 그 외=보호행만 잠금(일반 저장행 편집 유지).
     # 읽기전용 시각(ms-cell-readonly)은 각 컬럼의 잠금 조건과 동일 식으로 켠다.
     col_config = {
         # 사번(자연키)은 저장행에서 편집 불가(신규행만)지만, 읽기전용 틴트는 보호행에만 준다 —
         # org 코드열과 동일(모든 저장행 과잉 틴트 회피). editable=false 자체가 키 잠금 어포던스.
-        "사번": {"width": 128, "minWidth": 104, "cellClass": "md-c-left",
+        "사번": {"width": 110, "minWidth": 96, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY,
                 "cellClassRules": _cell_rules("사번", readonly=_IS_PROTECTED_JS)},
         # §1-E·H1 본문 14.5px — 공용 GRID_CSS(.ag-cell)가 이미 14.5px 이며, 아래 읽기 컬럼의
         # cellStyle fontSize 14.5px 는 동일값 명시(중복이나 무해). 사번/표시순서 등 별도 지정이
         # 없는 열도 공용 GRID_CSS 14.5px 를 그대로 따른다(더는 13px/13.5px 특례 없음).
-        "성명": {"width": 132, "minWidth": 100, "cellClass": "md-c-left",
+        "성명": {"width": 114, "minWidth": 96, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellStyle": {"fontSize": "14.5px"},
                 "cellRenderer": _NAME_STATUS_RENDERER,
                 "cellClassRules": _cell_rules("성명", readonly=_IS_PROTECTED_JS)},
-        "부서": {"flex": 1, "minWidth": 168, "cellClass": "md-c-left ms-cell-select",
+        "부서": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left ms-cell-select",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellStyle": {"fontSize": "14.5px"},
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": _dept_option_values(state)},
                 "cellRenderer": _dept_renderer(hint_json),
                 "cellClassRules": _cell_rules("부서", readonly=_IS_PROTECTED_JS)},
-        "직급": {"width": 96, "minWidth": 72, "cellClass": "md-c-left",
+        "직급": {"width": 78, "minWidth": 66, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellStyle": {"fontSize": "14.5px"},
                 "cellClassRules": _cell_rules("직급", readonly=_IS_PROTECTED_JS)},
         # 권한 = §1-E pill 렌더러(관리자/조장/조원, §2 팔레트) + select 편집(더블클릭). 편집 계약 보존.
-        "권한": {"width": 104, "minWidth": 84, "cellClass": "md-c-center ms-cell-select",
+        "권한": {"width": 92, "minWidth": 80, "cellClass": "md-c-center ms-cell-select",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": list(_LABEL_TO_ROLE)},
                 "cellRenderer": _ROLE_PILL_RENDERER,
                 "cellClassRules": _cell_rules("권한", readonly=_IS_PROTECTED_JS)},
+        # 이메일(010 user_emails, scope=ALL 대표 1건) — 부서와 함께 남는 폭을 나눠 갖는다.
+        # 스키마 미준비·조회 실패면 editable=False + 읽기전용 틴트로 내려, 모르는 값을
+        # 빈 값으로 덮어쓰는 저장을 원천 차단한다(저장 경로도 같은 사유로 skip).
+        EMAIL_COL: {"flex": 1.15, "minWidth": 150, "cellClass": "md-c-left",
+                "editable": (_EDIT_UNLESS_PROTECTED if email_editable else False),
+                "cellStyle": {"fontSize": "14.5px"},
+                "cellRenderer": _email_renderer(email_extra_json),
+                "cellClassRules": _cell_rules(
+                    EMAIL_COL,
+                    readonly=(_IS_PROTECTED_JS if email_editable else "true"))},
         # 입사일/퇴사일(009) — 자유 타이핑(YYYY-MM-DD 등), 저장 시 _clean_date 로 정규화.
         # 퇴사일이 지나면 로그인 차단 + 편성 명단 숨김(판정은 db.is_resigned).
-        "입사일": {"width": 112, "minWidth": 96, "cellClass": "md-c-center ms-num",
+        "입사일": {"width": 96, "minWidth": 88, "cellClass": "md-c-center ms-num",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellClassRules": _cell_rules("입사일", readonly=_IS_PROTECTED_JS)},
-        "퇴사일": {"width": 112, "minWidth": 96, "cellClass": "md-c-center ms-num",
+        "퇴사일": {"width": 96, "minWidth": 88, "cellClass": "md-c-center ms-num",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellClassRules": _cell_rules("퇴사일", readonly=_IS_PROTECTED_JS)},
-        "표시순서": {"width": 92, "minWidth": 72, "maxWidth": 120, "cellClass": "md-c-center ms-num",
+        "표시순서": {"width": 74, "minWidth": 68, "maxWidth": 110, "cellClass": "md-c-center ms-num",
                  "editable": _EDIT_UNLESS_PROTECTED,
                  "cellClassRules": _cell_rules("표시순서", readonly=_IS_PROTECTED_JS)},
         # 재직 = §1-E pill 렌더러(재직/퇴직, §2 팔레트) + 불리언 체크박스 편집(더블클릭). 값은 그대로
         # 반환되어 is_active 저장·2단계 삭제(퇴직) 경로 불변(pill 은 display-only).
-        "재직": {"width": 82, "minWidth": 68, "cellClass": "md-c-center",
+        "재직": {"width": 72, "minWidth": 66, "cellClass": "md-c-center",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellRenderer": _ACTIVE_PILL_RENDERER,
                 "cellClassRules": _cell_rules("재직", readonly=_IS_PROTECTED_JS)},

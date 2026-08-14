@@ -286,7 +286,10 @@ def _bool_pill(on_label: str, off_label: str, on_pal: list[str]) -> JsCode:
 _USE_PILL_RENDERER = _bool_pill("사용", "미사용", ["#eef5f0", "#2f6b45", "#d8e6dd"])    # 사용=success
 _WORK_PILL_RENDERER = _bool_pill("근무", "비근무", ["#eef2fb", "#2f4d99", "#dbe3f4"])   # 실근무=info
 
-# §1-E 건수 행 CSS(근무형태 제목 + 건수 pill + 사용/미사용). §2 리터럴.
+# §1-E 건수 행 CSS(좌: 근무형태 제목 + 건수 pill + 사용/미사용 · 우: 편집 상태 칩). §2 리터럴.
+# `.edit` 는 종전 인페이지 액션 버튼이 있던 우측 자리를 그대로 쓴다(margin-left:auto).
+# 칩 자체는 공용 `.ms-chip` 토큰(style.py)이라 새 색을 만들지 않는다. 미저장·선택이 0이면
+# 빈 span 이라 폭 0(빈 상태 문구로 화면을 채우지 않는다 — §6).
 _WT_CROW_CSS = """
 <style>
 .wt-crow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -294,6 +297,13 @@ _WT_CROW_CSS = """
 .wt-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
 .wt-crow .dist { font-size:11.5px; color:#6b665d; white-space:nowrap; }
+.wt-crow .edit { margin-left:auto; display:inline-flex; align-items:center; gap:6px; }
+/* 색·모양은 공용 .ms-chip 토큰 그대로 쓰고 **크기만** 사용처에서 올린다 — 공용 정의는
+   .68rem 이고 이 앱의 root 는 14px 라 실측 9.52px 로 떨어진다(DESIGN §0-6 라벨 11px 이하
+   금지). 헤더 아이콘의 활성 근거를 읽는 숫자이므로 사용/미사용 표기(.dist 11.5px)와 같은
+   크기로 맞추고, 값이 실시간으로 바뀌므로 tabular-nums 로 자릿수 흔들림을 없앤다. */
+.wt-crow .edit .ms-chip { font-size:11.5px; padding:2px 8px;
+  font-variant-numeric:tabular-nums; }
 </style>
 """
 
@@ -381,6 +391,39 @@ def _col_config() -> dict:
     return cfg
 
 
+# ---------------------------------------------------------------------------
+# 헤더 아이콘 발행 — 상단 52px 헤더는 **화면 본문보다 먼저** 렌더된다. 따라서 본문 끝
+# (그리드 건수 계산 뒤)에서 publish 한 음영/사유는 그 프레임의 헤더에 반영되지 못하고
+# 다음 run 을 기다린다. 인페이지 버튼 바가 함께 있던 동안에는 버튼이 첫 프레임부터
+# 정상이라 이 지연이 보이지 않았지만, 헤더 아이콘이 **유일한** 진입점이 된 뒤에는 그대로
+# 기능 결함이 된다 — 실측(1440px, sample):
+#   · 진입 직후 : 추가 아이콘 음영 유지 18s+ (사용자 조작 전까지 안 풀림)
+#   · 행 선택 후 : "선택 1건" 칩은 떴는데 삭제 아이콘 음영 유지 55s+
+#   · 행 추가 후 : "미저장 1건" 칩은 떴는데 저장 아이콘 음영 유지 25s+
+# 본문발 상태 변화 뒤에 자동 rerun 이 보장되지 않기 때문이다.
+#
+# 그래서 발행값(4종의 disabled·사유)이 **직전 발행과 다를 때만** 한 번 rerun 해 헤더를
+# 최신 상태로 다시 그린다. 같은 값이면 rerun 하지 않으므로 수렴한다(같은 입력 → 같은
+# 서명 → 정지). 활성 규칙 계산은 여전히 page_action_specs 한 곳이며(두 벌 규칙 금지),
+# 이 함수는 "언제 헤더를 다시 그리는가"만 정한다. modules/ui 는 건드리지 않는다.
+#
+# rerun 자체는 render 말미(액션 flag 소비 뒤)에서 실행한다 — 여기서 바로 rerun 하면
+# 헤더 아이콘 클릭으로 세팅된 flag 가 소비되기 전에 프레임이 끝난다.
+# ---------------------------------------------------------------------------
+_HDR_SIG = "hdr_sig"  # 직전 발행 서명 — 값이 바뀐 프레임에서만 헤더를 다시 그린다
+
+
+def _publish_header_actions(state: DraftState, specs: list[dict]) -> bool:
+    """헤더 아이콘 음영/사유를 발행하고, 발행값이 바뀌었으면 True(=재렌더 필요)."""
+    master.header_actions_from_specs(PAGE_ID, specs)
+    sig = tuple((s["role"], bool(s["disabled"]), s.get("help")) for s in specs)
+    key = state.key(_HDR_SIG)
+    if st.session_state.get(key) == sig:
+        return False
+    st.session_state[key] = sig
+    return True
+
+
 # ===========================================================================
 # 화면
 # ===========================================================================
@@ -388,8 +431,9 @@ def render(user: dict) -> None:
     state = DraftState(PAGE_ID)
 
     # §1-E 표형(구조 교체) — 아이콘 밴드 제거(§0-3, 6단계와 동일). 실기능 액션(행 추가·삭제·
-    # 저장·새로고침)은 건수 행 우측으로 이전(동일 flag 계약 — 사용자 관리와 같은 배치).
-    # 색·약칭·시간/HEX 검증·참조 확인 후 비활성화 우선 계약은 전부 보존.
+    # 저장·새로고침)의 진입점은 **상단 52px 헤더 아이콘 하나**다(2026-08-14 사용자 지시로
+    # 인페이지 버튼 바 제거 — 종전에는 헤더 아이콘과 화면 안 버튼이 같은 flag 를 쏘는
+    # 중복 진입점이었다). 색·약칭·시간/HEX 검증·참조 확인 후 비활성화 우선 계약은 전부 보존.
     _WT_DESC = "근무형태(코드·명칭·약칭·색상)를 표에서 직접 편집하고 [저장]으로 일괄 반영합니다."
     erp.screen_frame(
         SCREEN_ARCHETYPE,
@@ -432,7 +476,7 @@ def render(user: dict) -> None:
     # 텍스트색). 색 편집(피커/HEX 양방향)·검증(#RRGGBB·중복 경고) 계약은 불변이다.
     st.markdown("<div style='border-top:1px solid #e0dbd2;margin:2px 0 8px;'></div>",
                 unsafe_allow_html=True)
-    count_row_slot = st.container()  # 건수 행(근무형태 + 건수 pill + 사용/미사용 + 우측 액션) — deferred
+    count_row_slot = st.container()  # 건수 행(근무형태 + 건수 pill + 사용/미사용 + 우측 편집 상태) — deferred
     banner_slot = st.container()  # 배너(삭제 확인/폐기 확인/원장/오류/flash 중 1개)
 
     # ---- 그리드 ----
@@ -445,7 +489,7 @@ def render(user: dict) -> None:
     )
     grid_df = render_master_grid(spec, frame, key=state.grid_key())
 
-    # ---- 실시간 건수(§20) — dirty 단일 기준은 액션바 카운터 ----
+    # ---- 실시간 건수(§20) — dirty 단일 기준은 이 dtotal(헤더 저장 아이콘 활성 + 건수 행 칩) ----
     live = live_rows(grid_df)
     existing = live[live["_row_state"] == "existing"]
     new_rows = live[live["_row_state"] != "existing"]
@@ -456,46 +500,43 @@ def render(user: dict) -> None:
     state.set_dirty(dtotal > 0)
     st.session_state[state.key(_LAST_COUNTS)] = (new_count, changed_count, sel_count)
 
-    # ---- §1-E 건수 행 채움(deferred) — 근무형태 + 건수 pill + 사용/미사용 + 우측 행 추가·삭제·
-    #      저장·새로고침. 활성/사유/라벨은 page_action_specs(인페이지 규칙 그대로), 클릭은 동일
-    #      flag(state.action_requester) + {page}__{role} 키(저장/삭제/추가/새로고침 경로 무변경,
-    #      §8 색은 role-key class 로 자동=저장 오렌지 primary). ----
+    # ---- §1-E 건수 행 채움(deferred) — 좌: 근무형태 + 건수 pill + 사용/미사용,
+    #      우: 편집 상태(미저장·선택) 칩. **실행 컨트롤은 두지 않는다**(2026-08-14 사용자
+    #      지시 — 행 추가·삭제·저장·새로고침의 진입점은 상단 52px 헤더 아이콘 하나뿐,
+    #      DESIGN §0-3 "아이콘 툴바는 최상단 헤더 바 안에만"). 종전 인페이지 버튼 바가
+    #      들고 있던 상태 신호(저장 badge "저장 · N", 삭제 활성 근거)는 같은 y 위치의
+    #      이 칩으로 이어받는다 — 헤더 아이콘의 활성/음영 근거를 표 바로 위에서 읽는다.
+    #      활성/사유/라벨 계산은 종전과 동일한 page_action_specs 한 곳이다. ----
     specs = master.page_action_specs(sel_count=sel_count, dirty_total=dtotal, can_save=True)
-    by_role = {s["role"]: s for s in specs}
     active_ct, inactive_ct = _summary_counts(live)
     with count_row_slot:
-        ci, ca, cd, cs, cr = st.columns([4.8, 1.15, 1.05, 1.35, 1.15],
-                                        vertical_alignment="center")
-        with ci:
-            dist = (f"<span class='dist'>사용 중 {active_ct} · 미사용 {inactive_ct}</span>"
-                    if (active_ct or inactive_ct) else "")
-            st.markdown(
-                f"<div class='wt-crow'><span class='t'>근무형태</span>"
-                f"<span class='pill'>{len(existing)}</span>{dist}</div>",
-                unsafe_allow_html=True,
-            )
+        dist = (f"<span class='dist'>사용 중 {active_ct} · 미사용 {inactive_ct}</span>"
+                if (active_ct or inactive_ct) else "")
+        edit = ""
+        if dtotal:
+            edit += master.chip_html(f"미저장 {dtotal}건", "warn")
+        if sel_count:
+            edit += master.chip_html(f"선택 {sel_count}건", "mute")
+        st.markdown(
+            f"<div class='wt-crow'><span class='t'>근무형태</span>"
+            f"<span class='pill'>{len(existing)}</span>{dist}"
+            f"<span class='edit'>{edit}</span></div>",
+            unsafe_allow_html=True,
+        )
 
-        def _act(colobj, role: str, name: str, primary: bool = False) -> None:
-            s = by_role[role]
-            colobj.button(
-                s["label"] if role == SAVE else name,
-                key=f"{PAGE_ID}__{role}", width="stretch",
-                type="primary" if primary else "secondary",
-                icon=s.get("icon"), disabled=s["disabled"],
-                help=(s["help"] or name) if s["disabled"] else None,
-                on_click=state.action_requester(role),
-            )
-
-        _act(ca, ADD, "행 추가")
-        _act(cd, DELETE, "삭제")
-        _act(cs, SAVE, "저장", primary=True)
-        _act(cr, REFRESH, "새로고침")
-
-    # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)에 **같은 활성 규칙**을 발행한다 —
-    # 클릭은 같은 page-scoped flag 를 쏘므로 실행 경로·확인 게이트는 하나다.
-    master.header_actions_from_specs(PAGE_ID, specs)
+    # 상단 52px 헤더 아이콘(추가·삭제·저장·새로고침)에 활성 규칙을 발행한다 — 이제 이
+    # 아이콘이 **유일한** 진입점이며, 클릭은 종전과 같은 page-scoped flag 를 쏘므로
+    # 실행 경로·확인 게이트는 그대로 하나다(take_actions 소비 지점 무변경).
+    # 발행값이 바뀌었으면 render 말미에서 한 번 다시 그린다(위 _publish_header_actions 주석).
+    hdr_changed = _publish_header_actions(state, specs)
 
     # ---- 배너(표 위 슬롯, 단일 우선순위: 삭제확인 > 폐기확인 > 저장원장/오류 > flash) ----
+    # §21 flash 는 "다음 rerun 1회 표시" 계약이라 렌더 시 세션에서 pop 된다. 헤더 재렌더로
+    # 이 프레임이 버려지면 저장·삭제 완료 안내가 화면에 남지 않으므로(실측: 저장 성공 배너가
+    # 한 프레임 만에 사라짐), 표시 예정이던 flash 를 붙잡아 두었다가 rerun 직전에 되돌린다.
+    # 배너 렌더 자체는 순서를 바꾸지 않는다 — 확인 바 버튼 클릭이 유실되지 않도록 rerun 은
+    # 종전대로 배너·액션 소비 뒤에 둔다.
+    pending_flash = st.session_state.get(state.flash_key) if hdr_changed else None
     with banner_slot:
         _render_banners(state, params)
 
@@ -513,7 +554,12 @@ def render(user: dict) -> None:
     if actions[REFRESH]:
         _refresh(state, params)
 
-    if _normalize(state, grid_df):
+    # 구조 변경 반영 또는 헤더 아이콘 발행값 변경 → 한 번 다시 그린다.
+    # (_normalize 는 부작용이 있으므로 short-circuit 되지 않도록 먼저 호출한다.)
+    structural = _normalize(state, grid_df)
+    if structural or hdr_changed:
+        if pending_flash is not None:
+            st.session_state[state.flash_key] = pending_flash  # 위 주석 — flash 유실 방지
         st.rerun()
 
 

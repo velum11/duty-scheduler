@@ -384,10 +384,10 @@ def _reconcile_app():
     s = _state.DraftState("recon_test")
     rows = _pd.DataFrame([
         {"_row_id": "e:1", "_row_state": "existing", "_sel": False, "_team_code": "", "사번": "1",
-         "성명": "가", "부서": "D", "직급": "", "권한": "조원",
+         "성명": "가", "부서": "D", "직급": "", "권한": "조원", "이메일": "a@x.com",
          "입사일": "", "퇴사일": "", "표시순서": "1", "재직": True},
         {"_row_id": "n:1", "_row_state": "new", "_sel": False, "_team_code": "", "사번": "NEW1",
-         "성명": "신", "부서": "D", "직급": "", "권한": "조원",
+         "성명": "신", "부서": "D", "직급": "", "권한": "조원", "이메일": "",
          "입사일": "", "퇴사일": "", "표시순서": "", "재직": True},
     ])
     _st.session_state[s.key("baseline")] = _mu._baseline_of(rows)
@@ -465,10 +465,272 @@ def test_readiness_gate_wired():
     # readiness 는 배너로, 데이터 연결 pill 은 상단 52px 셸 헤더가 소유(P1). 액션은 건수 행으로.
     check("readiness 배너로 표면화(헤더 배지 조합 제거)",
           "readiness.banner()" in src and "_head_badges(readiness)" not in src)
-    check("§1-E 액션 건수 행 이전(page_action_specs + action_requester)",
-          "page_action_specs(" in src and "action_requester(" in src and "toolbar=\"icons\"" not in src)
+    check("액션 활성/사유는 공통 규칙(page_action_specs) 재사용",
+          "page_action_specs(" in src and "toolbar=\"icons\"" not in src)
     check("readiness 재프로브 노출", "reset_org_schema_cache" in src)
     check("저장 게이트가 readiness.write_enabled 로 통일", "ready = readiness.write_enabled" in src)
+
+
+# ---------------------------------------------------------------------------
+# 10b) 액션 진입점 단일화(2026-08-14) — 실행 버튼은 상단 52px 헤더 아이콘 하나뿐
+# ---------------------------------------------------------------------------
+def test_single_action_entry_point():
+    """화면 안 액션 버튼 제거 + 헤더 발행/동기화. 활성 규칙·플래그 계약은 불변."""
+    render_src = inspect.getsource(mu.render)
+    src = inspect.getsource(mu)
+
+    # (a) 화면 안 실행 버튼(행 추가/삭제/저장/새로고침) 진입점이 없다.
+    check("인페이지 액션바 미사용(master_action_bar)", "master_action_bar(" not in src)
+    check("인페이지 액션 버튼 키 없음({page}__{role})",
+          f'key=f"{{PAGE_ID}}__{{role}}"' not in src and "__save\"" not in render_src)
+    check("인페이지 on_click 액션 요청 없음(action_requester)",
+          "action_requester(" not in src)
+    for label in ('"행 추가"', '"새로고침"'):
+        check(f"render 소스에 인페이지 버튼 라벨 없음 [{label}]", label not in render_src)
+
+    # (b) 헤더 아이콘이 유일 진입점 — 활성/사유는 공통 규칙 그대로 발행한다.
+    check("헤더 아이콘에 공통 활성 규칙 발행",
+          "header_actions_from_specs(PAGE_ID, specs)" in render_src)
+    check("헤더 발행값 동기화 훅 호출", "_sync_header(specs)" in render_src)
+
+    # (c) 실행 경로·확인 게이트는 종전 그대로(플래그 소비 → 저장/삭제/추가/재적재).
+    check("액션 플래그 소비 유지(take_actions)", "take_actions(state)" in render_src)
+    for role in ("SAVE", "DELETE", "ADD"):
+        check(f"액션 처리 분기 유지 [{role}]", f"acts[{role}]" in render_src)
+
+
+def test_header_sync_converges():
+    """_sync_header: 발행값이 같으면 재실행 없음, 폭주 방지 상한(2회)에서 멈춘다."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except Exception as exc:  # noqa: BLE001
+        print(f"[SKIP] AppTest 미가용: {exc}")
+        return
+    at = AppTest.from_function(_sync_app, default_timeout=60).run()
+    check("_sync_header 예외 없음", not at.exception, str(at.exception))
+    check("동일 발행값이면 재실행 없음(가드 리셋)", at.session_state["sync_same_ok"])
+    check("연속 보정 상한에서 멈춤(무한 rerun 방지)", at.session_state["sync_capped_ok"])
+
+
+def _sync_app():
+    import os as _os
+    _os.environ["DUTY_DATA_MODE"] = "sample"
+    import streamlit as _st
+    from views import master_users as _mu
+    specs = [
+        {"role": "add", "disabled": False, "help": None},
+        {"role": "delete", "disabled": True, "help": "삭제할 행을 먼저 선택"},
+        {"role": "save", "disabled": True, "help": "저장할 변경이 없습니다"},
+        {"role": "refresh", "disabled": False, "help": None},
+    ]
+    payload = {s["role"]: (bool(s["disabled"]), s["help"]) for s in specs}
+    # (a) 이미 같은 값이 발행돼 있으면 rerun 하지 않는다(가드도 0 으로 리셋).
+    _st.session_state[f"{_mu.PAGE_ID}:hdr_mirror"] = payload
+    _st.session_state[f"{_mu.PAGE_ID}:hdr_sync_n"] = 1
+    _mu._sync_header(specs)
+    _st.session_state["sync_same_ok"] = (
+        _st.session_state[f"{_mu.PAGE_ID}:hdr_sync_n"] == 0)
+    # (b) 값이 달라도 연속 보정 상한(2)에 도달했으면 rerun 하지 않고 값만 갱신한다.
+    _st.session_state[f"{_mu.PAGE_ID}:hdr_mirror"] = {"add": (True, None)}
+    _st.session_state[f"{_mu.PAGE_ID}:hdr_sync_n"] = 2
+    _mu._sync_header(specs)
+    _st.session_state["sync_capped_ok"] = (
+        _st.session_state[f"{_mu.PAGE_ID}:hdr_mirror"] == payload)
+
+
+def test_count_row_status():
+    """건수 행: 미저장/선택 상태 텍스트와 진입점 안내가 남아 있다(액션 이전 후에도)."""
+    html = mu._count_row_html(9, 8, 1, 0, 0, 0)
+    check("건수·재직/퇴직 분포 유지", ">9<" in html and "재직 8 · 퇴직 1" in html)
+    check("미저장 0 이면 '변경 없음' 표기", "미저장 변경 없음" in html)
+    check("진입점 안내(상단 아이콘) 표기", "상단 아이콘" in html)
+    dirty = mu._count_row_html(9, 8, 1, 2, 3, 1)
+    check("미저장 건수·분해 표기", "미저장 5건" in dirty and "신규 2" in dirty and "변경 3" in dirty)
+    check("선택 건수 표기", "선택 1건" in dirty)
+
+
+# ---------------------------------------------------------------------------
+# 11) 이메일 열(010 user_emails) — scope=ALL 대표 1건 슬롯, 다중 이메일 계약 보존
+# ---------------------------------------------------------------------------
+def test_email_column_contract():
+    """이메일은 **보이는 열**이어야 저장까지 값이 살아 온다(숨김 컬럼 절단 함정)."""
+    check("EMAIL_COL 상수 정의", mu.EMAIL_COL == "이메일")
+    check("편집 열 계약에 포함(_USER_COLS)", mu.EMAIL_COL in mu._USER_COLS)
+    check("행 계약에 포함(_ROW_COLS)", mu.EMAIL_COL in mu._ROW_COLS)
+    check("그리드 컬럼 타입 text", mu._GRID_COLUMNS.get(mu.EMAIL_COL) == "text")
+    st_ = mstate.DraftState("email_spec_test")
+    spec = mu._grid_spec(st_, "{}")
+    check("spec.order 에 포함(왕복 보장)", mu.EMAIL_COL in spec.order)
+    cc = spec.col_config[mu.EMAIL_COL]
+    check("보호행만 편집 잠금(일반 저장행 편집 유지)", "_protected" in cc["editable"].js_code)
+    check("셀 오류·변경 마커 병존",
+          "ms-cell-error" in cc["cellClassRules"] and "ms-cell-dirty" in cc["cellClassRules"])
+    code = cc["cellRenderer"].js_code
+    check("이메일 렌더러는 component class(textContent)",
+          "document.createElement" in code and "textContent" in code and "innerHTML" not in code)
+    # 조회 실패/미준비 → 조회 전용(모르는 값을 빈 값으로 덮어쓰지 않는다)
+    ro = mu._grid_spec(st_, "{}", email_editable=False).col_config[mu.EMAIL_COL]
+    check("스키마 미준비면 editable=False", ro["editable"] is False)
+    check("스키마 미준비면 읽기전용 시각", ro["cellClassRules"].get("ms-cell-readonly") == "true")
+
+
+def test_email_validation():
+    """형식 오류는 저장 전 화면에서 차단하고, records(USER_COLUMNS)에는 섞이지 않는다."""
+    recs, errs, cells = mu._scan(_live([
+        {"_row_id": "e:E1", "_row_state": "existing", "_sel": False, "사번": "E1", "성명": "가",
+         "부서": _D0_LABEL, "직급": "", "권한": "조원", "이메일": "notanemail",
+         "입사일": "", "퇴사일": "", "표시순서": "", "재직": True},
+        {"_row_id": "e:E2", "_row_state": "existing", "_sel": False, "사번": "E2", "성명": "나",
+         "부서": _D0_LABEL, "직급": "", "권한": "조원", "이메일": " Ok.User@Corp.CO.KR ",
+         "입사일": "", "퇴사일": "", "표시순서": "", "재직": True},
+    ]), _DEPT_RESOLVER, _TEAM_RESOLVE)
+    check("이메일 형식 오류 차단", any("이메일 형식" in e for e in errs))
+    check("이메일 오류가 셀 마커로 매핑", cells.get("e:E1", {}).get("이메일") is not None)
+    check("정상 이메일은 오류 아님", cells.get("e:E2", {}).get("이메일") is None)
+    check("records 는 USER_COLUMNS 계약 유지(email 없음)",
+          all("email" not in r for r in recs))
+    check("이메일 형식 판정은 파사드와 동일 규칙",
+          mu._valid_email("a@b.co") and not mu._valid_email("a@b") and not mu._valid_email(""))
+
+
+def test_email_primary_and_merge():
+    """대표 주소 선정은 모드 무관 결정적이고, 병합은 나머지 주소를 보존한다."""
+    from modules import config as _cfg
+    cap = next(iter(_cfg.CAPABILITIES))
+    rows = [
+        {"email": "z@x.com", "scope": _cfg.EMAIL_SCOPE_ALL},
+        {"email": "a@x.com", "scope": _cfg.EMAIL_SCOPE_ALL},
+        {"email": "duty@x.com", "scope": cap},
+    ]
+    check("대표 = ALL 주소 정렬 최소값(삽입순 무관)", mu._primary_email(rows) == "a@x.com")
+    check("대표 없음(ALL 미등록)", mu._primary_email([{"email": "d@x.com", "scope": cap}]) == "")
+    check("추가 주소 건수(대표 제외)", mu._extra_email_count(rows) == 2)
+
+    merged = mu._merge_email_rows(rows, "NEW@x.com")
+    check("대표만 교체(소문자 정규화)",
+          {"email": "new@x.com", "scope": _cfg.EMAIL_SCOPE_ALL} in merged
+          and all(r["email"] != "a@x.com" for r in merged))
+    check("다른 ALL 주소 보존", {"email": "z@x.com", "scope": _cfg.EMAIL_SCOPE_ALL} in merged)
+    check("담당별(scope=capability) 주소 보존", {"email": "duty@x.com", "scope": cap} in merged)
+
+    cleared = mu._merge_email_rows(rows, "")
+    check("빈 값 = 대표 1건만 삭제", all(r["email"] != "a@x.com" for r in cleared)
+          and len(cleared) == 2)
+    added = mu._merge_email_rows([{"email": "duty@x.com", "scope": cap}], "me@x.com")
+    check("대표가 없던 사용자에 신규 등록",
+          {"email": "me@x.com", "scope": _cfg.EMAIL_SCOPE_ALL} in added and len(added) == 2)
+
+
+def _email_save_app():
+    """sample 세션 스토어로 저장 경로 왕복 — 변경 행만 쓰고 나머지 주소는 보존."""
+    import os as _os
+    _os.environ["DUTY_DATA_MODE"] = "sample"
+    import pandas as _pd
+    import streamlit as _st
+    from modules import config as _cfg
+    from modules import db as _db
+    from views import master_users as _mu
+    from views.master import state as _state
+
+    cap = next(iter(_cfg.CAPABILITIES))
+    # 대표(그리드 슬롯) = ALL 주소 정렬 최소값 → aa@x.com. zz@x.com 은 추가 ALL 주소.
+    _db.set_user_emails("1001", [
+        {"email": "aa@x.com", "scope": _cfg.EMAIL_SCOPE_ALL},
+        {"email": "zz@x.com", "scope": _cfg.EMAIL_SCOPE_ALL},
+        {"email": "duty@x.com", "scope": cap},
+    ])
+    _db.set_user_emails("1002", [{"email": "untouched@x.com", "scope": _cfg.EMAIL_SCOPE_ALL}])
+
+    s = _state.DraftState("email_save_test")
+    # 로드 시점 프레임(대표 주소가 실려 온 상태) → baseline. 그 뒤 1001 만 편집한다.
+    loaded = _pd.DataFrame([
+        {"_row_id": "e:1001", "_row_state": "existing", "_sel": False, "사번": "1001",
+         "성명": "가", "부서": "D", "직급": "", "권한": "조원", "이메일": "aa@x.com",
+         "입사일": "", "퇴사일": "", "표시순서": "", "재직": True},
+        {"_row_id": "e:1002", "_row_state": "existing", "_sel": False, "사번": "1002",
+         "성명": "나", "부서": "D", "직급": "", "권한": "조원", "이메일": "untouched@x.com",
+         "입사일": "", "퇴사일": "", "표시순서": "", "재직": True},
+    ])
+    _st.session_state[s.key("baseline")] = _mu._baseline_of(loaded)
+    live = _pd.concat([loaded, _pd.DataFrame([
+        {"_row_id": "n:1", "_row_state": "new", "_sel": False, "사번": "NEWU",
+         "성명": "신", "부서": "D", "직급": "", "권한": "조원", "이메일": "fresh@x.com",
+         "입사일": "", "퇴사일": "", "표시순서": "", "재직": True},
+    ])], ignore_index=True)
+    live.loc[live["사번"] == "1001", "이메일"] = "new@x.com"  # 이 행만 편집
+    failures = _mu._persist_emails(s, live, None, actor="1001")
+    _st.session_state["mail_failures"] = list(failures)
+    _st.session_state["mail_1001"] = _db.get_user_emails("1001")
+    _st.session_state["mail_1002"] = _db.get_user_emails("1002")
+    _st.session_state["mail_new"] = _db.get_user_emails("NEWU")
+
+    # 조회 실패/미준비 상태에서는 아무것도 쓰지 않는다(빈 값 덮어쓰기 금지).
+    _st.session_state[s.key("email_error")] = "조회 실패"
+    blocked = live.copy()
+    blocked.loc[blocked["사번"] == "1002", "이메일"] = ""
+    _mu._persist_emails(s, blocked, None, actor="1001")
+    _st.session_state["mail_blocked"] = _db.get_user_emails("1002")
+
+
+def test_email_save_roundtrip():
+    try:
+        from streamlit.testing.v1 import AppTest
+    except Exception as exc:  # noqa: BLE001
+        print(f"[SKIP] AppTest 미가용: {exc}")
+        return
+    at = AppTest.from_function(_email_save_app, default_timeout=60).run()
+    check("이메일 저장 예외 없음", not at.exception, str(at.exception))
+    if at.exception:
+        return
+    check("저장 실패 없음", at.session_state["mail_failures"] == [])
+    rows = at.session_state["mail_1001"]
+    got = {(r["email"], r["scope"]) for r in rows}
+    from modules import config as _cfg
+    cap = next(iter(_cfg.CAPABILITIES))
+    check("대표 주소 교체", ("new@x.com", _cfg.EMAIL_SCOPE_ALL) in got
+          and ("aa@x.com", _cfg.EMAIL_SCOPE_ALL) not in got)
+    check("추가 ALL 주소 보존", ("zz@x.com", _cfg.EMAIL_SCOPE_ALL) in got)
+    check("담당별 주소 보존", ("duty@x.com", cap) in got)
+    check("변경 없는 사용자는 그대로(불필요한 재작성 없음)",
+          [dict(r) for r in at.session_state["mail_1002"]]
+          == [{"email": "untouched@x.com", "scope": _cfg.EMAIL_SCOPE_ALL}])
+    check("신규 사용자 이메일 등록(사용자 저장 뒤 순서)",
+          [r["email"] for r in at.session_state["mail_new"]] == ["fresh@x.com"])
+    check("조회 실패 상태면 저장 skip(빈 값 덮어쓰기 금지)",
+          [r["email"] for r in at.session_state["mail_blocked"]] == ["untouched@x.com"])
+
+
+def test_admin_editor_targets():
+    """ADMIN 편집기 대상 목록은 **그리드 표시 컬럼(사번/성명)** 으로 만든다.
+
+    저장소 컬럼명(emp_no/name)으로 읽으면 항상 빈 목록이 돼 비밀번호 초기화·담당
+    권한/이메일 편집기가 캡션만 남고 조용히 사라진다(2026-08-14 실화면 검증 발견).
+    """
+    frame = pd.DataFrame([
+        {"_row_state": "existing", "사번": "1001", "성명": "가"},
+        {"_row_state": "existing", "사번": " ", "성명": "빈사번"},
+        {"_row_state": "existing", "사번": "1002", "성명": ""},
+    ])
+    opts = mu._target_options(frame)
+    check("표시 컬럼으로 대상 목록 구성", opts and opts[0] == "1001 · 가")
+    check("사번 없는 행 제외", all(not o.startswith(" ") for o in opts) and len(opts) == 2)
+    check("성명 없어도 사번만으로 선택 가능", "1002" in opts)
+    check("빈 프레임은 빈 목록", mu._target_options(pd.DataFrame()) == [])
+    src = inspect.getsource(mu)
+    check("편집기 두 곳 모두 공통 헬퍼 사용", src.count("_target_options(existing)") == 2)
+    check("대상 사번 파싱 규칙 유지(사번 · 성명)", 'split(" · ", 1)[0]' in src)
+
+
+def test_email_map_not_ready():
+    """010 미준비면 값을 만들지 않고 사유를 돌려준다(조회 전용 전환 근거)."""
+    orig = mu.db.capabilities_ready
+    try:
+        mu.db.capabilities_ready = lambda: False
+        primary, extra, err = mu._email_map(["1001"])
+        check("미준비 시 사유 반환", bool(err) and primary == {} and extra == {})
+    finally:
+        mu.db.capabilities_ready = orig
+    check("빈 목록은 조회하지 않음", mu._email_map([]) == ({}, {}, ""))
 
 
 def test_summary_chips_empty_keeps_filter():
@@ -531,6 +793,15 @@ def main():
     test_readiness_state()
     test_head_badges_compose()
     test_readiness_gate_wired()
+    test_single_action_entry_point()
+    test_header_sync_converges()
+    test_count_row_status()
+    test_email_column_contract()
+    test_email_validation()
+    test_email_primary_and_merge()
+    test_email_save_roundtrip()
+    test_admin_editor_targets()
+    test_email_map_not_ready()
     test_summary_chips_empty_keeps_filter()
 
     print("-" * 60)

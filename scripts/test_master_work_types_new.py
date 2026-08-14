@@ -2,6 +2,9 @@
 
 공통 기반 `views.master` 위에 재구현한 근무형태 화면의 계약을 검증한다:
   - 렌더 스모크(AppTest, 예외 없음, sample 모드)
+  - 액션 진입점 단일화(2026-08-14): 화면 안 버튼 바 없음 · 상단 52px 헤더 아이콘 4종에
+    같은 활성/사유 발행 · 발행값 변경 시에만 1회 재렌더(헤더 선렌더 지연 보정) ·
+    미저장/선택 상태 표시 보존
   - 저장 전 검증 `_validate` 하위호환((records, errors), 색상 #RRGGBB 보존, 필수값)
   - 보강 검증(Codex 지적): 색상 #RRGGBB 형식·정규화, 시간 HH:MM, 셀 오류 맵
   - dirty baseline 헬퍼(_row_tuple / _dirty_fields_json), 약칭 중복 소프트 경고
@@ -79,27 +82,137 @@ def test_render_smoke() -> None:
     check("동적 그리드 높이(master_grid_height) 사용", "master_grid_height" in src)
 
 
-# ===== 1-1) 액션 위치 = §1-E 건수 행 우측 (아이콘 밴드 제거, 8단계) =====
-def test_action_bar_above_grid() -> None:
-    print("액션 위치(§1-E 건수 행 우측) — 아이콘 밴드 제거, 건수 행에 행 추가·삭제·저장·새로고침")
+# ===== 1-1) 액션 진입점 = 상단 52px 앱 헤더 아이콘 하나 (2026-08-14 사용자 지시) =====
+# 종전: 헤더 아이콘 4종 + 건수 행 우측 인페이지 버튼 바 4개 = 같은 액션에 진입점이 둘.
+# 현재: 인페이지 버튼 바를 제거하고 상단 헤더 아이콘만 남긴다(DESIGN §0-3 "아이콘 툴바는
+# 최상단 헤더 바 안에만"). 활성/사유 계산(page_action_specs)·flag 소비(take_actions)·
+# 확인 게이트는 종전 그대로다 — 진입점만 하나로 줄었다.
+def test_actions_in_app_header_only() -> None:
+    print("액션 진입점 단일화 — 화면 안 버튼 바 제거, 상단 52px 헤더 아이콘만")
     import inspect
     from views import master_work_types as m
     src = inspect.getsource(m.render)
-    # §1-E 구조: 헤더 밴드/툴바 제거. 액션은 그리드 뒤 건수 계산 후 건수 행(count_row_slot)
-    # 우측에 page_action_specs + state.action_requester + {page}__{role} 키 버튼으로 채운다.
     i_frame = src.find("erp.screen_frame(")
     i_grid = src.find("render_master_grid(spec")
     i_crow = src.find("count_row_slot = st.container()")
     i_specs = src.find("page_action_specs")
+    i_pub = src.find("_publish_header_actions(state, specs)")
     check("헤더는 중립 프레임(erp.screen_frame)만 사용", 0 <= i_frame)
     check("아이콘 밴드 제거(toolbar/render_icons 없음)",
           'toolbar="icons"' not in src and "render_icons" not in src)
     check("건수 행 슬롯을 그리드보다 먼저 확보", 0 <= i_crow < i_grid)
-    check("액션은 그리드 건수 계산 뒤 채움(page_action_specs)", i_grid < i_specs)
+    check("액션 스펙은 그리드 건수 계산 뒤 산출(page_action_specs)", i_grid < i_specs)
     check("액션 활성/사유는 공통 규칙(page_action_specs) 재사용", 0 <= i_specs)
-    check("클릭은 동일 flag 계약(action_requester + {page}__{role} 키)",
-          "state.action_requester(role)" in src and 'f"{PAGE_ID}__{role}"' in src)
+    # 회귀 방지 핵심: 화면 안에 행 추가·삭제·저장·새로고침 버튼을 되살리지 않는다.
+    check("화면 안 액션 버튼 바 없음(action_requester 버튼 미렌더)",
+          "action_requester(" not in src and 'f"{PAGE_ID}__{role}"' not in src)
+    check("render 본문에 st.button 없음(확인 바 버튼은 배너 함수가 소유)", "st.button(" not in src)
+    check("상단 헤더 아이콘에 같은 스펙 발행(header_actions_from_specs)", 0 <= i_specs < i_pub)
+    check("클릭 flag 소비 경로는 종전 그대로(take_actions)", "take_actions(state)" in src)
     check("배너 슬롯은 그리드보다 먼저 확보", 0 <= src.find("banner_slot = st.container()") < i_grid)
+
+
+# ===== 1-1b) 헤더 아이콘 발행 상태 = 인페이지 규칙과 동일 (선택/미저장 기준) =====
+def test_header_action_states() -> None:
+    print("헤더 아이콘 상태 발행 — 선택 0 · 미저장 0 → 추가·새로고침 활성 / 삭제·저장 음영")
+    from modules.ui import _HDR_STATE_PREFIX
+    from views.master import page_action_specs
+
+    at = AppTest.from_function(_screen_work_types, default_timeout=60).run()
+    check("렌더 예외 없음(발행 경로 포함)", not at.exception)
+    # AppTest 의 session_state 프록시는 dict.get 이 없다 — 존재 확인 후 인덱싱한다.
+    hdr_key = _HDR_STATE_PREFIX + "master_work_types"
+    pub = at.session_state[hdr_key] if hdr_key in at.session_state else None
+    check("헤더 아이콘 상태가 page 스코프로 발행됨", isinstance(pub, dict))
+    if isinstance(pub, dict):
+        check("4종(add/delete/save/refresh) 모두 발행",
+              set(pub) == {"add", "delete", "save", "refresh"})
+        check("행 추가는 활성", pub["add"][0] is False)
+        check("새로고침은 활성", pub["refresh"][0] is False)
+        check("선택 0 → 삭제 음영", pub["delete"][0] is True)
+        check("미저장 0 → 저장 음영", pub["save"][0] is True)
+        check("삭제 음영 사유 tooltip 존재", "선택" in (pub["delete"][1] or ""))
+        check("저장 음영 사유 tooltip 존재", "변경" in (pub["save"][1] or ""))
+
+    # 발행값은 인페이지 액션바와 같은 순수 규칙(page_action_specs)에서 나온다 — 선택/미저장이
+    # 생기면 삭제·저장이 활성으로 뒤집히는지 규칙 단위로 고정한다(화면은 이 스펙을 그대로 넘긴다).
+    by_role = {s["role"]: s for s in page_action_specs(sel_count=2, dirty_total=3, can_save=True)}
+    check("선택 2건 → 삭제 활성", by_role["delete"]["disabled"] is False)
+    check("미저장 3건 → 저장 활성", by_role["save"]["disabled"] is False)
+    check("저장 라벨에 미저장 건수 배지", by_role["save"]["label"] == "저장 · 3")
+
+
+# ===== 1-1c) 헤더 발행 → 헤더 재렌더 게이트 =====
+# 상단 52px 헤더는 화면 본문보다 **먼저** 렌더되므로 본문 끝의 publish 는 그 프레임의
+# 헤더에 반영되지 못한다. 인페이지 버튼이 사라진 뒤에는 이 지연이 그대로 기능 결함이 된다
+# (실측 1440px/sample: 진입 후 추가 음영 18s+ · 행 선택 후 삭제 음영 55s+ · 행 추가 후
+# 저장 음영 25s+ — 본문발 상태 변화 뒤 자동 rerun 이 보장되지 않는다). 그래서 발행값이
+# 직전과 다를 때만 1회 rerun 하고, 같으면 rerun 하지 않아 수렴한다.
+def _probe_publish_gate():
+    """AppTest 안에서 _publish_header_actions 의 변경-게이트 동작을 관찰한다."""
+    import streamlit as _st
+
+    from views import master_work_types as m
+    from views.master import page_action_specs
+    from views.master.state import DraftState
+
+    s = DraftState("master_work_types")
+    clean = page_action_specs(sel_count=0, dirty_total=0, can_save=True)
+    selected = page_action_specs(sel_count=1, dirty_total=0, can_save=True)
+    _st.session_state["probe"] = [
+        m._publish_header_actions(s, clean),     # 최초 발행 → 재렌더 필요
+        m._publish_header_actions(s, clean),     # 같은 값 → 재렌더 없음(수렴)
+        m._publish_header_actions(s, selected),  # 선택 발생 → 재렌더 필요
+        m._publish_header_actions(s, selected),  # 같은 값 → 재렌더 없음
+    ]
+
+
+def test_header_publish_rerender_gate() -> None:
+    print("헤더 발행값 변경 시에만 1회 재렌더(_publish_header_actions)")
+    import inspect
+    from modules.ui import _HDR_STATE_PREFIX
+    from views import master_work_types as m
+
+    src = inspect.getsource(m._publish_header_actions)
+    check("발행은 공통 경로(header_actions_from_specs)", "header_actions_from_specs(PAGE_ID" in src)
+    check("발행 서명을 page-scoped 세션 키에 보관", "_HDR_SIG" in src and "state.key(" in src)
+
+    render_src = inspect.getsource(m.render)
+    check("render 는 발행 결과로 말미 rerun 을 판단",
+          "hdr_changed = _publish_header_actions(" in render_src)
+    check("rerun 은 액션 flag 소비(take_actions) 뒤에 온다",
+          0 <= render_src.find("take_actions(state)") < render_src.find("structural or hdr_changed"))
+    check("_normalize 부작용은 short-circuit 되지 않게 먼저 호출",
+          "structural = _normalize(state, grid_df)" in render_src)
+    # §21 flash 는 pop-1회 표시라 재렌더 프레임에서 유실된다 — 붙잡았다가 rerun 직전 복구.
+    check("재렌더 시 flash 를 붙잡아 둠(배너 렌더 전)",
+          0 <= render_src.find("pending_flash = st.session_state.get(state.flash_key)")
+          < render_src.find("_render_banners(state, params)"))
+    check("rerun 직전 flash 복구", "st.session_state[state.flash_key] = pending_flash" in render_src)
+
+    at = AppTest.from_function(_probe_publish_gate, default_timeout=60).run()
+    check("게이트 프로브 렌더 예외 없음", not at.exception)
+    seq = at.session_state["probe"] if "probe" in at.session_state else None
+    check("변경 시에만 재렌더(True,False,True,False)", seq == [True, False, True, False])
+    hdr_key = _HDR_STATE_PREFIX + "master_work_types"
+    pub = at.session_state[hdr_key] if hdr_key in at.session_state else None
+    check("마지막 발행값이 헤더 상태로 남음(선택 1건 → 삭제 활성)",
+          isinstance(pub, dict) and pub["delete"][0] is False)
+
+
+# ===== 1-1d) 상태 표시 보존 — 버튼을 없애도 미저장·선택 건수는 남는다 =====
+def test_edit_state_still_visible() -> None:
+    print("상태 표시 보존 — 건수 행 미저장·선택 칩 + 하단 상태 스트립")
+    import inspect
+    from views import master_work_types as m
+    src = inspect.getsource(m.render)
+    check("건수 행에 미저장 건수 표시", "미저장 {dtotal}건" in src)
+    check("건수 행에 선택 건수 표시", "선택 {sel_count}건" in src)
+    check("칩은 공용 토큰(chip_html) 재사용 — 새 색 없음", "master.chip_html(" in src)
+    check("우측 편집 상태 자리 CSS(.wt-crow .edit)", ".wt-crow .edit" in m._WT_CROW_CSS)
+    check("하단 상태 스트립(count_strip) 유지", "count_strip(" in src)
+    check("건수 행 좌측(근무형태 건수·사용/미사용) 유지",
+          "wt-crow" in src and "_summary_counts(live)" in src)
 
 
 # ===== 1-2) B2: 부분성공 원장 — save_work_types_report → PersistResult =====
@@ -431,7 +544,10 @@ def test_delete_policy() -> None:
 def main() -> int:
     for test in (
         test_render_smoke,
-        test_action_bar_above_grid,
+        test_actions_in_app_header_only,
+        test_header_action_states,
+        test_header_publish_rerender_gate,
+        test_edit_state_still_visible,
         test_unified_redesign_features,
         test_preview_color_short_label_contract,
         test_preview_badge_contrast_contract,
