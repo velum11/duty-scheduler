@@ -1,6 +1,6 @@
 """사이드바 명칭·버튼 가시성 정리 회귀 테스트 (sample, AppTest + 소스 정적).
 
-- 상단 제목 "WorkOps"(부제 '현장운영'), "생산 근무표"/"WORKFORCE" 사이드바 문자열 제거
+- 상단 제목 "WorkOps" 단독(한글 부제 없음), "생산 근무표"/"WORKFORCE" 사이드바 문자열 제거
 - 접기(sb_hide)·로그아웃(btn_logout) 버튼 렌더 유지
 - ADMIN/MANAGER App Shell 렌더, USER 전용 헤더 회귀 없음
 - 메뉴 라우팅·로그아웃·펼침/접힘 session_state 계약 불변
@@ -59,9 +59,10 @@ def _render(user):
 # ===== 1) 브랜드 문자열 (소스 정적 — 표시 명칭만, 공식 APP_NAME 은 불변) =====
 print("사이드바 브랜드 문자열")
 brand_src = inspect.getsource(ui._sidebar_brand)
-# 표시명 확정(2026-08-13, 코덱스 자문 합치): 브랜드 'WorkOps' + 한글 부제 '현장운영'
+# 표시명(2026-08-18 사용자 결정): 브랜드 'WorkOps' 단독. 한글 부제 폐기 —
+# 모듈이 계속 늘어나 어떤 부제도 범위를 좁게 규정하게 되므로 두지 않는다.
 check("사이드바 브랜드에 'WorkOps' 존재", "WorkOps" in brand_src)
-check("사이드바 브랜드에 부제 '현장운영' 존재", "현장운영" in brand_src)
+check("사이드바 브랜드에 부제 슬롯 없음", "sb-title-sub" not in brand_src)
 check("사이드바 브랜드에서 구명칭 '교대 근무표' 제거", "교대 근무표" not in brand_src)
 check("사이드바 브랜드에 '생산 근무표' 제거", "생산 근무표" not in brand_src)
 ui_src = inspect.getsource(ui)
@@ -78,7 +79,7 @@ at = _render(ADMIN)
 check("ADMIN 렌더 예외 없음", not at.exception)
 md_values = " ".join(m.value for m in at.markdown)
 check("렌더 결과에 'WorkOps' 표시", "WorkOps" in md_values)
-check("렌더 결과에 부제 '현장운영' 표시", "현장운영" in md_values)
+check("렌더 결과에 한글 부제 미표시", "현장운영" not in md_values)
 check("렌더 결과에 'WORKFORCE' 미표시", "WORKFORCE" not in md_values)
 btn_keys = {b.key for b in at.button}
 check("접기 버튼(sb_hide) 렌더 유지", "sb_hide" in btn_keys)
@@ -275,8 +276,10 @@ check("검색 '조직': 조직 관리 리프 표시", "sbi_master_org" in skeys)
 check("검색 '조직': 비매칭 단독항목(대시보드) 숨김", "sbs_dashboard" not in skeys)
 
 # ===== 9) 상단 52px 아이콘 헤더 + 페이지 타이틀 크롬 (파랑 밴드 제거) =====
-# 계약 의도 보존: 헤더 크롬 클래스(ms-head/ms-title)는 유지하되, 파랑 타이틀 밴드는 제거하고
-# 25px 제목 크롬으로 통일(항목5). 브레드크럼·연결 pill 은 상단 52px 헤더가 소유(항목4).
+# 계약 의도 보존: 헤더 크롬 클래스(ms-head/ms-title)는 유지하되, 파랑 타이틀 밴드는 제거.
+# 2026-08-18: 제목 25px/설명 13.5px → DESIGN.md §1.2 타이포 5단(page 28/600, label 12/400)에
+# 맞춰 28px/12px 로 교체. 이 한 선택자가 22개 화면 제목을 지배한다.
+# 브레드크럼·연결 pill 은 상단 52px 헤더가 소유(항목4).
 print("상단 52px 헤더 + 타이틀 크롬 계약")
 from views import master as _master  # noqa: E402
 head_src = inspect.getsource(_master.master_screen_head)
@@ -284,10 +287,13 @@ mstyle = _master.style._PAGE_CSS
 check("헤더 계약 클래스 유지(ms-head/ms-title)",
       "ms-head" in head_src and "ms-title" in head_src)
 check("파랑 밴드 토큰(#0F6FCB) 제거", "#0F6FCB" not in mstyle)
-check("제목 25px/600(-0.025em) 다크 잉크",
-      "font-size:25px; font-weight:600" in mstyle and "color:var(--ms-ink)" in mstyle
-      and "letter-spacing:-.025em" in mstyle)
-check("설명 13.5px 크롬", "font-size:13.5px" in mstyle)
+check("제목 28px/600(-0.02em) 다크 잉크 — DESIGN.md §1.2 page",
+      "font-size:28px; font-weight:600" in mstyle and "color:var(--ms-ink)" in mstyle
+      and "letter-spacing:-.02em" in mstyle)
+check("설명 12px 크롬 — DESIGN.md §1.2 label", "font-size:12px" in mstyle)
+# 스케일 밖 구값 재유입 방지(§1.2: 28·20·16·14·12 만).
+check("타이틀 크롬에 구값(25px/13.5px) 부재",
+      "font-size:25px" not in mstyle and "font-size:13.5px" not in mstyle)
 check("본문 브레드크럼(.ms-crumb) 숨김(상단 헤더가 소유)", ".ms-crumb { display:none;" in mstyle)
 check("중립 액션 스트립 토큰(파랑 아님)", "--ms-band:#fbfaf8" in mstyle)
 # 상단 52px 헤더(modules/ui.py) — MODULE / SCREEN 모노 브레드크럼 + 연결 pill

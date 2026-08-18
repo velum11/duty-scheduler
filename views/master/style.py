@@ -200,17 +200,19 @@ _PAGE_CSS = """
   --ms-info:#2f4d99; --ms-info-bg:#eef2fb; --ms-success:#2f6b45; --ms-success-bg:#eef5f0;
   --ms-warn:#8a6212; --ms-warn-bg:#fdf3e3; --ms-danger:#9c3232; --ms-danger-bg:#fbeeee;
 }
-/* §5 페이지 타이틀 크롬 — 파랑 밴드 제거(ADOPTION_SPEC 항목5). 제목 25px/600(-0.025em) +
-   설명 13.5px. 브레드크럼은 상단 52px 헤더(modules/ui.py)가 소유하므로 본문에선 숨긴다.
+/* 페이지 타이틀 크롬. 제목 28px/600(-0.02em) + 설명 12px — DESIGN.md §1.2 타이포 5단
+   (page 28/600, label 12/400)에 맞춘 값이다(2026-08-18). 종전 25px/13.5px 는 어느 스케일에도
+   없는 값이었고, **이 한 선택자가 22개 화면 제목을 전부 지배**해 최대 위반이었다.
+   브레드크럼은 상단 52px 헤더(modules/ui.py)가 소유하므로 본문에선 숨긴다.
    ms-head/ms-title/ms-mode 클래스명은 계약상 유지(선택자 하위호환). */
 .ms-head { display:flex; flex-direction:column; gap:.15rem; margin:0 0 .35rem; }
 .ms-crumb { display:none; }
 .ms-band { display:flex; flex-direction:column; gap:.15rem; }
 .ms-band-main { display:flex; align-items:center; gap:.6rem; min-width:0; }
 .ms-band-ico { display:none; }  /* 파랑 밴드 리딩 아이콘 제거 */
-.ms-title { font-size:25px; font-weight:600; color:var(--ms-ink); letter-spacing:-.025em; margin:0;
+.ms-title { font-size:28px; font-weight:600; color:var(--ms-ink); letter-spacing:-.02em; margin:0;
   line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ms-desc { font-size:13.5px; color:var(--ms-ink-2); margin:0; line-height:1.35; text-wrap:pretty; }
+.ms-desc { font-size:12px; color:var(--ms-ink-2); margin:0; line-height:1.4; text-wrap:pretty; }
 /* 밴드 우측 툴바(프로토타입 장식) — 파랑 밴드 제거로 미사용(정적 head 는 아이콘 미렌더). */
 .ms-band-tools { display:flex; align-items:center; gap:.1rem; flex:0 0 auto; }
 .ms-band-tools .ms-mode { margin-right:.4rem; }

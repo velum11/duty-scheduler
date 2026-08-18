@@ -357,10 +357,6 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
 .sb-title-ko {
   color: var(--sb-sel-text); font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap;
 }
-.sb-title-sub {
-  color: var(--sb-text); font-size: 10.5px; font-weight: 500; line-height: 1.25;
-  letter-spacing: .04em; white-space: nowrap;
-}
 /* 접기 버튼 — 심플 아이콘 전용. 기본 투명·무테두리, hover 때만 옅은 배경. */
 .st-key-sb_hide div.stButton button {
   width: 32px; min-height: 32px; height: 32px; padding: 0; justify-content: center;
@@ -811,7 +807,7 @@ def setup_page() -> None:
     user = st.session_state.get("user") or {}
     role = str(user.get("role", "")).strip().upper()
     st.set_page_config(
-        page_title="WorkOps · 현장운영",
+        page_title="WorkOps",
         page_icon=_FAVICON if Path(_FAVICON).exists() else "🟧",
         layout="wide",
         # USER=상단/하단 nav 셸(사이드바 미사용) → collapsed. ADMIN/MANAGER=사이드바 셸이지만
@@ -905,17 +901,18 @@ def _shell_groups(role: str, caps=None) -> list:
 
 
 def _sidebar_brand() -> None:
-    """사이드바 헤더: 오렌지 로고 마크 + 앱명(WorkOps | 현장운영) + 접기(66px 레일) 버튼.
+    """사이드바 헤더: 오렌지 로고 마크 + 앱명(WorkOps) + 접기(66px 레일) 버튼.
 
-    표시명은 2026-08-13 확정(코덱스 자문 합치): 브랜드 'WorkOps' 주 표기 + 한글
-    부제 '현장운영' — 근무표·아차사고에 더해 숙소예약·업무요청서 등 확장 모듈까지
-    포괄하는 이름이다. config.APP_NAME('WorkOps')이 공식 원천."""
+    표시명은 브랜드 'WorkOps' 단독이다(2026-08-18 사용자 결정). 종전 한글 부제
+    '현장운영'(2026-08-13 확정)은 폐기했다 — 근무표·아차사고에 더해 시험성적서·
+    계측기 주기관리·숙소예약·업무요청서까지 들어오면서 '현장 운영'이 범위를 좁게
+    규정하게 됐고, 모듈이 계속 늘어나는 한 어떤 한글 부제도 같은 문제를 겪는다.
+    부제를 두지 않아 범위를 규정하지 않는다. config.APP_NAME('WorkOps')이 공식 원천."""
     with st.container(key="sb_head"):
         brand, toggle = st.columns([5, 1.15], vertical_alignment="center")
         brand.markdown(
             "<div class='sb-brand'><span class='sb-logo'>W</span>"
-            "<span class='sb-title'><span class='sb-title-ko'>WorkOps</span>"
-            "<span class='sb-title-sub'>현장운영</span></span></div>",
+            "<span class='sb-title'><span class='sb-title-ko'>WorkOps</span></span></div>",
             unsafe_allow_html=True,
         )
         with toggle:
