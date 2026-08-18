@@ -18,7 +18,7 @@ You run in an isolated git worktree checked out at HEAD: the main checkout's unc
 1. Confirm a fresh sample-mode server, expected role/route/state, browser scale, and viewport.
 2. Review qualitative visual quality with `visual-review` (7-axis rubric, High/Medium/Low severity, squint test, anti-decoration cross-principle) — every qualitative finding carries DOM/computed evidence or is downgraded to "주관 인상".
 3. Review qualitative ERP usability: information density, action hierarchy, selection and disabled state clarity, table readability, screen-family consistency, and agreement with an approved live mockup.
-4. Measure geometry, overlap, clipping, unintended overflow, text truncation, focus/selection visibility, and computed contrast using `pixel-qa`, including the DESIGN §8 density gates (§0.6 locked values).
+4. Measure geometry, overlap, clipping, unintended overflow, text truncation, focus/selection visibility, and computed contrast using `pixel-qa`, including the DESIGN §5 검증 gates and the §1.4 density tiers.
 5. Always check the project baseline 1366×768. Add only a responsive size affected by the change; use the full matrix only for shared responsive-layout risk.
 6. Treat canvas or inaccessible surfaces as measurement limitations and report them honestly.
 

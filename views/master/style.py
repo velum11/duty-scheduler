@@ -407,8 +407,10 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 .ms-chip.mute   { background:var(--ms-surface-3);  color:var(--ms-ink-2);   border:1px solid var(--ms-line); } /* ink-3→ink-2: surface-3 위 대비 2.89→5.76 (§2) */
 .ms-chip.lock   { background:var(--ms-surface-3);  color:var(--ms-ink-2);   border:1px solid var(--ms-line-strong); }
 /* readiness 배지 — 모드 배지와 분리 */
+/* 크기는 px 고정 — root 14px 기준 .72rem 은 10.08px 로 라벨 하한(11px) 미달이었다
+   (2026-08-15 공용 조사: .ms-chip 만 12px 로 올리고 형제 라벨들이 남아 있었다). */
 .ms-ready { display:inline-flex; align-items:center; gap:.35rem; padding:.22rem .55rem; border-radius:6px;
-  font-size:.72rem; font-weight:600; }
+  font-size:12px; font-weight:600; }
 .ms-ready.ready { background:var(--ms-success-bg); color:var(--ms-success); }
 .ms-ready.not   { background:var(--ms-warn-bg);    color:var(--ms-warn); }
 .ms-ready.err   { background:var(--ms-danger-bg);  color:var(--ms-danger); }
@@ -434,24 +436,24 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 /* 시트 헤더(제목 + 건수 + 드릴다운 컨텍스트 칩) */
 .ms-sheet-head { display:flex; align-items:center; gap:.5rem; padding:.55rem .7rem .5rem; }
 .ms-sheet-head .t { font-size:.92rem; font-weight:700; color:var(--ms-ink); }
-.ms-sheet-head .cnt { font-size:.7rem; font-weight:600; color:var(--ms-ink-2); background:var(--ms-surface-3);
+.ms-sheet-head .cnt { font-size:12px; font-weight:600; color:var(--ms-ink-2); background:var(--ms-surface-3);
   border:1px solid var(--ms-line); border-radius:999px; padding:.05rem .5rem; }
-.ms-sheet-head .ctx { margin-left:auto; font-size:.7rem; font-weight:600; color:var(--ms-navy);
+.ms-sheet-head .ctx { margin-left:auto; font-size:12px; font-weight:600; color:var(--ms-navy);
   background:#E5EAF2; border:1px solid #C6D2E4; border-radius:6px; padding:.1rem .45rem;
   max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ms-sheet-head .lock { margin-left:auto; font-size:.7rem; font-weight:600; color:var(--ms-ink-2); /* ink-3→ink-2: 대비 (§2, WCAG) */
+.ms-sheet-head .lock { margin-left:auto; font-size:12px; font-weight:600; color:var(--ms-ink-2); /* ink-3→ink-2: 대비 (§2, WCAG) */
   display:inline-flex; align-items:center; gap:.3rem; }
 /* 잠김/빈 상태 — 상위 미선택 시 하위 시트 (§ '그룹을 먼저 선택하세요') */
 .ms-locked { display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:.5rem; text-align:center; padding:2.6rem 1rem; min-height:220px; color:var(--ms-ink-3); }
 .ms-locked .glyph { font-size:1.4rem; line-height:1; color:var(--ms-line-strong); }
 .ms-locked .t { font-size:.82rem; font-weight:700; color:var(--ms-ink-2); }
-.ms-locked .s { font-size:.74rem; color:var(--ms-ink-2); line-height:1.45; } /* ink-3→ink-2: 대비 (§2, WCAG) */
+.ms-locked .s { font-size:12px; color:var(--ms-ink-2); line-height:1.45; } /* ink-3→ink-2: 대비 (§2, WCAG) */
 /* 빈 상태(정상 empty, 오류 아님) — 표 본문 자리 */
 .ms-empty { display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:.4rem; text-align:center; padding:2rem 1rem; color:var(--ms-ink-3); }
 .ms-empty .t { font-size:.82rem; font-weight:600; color:var(--ms-ink-2); }
-.ms-empty .s { font-size:.74rem; color:var(--ms-ink-2); } /* ink-3→ink-2: 콘텐츠 배경 위 대비 2.9→5.76 (§2, WCAG) */
+.ms-empty .s { font-size:12px; color:var(--ms-ink-2); } /* ink-3→ink-2: 콘텐츠 배경 위 대비 2.9→5.76 (§2, WCAG) */
 /* ≤1100px: 3시트 세로 스택(드릴다운 연동 유지). st.columns 를 감싼 horizontal block 대상. */
 @media (max-width:1100px){
   div[data-testid="stHorizontalBlock"]:has([class*="__sheet"]) { flex-direction:column; }

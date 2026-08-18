@@ -23,11 +23,12 @@ page-composition design must precede any implementation.
 - [ ] Reads required context before proposing structure: `AGENTS.md`, `CLAUDE.md`,
       relevant `DESIGN.md` sections, and `views/common/scaffold.py::ARCHETYPES`.
 - [ ] Produces a Stage 0 design brief in conversation/task text covering all six steps: intent
-      (3 questions), single focal point, declared §0.6 density targets, reuse of existing
+      (3 questions), single focal point, declared §1.4 density tier, reuse of existing
       widgets/kit, per-component checkpoint, and interactive states.
 - [ ] Names one focal point for the view (the primary review verb), not several.
-- [ ] Cites §0.6 locked density values as numeric targets (e.g. detail ≥600px, condition
-      panel ≤96px) rather than vague adjectives like "clean" or "modern".
+- [ ] Cites the §1.4 density tier and §1.1 spacing scale as numeric targets (e.g. compact
+      34–38px hit area, gaps from 4·8·12·16·24·32·40) rather than vague adjectives like
+      "clean" or "modern".
 - [ ] Proposes reusing the neutral scaffold / `views/common/erp/` kit before any one-off
       widget or local CSS; if the kit lacks a capability, proposes a kit extension.
 - [ ] For a design change, presents 3 side-by-side mockup variants and obtains the user's selection before editing a production view (2 for smaller direction choices; variants skipped only for copy/token/exact-spec fixes).

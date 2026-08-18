@@ -23,26 +23,29 @@ For UI_CENTRIC structural work (area order, archetype, list-detail split, task f
 navigation, shared kit, primary-action hierarchy), design the page composition first.
 Procedure adapted from Dammyjay93/interface-design (MIT, Copyright (c) 2026 Damola
 Akinleye; full notice in repository-root `THIRD_PARTY_NOTICES.md`) — procedure only; all
-values come from `DESIGN.md` §0/§0.6 and `views/common/scaffold.py::ARCHETYPES`, never
-from this skill or any external system file.
+values come from `DESIGN.md` §1(토큰)/§2(화면 유형) and `views/common/scaffold.py::ARCHETYPES`,
+never from this skill or any external system file.
 
 1. **Intent (3 questions)**: who is this specific user (role, situation)? what verb must
    they accomplish here? what should it feel like, in words that mean something for a
    dense work tool (not "clean and modern")?
 2. **One focal point per view**: name the single thing the user came to do; it must
-   dominate through size, position, or surrounding space (§0.3 area order).
-3. **Density declared up front**: pick the §0.6 locked values (condition panel ≤2 rows/
-   ≤96px, detail ≥600px, strip ≤72px, empty state one line, box cap) as design targets
-   before drawing anything. Content-fit control widths; no full-width controls for short
-   coded values.
+   dominate through size, position, or surrounding space (the archetype's 골격 in §2 fixes
+   the area order — do not invent a different one).
+3. **Density declared up front**: pick the §1.4 density tier (cozy 44px+ / compact 34–38px /
+   condensed 24–28px) that the archetype in §2 declares, before drawing anything. cozy and
+   condensed never mix in one screen, and condensed is grid-tables only. Spacing values come
+   from the §1.1 scale (4·8·12·16·24·32·40); the only sanctioned exception is data-density
+   geometry (matrix cell, sticky identity column), which must carry a code comment saying why.
+   Content-fit control widths; no full-width controls for short coded values.
 4. **Use what exists**: native Streamlit widgets and the neutral kit
    (`views/common/erp/`) before any one-off widget or local CSS; if the kit lacks a
    capability, propose the kit extension rather than a screen-local workaround.
 5. **Component checkpoint**: for each major component state why this component, how the
    hierarchy wins, and which existing token/pattern it reuses.
 6. **States are not optional**: default/hover/active/focus/disabled for every
-   interactive element; tabular-nums for dynamic numbers; hit targets — USER/touch 44px,
-   desktop ERP interaction targets ≥32×32px (§0.6·§4).
+   interactive element; tabular-nums for dynamic numbers; hit targets follow the §1.4 tier —
+   touch/cozy ≥44px, compact 34–38px, condensed 24–28px (grid tables only, not touch-operable).
 
 Design output is a structured design brief in conversation/task text (an optional copy may be
 saved under `.orca/artifacts/<task>/`; artifacts are reference only, never normative). Never
@@ -70,7 +73,7 @@ For a design change to an existing screen's visuals, layout, or structure:
 4. Implement only the selected variant, as a single Owner.
 5. Compare the real rendered screen with the selected concept at the project's baseline viewport and relevant responsive sizes.
 
-Use 2 variants for smaller changes that still leave a direction choice. Skip variants entirely and act directly for copy/menu wording, single color/token fixes within §0.6, permission-unchanged route wiring, single-control alignment, or when the user already specified the exact result.
+Use 2 variants for smaller changes that still leave a direction choice. Skip variants entirely and act directly for copy/menu wording, single color/token fixes that stay inside the §1 tokens, permission-unchanged route wiring, single-control alignment, or when the user already specified the exact result.
 
 ## Verification
 

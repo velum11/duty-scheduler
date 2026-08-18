@@ -153,8 +153,14 @@ DESIGN.md 전문과 docs/WORKLOG.md 최상단 2026-08-18 항목을 먼저 읽어
 글로벌 PLAYBOOK 이 ui-feature 에 데이터 계약 변경을 금지한다. 한 Owner 가 다 하지 않는다.
 
 [반드시 알아야 할 함정]
-- views/lodging_request.py 에 이 세션이 만들지 않은 미커밋 변경 271줄이 있다(병행 작업).
+- views/lodging_request.py(+271)·views/common/proto.py(+59)·views/workspace.py(+7)·
+  scripts/test_sidebar_ui.py(+6) 에 이 세션이 만들지 않은 미커밋 변경이 있다(병행 작업).
   AGENTS.md 에 따라 보존한다. 커밋에 넣지 마라.
+  **단 proto.py 안에는 이 세션이 넣은 1줄 수정이 섞여 있다** — `MONO` 상수를
+  `'"IBM Plex Mono", monospace'`(내부 큰따옴표)로 바꾼 것으로, 숙소예약·업무요청 3화면의
+  신청번호 style 소실을 막는다. hunk 분리 스테이징이 CRLF 문제로 두 번 실패해 커밋하지
+  않았다. **병행 작업 소유자가 proto.py 를 커밋할 때 이 줄이 함께 들어가야 한다** —
+  빠지면 같은 시각 결함이 되살아난다.
 - P1 결함 미수정: 평가 관리 보완요청 버튼이 활성인데 클릭하면 실패한다.
   활성 게이트는 006 프로브(near_miss_evaluate.py:171), 실행부는 007 프로브(db.py:2566).
 - UI 서체 IBM Plex 를 Google Fonts CDN 에서 @import 한다(ui.py:37, 동봉 아님).
@@ -165,10 +171,31 @@ DESIGN.md 전문과 docs/WORKLOG.md 최상단 2026-08-18 항목을 먼저 읽어
 빈도×강도 격자의 눈금 라벨과 20칸 등급 배치. 구조(5×4·행렬법·중대성 우선 두 규칙)는
 확정이므로 사내 위험성평가 기준표를 받으면 값만 교체한다. 화면·코드는 그대로다.
 
-[미완료 조사]
-.claude 에이전트·스킬 문서 감사와 공용 코드 방해요소 조사를 돌렸으나 세션 종료까지
-결과가 오지 않았다. 필요하면 다시 돌려라. 알려진 것: screen-design/SKILL.md 가
-존재하지 않는 §0.6·§0.3 을 5곳에서 인용하고 references/ 가 비어 있다.
+[완료된 조사 — 2026-08-15]
+.claude 문서 감사 **완료·수정됨**. DESIGN.md 재편(§0 결정문장/§1 토큰/§2 화면유형/
+§3 패턴/§4 금지/§5 검증)으로 사라진 §0.6·§0.3·§8 인용 15곳을 실제 섹션으로 교체했다:
+  screen-design/SKILL.md 4 · screen-design/evals 2 · visual-review/SKILL.md 2 ·
+  ui-feature.md 2 · ux-architect.md 5 · visual-qa.md 1.
+숫자도 함께 갱신했다 — 구 "≥32×32px 단일 하한"은 폐기되고 §1.4 등급별
+(cozy ≥44 / compact 34~38 / condensed 24~28, condensed 는 터치 조작 대상 아님)이 정본이다.
+`grep -rn "§0\.[0-9]" .claude/agents .claude/skills` 잔여 0.
+
+공용 코드 방해요소 조사 **완료**. 2026-08-14 검수에서 고친 4유형과 **같은 근본원인**의
+잠복 3건을 찾았고 안전한 2건은 수정했다:
+  (수정) `views/common/proto.py:32` MONO 상수가 작은따옴표를 품어 숙소예약·업무요청 3화면의
+         신청번호 style 이 통째로 소실되고 있었다 — 아차사고 6화면만 고치고 이 공급원을
+         빠뜨렸던 것.
+  (수정) `views/master/style.py` — `.ms-chip` 만 12px 로 올리고 형제 라벨
+         `.ms-ready`·`.cnt`·`.ctx`·`.lock`·`.ms-locked .s`·`.ms-empty .s`(9.8~10.4px)가
+         하한 미달로 남아 있었다.
+  (미수정·BACKLOG) 공용 버튼·입력 `min-height:2.15rem`=**30.1px** 가 §1.4 compact 34px 미달.
+         이미 5곳이 개별 우회 중이라 공용 기본값이 틀렸다는 신호지만, 버튼 높이는 인접
+         행·조건줄에 연쇄하므로 **3단계 visual-qa 측정과 함께** 처리하라.
+새 선택자 오매치·flex min-width 누락은 추가 발견 없음(기존 수정이 해당 지점에서 충분).
+
+`references/` 는 **깨진 참조가 아니다** — 이를 참조하는 것은 test-selection 뿐이고
+`test-selection/references/test-map.md` 는 실재한다. screen-design 등은 references/ 를
+인용하지 않으므로 디렉터리 부재가 결함이 아니다(구 인계 메모의 오기).
 ```
 
 ---
