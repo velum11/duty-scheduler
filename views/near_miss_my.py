@@ -1,19 +1,24 @@
-"""내 아차사고 — 컬럼형 테이블 선택(§0 MASTER_DETAIL) + SUBMITTED 자기수정.
+"""내 아차사고 — 컬럼형 테이블 선택(§2 READ_VIEW) + SUBMITTED 자기수정.
 
-    제목/설명 → [지표 스트립] → [상태·기간 조건] → [보고서 표(행 클릭 = 선택)]
+    제목/설명 → [상태·기간 조건] → [지표 스트립] → [보고서 표(행 클릭 = 선택)]
     → [선택 건 전체폭 상세: 진행 단계 · 본문 블록 · 사진 · 수정]
+
+§2 READ_VIEW 골격(제목 → 조회 조건 → 표)을 그대로 따르며, 지표 스트립은 조건과 표 사이에
+둔다 — 조회 화면(``views/near_miss_view``)과 **같은 위치·같은 라벨**이다. 스트립 자체의
+존폐는 §7.2-8(§4-1 vs 지표 스트립 9화면) 미결이라 여기서 단독 결정하지 않는다.
 
 2026-08-13 사용자 지시("컬럼 나눠줘 — 아차사고 조회 테이블 참조")로 한 줄 요약
 아코디언(구 §1-B 목록형)에서 **컬럼형 표 + 전체폭 상세**로 전환했다. 한 줄 요약은
-보고번호·작업명·발생일·원인·상태가 한 문장으로 이어져 세로 비교가 불가능했고, 등급
-(제안/확정)은 아예 목록에 없어 펼쳐야만 보였다. 표로 나누면 같은 정보가 열로 정렬되고
+보고번호·작업명·발생일·원인·상태가 한 문장으로 이어져 세로 비교가 불가능했고, 등급은
+아예 목록에 없어 펼쳐야만 보였다. 표로 나누면 같은 정보가 열로 정렬되고
 조회 화면(``views/near_miss_view``)과 같은 목록 어휘를 공유한다.
 
 - 목록 어휘는 조회 화면과 동일 계열: ``erp.select_grid`` + 같은 컬럼 서식(보고번호 모노 ·
   발생일 ISO · 상태/등급 색 규칙은 ``views.master.TOKENS`` 동일 값). 신고자·소속 열은
   본인 전용 화면이라 항상 같은 값이므로 싣지 않는다(모바일 폭 절약).
 - 행 클릭이 곧 선택이자 상세 열기(§0 금지 1 — 상세 여는 체크박스 없음, ``checkbox_marker=
-  False``). 행 피치는 USER·터치 variant 44px(``views/lodging_my`` 와 동일 계약).
+  False``). 행 피치는 compact 밴드 상단 38px(§1.4 34~38, 2026-08-18 확정 지시) —
+  종전 44px(cozy)는 §3.4 모바일 우선 목록이 아닌 이 화면의 근거가 아니었다.
 - 좌우 분할·"보고서를 선택하세요" 빈 패널 없음(§0 금지 1·2) — 미선택이면 상세 영역 자체를
   그리지 않는다(조회 화면과 동일).
 - 카드 금지(§0 금지 5). §2 팔레트 밖 색 금지(§0 금지 8).
@@ -29,7 +34,7 @@
 """
 from __future__ import annotations
 
-# DESIGN.md §0 MASTER_DETAIL — 목록(표 선택) + 전체폭 상세/워크플로.
+# DESIGN.md §2 READ_VIEW — 목록(표 선택) + 전체폭 상세/워크플로.
 SCREEN_ARCHETYPE = "READ_VIEW"
 
 from datetime import date, timedelta
@@ -50,9 +55,22 @@ _PAGE_ID = "near_miss_my"
 _SEL_KEY = "nm_my_selected_id"      # 선택(상세를 여는) 보고서 id(문자열).
 _KEY_FIELD = "_report_id"           # 표에 항상 hidden 으로 실리는 자연키(선택 반환용).
 
+# 상태 코드→라벨 — 6화면 단일 어휘. IN_REVIEW 는 **'평가중'**(§3.6: 평가 대기 → 평가중 →
+# 평가완료). 영문 코드값(IN_REVIEW)은 그대로 두고 한글 라벨만 통일한다.
 _STATUS_LABEL = {
-    "SUBMITTED": "제출됨", "IN_REVIEW": "검토중", "EVALUATED": "평가완료",
+    "SUBMITTED": "제출됨", "IN_REVIEW": "평가중", "EVALUATED": "평가완료",
     "REJECTED": "반려", "CLOSED": "종결",
+}
+# §3.3 상태의 **결과** — 배지 옆 한 줄로 "무엇이 막히고 무엇이 열리는지"를 적는다. 이 화면의
+# 독자는 보고자이므로 자기가 지금 할 수 있는 일을 기준으로 쓴다(수정 가능 여부). 잠김/종결
+# 표현은 조회 화면·평가 관리와 같은 어휘를 쓴다 — 같은 상태가 화면마다 다른 말을 하면 안 된다.
+# 수정 가능 상태는 _EDITABLE_STATUS(=SUBMITTED) 하나이며 사진 첨부/삭제도 같은 게이트다.
+_STATUS_EFFECT = {
+    "SUBMITTED": "평가 착수 전 — 수정·사진 첨부 가능",
+    "IN_REVIEW": "보고자 수정 잠김",
+    "EVALUATED": "개선조치 등록 단계 — 수정 잠김",
+    "REJECTED": "보고자 수정 잠김 — 반려 사유 확인",
+    "CLOSED": "종결 — 변경 불가",
 }
 # 발생원인 라벨 — 6화면 단일 어휘(2026-08-14 통일, 조회/평가/개선조치/분석/등록과 동일 dict).
 # 종전 이 화면만 쓰던 복합 라벨('부딪힘·충돌'·'미끄러짐·넘어짐'·'화상·고온')은 KOSHA 현행
@@ -84,10 +102,10 @@ _MONO = '"IBM Plex Mono", monospace'
 # 상태 색 — 상세 진행 단계 pill·상태 배지·표 상태 열 색 규칙 공용. 조회 화면
 # (near_miss_view)과 **같은 토큰**을 쓴다: 같은 상태가 화면마다 다른 색이면 안 된다.
 # 2026-08-14: DESIGN §2 상태 배지(= views/master/style.py::LIFECYCLE_BADGE, 평가·개선조치가
-# 쓰는 값)와 일치시킨다. 종전에는 제출됨=파랑·검토중=황토로 두 상태가 서로 바뀌어 있었다.
+# 쓰는 값)와 일치시킨다. 종전에는 제출됨=파랑·평가중=황토로 두 상태가 서로 바뀌어 있었다.
 _STATUS_COLOR = {
-    "SUBMITTED": TOKENS["gold"],       # #8a6212 (§2 제출됨)
-    "IN_REVIEW": TOKENS["info"],       # #2f4d99 (§2 검토중)
+    "SUBMITTED": TOKENS["gold"],       # #8a6212 (§1.3 대기·주의)
+    "IN_REVIEW": TOKENS["info"],       # #2f4d99 (§1.3 진행·정보 — 평가중)
     "EVALUATED": TOKENS["success"],    # #2f6b45
     "CLOSED": "#5c564d",               # §2 종결 배지 텍스트
     "REJECTED": TOKENS["danger"],      # #9c3232
@@ -102,38 +120,48 @@ _GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
 
 
 def _grade_mark(grade, empty: str) -> str:
-    """등급 마크 HTML(공용 kit primitive) — 빈 값은 중립 점 마커 + ``empty`` 라벨."""
-    g = str(grade or "").strip().upper()
+    """등급 마크 HTML(공용 kit primitive) — 빈 값은 중립 점 마커 + ``empty`` 라벨.
+
+    빈 값 판정은 ``_clean``(pd.isna 처리)을 쓴다 — ``str(x or "")`` 는 pandas 결측(NaN)이
+    truthy 라 'NAN' 을 등급으로 렌더한다(2026-08-18 실렌더에서 확인: 미평가 건의 상세
+    등급이 '· NAN' 으로 표시됐다)."""
+    g = _clean(grade).upper()
     if not g:
         return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
     return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
 
-# ── 표시 컬럼(조회 화면 9열에서 신고자·소속만 제외한 7열) ──
+# ── 표시 컬럼(조회 화면 8열에서 신고자·소속만 제외한 6열) ──
 # 본인 전용 화면이라 신고자는 항상 본인이고 소속도 사실상 한 값이라, 두 열은 스캔에
 # 기여하지 않으면서 좁은 폭만 잡아먹는다. 나머지 열의 구성·순서·서식은 조회와 같다.
+# 2026-08-18 제안등급 열 폐기(§7.2-1b) — 등록 폼에 입력 경로가 없어 신규 건은 항상 비었다.
+# 남은 등급이 하나뿐이라 '확정' 수식어도 불필요해져 헤더는 §3.6 축약형 '등급'을 쓴다.
 _DISPLAY_COLUMNS = [
-    # 상태를 발생일 뒤로 당김(2026-08-13, 코덱스 자문 합치): 본인 보고서 목록의 주 관심은
-    # "내 보고서가 어느 단계인가"라, 모바일 첫 화면(스와이프 전)에 상태가 보여야 한다.
-    # 조회 화면과는 이 한 칸만 순서가 다르다(컬럼 구성·서식은 동일).
-    "보고번호", "작업명", "발생일", "상태", "제안등급", "확정등급", "원인",
+    # 순서는 2026-08-18 사용자 확정 지시(아차사고 조회와 **같은 값**을 쓴다):
+    #   문서번호 · 발생일 · 원인 · 작업명 · 소속 · 신고자 · 등급 · 상태(제일 우측).
+    # 이 화면은 본인 전용이라 소속·신고자가 빠져 6열이 된다.
+    # 종전 주석("조회와 이 한 칸만 순서가 다르다 — 상태를 발생일 뒤로 당김, 2026-08-13
+    # 코덱스 자문")은 폐기한다: 이번 지시가 그보다 뒤이고 "같은 성격의 목록도 함께 맞춰라
+    # (같은 값을 쓰기로 되어 있다)"로 명시됐다. 상태는 조회와 같이 행 끝을 닫는다.
+    # 헤더 낱말은 '보고번호' 유지 — 낱말 교체(문서번호)는 §3.6 어휘 단일화로 한 번에 한다
+    # (등록 완료 배너의 '접수번호' 등 이 화면 밖 파급이 있어 이번 범위에서 제외).
+    "보고번호", "발생일", "원인", "작업명", "등급", "상태",
 ]
-# 컬럼 폭 — 원인을 뺀 나머지는 조회 화면 _COL_CONFIG 와 같은 값(작업명만 잔여 폭 흡수).
-# 고정폭 합 + 작업명 minWidth 가 컨테이너보다 넓어지면 AgGrid 가 **표 안에서** 가로
-# 스크롤한다(§5) — 페이지 가로 스크롤은 발생하지 않는다(390px 실측 0).
+# 컬럼 폭 — 전부 **실제 값의 최대 길이에서 역산한 고정폭**이며, 같은 성격 열은 조회 화면
+# (near_miss_view._COL_CONFIG)과 같은 값이다. 폭 산식·한글 계수 실측 방법·열별 근거(가정
+# 표시 포함)는 조회 화면 _COL_CONFIG 주석이 정본으로 적고 있다(여기서 복제하지 않는다).
+#   보고번호 108 · 발생일 92 · 원인 72 · 작업명 172 · 등급 40 · 상태 72 → 합계 556px.
+# flex(잔여 폭 흡수)는 쓰지 않는다 — 2026-08-18 확정 지시 "남으면 남긴다". 종전 작업명
+# flex:2 가 넓은 폭에서 잔여 폭을 전부 먹어 4~5자 값에 400px 이 배정되던 것이 근본 원인이다.
+# 고정폭 합(556)이 컨테이너보다 넓으면 AgGrid 가 **표 안에서** 가로 스크롤한다(§5) —
+# 페이지 가로 스크롤은 발생하지 않는다(390px 실측 0).
 _COL_CONFIG = {
-    "보고번호": {"width": 112, "cellStyle": {"fontFamily": "'IBM Plex Mono', monospace",
+    "보고번호": {"width": 108, "cellStyle": {"fontFamily": "'IBM Plex Mono', monospace",
                                           "letterSpacing": "0.01em"}},
-    "작업명": {"flex": 2, "minWidth": 150},
-    # 발생일 104→96: ISO 값 실측 74px + 셀 좌우 패딩 14px = 88px 라 8px 여유가 남는다. 8px 를
-    # 줄이면 좁은 폭에서 다음 열(상태)이 그만큼 먼저 들어온다 — 430px 실측에서 '제출됨'이
-    # 잘리지 않고 첫 화면에 들어온다(390px 은 여전히 가로 스크롤 1회 필요 — 보고 참조).
-    "발생일": {"width": 96},
-    "제안등급": {"width": 84},
-    "확정등급": {"width": 84},
-    "상태": {"width": 88},
-    # 2026-08-14: 원인 라벨 어휘를 6화면 단일 어휘로 통일해(최대 4자 '미끄러짐' = 53px @14.5px)
-    # 조회 화면과 **같은 92px**로 맞췄다(종전 140px — 이 화면만 쓰던 8자 복합 라벨 때문).
-    "원인": {"width": 92},
+    "발생일": {"width": 92},
+    "원인": {"width": 72},
+    "작업명": {"width": 172},
+    "등급": {"width": 44},
+    "상태": {"width": 72},
 }
 
 _MINE_CSS = """
@@ -186,7 +214,7 @@ def render(user: dict) -> None:
                            head="내 아차사고")
         return
 
-    # §0-4·분석 화면 표준 타일: 제목 바로 아래 내 보고 합계(현재 필터 결과 기준 파생).
+    # 지표 타일(조회 조건 뒤·표 앞 — 조회 화면과 같은 위치): 현재 필터 결과 기준 파생.
     erp.metric_strip(_my_metrics(reports))
     _render_list(user, reports)
 
@@ -235,9 +263,13 @@ def _my_metrics(reports: pd.DataFrame) -> list[tuple]:
     in_progress = c.get("SUBMITTED", 0) + c.get("IN_REVIEW", 0)
     evaluated = c.get("EVALUATED", 0)
     closed_rej = c.get("CLOSED", 0) + c.get("REJECTED", 0)
+    # 라벨은 조회 화면(_view_metrics)과 **같은 낱말**을 쓴다(§3.6) — 같은 계산(SUBMITTED+
+    # IN_REVIEW)을 '진행중'/'미평가'로 달리 부르던 불일치를 '미평가'로 통일했고, 첫 타일도
+    # 필터가 걸린 결과 건수라는 사실이 드러나게 '조회 건수'로 맞췄다('총 보고'는 필터가
+    # 걸린 상태에서 전체 보고 수로 오해된다).
     return [
-        ("총 보고", n, "건", "TOTAL", n > 0),
-        ("진행중", int(in_progress), "건", "IN PROGRESS", False),
+        ("조회 건수", n, "건", "TOTAL", n > 0),
+        ("미평가", int(in_progress), "건", "PENDING", False),
         ("평가완료", int(evaluated), "건", "DONE", False),
         ("종결·반려", int(closed_rej), "건", "CLOSED", False),
     ]
@@ -272,22 +304,23 @@ def _clean(value) -> str:
 
 # ---------- 컬럼형 표 + 전체폭 상세 ----------
 def _to_display(reports: pd.DataFrame) -> pd.DataFrame:
-    """표시 7열 프레임(+hidden 자연키). 서식은 조회 화면 ``_to_display`` 와 같은 규칙:
+    """표시 6열 프레임(+hidden 자연키). 서식은 조회 화면 ``_to_display`` 와 같은 규칙:
     보고번호/작업명 원문, 발생일 ISO 문자열, 등급은 코드 문자 그대로(빈 값 '-'),
     상태·원인은 한글 라벨. 여기서 라벨로 바꾼 문자열이 색 규칙의 키가 된다."""
     rows = []
     for _, r in reports.iterrows():
         status = _clean(r.get("status"))
         cause = _clean(r.get("cause_code"))
+        # 실제 열 순서는 아래 columns= 가 고정하지만, 읽는 사람이 헷갈리지 않게
+        # _DISPLAY_COLUMNS 와 같은 순서로 싣는다.
         rows.append({
             _KEY_FIELD: str(r.get("id")),
             "보고번호": _clean(r.get("report_no")) or "(번호 미상)",
-            "작업명": _clean(r.get("work_name")) or "(제목 없음)",
             "발생일": _clean(r.get("incident_date")) or "-",
-            "제안등급": _clean(r.get("proposed_grade")) or "-",
-            "확정등급": _clean(r.get("confirmed_grade")) or "-",
-            "상태": _STATUS_LABEL.get(status, status) or "-",
             "원인": _CAUSE_LABEL.get(cause, cause) or "-",
+            "작업명": _clean(r.get("work_name")) or "(제목 없음)",
+            "등급": _clean(r.get("confirmed_grade")) or "-",
+            "상태": _STATUS_LABEL.get(status, status) or "-",
         })
     return pd.DataFrame(rows, columns=[_KEY_FIELD] + _DISPLAY_COLUMNS)
 
@@ -315,11 +348,14 @@ def _render_list(user: dict, reports: pd.DataFrame) -> None:
         columns=_DISPLAY_COLUMNS, selected_key=selected,
         col_config=_COL_CONFIG,
         checkbox_marker=False,      # §0-1: 행 클릭이 곧 선택(상세 열기용 체크박스 금지)
-        row_height=44,              # USER·터치 variant(§4 44px) — lodging_my 와 동일 계약
+        # 행 피치 44→38(2026-08-18): 목록 표는 compact(§1.4 34~38px)라는 확정 지시.
+        # §3.4 모바일 우선 3화면(대시보드·내 근무표·아차사고 등록)에 이 화면은 없고
+        # READ_VIEW 밀도도 compact 라 cozy 44 는 근거가 없었다. 밴드 안에서 가장 큰 값
+        # (38)을 써 행 클릭(=상세 열기) 히트영역을 최대한 남긴다. 조회 화면은 34.
+        row_height=38,
         scroll_affordance=True,     # 모바일 폭에서 "오른쪽에 열이 더 있음" 신호(상시 스크롤바)
         color_rules={
-            "제안등급": _GRADE_COLOR,
-            "확정등급": _GRADE_COLOR,
+            "등급": _GRADE_COLOR,
             "상태": {label: _STATUS_COLOR[code] for code, label in _STATUS_LABEL.items()},
         },
     )
@@ -340,18 +376,26 @@ def _render_list(user: dict, reports: pd.DataFrame) -> None:
 
 
 def _detail_anchor_html(report: dict, status: str) -> str:
-    """상세 앵커 한 줄 — 보고번호(모노 16/600) + 상태 배지. 표 아래 상세가 **어느 건**인지
-    고정한다(수정 안전: 잘못된 건을 고치지 않게). 배지는 공용 kit primitive 재사용."""
+    """상세 앵커 한 줄 — 보고번호(모노 16/600) + 상태 배지 + 상태의 결과(§3.3). 표 아래
+    상세가 **어느 건**인지 고정한다(수정 안전: 잘못된 건을 고치지 않게). 배지는 공용 kit
+    primitive 재사용.
+
+    §3.3 — 배지는 상태 이름만 말한다. 보고자가 "지금 내가 고칠 수 있나"를 알려면 그 상태가
+    무엇을 막고 여는지를 배지 옆에 적어야 한다(하단 '제출됨 상태에서만 수정할 수 있습니다'
+    캡션은 수정 진입부까지 내려가야 보이므로 §4-3 취지에 못 미쳤다)."""
     report_no = _clean(report.get("report_no")) or "(번호 미상)"
     badge = erp.status_badge_html(
         _STATUS_LABEL.get(status, status or "-"),
         _STATUS_COLOR.get(status, TOKENS["ink-3"]),
     )
+    effect = _STATUS_EFFECT.get(status, "")
+    effect_html = (f"<span style='font-size:12px;color:{_MUT};'>{escape(effect)}</span>"
+                   if effect else "")
     return (
         "<div style='display:flex;flex-wrap:wrap;align-items:center;gap:10px;"
         "margin:10px 0 0;'>"
         f"<span style='font-family:{_MONO};font-size:16px;font-weight:600;"
-        f"color:{_INK};'>{escape(report_no)}</span>{badge}</div>"
+        f"color:{_INK};'>{escape(report_no)}</span>{badge}{effect_html}</div>"
     )
 
 
@@ -382,10 +426,10 @@ def _render_detail(user: dict, report: dict, status: str) -> None:
 
 
 def _steps_html(status: str) -> str:
-    """진행 단계 pill(제출→검토중→평가완료→종결). 현행 상태값 기준으로 도달 단계를 채운다.
+    """진행 단계 pill(제출→평가중→평가완료→종결). 현행 상태값 기준으로 도달 단계를 채운다.
 
     반려(REJECTED)는 분기 표현: 제출만 도달로 두고 마지막에 '반려' pill(danger)을 덧붙인다."""
-    order = [("SUBMITTED", "제출"), ("IN_REVIEW", "검토중"),
+    order = [("SUBMITTED", "제출"), ("IN_REVIEW", "평가중"),
              ("EVALUATED", "평가완료"), ("CLOSED", "종결")]
     codes = [c for c, _ in order]
     rejected = (status == "REJECTED")
@@ -417,18 +461,18 @@ def _step_pill(dot: str, txt: str, bg: str, bd: str, label: str) -> str:
 def _detail_blocks_html(report: dict) -> str:
     """펼친 영역 본문 블록(§1-B) — 좌측 2px 보더 + 모노 오버라인 + 라벨 + 본문 14.5px/1.7.
 
-    상단에 제안등급·확정등급 메타를 한 줄로 덧붙인다(행 요약엔 없는 등급 컨텍스트)."""
+    상단에 평가 등급 메타를 덧붙인다(행 요약엔 없는 등급 컨텍스트)."""
     # 등급 메타 — 조회·평가·개선조치 상세와 **같은 메타 셀**(10.5px 모노 오버라인 라벨 위 /
-    # 13.5px 값 아래) + 공용 등급 마크(셰브런+색 텍스트)로 통일한다(2026-08-14). 종전에는 이
-    # 화면만 '제안등급 D' 한 줄 12.5px 평문이라 같은 데이터가 화면마다 다른 형식으로 보였다.
+    # 13.5px 값 아래) + 공용 등급 마크(셰브런+색 텍스트)로 통일한다(2026-08-14).
+    # 2026-08-18: 제안등급 셀 폐기(§7.2-1b) — 항상 비는 값이었다. 라벨은 §3.6 정본
+    # '평가 등급'(표 헤더만 폭 때문에 '등급'으로 줄인다). 라벨이 한글이라 모노·자간은 걸지
+    # 않는다 — 한글 글리프가 없어 글자별 폴백 + letter-spacing 이중 적용으로 벌어진다.
     meta_cells = "".join(
         f"<div style='display:flex;flex-direction:column;gap:3px;min-width:0;'>"
-        f"<span style='font-size:10.5px;letter-spacing:0.08em;color:{_MUT};"
-        f"font-family:{_MONO};'>{escape(label)}</span>"
+        f"<span style='font-size:10.5px;color:{_MUT};'>{escape(label)}</span>"
         f"<span style='font-size:13.5px;color:{_INK};line-height:1.35;'>{value}</span></div>"
         for label, value in (
-            ("제안등급", _grade_mark(report.get("proposed_grade"), empty="없음")),
-            ("확정등급", _grade_mark(report.get("confirmed_grade"), empty="미정")),
+            ("평가 등급", _grade_mark(report.get("confirmed_grade"), empty="미정")),
         )
     )
     meta = (
@@ -501,9 +545,10 @@ def _render_my_photos(report: dict, status: str) -> None:
     # 이전 rerun 에서 stash 한 첨부/삭제 결과 문구를 표시(성공 썸네일은 재조회로 자동 반영).
     _flush_photo_msg(rid)
 
+    # 한글('사진')이라 모노·자간 없음(조회 화면 _photo_overline 과 같은 처리).
     st.markdown(
-        f"<div style='font-family:{_MONO};font-size:11px;letter-spacing:0.12em;"
-        f"color:{_INK2};margin:16px 0 8px;'>사진 · {len(paths)}</div>",
+        f"<div style='font-size:11px;color:{_INK2};margin:16px 0 8px;'>"
+        f"사진 · {len(paths)}</div>",
         unsafe_allow_html=True,
     )
     if paths:
@@ -661,7 +706,13 @@ def _render_edit_form(user: dict, report: dict) -> None:
 
     payload = {
         "work_name": work_name,
-        # 제안 등급은 폼에서 제거했으나 기존 저장값을 그대로 실어 보존한다(수정으로 미변경).
+        # 제안등급(§7.2-1b 폐기): 이 화면에는 **입력도 표시도 없다**. 그런데도 키를 남기는
+        # 이유는 파사드가 본문 수정에서 proposed_grade 를 항상 함께 쓰기 때문이다 — sample 은
+        # `allow_null={"proposed_grade"}`(db.py), supabase 는 `_near_miss_editable_payload`
+        # 가 None 을 그대로 UPDATE 에 싣는다. 키를 빼면 자기 정정을 할 때마다 기존 저장값이
+        # NULL 로 지워진다. 화면이 데이터를 지우는 것은 표시 폐기의 범위가 아니므로(컬럼
+        # 처분은 data-contract 소관 — §7.2-1b/1e migration 과 함께 판단) 읽은 값을 그대로
+        # 되돌려 보존만 한다. 컬럼이 제거되면 이 줄도 함께 사라진다.
         "proposed_grade": _clean(report.get("proposed_grade")) or None,
         "cause_code": cause_code,
         "cause_detail": cause_detail,

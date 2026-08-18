@@ -1,8 +1,12 @@
 """views/near_miss_view.py 순수 함수 회귀 테스트(구조적 UI 이관 전 보존 목록).
 
-대상: `_scope_for`(fail-closed 접근 범위) · `_to_display`(9열 표시 변환) ·
+대상: `_scope_for`(fail-closed 접근 범위) · `_to_display`(8열 표시 변환) ·
 `_has_filters` · `_facade_filters`. 그리드 엔진/필터 레이아웃을 구조적으로
 바꾸기 전, 이 네 함수의 현재 계약을 고정한다(비회귀 그물).
+
+2026-08-18 DESIGN §7.2-1b/§3.6 반영: 제안등급 열 폐기(9열→8열) · 확정등급 헤더는 축약형
+'등급' · IN_REVIEW 라벨 '검토중'→'평가중' · §3.3 상태의 결과 표기. 되돌림 방지로 폐기된
+표시의 **부재**를 명시 검증한다.
 
 로컬 sample 모드에서만 동작하며 Supabase 에 접속하지 않는다. `db.get_departments`/
 `db.get_users` 는 통제된 DataFrame 으로 monkeypatch 한다(scripts/test_login_auth.py
@@ -13,6 +17,7 @@
 """
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 from pathlib import Path
@@ -105,7 +110,7 @@ def test_scope_for() -> None:
 
 
 def test_to_display() -> None:
-    print("_to_display (9열 표시 변환)")
+    print("_to_display (8열 표시 변환)")
     orig_get_users = db.get_users
     orig_get_departments = db.get_departments
     db.get_users = lambda *a, **k: _USERS_DF  # type: ignore[assignment]
@@ -119,7 +124,7 @@ def test_to_display() -> None:
                 "incident_date": "2026-07-01", "proposed_grade": "B",
                 "confirmed_grade": "A", "status": "EVALUATED", "cause_code": "SLIP",
             },
-            # 2) 빈 값 전부 → "-" 폴백(신고자/소속/발생일/제안등급/확정등급/원인),
+            # 2) 빈 값 전부 → "-" 폴백(신고자/소속/발생일/등급/원인),
             #    보고번호/작업명은 폴백 없이 그대로(빈 문자열), 상태는 값이
             #    있으므로("SUBMITTED") "-" 폴백 대상 아님.
             {
@@ -148,13 +153,47 @@ def test_to_display() -> None:
 
         out = nmv._to_display(raw)
 
+        # 2026-08-18 사용자 확정 순서: 문서번호 · 발생일 · 원인 · 작업명 · 소속 · 신고자 ·
+        # 등급 · **상태(제일 우측)**. 헤더 낱말은 '보고번호' 유지(어휘 단일화는 §3.6 별건).
         check(
-            "출력 열 집합·순서 고정",
+            "출력 열 집합·순서 고정(확정 지시 순서 — 상태가 제일 우측)",
             list(out.columns) == [
-                "보고번호", "작업명", "신고자", "소속", "발생일",
-                "제안등급", "확정등급", "상태", "원인",
+                "보고번호", "발생일", "원인", "작업명", "소속", "신고자", "등급", "상태",
             ],
         )
+        check("상태는 마지막 열", list(out.columns)[-1] == "상태")
+        check("원인은 발생일 바로 뒤(마지막 열 아님)",
+              list(out.columns).index("원인") == list(out.columns).index("발생일") + 1)
+        check("표시에 '제안등급' 열 없음(§7.2-1b — 되돌림 방지)",
+              "제안등급" not in out.columns)
+        check("등급 열은 confirmed_grade 만 싣는다(제안 값이 새지 않음)",
+              out.iloc[0]["등급"] == "A")
+        check("표시 열 목록도 8열(_DISPLAY_COLUMNS)", nmv._DISPLAY_COLUMNS == list(out.columns))
+        check("모든 표시 열에 폭 지정(_COL_CONFIG)",
+              all(c in nmv._COL_CONFIG for c in nmv._DISPLAY_COLUMNS))
+        check("폐기 열의 폭 설정도 제거(빈 자리 없음)",
+              "제안등급" not in nmv._COL_CONFIG and "확정등급" not in nmv._COL_CONFIG)
+        # ── 폭 계약(2026-08-18 확정 지시) — 내용 역산 고정폭, flex 금지 ──
+        # "남는 가로 폭을 flex 로 아무 열에나 흡수시키지 마라. 남으면 남긴다."
+        check("잔여 폭 흡수(flex) 열 없음 — 전부 고정폭",
+              not any("flex" in cfg for cfg in nmv._COL_CONFIG.values()))
+        check("모든 열이 명시 width 보유",
+              all("width" in cfg for cfg in nmv._COL_CONFIG.values()))
+        # 값/헤더 실폭(2026-08-18 실렌더 계측, 셀 14.5px / 헤더 12.5px·600)에 셀 크롬 16px
+        # (패딩 7+7 **및 좌우 1px 보더** — 실측)을 더해 4의 배수로 올린 값.
+        check("열 폭 = 값 최대 길이 역산값",
+              {c: cfg["width"] for c, cfg in nmv._COL_CONFIG.items()} == {
+                  "보고번호": 108,   # 89.3(YYYYMM-NNNN 11자 모노) + 16
+                  "발생일": 92,     # 74.2(ISO 10자) + 16
+                  "원인": 72,       # 53.4('미끄러짐' 4자) + 16
+                  "작업명": 172,    # 153.6('3라인 컨베이어 벨트 점검' 14자·가정) + 16
+                  "소속": 136,      # 117.9('PET생산부(원료실)') + 16
+                  "신고자": 72,     # 53.4(성명 4자·가정) + 16
+                  "등급": 44,       # 값 1자라 헤더('등급' 23) + 16 이 폭을 정한다
+                  "상태": 72,       # 53.4('평가완료' 4자) + 16
+              })
+        check("표 폭 합계 768(1440 뷰포트 표 가용폭 1167 → 우측 399px 는 남긴다)",
+              sum(cfg["width"] for cfg in nmv._COL_CONFIG.values()) == 768)
         check("4행 유지(입력 행수 보존)", len(out) == 4)
 
         row1 = out.iloc[0]
@@ -163,8 +202,7 @@ def test_to_display() -> None:
         check("정상행 신고자: 사번→이름 매핑", row1["신고자"] == "김철수")
         check("정상행 소속: 코드→부서명 매핑", row1["소속"] == "PET1부")
         check("정상행 발생일", row1["발생일"] == "2026-07-01")
-        check("정상행 제안등급", row1["제안등급"] == "B")
-        check("정상행 확정등급", row1["확정등급"] == "A")
+        check("정상행 등급(확정 등급 값)", row1["등급"] == "A")
         check("정상행 상태: EVALUATED→평가완료", row1["상태"] == "평가완료")
         check("정상행 원인: SLIP→미끄러짐", row1["원인"] == "미끄러짐")
 
@@ -174,8 +212,7 @@ def test_to_display() -> None:
         check("빈값행 신고자 '-' 폴백", row2["신고자"] == "-")
         check("빈값행 소속 '-' 폴백", row2["소속"] == "-")
         check("빈값행 발생일 '-' 폴백", row2["발생일"] == "-")
-        check("빈값행 제안등급 '-' 폴백", row2["제안등급"] == "-")
-        check("빈값행 확정등급 '-' 폴백", row2["확정등급"] == "-")
+        check("빈값행 등급 '-' 폴백", row2["등급"] == "-")
         # 2026-08-14 6화면 상태 어휘 통일: SUBMITTED 표기는 '제출'이 아니라 '제출됨'
         # (DESIGN §2 상태 배지 표기 = 평가·개선조치·내 아차사고와 동일).
         check("빈값행 상태(SUBMITTED→제출됨, '-' 아님)", row2["상태"] == "제출됨")
@@ -191,8 +228,7 @@ def test_to_display() -> None:
         check("None 신고자 → 정리 후 '-' 폴백", row4["신고자"] == "-")
         check("None 소속 → 정리 후 '-' 폴백", row4["소속"] == "-")
         check("None 발생일 → 정리 후 '-' 폴백", row4["발생일"] == "-")
-        check("None 제안등급 → 정리 후 '-' 폴백", row4["제안등급"] == "-")
-        check("None 확정등급 → 정리 후 '-' 폴백", row4["확정등급"] == "-")
+        check("None 등급 → 정리 후 '-' 폴백", row4["등급"] == "-")
         check("None 원인 → 정리 후 '-' 폴백", row4["원인"] == "-")
         check("None 아닌 상태(CLOSED→종결) 정상 매핑", row4["상태"] == "종결")
 
@@ -210,6 +246,64 @@ def test_to_display() -> None:
     finally:
         db.get_users = orig_get_users  # type: ignore[assignment]
         db.get_departments = orig_get_departments  # type: ignore[assignment]
+
+
+def test_vocabulary_and_status_effect() -> None:
+    """§3.6 어휘 통일 · §7.2-1b 제안등급 폐기 · §3.3 상태의 결과 표기 · §2 영역 순서."""
+    print("어휘(§3.6) · 제안등급 폐기(§7.2-1b) · 상태의 결과(§3.3) · 골격(§2)")
+    # ── §3.6: IN_REVIEW 한글 라벨은 '평가중'(코드값 IN_REVIEW 는 불변) ──
+    check("IN_REVIEW 라벨 = '평가중'", nmv._STATUS_LABEL["IN_REVIEW"] == "평가중")
+    check("'검토중' 라벨 폐기", "검토중" not in set(nmv._STATUS_LABEL.values()))
+    check("영문 코드값 불변(IN_REVIEW 키 유지)", "IN_REVIEW" in nmv._STATUS_LABEL)
+    check("상태 5종 전부 색 보유", set(nmv._STATUS_COLOR) == set(nmv._STATUS_LABEL))
+
+    # ── §3.3: 상태마다 '무엇이 막히고 열리는지' 한 줄이 있고, 상세 배지 옆에 렌더된다 ──
+    check("모든 상태에 결과 표기 존재(_STATUS_EFFECT)",
+          set(nmv._STATUS_EFFECT) == set(nmv._STATUS_LABEL)
+          and all(str(v).strip() for v in nmv._STATUS_EFFECT.values()))
+    detail_src = inspect.getsource(nmv._render_result_detail)
+    check("상세 상태 배지 옆에 결과 표기 렌더(§3.3)",
+          "_STATUS_EFFECT" in detail_src and "status_badge" in detail_src)
+    check("PDF 출력에도 같은 결과 표기 전달", "status_effect=" in detail_src)
+
+    # ── §7.2-1b: 제안등급은 표시·변환 어디에도 남지 않는다 ──
+    check("표시 변환에 proposed_grade 미참조",
+          "proposed_grade" not in inspect.getsource(nmv._to_display))
+    check("상세 렌더에 proposed_grade 미참조", "proposed_grade" not in detail_src)
+    check("상세 메타 라벨은 정본 '평가 등급'",
+          '"평가 등급"' in detail_src and '"확정등급"' not in detail_src)
+
+    # 한글 라벨에 모노·자간 금지 — IBM Plex Mono 에 한글 글리프가 없어 글자마다 폴백으로
+    # 떨어지고 letter-spacing 이 이중으로 적용돼 '신 고 자'처럼 벌어진다(2026-08-18 실렌더).
+    meta_html = nmv._meta_cell("신고자", "1001")
+    check("한글 메타 라벨에 모노 미적용", "monospace" not in meta_html)
+    check("한글 메타 라벨에 letter-spacing 미적용", "letter-spacing" not in meta_html)
+    check("라벨 크기·색은 불변(10.5px / #6b665d)",
+          "font-size:10.5px" in meta_html and nmv._META_FAINT in meta_html)
+    check("사진 오버라인도 모노·자간 제거(한글 '사진')",
+          "monospace" not in inspect.getsource(nmv._photo_overline).split('"""')[-1]
+          and "letter-spacing" not in inspect.getsource(nmv._photo_overline).split('"""')[-1])
+    check("영숫자 전용 표기(보고번호 셀)는 모노 유지",
+          "Mono" in str(nmv._COL_CONFIG["보고번호"]["cellStyle"]))
+
+    # ── §3.6: 조회 조건 라벨도 정본(폭 140 — 축약 불필요) ──
+    cond_src = inspect.getsource(nmv._collect_conditions)
+    check("등급 필터 라벨 = '평가 등급'", 'label="평가 등급"' in cond_src)
+    check("'확정등급' 라벨 폐기", "확정등급" not in cond_src)
+    ALL = workspace.ALL
+    check("필터 key·파사드 필드(코드값)는 불변",
+          'key="grade"' in cond_src
+          and nmv._facade_filters({"dept": ALL, "grade": "A", "status": ALL, "cause": ALL})
+          == {"confirmed_grade": "A"})
+
+    # ── §2 READ_VIEW 골격: 제목 → 조회 조건 → (지표) → 표 ──
+    render_src = inspect.getsource(nmv.render)
+    check("영역 순서: screen_frame → condition_panel → metric_strip → select_grid",
+          render_src.index("erp.screen_frame")
+          < render_src.index("_collect_conditions")
+          < render_src.index("erp.metric_strip")
+          < render_src.index("erp.select_grid"))
+    check("제목 직후 지표 슬롯(deferred container) 제거", "metric_slot" not in render_src)
 
 
 def test_has_filters() -> None:
@@ -285,6 +379,7 @@ def main() -> int:
     for test in (
         test_scope_for,
         test_to_display,
+        test_vocabulary_and_status_effect,
         test_has_filters,
         test_facade_filters,
     ):

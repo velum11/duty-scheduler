@@ -2533,7 +2533,7 @@ def request_near_miss_revision(report_id, reason: str, *, current_user) -> dict 
     - 요청자(revision_requested_by)·요청시각은 payload/위젯이 아니라 인증된 ``current_user``
       에서 **서버측 확정**한다(위조 무시). 인가는 평가 능력(auth.can_evaluate_near_miss)
       이 필수다(화면 게이트를 계약으로 승격).
-    - 보완요청은 검토중(IN_REVIEW)에서만 가능하다. 재개(EVALUATED→IN_REVIEW)와는 다른 전이다.
+    - 보완요청은 평가중(IN_REVIEW)에서만 가능하다. 재개(EVALUATED→IN_REVIEW)와는 다른 전이다.
     - supabase 는 007 보완요청 컬럼이 준비된 경우에만 기록한다. 미적용/probe 오류면
       fail-closed 로 차단한다(사유를 저장할 수 없는 상태에서 반송만 만들지 않음).
     """
@@ -2547,7 +2547,7 @@ def request_near_miss_revision(report_id, reason: str, *, current_user) -> dict 
     cur_status = str(current.get("status") or "").strip()
     if cur_status != "IN_REVIEW":
         raise ValueError(
-            f"보완요청(반송)은 검토중(IN_REVIEW) 상태에서만 가능합니다: 현재 {cur_status}"
+            f"보완요청(반송)은 평가중(IN_REVIEW) 상태에서만 가능합니다: 현재 {cur_status}"
         )
     from modules import auth  # 지연 import(순환 회피)
     if not auth.can_evaluate_near_miss(actor):

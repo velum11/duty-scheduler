@@ -4,13 +4,16 @@
 표시 라벨/색은 아차사고 조회(``views/near_miss_view``)와 같은 계열이어야 하고, 선택은
 자연키(보고서 id)로 오가며 상세 진입 경로(행 클릭 → ``_render_detail``)가 보존돼야 한다.
 
-  1) 컬럼 구성 — 조회 9열에서 신고자·소속만 뺀 7열, 순서 동일.
+  1) 컬럼 구성 — 조회 8열에서 신고자·소속만 뺀 6열, 순서 동일(2026-08-18 확정 순서:
+     번호 → 발생일 → 원인 → 작업명 → 등급 → 상태, 상태가 제일 우측).
   2) 표시 서식 — 보고번호 모노, 발생일 ISO 원문, 빈 등급 '-', 상태·원인 한글 라벨.
   3) 색 규칙 — 상태·등급 색이 조회 화면과 **같은 값**(같은 상태가 화면마다 다른 색 금지).
   4) 선택 계약 — hidden 자연키(_report_id), 상세 여는 체크박스 없음(§0-1),
-     USER·터치 행 피치 44px, 자연키 유일·비표시.
+     compact 행 피치 38px(§1.4 34~38), 자연키 유일·비표시.
   5) 상세 진입 보존 — 선택된 자연키의 건이 _render_detail 로 전달되고, 앵커에 보고번호가
      노출된다. 목록에서 사라진 stale 선택은 조용히 해제된다.
+  7) 2026-08-18 어휘·표시 정합 — 제안등급 폐기(§7.2-1b) · '검토중'→'평가중'(§3.6) ·
+     상태의 결과 표기(§3.3) · 조회 화면과 같은 지표 라벨.
 
 실행: PYTHONUTF8=1 C:\\dev\\workops\\.venv\\Scripts\\python.exe scripts/test_near_miss_my_table.py
 """
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -61,42 +65,48 @@ REPORTS = pd.DataFrame([
 ])
 
 
-# ===== 1) 컬럼 구성 — 조회 9열 − (신고자·소속) =====
+# ===== 1) 컬럼 구성 — 조회 8열 − (신고자·소속) =====
 print("컬럼 구성(조회 참조)")
-check("표시 7열", len(nmy._DISPLAY_COLUMNS) == 7)
+check("표시 6열", len(nmy._DISPLAY_COLUMNS) == 6)
+check("제안등급 열 폐기(§7.2-1b — 되돌림 방지)",
+      "제안등급" not in nmy._DISPLAY_COLUMNS and "제안등급" not in nmy._COL_CONFIG)
+check("등급 열은 §3.6 축약형 '등급' 하나만",
+      [c for c in nmy._DISPLAY_COLUMNS if "등급" in c] == ["등급"])
 check("신고자 열 없음(본인 전용 화면)", "신고자" not in nmy._DISPLAY_COLUMNS)
 check("소속 열 없음(본인 전용 화면)", "소속" not in nmy._DISPLAY_COLUMNS)
-# 상태는 발생일 뒤로 당긴다(2026-08-13 확정, 코덱스 자문 합치) — 본인 보고서 목록의
-# 주 관심은 진행 단계라 모바일 첫 화면(스와이프 전)에 상태가 보여야 한다.
-# 그 외의 상대 순서는 조회 화면과 동일해야 한다.
-check("상태가 발생일 바로 뒤(모바일 첫 화면 노출)",
-      nmy._DISPLAY_COLUMNS.index("상태") == nmy._DISPLAY_COLUMNS.index("발생일") + 1)
-check("상태 제외 시 조회 컬럼 상대 순서 보존(신고자·소속 제외)",
-      [c for c in nmy._DISPLAY_COLUMNS if c != "상태"]
-      == [c for c in nmv._DISPLAY_COLUMNS if c not in ("신고자", "소속", "상태")])
+# 2026-08-18 사용자 확정 순서(조회와 **같은 값**): 문서번호 · 발생일 · 원인 · 작업명 ·
+# 소속 · 신고자 · 등급 · 상태(제일 우측). 이 화면은 소속·신고자가 빠져 6열이 된다.
+# 종전의 "상태를 발생일 뒤로 당긴다(2026-08-13)"는 이번 지시가 뒤이므로 폐기됐다.
+check("확정 순서 그대로(조회에서 소속·신고자만 제거)",
+      nmy._DISPLAY_COLUMNS == [c for c in nmv._DISPLAY_COLUMNS
+                               if c not in ("소속", "신고자")])
+check("상태가 제일 우측", nmy._DISPLAY_COLUMNS[-1] == "상태")
 check("모든 표시 열이 조회 화면 열의 부분집합",
       set(nmy._DISPLAY_COLUMNS) <= set(nmv._DISPLAY_COLUMNS))
 check("모든 표시 열에 폭 지정(_COL_CONFIG)",
       all(c in nmy._COL_CONFIG for c in nmy._DISPLAY_COLUMNS))
 check("보고번호는 모노(조회와 동일 서식)",
       "Mono" in str(nmy._COL_CONFIG["보고번호"].get("cellStyle", {})))
-check("작업명만 잔여 폭 흡수(flex)",
-      [c for c, cfg in nmy._COL_CONFIG.items() if "flex" in cfg] == ["작업명"])
+# "남는 가로 폭을 flex 로 아무 열에나 흡수시키지 마라. 남으면 남긴다."(2026-08-18 확정)
+check("잔여 폭 흡수(flex) 열 없음 — 전부 고정폭",
+      not any("flex" in cfg for cfg in nmy._COL_CONFIG.values()))
 
 
 # ===== 2) 표시 서식(_to_display) =====
 print("표시 서식")
 disp = nmy._to_display(REPORTS)
 check("행 수 보존", len(disp) == 3)
-check("컬럼 = 자연키 + 표시 7열",
+check("컬럼 = 자연키 + 표시 6열",
       list(disp.columns) == [nmy._KEY_FIELD] + nmy._DISPLAY_COLUMNS)
 r0 = disp.iloc[0].to_dict()
 check("보고번호 원문", r0["보고번호"] == "202608-0004")
 check("발생일 ISO 원문(YYYY-MM-DD)", r0["발생일"] == "2026-08-11")
 check("상태 한글 라벨", r0["상태"] == nmy._STATUS_LABEL["SUBMITTED"])
 check("원인 한글 라벨", r0["원인"] == nmy._CAUSE_LABEL["BURN"])
-check("빈 확정등급은 '-'(코드 노출·빈칸 금지)", r0["확정등급"] == "-")
-check("빈 제안등급도 '-'", disp.iloc[2]["제안등급"] == "-")
+check("빈 등급은 '-'(코드 노출·빈칸 금지)", r0["등급"] == "-")
+check("등급 열 값은 confirmed_grade(제안 값이 새지 않음)", disp.iloc[1]["등급"] == "B")
+check("표시 변환에 proposed_grade 미참조",
+      "proposed_grade" not in inspect.getsource(nmy._to_display))
 check("작업명 빈값 폴백", disp.iloc[2]["작업명"] == "(제목 없음)")
 check("자연키는 보고서 id 문자열", list(disp[nmy._KEY_FIELD]) == ["NM-1", "NM-2", "NM-3"])
 check("원시 상태코드 미노출", "EVALUATED" not in set(disp["상태"]))
@@ -117,19 +127,22 @@ print("선택 계약")
 list_src = inspect.getsource(nmy._render_list)
 check("목록은 공용 select_grid 어휘 사용", "erp.select_grid(" in list_src)
 check("상세 여는 체크박스 없음(§0-1)", "checkbox_marker=False" in list_src)
-check("USER·터치 행 피치 44px", "row_height=44" in list_src)
+# 목록 표는 compact(§1.4 34~38px, 2026-08-18 확정 지시). 종전 cozy 44px 폐기 —
+# §3.4 모바일 우선 3화면에 이 화면은 없고 READ_VIEW 밀도도 compact 다.
+check("행 피치 = compact 밴드 상단 38px", "row_height=38" in list_src)
+check("cozy 44px 되돌림 방지", "row_height=44" not in list_src)
 check("자연키는 표시 컬럼이 아님", nmy._KEY_FIELD not in nmy._DISPLAY_COLUMNS)
 
 view, options, _css = kit._build_select_gridoptions(
     disp, key_field=nmy._KEY_FIELD, columns=nmy._DISPLAY_COLUMNS,
     selected_key="NM-2", color_rules={
-        "제안등급": nmy._GRADE_COLOR, "확정등급": nmy._GRADE_COLOR,
+        "등급": nmy._GRADE_COLOR,
         "상태": {lab: nmy._STATUS_COLOR[c] for c, lab in nmy._STATUS_LABEL.items()},
     },
     col_config=nmy._COL_CONFIG, row_rules=None, hidden_fields=None,
-    row_height=44, checkbox_marker=False,
+    row_height=38, checkbox_marker=False,
 )
-check("grid 옵션 rowHeight=44", options["rowHeight"] == 44)
+check("grid 옵션 rowHeight=38(compact 34~38)", options["rowHeight"] == 38)
 check("단일 선택(rowSelection=single)", options["rowSelection"] == "single")
 check("행 클릭이 선택(suppressRowClickSelection=False)",
       options["suppressRowClickSelection"] is False)
@@ -142,11 +155,16 @@ check("표시 컬럼 순서 그대로 colDef",
       == nmy._DISPLAY_COLUMNS)
 check("선택 자연키 pre-select(위치 비의존, NM-2 → index 1)",
       options.get("initialState", {}).get("rowSelection") == ["1"])
-# 좁은 폭 계약: 고정폭 합 + 작업명 minWidth 가 390px 를 넘으므로 AgGrid 가 **표 안에서**
-# 가로 스크롤한다(§5 "표는 overflow-x:auto"). 페이지 가로 스크롤은 실측(Playwright)이 담당.
-min_total = sum(cfg.get("width") or cfg.get("minWidth", 0)
-                for cfg in nmy._COL_CONFIG.values())
+# 좁은 폭 계약: 고정폭 합이 390px 를 넘으므로 AgGrid 가 **표 안에서** 가로 스크롤한다
+# (§5 "표는 overflow-x:auto"). 페이지 가로 스크롤은 실측(Playwright)이 담당.
+min_total = sum(cfg["width"] for cfg in nmy._COL_CONFIG.values())
 check("표 최소 폭 > 390(좁은 폭에서 표 내부 가로 스크롤)", min_total > 390)
+# 2026-08-18 내용 역산 고정폭: 108+92+72+172+44+72 = 560.
+check("표 폭 합계 = 560(내용 역산 고정폭 합)", min_total == 560)
+# 같은 성격 열은 두 화면이 **같은 값**(기존 계약 유지).
+for _c in nmy._DISPLAY_COLUMNS:
+    check(f"{_c} 열 폭이 조회 화면과 동일",
+          nmy._COL_CONFIG[_c]["width"] == nmv._COL_CONFIG[_c]["width"])
 
 
 # ===== 5) 상세 진입 보존 =====
@@ -194,10 +212,76 @@ try:
     check("stale 선택은 grid 에 pre-select 로 넘기지 않음",
           _seen.get("selected_key") is None)
     check("stale 선택이면 상세 미렌더", "detail" not in _seen)
-    check("grid 에 표시 7열 전달", _seen.get("columns") == nmy._DISPLAY_COLUMNS)
+    check("grid 에 표시 6열 전달", _seen.get("columns") == nmy._DISPLAY_COLUMNS)
 finally:
     nmy.erp.select_grid = _orig
     st.session_state.pop(nmy._SEL_KEY, None)
+
+
+# ===== 7) 어휘(§3.6) · 상태의 결과(§3.3) · 조회 화면과 목록 어휘 정합 =====
+print("어휘·상태의 결과·조회 화면 정합")
+check("IN_REVIEW 라벨 = '평가중'", nmy._STATUS_LABEL["IN_REVIEW"] == "평가중")
+check("'검토중' 라벨 폐기", "검토중" not in set(nmy._STATUS_LABEL.values()))
+check("상태 라벨이 조회 화면과 동일(같은 상태·같은 말)",
+      nmy._STATUS_LABEL == nmv._STATUS_LABEL)
+check("진행 단계 pill 도 '평가중'",
+      "평가중" in inspect.getsource(nmy._steps_html)
+      and "검토중" not in inspect.getsource(nmy._steps_html))
+# §3.3 — 배지 옆 한 줄로 그 상태가 무엇을 막고 여는지 적는다.
+check("모든 상태에 결과 표기 존재(_STATUS_EFFECT)",
+      set(nmy._STATUS_EFFECT) == set(nmy._STATUS_LABEL)
+      and all(str(v).strip() for v in nmy._STATUS_EFFECT.values()))
+_anchor_effect = nmy._detail_anchor_html(REPORTS.iloc[0].to_dict(), "IN_REVIEW")
+check("상세 앵커에 상태의 결과 노출(§3.3)",
+      nmy._STATUS_EFFECT["IN_REVIEW"] in _anchor_effect)
+check("잠김 어휘는 평가 관리·조회와 동일('보고자 수정 잠김')",
+      nmy._STATUS_EFFECT["IN_REVIEW"] == nmv._STATUS_EFFECT["IN_REVIEW"] == "보고자 수정 잠김")
+# 상세 등급 메타는 정본 '평가 등급'(표 헤더만 폭 때문에 '등급'으로 줄인다).
+_blocks_src = inspect.getsource(nmy._detail_blocks_html)
+check("상세 등급 메타 라벨 = '평가 등급'",
+      '"평가 등급"' in _blocks_src and "확정등급" not in _blocks_src)
+check("상세 메타에 제안등급 미참조", "proposed_grade" not in _blocks_src)
+# 한글 라벨은 모노·자간 없이 본문 sans 를 상속한다(한글 글리프 부재 → 글자별 폴백).
+_meta_html = nmy._detail_blocks_html(REPORTS.iloc[1].to_dict())
+_meta_head = _meta_html.split("gap:20px 32px")[0]   # 본문 블록 앞까지(= 메타 영역)
+check("한글 등급 라벨에 모노 미적용", "monospace" not in _meta_head)
+check("한글 등급 라벨에 letter-spacing 미적용", "letter-spacing" not in _meta_head)
+check("라벨 크기·색 불변(10.5px / #6b665d)",
+      "font-size:10.5px" in _meta_head and nmy._MUT in _meta_head)
+check("영문 태그(WHAT/CAUSE/ACTION)는 모노 유지", "monospace" in _meta_html)
+check("보고번호(영숫자) 앵커는 모노 유지",
+      "monospace" in nmy._detail_anchor_html(REPORTS.iloc[1].to_dict(), "EVALUATED"))
+# 결측(NaN) 등급은 'NAN' 이 아니라 빈 값 라벨('미정')로 렌더된다(2026-08-18 실렌더 버그).
+_nan_grade = REPORTS.iloc[0].to_dict()["confirmed_grade"]
+check("None 등급 → '미정'", "미정" in nmy._grade_mark(_nan_grade, empty="미정"))
+check("pandas 결측(NaN) 등급 → 'NAN' 미노출",
+      "NAN" not in nmy._grade_mark(float("nan"), empty="미정")
+      and "미정" in nmy._grade_mark(float("nan"), empty="미정"))
+check("조회 화면도 같은 방어(NaN → '미정')",
+      "NAN" not in nmv._grade_mark(float("nan"), empty="미정"))
+check("정상 등급은 그대로(B)", "B" in nmy._grade_mark("b", empty="미정"))
+# 자기 정정(본문 수정) 폼에 제안등급 입력 위젯이 없다 — 저장 payload 의 보존 pass-through는
+# 파사드가 None 을 그대로 써 기존 값을 지우기 때문이며(데이터 처분은 data-contract 소관),
+# 화면 입력·표시로는 어디에도 노출되지 않는다.
+_form_src = inspect.getsource(nmy._render_edit_form)
+_form_widget_labels = re.findall(
+    r'st\.(?:text_input|text_area|selectbox|date_input|number_input|radio|'
+    r'segmented_control|multiselect)\(\s*"([^"]+)"', _form_src)
+check("자기 정정 폼에 등급 입력 위젯 없음(입력 경로 부재)",
+      _form_widget_labels and not any("등급" in lab for lab in _form_widget_labels))
+check("자기 정정 폼이 등급 목록을 읽지 않음", "NEAR_MISS_GRADES" not in _form_src)
+# 지표 스트립 라벨 — 같은 계산은 두 화면이 같은 낱말을 쓴다(§3.6).
+_my_labels = [t[0] for t in nmy._my_metrics(REPORTS)]
+_view_labels = [t[0] for t in nmv._view_metrics(REPORTS)]
+check("지표 라벨이 조회 화면과 동일", _my_labels == _view_labels)
+check("SUBMITTED+IN_REVIEW 타일 이름 = '미평가'", _my_labels[1] == "미평가")
+# §2 READ_VIEW 영역 순서: 제목 → 조회 조건 → (지표) → 표.
+_render_src = inspect.getsource(nmy.render)
+check("영역 순서: screen_frame → 조건 → metric_strip → 목록",
+      _render_src.index("erp.screen_frame")
+      < _render_src.index("_collect_my_filters")
+      < _render_src.index("erp.metric_strip")
+      < _render_src.index("_render_list"))
 
 
 print()

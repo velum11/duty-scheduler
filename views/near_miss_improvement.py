@@ -1,15 +1,30 @@
-"""개선조치 관리 — 큐 처리형(DESIGN.md §1-A 변형) + CAPA 폐루프.
+"""개선조치 관리 — WORKLIST(DESIGN.md §2) + CAPA 폐루프.
 
-신판 DESIGN.md §1-A "큐 처리형" 골격으로 구현한다(색 리스킨이 아니라 구조 교체):
+§2 WORKLIST 골격을 그대로 구현한다(2026-08-18 §7.1 확정 이관 — 구 "KPI 스트립 + 큐 칩
+스트립 + 전체폭 상세" 골격 폐기):
 
-    제목/설명 → [KPI 스트립 4종] → 헤어라인 → [종결 대기 큐 칩 스트립]
-    → 헤어라인 → [선택 건 전체폭 상세 + CAPA 워크플로] → 하단 액션 바
+    제목/설명 → [상태 탭: 확인대기 n · 진행·미작성 n · 확인 완료 n · 기한초과 n · 전체 n]
+    → [담당자·기간 조건] → 헤어라인 → 2열( 목록 33% | 상세 67% )
+      목록 : 2줄 고정 행(제목/경과일 · 보고번호·소속/조치 단계) + 좌측 2px 상태 보더
+      상세 : 식별자 + 상태 배지 + 상태 결과 + 대상 제목 + 메타
+             → 주요 내용 표(라벨 열 + 값 열 1개) → CAPA 결정 컨트롤 → 실행(액션·2단계 종결)
 
-- 좌우 분할·행 체크박스·"케이스를 선택하세요" 빈 패널·본문 아이콘 툴바 띠 제거(§0 금지 1·2·3).
-- 진입 시 큐의 첫 건 자동 선택. 칩 클릭=선택(오렌지), [n/m]+이전/다음 순회.
-- 카드 금지(§0 금지 5) — 구획은 헤어라인+여백만. 색·크기·간격은 §2~§4 값만(§0 금지 8).
-
-레퍼런스 골격: ``아차사고 관리.dc.html`` isCapa 블록(426~507).
+이관에서 바뀐 것(구조·표기만, 기능 계약 불변)
+  - **지표 타일 제거**(§4-1·§2) — ``erp.metric_strip`` 4장을 없애고 그 건수를 **상태 탭
+    라벨**로 옮겼다. 종전 타일은 클릭·필터링이 없는 순수 HTML 이라 목록을 바꾸지 못했다.
+    같은 건수가 이제 탭으로서 목록을 실제로 바꾼다.
+  - **조치 단계 필터 → 상태 탭**(§4-2) — 같은 축의 진입점을 두 곳 두지 않는다. 종전
+    조건 패널의 ``조치 단계`` select 는 폐지하고 탭이 그 축을 소유한다. 조건 패널에는
+    축이 다른 ``담당자``·``기간``만 남는다.
+  - **어휘 통일**(§3.6) — ``확정 등급 → 평가 등급``(상세 메타). 영문 코드값
+    (``confirmed_grade``)은 불변이며 한글 라벨만 통일한다.
+  - **상태의 결과 표기**(§3.3) — 배지 옆에 그 단계가 무엇을 막고 여는지 한 줄
+    (``확인됨`` 옆 ``조치 수정 잠김 · 보고서 종결 가능``).
+  - **근거 → 결정 → 실행 순서 정정**(§2) — 종전에는 작업 내용·현장 설명이 액션 **뒤**의
+    expander 에 있었다(판정 자료가 판정 컨트롤보다 뒤). 주요 내용 표로 끌어올렸다.
+  - **목록 정렬** — 경과일(접수일 ``created_at`` 기준, §7.2-4) 내림차순. 색은 칠하지
+    않는다(§7.2-4-b). 기한초과는 좌측 보더 + 행 텍스트로 드러낸다(due_date 는 데이터에
+    있는 실제 기한이라 SLA 추정이 아니다).
 
 기능 계약(불변 — CAPA 폐루프 핵심, 표현 계층만 교체):
   - 행단위 권한(담당자=조치저장/제출, 확인자=확인/재조치요청, 평가자=배정/보고서 종결)과
@@ -17,12 +32,16 @@
   - 워크플로 액션 전부 유지: 조치 저장/배정 저장/저장 · 제출 · 확인 · 재조치 요청 · 보고서 종결.
     역할별 비활성/숨김 규칙 현행 유지. 신원은 항상 ``auth.get_current_user()``.
   - 큐 = 현재 사용자 역할 기준 처리 대상(actor-aware ``list_near_miss_improvements`` +
-    담당자 스코핑 ``_scope_reports``). 상태 배지는 §2(P1) 팔레트.
+    담당자 스코핑 ``_scope_reports``).
 """
 from __future__ import annotations
 
-# DESIGN.md §1-A 큐 처리형 — 읽기 큐(칩) + 전체폭 상세/워크플로.
+# DESIGN.md §2 WORKLIST — 상태 탭 + 2열(목록 33% / 상세 67%).
 SCREEN_ARCHETYPE = "WORKLIST"
+# §0 — 이 화면이 내리는 결정(기계 검증은 아직 없다, §5).
+SCREEN_DECISION = "이 건의 개선조치를 확인할 것인가, 재조치를 요청할 것인가, 보고서를 종결할 것인가"
+SCREEN_EVIDENCE = ("사고 내용·원인·대책", "등록된 조치 내용·결과", "조치 기한과 경과",
+                   "담당자·확인자 배정")
 
 from datetime import date, timedelta
 from html import escape
@@ -32,7 +51,7 @@ import streamlit as st
 
 from modules import auth, db
 from views import workspace
-from views.common import erp, scaffold
+from views.common import erp, scaffold, worklist
 from views.master import (
     TOKENS,
     DraftState,
@@ -47,6 +66,7 @@ from views.master import (
 _STATE = DraftState("nm_impr")
 _PAGE_ID = _STATE.page_id
 _SEL_KEY = "nm_impr_selected_id"              # 상세에 열린 보고서 id(문자열).
+_TAB_KEY = "nm_impr_tab"                      # 상태 탭(§2: 탭이 목록을 실제로 바꾼다).
 _CLOSE_CONFIRM_KEY = "nm_impr_close_confirm"  # 2단계 종결 확인 중인 보고서 id.
 
 _IMPROVEMENT_DESC = "평가 확정된 아차사고의 개선조치를 등록·확인하고 보고서를 종결합니다."
@@ -64,7 +84,6 @@ _CAUSE_LABEL = {
     "SLIP": "미끄러짐", "BURN": "화상", "PINCH": "협착", "ETC": "기타",
 }
 # 등급 색·순서 — 조회/내 아차사고/평가와 **같은 매핑**(TOKENS 재사용, 새 색 없음).
-# 상세 메타의 확정등급을 공용 등급 마크(셰브런+색 텍스트)로 렌더한다(2026-08-14 표기 통일).
 _GRADE_COLOR = {
     "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
     "C": TOKENS["info"], "D": TOKENS["ink-3"],
@@ -79,25 +98,40 @@ def _grade_mark(grade, empty: str) -> str:
         return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
     return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
 
-# ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴 고정으로 새 색 유입 차단. ──
+
+# ── §1.3 팔레트 (토큰 밖 색 금지 §4-7) — 리터럴 고정으로 새 색 유입 차단. ──
 _INK = "#1c1a17"          # 본문
 _INK2 = "#4a453d"         # 보조(섹션 라벨)
-# Codex P1: 이 파일의 _FAINT 는 모두 읽는 작은 텍스트(라벨·모노 오버라인·메타)에
-# 쓰이므로 #6b665d(5.1:1↑)로 상향한다 — #8b857c(3.27:1)·#a09a90(2.5:1)은 읽는 텍스트 금지.
-_FAINT = "#6b665d"        # 읽는 캡션·모노 오버라인(구 #a09a90)
+_FAINT = "#6b665d"        # 읽는 텍스트 최저 대비(5.1:1)
+_LINE = "#e6e2da"         # 행 헤어라인
 _LINE_SEC = "#e0dbd2"     # 섹션 헤어라인
-_ACCENT_TEXT = "#b4451a"
-_ACCENT_TINT = "#fdf3ec"
-_NEUTRAL = "#5c564d"      # §2 종결 배지 텍스트(중립, 6.4:1) — 비-§2 회색(#6b665d) 대체
+_NEUTRAL = "#5c564d"      # §1.3 종결·중립 배지 텍스트(6.4:1)
 # 인라인 style 속성 안에 그대로 들어가므로 **큰따옴표**로 감싼다(작은따옴표는 금지) —
 # style='font-family:{_MONO};…' 가 첫 내부 따옴표에서 끊겨 style 전체가 소실되는 것을 막는다
 # (2026-08-14 실측). CSS 블록(<style>) 안에서도 동일하게 유효하다.
 _MONO = '"IBM Plex Mono", monospace'
 
-# 상태 배지 색(§2 배지 텍스트색 — status_badge_html 이 옅은 배경/테두리를 파생). 모두 §2 값.
+# 상태 배지 색(§1.3 의미 색 — status_badge_html 이 옅은 배경/테두리를 파생).
 _SUBMIT_COLOR = {"DRAFT": _NEUTRAL, "SUBMITTED": "#2f4d99"}
 _CONFIRM_COLOR = {"PENDING": "#8a6212", "CONFIRMED": "#2f6b45", "REJECTED": "#9c3232",
                   "미작성": _NEUTRAL}
+# 목록 행 좌측 2px 보더 색(§2: 상태는 줄 수가 아니라 보더 색으로 표현한다).
+_STAGE_ACCENT = {
+    "미작성": _NEUTRAL, "작성중": "#8a6212", "확인대기": "#2f4d99",
+    "확인됨": "#2f6b45", "반려": "#9c3232",
+}
+_OVERDUE_ACCENT = "#9c3232"   # 기한초과는 단계색을 덮어쓴다(지금 처리해야 하는 신호)
+_OVERDUE_MARK = "기한초과"
+# §3.3 — 단계 배지 옆에 그 단계가 무엇을 막고 무엇을 여는지 한 줄로 적는다.
+# 근거: db.upsert_near_miss_improvement(CONFIRMED 편집 차단) · confirm/reject 는 제출·
+# 확인대기에서만 · close 는 확인됨에서만.
+_STAGE_EFFECT = {
+    "미작성": "담당자 배정·조치 등록 필요 · 종결 불가",
+    "작성중": "담당자 편집 가능 · 확인 불가",
+    "확인대기": "담당자 수정 잠김 · 확인자 판정 대기",
+    "확인됨": "조치 수정 잠김 · 보고서 종결 가능",
+    "반려": "담당자 재조치 필요 · 종결 불가",
+}
 
 _LOAD_FAILED_LABEL = "조회실패"
 _NOT_READY_MSG = (
@@ -109,30 +143,63 @@ _PROBE_ERROR_MSG = (
 )
 _STALE_MARK = "이미 변경"  # db 원문 일부 — stale 충돌(다른 사용자 선처리)은 warning 로 분기.
 
-_EVAL_CSS = f"""
+# 상태 탭 — 라벨은 종전 지표 타일의 이름을 그대로 물려받는다(§4-1: 지표는 탭 건수로).
+# 앞 세 탭은 큐를 나누는 분할이고(합=전체), '기한초과'는 그 위에 겹치는 부분집합이다.
+_TAB_PENDING = "확인대기"
+_TAB_PROGRESS = "진행·미작성"
+_TAB_CONFIRMED = "확인 완료"
+_TAB_OVERDUE = "기한초과"
+_TAB_ALL = "전체"
+_TABS: tuple[str, ...] = (_TAB_PENDING, _TAB_PROGRESS, _TAB_CONFIRMED, _TAB_OVERDUE, _TAB_ALL)
+#: ``_kpi_items`` 가 총계에 쓰는 라벨(계약 테스트가 고정) — '전체' 탭이 같은 값을 쓴다.
+_TOTAL_LABEL = "종결 대기"
+
+# 목록 열 자체 스크롤 높이(§2: 목록과 상세는 독립 스크롤). 뷰포트 파생값이며 간격 토큰이 아니다.
+_LIST_HEIGHT = 520
+
+_IMPR_CSS = f"""
 <style>
-/* 종결 대기 큐 칩(선택=primary 오렌지, 비선택=secondary 흰+테두리) — pill, 히트영역 32px */
-[class*="st-key-cq_"] button {{
-  border-radius:999px !important; min-height:32px !important; height:auto !important;
-  padding:5px 14px !important; font-size:12.5px !important; font-weight:600 !important;
-  white-space:nowrap !important; line-height:1.2 !important;
+/* 상태 탭 — compact 히트영역 34px(공용 기본 30.1px 미달 보정). 선택자는 위젯 key
+   (_TAB_KEY)에서 오는 st-key 클래스다. 한글 라벨이라 모노·letter-spacing 을 걸지 않는다. */
+.st-key-nm_impr_tab button {{
+  min-height:34px !important; font-weight:600 !important;
 }}
-.st-key-cq_prev button, .st-key-cq_next button {{
-  min-width:32px !important; width:32px !important; min-height:32px !important; height:32px !important;
-  padding:0 !important; border-radius:7px !important; font-size:14px !important;
+/* 라벨 글자는 내부 <p> 소유 — button 에만 걸면 12.25px 로 남는다(실측). §1.2 14px. */
+.st-key-nm_impr_tab button p {{ font-size:14px !important; font-weight:600 !important; }}
+/* 선택 탭 라벨 대비: #c2410c on #efe0d7 = 4.03:1(§5 미달) → #a3350a = 5.31:1. */
+.st-key-nm_impr_tab button[aria-checked="true"] p {{ color:#a3350a !important; }}
+/* 결정 액션·조건 컨트롤 히트영역 — 평가 관리(:173)에는 있는 규칙이 여기엔 없어
+   결정 버튼이 30.1px, 셀렉트 33px, 날짜 31.1px 로 §1.4 compact(34~38) 미달이었다. */
+[class*="st-key-nm_impr_da_"] button, [class*="st-key-nm_impr_close_da_"] button {{
+  min-height:34px !important; border-radius:8px !important; font-weight:600 !important;
+  white-space:nowrap !important;
 }}
-.cq-head {{ display:flex; align-items:center; gap:8px; margin:2px 0 6px; }}
-.cq-head .t {{ font-size:14px; font-weight:600; color:{_INK}; }}
-.cq-head .c {{ font-family:{_MONO}; font-size:11px; font-weight:600; padding:2px 8px;
-  border-radius:999px; background:{_ACCENT_TINT}; color:{_ACCENT_TEXT}; }}
-.cq-pos {{ font-family:{_MONO}; font-size:11.5px; color:{_FAINT}; white-space:nowrap; }}
+[class*="st-key-nm_impr_da_"] button p, [class*="st-key-nm_impr_close_da_"] button p {{
+  font-size:14px !important; font-weight:600 !important;
+}}
+[class*="st-key-nm_impr_flt_"] div[data-baseweb="select"] > div,
+[class*="st-key-nm_impr_flt_"] .react-aria-ComboBox input,
+[class*="st-key-nm_impr_assignee_"] div[data-baseweb="select"] > div,
+[class*="st-key-nm_impr_assignee_"] .react-aria-ComboBox input,
+[class*="st-key-nm_impr_confirmer_"] div[data-baseweb="select"] > div,
+[class*="st-key-nm_impr_confirmer_"] .react-aria-ComboBox input,
+[class*="st-key-nm_impr_due_"] input {{ min-height:34px !important; }}
+/* 비활성 라벨은 Streamlit 기본 #9e9c98(2.46:1, §1.3 팔레트 밖)이다. WCAG 는 비활성을
+   예외로 두지만 같은 화면에서 5.04:1 과 2.46:1 이 섞이는 것은 결함이다 — ink-3 로 통일. */
+[class*="st-key-nm_impr_da_"] button:disabled p,
+[class*="st-key-nm_impr_close_da_"] button:disabled p {{ color:{_FAINT} !important; }}
+/* <599px: 목록 고정 높이(520)가 콘텐츠보다 커서 상세가 폴드 밖으로 밀린다(실측). */
+@media (max-width:598px) {{
+  .st-key-nm_impr_listbox {{ height:auto !important; max-height:none !important; }}
+}}
+/* 섹션 라벨 — 한글이라 letter-spacing 을 주지 않는다(자간이 벌어진다). */
+.nm-sec {{ font-size:12px; font-weight:600; color:{_INK2}; margin:0 0 6px; }}
 </style>
 """
 
 
 # ---------- 진입 ----------
 def render(user: dict) -> None:
-    # 제목 크롬만(아이콘 툴바 밴드 없음 §0-3) — 아이콘은 상단 52px 헤더에만.
     erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="개선조치 관리",
@@ -140,7 +207,7 @@ def render(user: dict) -> None:
         breadcrumb="아차사고 › 개선조치 관리",
         badges=scaffold.mode_badge(),
     )
-    st.markdown(_EVAL_CSS, unsafe_allow_html=True)
+    st.markdown(_IMPR_CSS, unsafe_allow_html=True)
     # 접근 경계 — 배정 기반 접근 facade(has_near_miss_improvement_access): 평가자/ADMIN·배정
     # 담당자·지정 확인자는 True, 그 외/미인증/비활성은 False(fail-closed·비크래시).
     if not db.has_near_miss_improvement_access(user):
@@ -189,37 +256,41 @@ def _render_body(user: dict) -> None:
         )
     scoped = _scope_reports(reports, improvements, is_reviewer, load_failed)
 
-    # ── KPI 스트립(제목 바로 아래 첫 블록 §0-4) — 기존 요약 지표를 상단으로 이동 + 기한초과. ──
-    # KPI 는 항상 전체 스코프 큐 기준(실제 종결 대기·기한초과 총량) — 필터로 왜곡하지 않는다.
-    erp.metric_strip(_kpi_items(scoped, improvements, load_failed))
-    _hairline()
+    # ── 상태 탭(§2) — 지표 타일 대신 여기에 건수를 싣는다(§4-1). 건수는 항상 전체 스코프
+    # 큐 기준이며(담당자·기간 조건으로 왜곡하지 않는다) 탭 선택만이 목록을 바꾼다. ──
+    tab = _render_tabs(_tab_counts(scoped, improvements, load_failed))
 
-    # ── 큐 위 필터(조치 단계·담당자·기간) — 뷰단 필터링(facade 파라미터 없음, 코디 B-2). ──
-    # 권한·스코핑·KPI 는 불변이며, 표시 큐만 좁힌다. 제출 버튼 없이 변경 즉시 반영.
+    # ── 축이 다른 조건(담당자·기간)만 남긴다 — 조치 단계 축은 탭이 소유한다(§4-2). ──
     fq, fq_active = _collect_impr_filters(scoped, improvements)
-    scoped_view = _apply_impr_filters(scoped, improvements, fq)
+    scoped_view = _apply_impr_filters(scoped, improvements, dict(fq, tab=tab))
 
     ordered = _ordered_ids(scoped_view)
-    if not ordered:
-        msg = ("조건에 해당하는 종결 대기 건이 없습니다. 조치 단계·담당자·기간 필터를 조정하세요."
-               if fq_active else "현재 종결 대기 중인 개선조치 건이 없습니다.")
-        st.markdown(
-            f"<div style='padding:22px 0;font-size:14.5px;color:{_INK2};'>{msg}</div>",
-            unsafe_allow_html=True,
-        )
-        return
+    reports_by_id = {}
+    if scoped_view is not None and not scoped_view.empty:
+        reports_by_id = {str(r["id"]): r for _, r in scoped_view.iterrows()}
 
-    # 진입 시 첫 건 자동 선택(§1-A) — 선택이 없거나 (필터로) 큐에서 사라진 경우.
+    # 선택 보관은 호출부 책임(erp.select_list 계약). 탭·조건 전환으로 선택이 목록에서 빠지면
+    # 첫 건으로 되돌리고 2단계 종결 확인을 초기화한다(오처리 방지).
     selected_id = st.session_state.get(_SEL_KEY)
     if selected_id not in ordered:
-        selected_id = ordered[0]
+        selected_id = ordered[0] if ordered else None
         st.session_state[_SEL_KEY] = selected_id
         st.session_state.pop(_CLOSE_CONFIRM_KEY, None)
 
-    reports_by_id = {str(r["id"]): r for _, r in scoped_view.iterrows()}
-    _render_queue_chips(ordered, reports_by_id, improvements, load_failed, selected_id)
-    _hairline()
-    _render_detail(user, readiness)
+    list_col, detail_col = erp.master_detail_frame(list_ratio=1, detail_ratio=2)
+    with list_col:
+        picked = _render_list(ordered, reports_by_id, improvements, selected_id, tab)
+        if picked and picked != selected_id:
+            st.session_state[_SEL_KEY] = picked
+            st.session_state.pop(_CLOSE_CONFIRM_KEY, None)
+            st.rerun()
+    with detail_col:
+        if selected_id is None:
+            body = (f"조건에 해당하는 건이 없습니다. '{tab}' 탭과 담당자·기간 조건을 조정하세요."
+                    if fq_active else f"'{tab}' 탭에 표시할 개선조치 건이 없습니다.")
+            erp.detail_empty("처리할 건이 없습니다", body)
+            return
+        _render_detail(user, readiness)
 
 
 # ---------- 데이터 적재 ----------
@@ -261,19 +332,18 @@ def _scope_reports(reports: pd.DataFrame, improvements: dict,
 
 
 def _ordered_ids(df: pd.DataFrame) -> list[str]:
+    """**경과일 내림차순**(오래 묵은 건 먼저, §7.2-4-b). 경과일은 접수일(``created_at``)
+    파생이며 ``incident_date`` 는 동순위 tie-break 로만 쓴다."""
     if df is None or df.empty:
         return []
-    frame = df.sort_values("incident_date", ascending=False, kind="stable")
-    return [str(v) for v in frame["id"].tolist()]
+    return worklist.order_by_elapsed([
+        (r["id"], r.get("created_at"), r.get("incident_date")) for _, r in df.iterrows()
+    ])
 
 
-# ---------- 큐 필터(뷰단 — 조치 단계·담당자·기간) ----------
-_FILTER_PID = f"{_PAGE_ID}_flt"          # condition_panel page_id(세션 위젯 키 접두)
-_STAGE_OPTS = ["전체", "미작성", "작성중", "확인대기", "확인됨", "반려"]
-
-
+# ---------- 조치 단계·기한 파생 ----------
 def _impr_stage(imp) -> str:
-    """개선조치 한 건의 '조치 단계' 라벨(제출/확인 상태 파생 — 필터·표시 어휘 통일).
+    """개선조치 한 건의 '조치 단계' 라벨(제출/확인 상태 파생 — 탭·행·상세 단일 어휘).
 
     미작성(imp 없음) < 작성중(DRAFT) < 확인대기(SUBMITTED·PENDING) < 확인됨(CONFIRMED) /
     반려(REJECTED). 확정 상태(확인됨/반려)를 제출 상태보다 우선 판정한다."""
@@ -292,11 +362,107 @@ def _impr_stage(imp) -> str:
     return "미작성"
 
 
-def _collect_impr_filters(scoped: pd.DataFrame, improvements: dict) -> tuple[dict, bool]:
-    """§1-E 필터 줄(조치 단계·담당자·기간)을 렌더하고 (필터 dict, 활성여부)를 반환한다.
+def _is_overdue(imp, today: str) -> bool:
+    """조치 기한(``due_date``) 경과 & 미확인. ISO 날짜 문자열 사전식 비교(안전).
 
-    담당자 옵션은 현재 스코프 큐에 실제 배정된 담당자만(+전체)으로 구성한다(허수 옵션 방지).
-    기본 기간은 '전체'. 제출 버튼 없이 변경 즉시 반영(뷰단 필터)."""
+    임의로 정한 SLA 가 아니라 **데이터에 저장된 실제 기한**이라 §7.2-4-b(경과일에 색을
+    칠하지 않는다)와 충돌하지 않는다 — 경과일과 기한초과는 다른 값이다."""
+    if not imp or str(imp.get("confirm_status") or "") == _CONFIRMED:
+        return False
+    due = str(imp.get("due_date") or "").strip()
+    return bool(due) and due < today
+
+
+def _confirm_state_of(imp) -> str:
+    if not imp:
+        return "미작성"
+    return str(imp.get("confirm_status") or "").strip() or "미작성"
+
+
+# ---------- 상태 탭 ----------
+def _kpi_items(scoped: pd.DataFrame, improvements: dict, load_failed: bool) -> list[tuple]:
+    """상태 탭 건수의 단일 출처 — ``[(label, value)]``.
+
+    **함수명은 종전 KPI 스트립 시절 이름을 유지한다** — 이 파생 계약("조회 실패 시 파생
+    지표를 0 으로 위장하지 않고 '—' 로 표면화한다")을 ``test_near_miss_error_surfacing``
+    이 이 이름으로 고정하고 있고, 이름만 바꾸면 계약 추적이 끊긴다. 렌더 수단은 지표
+    타일에서 **상태 탭**으로 바뀌었다(§4-1: 지표가 목록을 바꾸지 않으면 자리값을 못 한다).
+
+    전부 기존 데이터에서 파생한다: 확인대기(제출·확인대기) · 진행·미작성(작성 전/작성중/
+    반려) · 확인 완료(CONFIRMED) · 기한초과(due_date 경과 & 미확인) · 종결 대기(큐 크기).
+    앞 세 개는 큐를 나누는 분할이고 기한초과는 그 위에 겹치는 부분집합이다.
+    조회 실패 시 파생 4종은 '—'(오류≠0)이며 큐 크기만 실수치를 낸다.
+    """
+    total = 0 if scoped is None or scoped.empty else len(scoped)
+    if load_failed:
+        return [
+            (_TAB_PENDING, "—"), (_TAB_PROGRESS, "—"),
+            ("확인 완료", "—"), ("기한초과", "—"), (_TOTAL_LABEL, total),
+        ]
+    today = date.today().isoformat()
+    pending = progress = confirmed = overdue = 0
+    if scoped is not None and not scoped.empty:
+        for _, r in scoped.iterrows():
+            imp = improvements.get(str(r["id"]))
+            stage = _impr_stage(imp)
+            if stage == "확인됨":
+                confirmed += 1
+            elif stage == "확인대기":
+                pending += 1
+            else:
+                progress += 1
+            if _is_overdue(imp, today):
+                overdue += 1
+    return [
+        (_TAB_PENDING, pending), (_TAB_PROGRESS, progress),
+        ("확인 완료", confirmed), ("기한초과", overdue), (_TOTAL_LABEL, total),
+    ]
+
+
+def _tab_counts(scoped: pd.DataFrame, improvements: dict, load_failed: bool) -> dict:
+    """탭 라벨에 붙일 건수 사전. '전체' 탭은 큐 크기(``종결 대기``)와 같은 값이다."""
+    counts = {label: value for label, value, *_ in
+              _kpi_items(scoped, improvements, load_failed)}
+    counts[_TAB_ALL] = counts.get(_TOTAL_LABEL, 0)
+    return counts
+
+
+def _render_tabs(counts: dict) -> str:
+    """상태 탭을 렌더하고 선택된 탭 이름을 반환한다(§2 골격의 두 번째 블록).
+
+    ``st.tabs`` 를 쓰지 않는다 — 기본값이 모든 탭을 미리 렌더해 "탭이 목록을 바꾼다"는
+    §2 계약이 성립하지 않는다. ``st.segmented_control`` 은 클릭=rerun 이라 필터링이 자동
+    성립한다. ``required=True`` 로 선택 해제를 막아 "아무 탭도 아닌" 상태를 만들지 않는다.
+    """
+    # 첫 진입 탭은 **비어 있지 않은 첫 탭**이다(§3.5: 애초에 빈 영역이 생기지 않게 배치).
+    # 처리 우선순위 순서(확인대기 → 진행·미작성 → 확인 완료 → 기한초과 → 전체)로 훑어
+    # 건수가 있는 첫 탭을 고른다. 조회 실패 시 파생 건수는 '—'(문자열)라 truthy 이므로
+    # 그대로 첫 탭에 머문다. 이미 사용자가 고른 탭은 건드리지 않는다.
+    if st.session_state.get(_TAB_KEY) not in _TABS:
+        st.session_state[_TAB_KEY] = next(
+            (name for name in _TABS if counts.get(name, 0)), _TAB_PENDING)
+    picked = st.segmented_control(
+        "조치 단계",
+        _TABS,
+        key=_TAB_KEY,
+        required=True,
+        format_func=lambda name: f"{name} {counts.get(name, 0)}",
+        label_visibility="collapsed",
+        width="content",
+    )
+    return picked if picked in _TABS else _TAB_PENDING
+
+
+# ---------- 조건(담당자·기간) ----------
+_FILTER_PID = f"{_PAGE_ID}_flt"          # condition_panel page_id(세션 위젯 키 접두)
+
+
+def _collect_impr_filters(scoped: pd.DataFrame, improvements: dict) -> tuple[dict, bool]:
+    """조건 줄(담당자·기간)을 렌더하고 (조건 dict, 활성여부)를 반환한다.
+
+    **조치 단계 축은 여기 없다** — 상태 탭이 소유한다(§4-2: 같은 기능의 진입점을 두 곳
+    두지 않는다). 담당자 옵션은 현재 스코프 큐에 실제 배정된 담당자만(+전체)으로 구성한다
+    (허수 옵션 방지). 기본 기간은 '전체'. 제출 버튼 없이 변경 즉시 반영(뷰단 조건)."""
     period_on = st.session_state.get(f"{_FILTER_PID}_period_mode") == "기간 지정"
     assignees: list[str] = []
     seen: set = set()
@@ -310,7 +476,6 @@ def _collect_impr_filters(scoped: pd.DataFrame, improvements: dict) -> tuple[dic
     assignees.sort()
 
     fields: list[erp.Field] = [
-        erp.Field(key="stage", label="조치 단계", kind="select", width=150, options=_STAGE_OPTS),
         erp.Field(key="assignee", label="담당자", kind="select", width=200,
                   options=[workspace.ALL] + assignees,
                   format_func=lambda e: "전체" if e == workspace.ALL else _user_label(e)),
@@ -328,27 +493,40 @@ def _collect_impr_filters(scoped: pd.DataFrame, improvements: dict) -> tuple[dic
 
     on = v["period_mode"] == "기간 지정"
     q = {
-        "stage": v["stage"],
         "assignee": v["assignee"],
         "date_from": v["from"].isoformat() if on and "from" in v else "",
         "date_to": v["to"].isoformat() if on and "to" in v else "",
     }
-    active = (v["stage"] != "전체") or (v["assignee"] != workspace.ALL) or on
+    active = (v["assignee"] != workspace.ALL) or on
     return q, active
 
 
+def _matches_tab(tab: str, stage: str, overdue: bool) -> bool:
+    """상태 탭 술어 — 탭 하나가 목록을 실제로 바꾼다(§2)."""
+    if tab == _TAB_ALL:
+        return True
+    if tab == _TAB_OVERDUE:
+        return overdue
+    if tab == _TAB_CONFIRMED:
+        return stage == "확인됨"
+    if tab == _TAB_PENDING:
+        return stage == "확인대기"
+    return stage not in ("확인됨", "확인대기")   # 진행·미작성
+
+
 def _apply_impr_filters(scoped: pd.DataFrame, improvements: dict, q: dict) -> pd.DataFrame:
-    """뷰단 필터 적용(권한·스코핑 불변 — 표시 큐만 좁힌다). 조건 불일치 행을 제거한다."""
+    """상태 탭 + 조건(담당자·기간)을 적용한다(권한·스코핑 불변 — 표시 큐만 좁힌다)."""
     if scoped is None or scoped.empty:
         return scoped
-    stage = q.get("stage") or "전체"
+    tab = q.get("tab") or _TAB_ALL
     assignee = q.get("assignee")
     date_from = q.get("date_from") or ""
     date_to = q.get("date_to") or ""
+    today = date.today().isoformat()
     keep = []
     for idx, r in scoped.iterrows():
         imp = improvements.get(str(r["id"]))
-        if stage != "전체" and _impr_stage(imp) != stage:
+        if not _matches_tab(tab, _impr_stage(imp), _is_overdue(imp, today)):
             continue
         if assignee not in (None, workspace.ALL):
             if str((imp or {}).get("assignee_emp_no") or "").strip() != str(assignee).strip():
@@ -376,101 +554,54 @@ def _user_label(emp_no) -> str:
     return f"{name}({emp_no})" if name else emp_no
 
 
-def _confirm_state_of(imp) -> str:
-    if not imp:
-        return "미작성"
-    return str(imp.get("confirm_status") or "").strip() or "미작성"
+# ---------- 목록 열(33%) ----------
+def _list_items(ordered: list[str], reports_by_id: dict, improvements: dict) -> list[dict]:
+    """§2 목록 행 2줄 고정 — 1줄: 제목 / 경과일, 2줄: 보고번호·소속 / 조치 단계.
 
-
-# ---------- KPI 스트립 ----------
-def _kpi_items(scoped: pd.DataFrame, improvements: dict, load_failed: bool) -> list[tuple]:
-    """KPI 4종 타일 항목(§1-A: 좌측 2px 보더 + 26px 모노 숫자). 전부 기존 데이터에서 파생.
-
-    종결 대기(scoped 큐 크기, accent) · 확인 완료(CONFIRMED) · 진행·미작성(대기-확인완료) ·
-    기한초과(due_date 경과 & 미확인). 조회 실패 시 파생 3종은 '—'(오류≠0).
-
-    렌더는 공용 kit(``erp.metric_strip``)이 소유한다 — 화면 로컬 타일 HTML 복제를 없애
-    조회·내 아차사고·평가 관리와 **같은 타일**(라벨 12px / 값 26px·600 모노 / 단위 11.5px)을
-    쓴다(2026-08-14 6화면 지표 어휘 통일)."""
-    total = 0 if scoped is None or scoped.empty else len(scoped)
-    if load_failed:
-        return [
-            ("종결 대기", total, "건", "PENDING CLOSE", True),
-            ("확인 완료", "—", "건", "VERIFIED", False),
-            ("진행·미작성", "—", "건", "IN PROGRESS", False),
-            ("기한초과", "—", "건", "OVERDUE", False),
-        ]
-    confirmed = sum(1 for imp in improvements.values()
-                    if imp and str(imp.get("confirm_status") or "") == _CONFIRMED)
-    in_progress = max(total - confirmed, 0)
+    "무엇을 먼저 처리할지 고를 근거"(경과일·소속·분류=조치 단계)를 담는다. 상태는 줄을
+    늘리지 않고 좌측 2px 보더 색으로만 표현하며(§4-5 행 높이 불변), 기한초과는 보더를
+    덮어쓰는 동시에 2줄 우측에 낱말로도 적는다(색 단독 신호 금지 §1.3).
+    """
     today = date.today().isoformat()
-    overdue = 0
-    for imp in improvements.values():
-        if not imp or str(imp.get("confirm_status") or "") == _CONFIRMED:
-            continue
-        due = str(imp.get("due_date") or "").strip()
-        if due and due < today:  # ISO 날짜 문자열 사전식 비교(안전)
-            overdue += 1
-    return [
-        ("종결 대기", total, "건", "PENDING CLOSE", True),
-        ("확인 완료", confirmed, "건", "VERIFIED", False),
-        ("진행·미작성", in_progress, "건", "IN PROGRESS", False),
-        ("기한초과", overdue, "건", "OVERDUE", False),
-    ]
+    items: list[dict] = []
+    for rid in ordered:
+        # ``or {}`` 를 쓰지 않는다 — 값이 pandas Series 라 truthiness 평가에서
+        # ValueError("truth value of a Series is ambiguous")로 화면이 통째로 죽는다.
+        r = reports_by_id.get(rid)
+        if r is None:
+            r = {}
+        imp = improvements.get(rid)
+        stage = _impr_stage(imp)
+        overdue = _is_overdue(imp, today)
+        dept = str(r.get("dept_code") or "").strip()
+        right = f"{stage} · {_OVERDUE_MARK}" if overdue else stage
+        items.append({
+            "key": rid,
+            "line1_left": str(r.get("work_name") or "(제목 없음)"),
+            "line1_right": worklist.elapsed_label(r.get("created_at")),
+            # line2_left 는 kit 이 **모노**로 렌더한다(.esl-mono) — IBM Plex Mono 에는 한글
+            # 글리프가 없어 한글을 넣으면 글자마다 폴백돼 자간이 벌어진다. 영숫자 식별자만.
+            "line2_left": str(r.get("report_no") or rid),
+            # 소속·조치 단계는 sans 쪽(line2_right)에 모아 둔다(둘 다 한글이 올 수 있다).
+            "line2_right": f"{dept} · {right}" if dept else right,
+            "accent": _OVERDUE_ACCENT if overdue else _STAGE_ACCENT.get(stage, _NEUTRAL),
+        })
+    return items
 
 
-def _hairline() -> None:
-    st.markdown(
-        f"<div style='border-top:1px solid {_LINE_SEC};margin:2px 0 10px;'></div>",
-        unsafe_allow_html=True,
-    )
+def _render_list(ordered: list[str], reports_by_id: dict, improvements: dict,
+                 selected_id, tab: str) -> str | None:
+    """목록 열 렌더 — 이번 run 에 새로 클릭된 자연키를 반환한다(선택 보관은 호출부)."""
+    with st.container(height=_LIST_HEIGHT, border=False, key="nm_impr_listbox"):
+        return erp.select_list(
+            "nm_impr_list",
+            _list_items(ordered, reports_by_id, improvements),
+            selected=str(selected_id) if selected_id is not None else None,
+            empty=f"'{tab}' 탭에 표시할 건이 없습니다.",
+        )
 
 
-# ---------- 종결 대기 큐 칩 스트립 ----------
-def _render_queue_chips(ordered: list[str], reports_by_id: dict, improvements: dict,
-                        load_failed: bool, selected_id: str) -> None:
-    """종결 대기 큐를 칩 스트립으로 렌더(§1-A·§7: st.button 반복 + session_state.sel).
-
-    칩=보고번호+작업명+확정등급. 선택=오렌지(primary), 나머지=흰+테두리. [n/m]+이전/다음.
-    케이스 전환 시 2단계 종결 확인(_CLOSE_CONFIRM_KEY)을 초기화한다(오처리 방지)."""
-    idx = ordered.index(selected_id)
-    st.markdown(
-        f"<div class='cq-head'><span class='t'>종결 대기 큐</span>"
-        f"<span class='c'>{len(ordered)}</span></div>",
-        unsafe_allow_html=True,
-    )
-    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
-        for rid in ordered:
-            r = reports_by_id.get(rid, {})
-            short = str(r.get("report_no") or rid)[-8:]
-            title = str(r.get("work_name") or "(제목 없음)")
-            if len(title) > 20:
-                title = title[:19] + "…"
-            grade = str(r.get("confirmed_grade") or "").strip()
-            label = f"{short} · {title}" + (f" · {grade}" if grade else "")
-            picked = st.button(
-                label, key=f"cq_{rid}",
-                type="primary" if rid == selected_id else "secondary",
-            )
-            if picked and rid != selected_id:
-                st.session_state[_SEL_KEY] = rid
-                st.session_state.pop(_CLOSE_CONFIRM_KEY, None)
-                st.rerun()
-        st.markdown(f"<span class='cq-pos'>{idx + 1}/{len(ordered)}</span>",
-                    unsafe_allow_html=True)
-        if st.button("‹", key="cq_prev", help="이전 건",
-                     disabled=idx <= 0, type="secondary"):
-            st.session_state[_SEL_KEY] = ordered[idx - 1]
-            st.session_state.pop(_CLOSE_CONFIRM_KEY, None)
-            st.rerun()
-        if st.button("›", key="cq_next", help="다음 건",
-                     disabled=idx >= len(ordered) - 1, type="secondary"):
-            st.session_state[_SEL_KEY] = ordered[idx + 1]
-            st.session_state.pop(_CLOSE_CONFIRM_KEY, None)
-            st.rerun()
-
-
-# ---------- 전체폭 상세 ----------
+# ---------- 상세 열(67%) ----------
 def _render_detail(user: dict, readiness: ReadinessState) -> None:
     selected_id = st.session_state.get(_SEL_KEY)
     if not selected_id:
@@ -490,11 +621,9 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
         # 다른 사용자가 먼저 종결(CLOSED)했거나 재개(IN_REVIEW)됐거나 삭제됨 — stale 선택 해제.
         st.session_state.pop(_SEL_KEY, None)
         st.session_state.pop(_CLOSE_CONFIRM_KEY, None)
-        st.markdown(
-            f"<div style='padding:22px 0;font-size:14.5px;color:{_INK2};'>"
-            "이 케이스는 더 이상 종결 대기 상태가 아닙니다. 다른 사용자가 먼저 처리했을 수 있습니다 — "
-            "새로고침한 뒤 다시 선택하세요.</div>",
-            unsafe_allow_html=True,
+        erp.detail_empty(
+            "더 이상 종결 대기 상태가 아닙니다",
+            "다른 사용자가 먼저 처리했을 수 있습니다 — 새로고침한 뒤 다시 선택하세요.",
         )
         return
 
@@ -516,48 +645,34 @@ def _render_detail(user: dict, readiness: ReadinessState) -> None:
     can_review = auth.can_review_improvement(user, imp)
     can_assign = auth.can_evaluate_near_miss(user)
 
-    # ── 전체폭 상세(읽기 HTML): 보고번호+평가완료 pill + 제출/확인 배지 / 제목 / 메타 / 본문 블록 ──
+    # ── 근거(§2: 근거 → 결정 컨트롤 → 실행 버튼) ──
     st.markdown(_detail_read_html(report, imp, status), unsafe_allow_html=True)
 
-    # ── 워크플로 클러스터(CAPA 폼 + 역할별 scope 액션) — 본문 블록 바로 뒤 ──
+    # ── 결정 컨트롤(CAPA 폼) → 실행(역할별 scope 액션) ──
     st.markdown(
-        f"<div style='border-top:1px solid {_LINE_SEC};margin:12px 0 2px;'></div>",
+        f"<div style='border-top:1px solid {_LINE_SEC};margin:12px 0 12px;'></div>",
         unsafe_allow_html=True,
     )
+    st.markdown("<div class='nm-sec'>개선조치</div>", unsafe_allow_html=True)
     form = _render_capa_form(selected_id, imp, readiness, can_work=can_work, can_assign=can_assign)
     _render_actions(user, report, imp, form, readiness,
                     can_work=can_work, can_review=can_review, can_assign=can_assign)
 
-    # ── 부차 참조 서술(작업 내용·현장 설명)은 기본 접힘으로 상세 높이 bound(§0.4 네이티브 expander). ──
-    with st.expander("보고서 원문 더 보기", expanded=False):
-        _read_field("작업 내용", str(report.get("work_content") or ""))
-        _read_field("현장 설명", str(report.get("site_description") or ""))
-
-
-def _read_field(label: str, value: str) -> None:
-    """전폭 읽기 필드(라벨 12.5/600 + 본문 **14.5px**/1.7) — 이 화면 상단 본문 블록과 같은 크기.
-
-    공용 ``erp.field_block`` 은 본문 13px 이라 같은 화면 안에서도 상단 블록(14.5px)과 크기가
-    달랐다(DESIGN 부속서 A-3 본문 ≥14.5px 미달). kit 은 이 작업의 수정 범위 밖이라 화면
-    로컬로 맞추고 kit 정합은 별도 보고 항목으로 남긴다(2026-08-14)."""
-    body = escape(value) if str(value or "").strip() else "-"
-    st.markdown(
-        "<div style='margin:8px 0 0;'>"
-        f"<div style='font-size:12.5px;font-weight:600;color:{_INK2};margin-bottom:2px;'>"
-        f"{escape(label)}</div>"
-        f"<div style='font-size:14.5px;line-height:1.7;color:{_INK};white-space:pre-wrap;"
-        f"text-wrap:pretty;'>{body}</div></div>",
-        unsafe_allow_html=True,
-    )
-
 
 def _detail_read_html(report: dict, imp, status: str) -> str:
-    """선택 건 전체폭 상세(§1-A) — 보고번호(18px 모노)+상태 pill·제출/확인 배지 / 제목(17/600) /
-    우측 메타(신고자·발생일·부서·확정등급) / 본문 블록(WHAT·CAUSE·ACTION)."""
+    """상세 머리 + 주요 내용 표.
+
+    머리 — 식별자(16/600 모노) + 상태 배지 + **단계 결과**(§3.3) + 제출/확인 배지 +
+    대상 제목(20/600) + 메타(발생일·접수 경과·소속·신고자·평가 등급).
+    본문 — **라벨 열 + 값 열 1개**(§3.1·§4-4). 값 열이 둘 이상이면 길이가 다른 산문의 폭을
+    맞출 수 없어 반드시 어긋난다(이 저장소에서 같은 결함이 세 번 재발했다). 라벨 열 폭은
+    §2 FORM_ENTRY 의 130px 과 같은 값을 써 등록 화면과 필드 순서·라벨 폭을 일치시킨다.
+    """
     report_no = escape(str(report.get("report_no") or "-"))
     status_pill = lifecycle_badge_html(status, "평가완료")
     submit_status = str(imp.get("submit_status") or "") if imp else ""
     confirm_status = _confirm_state_of(imp)
+    stage = _impr_stage(imp)
     submit_badge = erp.status_badge_html(
         _SUBMIT_LABEL.get(submit_status, "미작성"),
         _SUBMIT_COLOR.get(submit_status, _NEUTRAL))
@@ -565,65 +680,68 @@ def _detail_read_html(report: dict, imp, status: str) -> str:
         _CONFIRM_LABEL.get(confirm_status, confirm_status),
         _CONFIRM_COLOR.get(confirm_status, _NEUTRAL))
     title = escape(str(report.get("work_name") or "(제목 없음)"))
-    # 등급은 조회·평가와 같은 등급 마크(셰브런+색 텍스트)로 렌더한다(2026-08-14 표기 통일).
-    grade = _grade_mark(report.get("confirmed_grade"), empty="미정")
+    effect = escape(_STAGE_EFFECT.get(stage, ""))
 
-    lbl = f"font-size:11.5px;color:{_INK2};"
-    head_left = (
-        "<div style='display:flex;flex-direction:column;gap:7px;min-width:0;'>"
+    lbl = f"font-size:12px;color:{_FAINT};"
+    head = (
+        "<div style='padding:2px 0 14px;display:flex;flex-direction:column;gap:8px;'>"
         "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;'>"
-        f"<span style='font-family:{_MONO};font-size:18px;font-weight:600;color:{_INK};'>{report_no}</span>"
+        f"<span style='font-family:{_MONO};font-size:16px;font-weight:600;color:{_INK};'>{report_no}</span>"
         f"{status_pill}"
         f"<span style='{lbl}'>제출</span>{submit_badge}"
         f"<span style='{lbl}'>확인</span>{confirm_badge}</div>"
-        f"<span style='font-size:17px;color:{_INK};font-weight:600;letter-spacing:-0.02em;'>{title}</span>"
-        "</div>"
+        f"<span style='font-size:12px;color:{_INK2};'>{effect}</span>"
+        f"<span style='font-size:20px;font-weight:600;color:{_INK};line-height:1.35;"
+        f"text-wrap:pretty;'>{title}</span>"
     )
+    # 등급은 조회·평가와 같은 등급 마크(셰브런+색 텍스트)로 렌더한다. 라벨은 §3.6 어휘
+    # '평가 등급'이며 코드값 confirmed_grade 는 불변이다(폐기한 낱말은 모듈 docstring 참조).
+    # 세 번째 항목(mono)은 **영숫자 전용 문자열에만** 켠다 — IBM Plex Mono 에는 한글
+    # 글리프가 없어 한글에 모노를 걸면 글자마다 폴백 폰트로 떨어져 자간이 벌어진다.
     meta = [
-        ("신고자", escape(_user_label(report.get("reporter_emp_no")))),
-        ("발생일", escape(str(report.get("incident_date") or "-"))),
-        ("부서", escape(str(report.get("dept_code") or "-"))),
-        ("확정등급", grade),
+        ("발생일", escape(str(report.get("incident_date") or "-")), True),
+        ("접수 경과", escape(worklist.elapsed_label(report.get("created_at"))), False),
+        ("소속", escape(str(report.get("dept_code") or "-")), False),
+        ("신고자", escape(_user_label(report.get("reporter_emp_no"))), False),
+        ("평가 등급", _grade_mark(report.get("confirmed_grade"), empty="미정"), False),
     ]
     meta_cells = "".join(
-        f"<div style='display:flex;flex-direction:column;gap:3px;'>"
-        f"<span style='font-size:10.5px;letter-spacing:0.08em;color:{_FAINT};font-family:{_MONO};'>"
-        f"{escape(label)}</span>"
-        f"<span style='font-size:13.5px;color:{_INK};line-height:1.35;'>{value}</span></div>"
-        for label, value in meta
+        f"<div style='display:flex;flex-direction:column;gap:2px;min-width:0;'>"
+        f"<span style='font-size:12px;color:{_FAINT};'>{escape(label)}</span>"
+        f"<span style='font-size:14px;color:{_INK};line-height:1.4;"
+        + (f"font-family:{_MONO};font-variant-numeric:tabular-nums;" if mono else "")
+        + f"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{value}</span></div>"
+        for label, value, mono in meta
     )
-    head = (
-        "<div style='padding:4px 0 18px;display:flex;flex-wrap:wrap;align-items:flex-start;"
-        f"justify-content:space-between;gap:14px 20px;'>{head_left}"
-        f"<div style='display:flex;flex-wrap:wrap;gap:12px 26px;'>{meta_cells}</div></div>"
+    head += (
+        f"<div style='display:flex;flex-wrap:wrap;gap:8px 32px;padding-top:4px;"
+        f"border-top:1px solid {_LINE};'>{meta_cells}</div></div>"
     )
 
     cause = str(report.get("cause_code") or "")
     cause_detail = str(report.get("cause_detail") or "")
     cause_label = _CAUSE_LABEL.get(cause, cause)  # 미등록 코드는 원문 fallback(표시 전용)
     cause_val = cause_label + (f" · {cause_detail}" if cause_detail else "")
-    blocks = [
-        ("WHAT", "사고 내용", str(report.get("incident_content") or ""), True),
-        ("CAUSE", "원인", cause_val, False),
-        ("ACTION", "제안 대책", str(report.get("countermeasure") or ""), True),
+    # 종전에는 작업 내용·현장 설명이 액션 **뒤**의 expander 에 있었다 — 판정 자료가 판정
+    # 컨트롤보다 뒤에 오면 안 된다(§2). 주요 내용 표로 끌어올린다.
+    rows = [
+        ("사고 내용", str(report.get("incident_content") or "")),
+        ("작업 내용", str(report.get("work_content") or "")),
+        ("현장 설명", str(report.get("site_description") or "")),
+        ("원인", cause_val),
+        ("대책", str(report.get("countermeasure") or "")),
     ]
-    block_cells = []
-    for tag, label, value, long in blocks:
-        flex = "2 1 420px" if long else "1 1 260px"
-        body = escape(value).strip() or "-"
-        block_cells.append(
-            f"<div style='flex:{flex};min-width:0;border-left:2px solid {_LINE_SEC};"
-            "padding-left:14px;display:flex;flex-direction:column;gap:6px;'>"
-            f"<span style='font-size:11px;letter-spacing:0.1em;color:{_FAINT};font-family:{_MONO};'>{tag}</span>"
-            f"<span style='font-size:12.5px;font-weight:600;color:{_INK2};'>{escape(label)}</span>"
-            f"<p style='margin:0;font-size:14.5px;line-height:1.7;color:{_INK};text-wrap:pretty;"
-            f"white-space:pre-wrap;'>{body}</p></div>"
-        )
-    body_blocks = (
-        f"<div style='padding:22px 0 6px;border-top:1px solid {_LINE_SEC};"
-        f"display:flex;flex-wrap:wrap;gap:22px 32px;'>{''.join(block_cells)}</div>"
+    cells = "".join(
+        "<div style='display:flex;gap:16px;padding:8px 0;"
+        f"border-top:1px solid {_LINE};'>"
+        f"<span style='flex:0 0 130px;font-size:12px;color:{_INK2};font-weight:600;"
+        "line-height:1.6;'>" + escape(label) + "</span>"
+        f"<span style='flex:1 1 auto;min-width:0;font-size:14px;line-height:1.7;color:{_INK};"
+        "white-space:pre-wrap;text-wrap:pretty;'>"
+        + (escape(value).strip() or "-") + "</span></div>"
+        for label, value in rows
     )
-    return head + body_blocks
+    return head + f"<div style='margin:0 0 4px;'>{cells}</div>"
 
 
 def _user_options() -> tuple[list[str], dict, bool]:
@@ -661,7 +779,10 @@ def _render_capa_form(selected_id, imp, readiness: ReadinessState,
 
     행단위 편집 경계: 배정 필드(담당자·확인자)는 can_assign(평가자/ADMIN)만, 작업 필드
     (기한·조치 내용/결과)는 can_work(배정 담당자 본인·ADMIN)만 편집 가능하고 그 외에는
-    읽기전용(disabled)으로 표시한다 — facade 가 어차피 strip 하지만 화면도 경계를 드러낸다."""
+    읽기전용(disabled)으로 표시한다 — facade 가 어차피 strip 하지만 화면도 경계를 드러낸다.
+
+    상세가 67% 열이라 컨트롤을 한 줄에 셋 늘어놓으면 폭이 모자라 줄바꿈이 어긋난다 —
+    배정(담당자·확인자) 한 줄 / 기한 한 줄로 나누고 각 컨트롤은 제 폭만 쓴다(§3.1)."""
     confirm_status = _confirm_state_of(imp)
     if imp and confirm_status == "REJECTED" and str(imp.get("revision_note") or "").strip():
         banner("warn", f"재조치 요청 사유: {str(imp.get('revision_note')).strip()}")
@@ -691,13 +812,13 @@ def _render_capa_form(selected_id, imp, readiness: ReadinessState,
             format_func=fmt, key=f"nm_impr_confirmer_{selected_id}",
             disabled=assign_disabled, width=240,
         )
-        due_raw = str(imp.get("due_date") or "").strip() if imp else ""
-        try:
-            due_default = date.fromisoformat(due_raw) if due_raw else date.today()
-        except ValueError:
-            due_default = date.today()
-        due = st.date_input("조치 기한", value=due_default, format="YYYY-MM-DD",
-                            key=f"nm_impr_due_{selected_id}", disabled=not can_work, width=180)
+    due_raw = str(imp.get("due_date") or "").strip() if imp else ""
+    try:
+        due_default = date.fromisoformat(due_raw) if due_raw else date.today()
+    except ValueError:
+        due_default = date.today()
+    due = st.date_input("조치 기한", value=due_default, format="YYYY-MM-DD",
+                        key=f"nm_impr_due_{selected_id}", disabled=not can_work, width=180)
 
     if not can_work:
         st.caption("조치 내용·결과·기한은 배정된 담당자만 편집할 수 있습니다(조회 전용).")
@@ -718,15 +839,31 @@ def _render_capa_form(selected_id, imp, readiness: ReadinessState,
     }
 
 
+def _gate_notes(notes: list[tuple]) -> None:
+    """비활성 사유를 화면에 쓴다(§3.2·§4-3 — 툴팁에만 두지 않는다).
+
+    마우스를 올려야 알 수 있으면 모르는 것과 같고, 사유 없는 회색 버튼은 고장과 구분되지
+    않는다. ``notes``: ``[(라벨, 사유 or None)]`` — 사유가 있는 것만 모아 한 블록으로 쓴다."""
+    lines = [f"<b>{escape(str(label))}</b> 비활성 — {escape(str(reason))}"
+             for label, reason in notes if reason]
+    if not lines:
+        return
+    st.markdown(
+        f"<div style='font-size:12px;color:{_INK2};line-height:1.6;margin:6px 0 0;"
+        f"text-wrap:pretty;'>" + "<br>".join(lines) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _render_actions(user: dict, report: dict, imp, form: dict, readiness: ReadinessState,
                     *, can_work: bool, can_review: bool, can_assign: bool) -> None:
-    """행단위 역할 variant scope 액션(§0.4) — §1-A 하단 액션 바. 버튼 노출을 능력으로 가른다:
+    """행단위 역할 variant scope 액션(§0.4) — §2 실행 블록. 버튼 노출을 능력으로 가른다:
 
       - can_work(담당자/ADMIN): 조치 저장·제출.
       - can_assign(평가자/ADMIN): 배정 저장(담당자·확인자 지정).
       - can_review(확인자/평가자/ADMIN): 확인·재조치 요청·보고서 종결.
 
-    자기확인(담당자==세션) 시 확인은 disabled+help 로 남기고 facade 도 차단한다. 실제 쓰기·
+    자기확인(담당자==세션) 시 확인은 disabled+사유로 남기고 facade 도 차단한다. 실제 쓰기·
     신원전달(auth.get_current_user())·예외흡수는 이 화면 소관이다."""
     selected_id = str(report.get("id"))
     can_write = readiness.write_enabled
@@ -750,6 +887,7 @@ def _render_actions(user: dict, report: dict, imp, form: dict, readiness: Readin
         ) or "").strip()
 
     actions: list[tuple] = []
+    gates: list[tuple] = []
 
     # ---- 저장(작업 or 배정) — can_work 또는 can_assign. 라벨로 무엇을 저장하는지 드러낸다. ----
     save_label = None
@@ -764,6 +902,7 @@ def _render_actions(user: dict, report: dict, imp, form: dict, readiness: Readin
         else:
             save_label = "배정 저장"       # 평가자: 담당자·확인자 배정만(작업필드 facade strip).
         actions.append((save_label, "default", save_disabled, save_help))
+        gates.append((save_label, save_help if save_disabled else None))
 
     # ---- 제출 — can_work(담당자/ADMIN)만. 비담당 평가자에겐 미표시. ----
     if can_work:
@@ -777,6 +916,7 @@ def _render_actions(user: dict, report: dict, imp, form: dict, readiness: Readin
         else:
             submit_help = None
         actions.append(("제출", "primary", submit_disabled, submit_help))
+        gates.append(("제출", submit_help if submit_disabled else None))
 
     # ---- 확인·재조치 요청 — can_review(확인자/평가자/ADMIN)만. 담당자에겐 미표시. ----
     if can_review:
@@ -802,8 +942,11 @@ def _render_actions(user: dict, report: dict, imp, form: dict, readiness: Readin
 
         actions.append(("확인", "primary", confirm_disabled, confirm_help))
         actions.append(("재조치 요청", "default", reject_disabled, reject_help))
+        gates.append(("확인", confirm_help if confirm_disabled else None))
+        gates.append(("재조치 요청", reject_help if reject_disabled else None))
 
     clicks = erp.detail_actions(_PAGE_ID, actions)
+    _gate_notes(gates)
 
     if save_label and clicks.get(save_label):
         _run_action(save_label, lambda: db.upsert_near_miss_improvement(
@@ -841,6 +984,7 @@ def _render_close(report: dict, imp, disabled: bool, help_: str | None) -> None:
     close_clicks = erp.detail_actions(f"{_PAGE_ID}_close", [
         ("보고서 종결", "primary", disabled, help_),
     ])
+    _gate_notes([("보고서 종결", help_ if disabled else None)])
     if close_clicks.get("보고서 종결") and not disabled:
         st.session_state[_CLOSE_CONFIRM_KEY] = selected_id
         st.rerun()
@@ -848,7 +992,7 @@ def _render_close(report: dict, imp, disabled: bool, help_: str | None) -> None:
     if st.session_state.get(_CLOSE_CONFIRM_KEY) != selected_id:
         return
 
-    # 인라인 확인 영역 — 보고번호·확정등급·확인된 개선조치 요약 + 불가역 고지.
+    # 인라인 확인 영역 — 보고번호·평가 등급·확인된 개선조치 요약 + 불가역 고지.
     report_no = str(report.get("report_no") or "-")
     grade = str(report.get("confirmed_grade") or "-")
     result_summary = str((imp or {}).get("result_body") or "").strip() or "(조치 결과 없음)"
@@ -856,7 +1000,7 @@ def _render_close(report: dict, imp, disabled: bool, help_: str | None) -> None:
         result_summary = result_summary[:80] + "…"
     banner(
         "warn",
-        f"보고서 종결(불가역): {report_no} · 확정등급 {grade} · 확인된 개선조치 "
+        f"보고서 종결(불가역): {report_no} · 평가 등급 {grade} · 확인된 개선조치 "
         f"“{result_summary}”. 종결하면 이후 전이가 없습니다.",
     )
     confirm_clicks = erp.detail_actions(f"{_PAGE_ID}_close2", [

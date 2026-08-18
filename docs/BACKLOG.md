@@ -56,6 +56,26 @@
 | KP-standard 구조 통합(진행 중) | 07-26 DESIGN.md §0 재작성(화면×역할 매니페스트·중립 구조 키트·영역 순서·MASTER_DETAIL 신규·실렌더 region 검증) 확정, Codex+Sonnet GO-WITH-CHANGES. **진행: near_miss_view(조회)·schedule_view(월간) 이관 완료(sign-off).** 구현 P1: ①중립 키트 `views/common/erp/`를 `views/master`(lifecycle)와 분리 ②AgGrid 단일 렌더러 + `READ/SELECT/EDIT/MATRIX` capability 분리(READ에 action열·paste JS·unsafe_jscode 금지) ③`workspace.py` 중복 grid는 UI 렌더러만 분리(scope·snapshot·dirty 로직 보존) ④`test_screen_scaffold`를 AppTest 역할별 실렌더 region 순서 검증으로 전환(분기 맹점) ⑤조직 3저장범위·FORM_ENTRY form 제약 계약 보존 ⑥`AppTest.dataframe` 검사는 뷰모델 검사로 전환(삭제 금지). 순서: 매니페스트/키트 → near_miss_view(파일럿) → schedule_view → near_miss_submit → evaluate → dashboard/stats → schedule_edit → master 3종(조직 마지막) → 사이드바 정리 → 전역 sign-off | 코드 |
 | 전역 UI 검수 잔여(2026-08-14) | PC 13화면 표 간격·정렬 결함 0건 확인, 모바일 3건(헤더 아이콘 잘림 P1·그리드 스크롤 신호 부재 P2·드로어 미자동닫힘 P3) 수정 완료(Codex FINAL+RECHECK PASS). 잔여: ①PC 접기 버튼 종착 상태 사용자 결정 대기(현행 66px 레일 유지 vs 완전 접힘 전환 vs 네이티브 X 노출 — DESIGN §4) ②PC에서 가로로 넘치는 그리드(편성 527/1736·근무형태 993/1144)의 스크롤바 스타일 통일 여부 별도 결정 ③kit 옵트인 상시 스크롤바 실기기 미검증(모바일 엣지 페이드가 어포던스 보증) ④모바일 브레드크럼 "홈 / …" 말줄임 가독성(페이지 제목이 전체 명칭 보증) ⑤드로어 자동닫힘은 st.iframe JS 브리지(Streamlit 사이드바 상태 API 생기면 교체, 실패 시 무동작 degrade) | 게이트/코드 |
 
+| 공용: primary 버튼 `:disabled` 예외 부재 | `modules/ui.py` 의 primary 버튼 규칙에 `:disabled` 분기가 없어 비활성 primary 가 활성처럼 보인다. 아차사고 등록은 §1.3 중립색으로 로컬 교정했으나 공용 규칙 자체를 고쳐야 다른 화면도 해소된다 | 코드 |
+| 공용: `[data-baseweb="select"]` 죽은 선택자 | Streamlit 1.60 의 selectbox 는 baseweb 이 아니라 `react-aria-ComboBox` 다. 이 선택자에 기대는 공용 CSS 는 무효 — 전수 확인 후 두 형태 병기 또는 교체 | 코드 |
+| 공용: `form_row` primitive 승격 | 라벨 열(130px) + 값 열 1개 행이 FORM_ENTRY 3화면에서 반복될 예정 — `views/common/erp/` 로 올려 130px 단일 출처화 | 코드 |
+| 공용: sticky 는 `stLayoutWrapper` 에 걸어야 한다 | Streamlit 1.60 은 키드 컨테이너를 `stLayoutWrapper` 로 한 겹 더 감싼다. 안쪽 `st-key-` div 에 `position:sticky` 를 걸면 containing block 이 바 자신의 높이로 잘려 **고정 구간이 0** 이 된다(실측). `near_miss_submit` 은 wrapper 선택자로 해결했고, `views/common/proto.py:291` 의 `.st-key-lrq_submitbar` 는 아직 안쪽에 걸려 있어 같은 함정 대상 | 코드 |
+| `_STATUS_LABEL` 6곳 복제 → 단일 출처 | `near_miss_my`·`view`·`evaluate`·`stats`·`pdf`(`_STATUS_RGB` 키가 사실상 라벨 사전)·`improvement` 에 상태 라벨이 복제돼 있다. 실제로 조용히 어긋난 사례 발생 — PDF 의 키가 `"제출"` 이라 호출부의 `"제출됨"` 과 매칭 실패해 상태 색이 기본값으로 떨어지고 있었다(2026-08-18 수정). **라벨 + 색 + `_STATUS_EFFECT` 3종을 한 모듈로** 묶되, §3.3 문구는 화면 시점별로 갈리므로 기본값 + 화면 override 구조가 필요 | 코드 |
+| `_kpi_items` 이름 정리 | 평가·개선조치의 지표 타일이 §4-1 로 제거되고 상태 탭 건수로 바뀌었으나, `test_near_miss_error_surfacing` 이 "조회 실패 시 파생 지표를 0 으로 위장하지 않고 '—'" 계약을 이 이름으로 고정하고 있어 이름을 유지했다. 계약 테스트와 함께 개명 | 코드 |
+| REJECTED 재제출 UI 부재 | `db.NEAR_MISS_TRANSITIONS` 는 `REJECTED → SUBMITTED` 를 허용하는데 내 아차사고에 재제출 경로가 없다. 평가 관리의 `보고자 재제출 대기` 문구와 실제 보고자 경로가 어긋남 — UI 신설 또는 전이 제거 중 택일(5단계 전이표 정리와 함께) | 코드 |
+| §3.2 불가능한 전이 숨김 미적용 | 평가 관리의 액션 버튼 4개를 상태별로 숨기는 것은 기능 계약 변경이라 이번 범위 밖으로 두고 비활성 + 사유 표기로 처리했다. §3.2 적용 여부 결정 필요 | 결정 |
+| DESIGN §2 FORM_ENTRY 밀도 모순 | §2 표는 FORM_ENTRY 밀도를 `compact` 로 적는데 §3.4 등급표는 아차사고 등록을 이름으로 지목해 `모바일 우선 = cozy` 로 둔다. 구현은 화면별 등급(cozy)을 따랐다 — §2 표 한 줄 정정 필요 | 문서 |
+| 경과일·목록 스크롤 실렌더 미검증 | sample seed(`modules/db.py::_NEAR_MISS_SEED`)에 `created_at` 이 없어 경과일이 화면에서 `-` 로만 뜬다(숫자·경계는 단위검사 8건으로만 덮임). sample 큐가 1건이라 `select_list` 자체 스크롤(520px)과 행 높이 편차도 실물 확인 불가 — 시드 보강 또는 실데이터 시 확인 | 게이트 |
+| `select_list` 선택 행 accent 가려짐 | 선택 행의 좌측 보더를 kit 이 선택 어휘(navy)로 덮어써 상태색 accent 는 비선택 행에서만 보인다. kit 설계 의도이나 sample 1건이라 실물 확인 불가 — 상태색을 다른 슬롯으로 옮길지 결정 | 결정 |
+| `views/common/worklist.py` 확장 | 경과일 계산(`created_at` 기준, UTC→KST 날짜 비교, 미래 0 클램프, 값 없음 `-`)을 신설했다. WORKLIST 4화면 공유 예정이며 나머지 화면 이관 시 함께 소비 | 코드 |
+| §5 검증: 분석 차트가 의미색을 카테고리 팔레트로 전용 | 2026-08-18 §5 최초 실행 실측 — `near_miss_stats` 의 분포 4블록 fill 이 등급 `#c2410c` · 상태 `#2f6b45` · 원인 `#8a6212` · 월별 `#2f4d99` 로 고정돼 있어, **상태별 분포는 `반려`·`제출됨` 까지 전부 '완료·정상' 초록**으로 칠한다. §1.3 의미색 규칙과 충돌 — 카테고리축은 중립 팔레트로 분리할지 결정 필요 | 결정 |
+| §5 검증: 화면 제목 line-height 가 글리프 박스보다 작음 | `views/master/style.py:213-214` `.ms-title` 28px/line-height 1.2(33.6px) + `overflow:hidden` 인데 실측 `scrollHeight 37 > clientHeight 34` — 3px 세로 클립 여지. 6개 렌더 전부 동일하나 **실제 글리프 손실은 관측되지 않아** 미달로 세지 않았다. 한글 디센더가 긴 글꼴로 바뀌면 드러남 | 코드 |
+| §5 검증: 공용 키트·셸의 §1.2 스케일 이탈 | `kit.py` 가 표 값 14.5 · 헤더 12.5 · 지표값 26 · 단위 11.5 를, `ui.py` 셸이 10.92/11/12.25/15/17/18 을 공급해 한 화면에 폰트 9~13종이 렌더된다(실측). 화면 단위로는 해결 불가 — 공용 계층 일괄 정합 필요. DESIGN §7.2-10 서술과 실측 일치 | 코드 |
+| §5 검증: 포커스 어휘 3종 혼재 | `.esl-row` 는 `outline 2px solid #c2410c`, 일반 컨트롤은 `box-shadow rgba(194,65,12,.5) 0 0 0 2.8px`, 텍스트 입력은 알파 9% 그림자 + 1px 보더(그림자는 사실상 안 보이고 보더가 실신호). 하나로 통일 필요 | 코드 |
+| §5 검증: 분석 KPI 단위 표기 2종 | 8개 타일은 값 26px + 단위 11.5px 를 분리하는데, `기한초과`("0건")·`보고서 종결률`("50%") 2개는 26px 값 안에 단위를 넣는다 — 표기 규칙 단일화 | 코드 |
+| §5 검증: 2열 gap 8.4px | `master_detail_frame` 의 열 간격이 Streamlit 기본 8.4px 로 §1.1 스케일(8) 밖. 비율 자체는 32.95/66.28 로 §2 33/67 계약 통과 | 코드 |
+| §5 검증: 사이드바 확장 아이콘 4.39:1 | 390 에서 `keyboard_double_arrow_right` 글리프가 `#72706d`/`#f4f2ee` = 4.39:1, 히트영역 24.5×24.5px. **아이콘이라 비텍스트 3:1 기준으로는 통과**라 미달로 세지 않았으나 히트영역은 §1.4 하한 미달 | 코드 |
+| §5 검증: 미측정 조합 | 2026-08-18 실행에서 남은 것 — ①`599–1023px` 중간 브레이크포인트 ②1440/1280/1024 폭 ③MANAGER·USER 권한으로 본 평가·개선조치 ④행 선택 상태·상세 패널·hover/focus 실렌더 ⑤ADMIN 사이드바 셸 @390 ⑥사진 첨부 후 썸네일 레이아웃. 다음 §5 실행 시 우선 대상 | 게이트 |
 ## 후보 (미채택 — 필요 시 재검토)
 
 - 문서 정합 자동 점검 스크립트(`test_docs_consistency.py`): migration 목록 vs 문서 표 일치·참조 경로 실존 검사 (2026-07-25 인터뷰에서 미채택)

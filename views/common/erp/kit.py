@@ -26,7 +26,10 @@ TOKENS = style.TOKENS
 
 # ── 밀도 토큰 (DESIGN.md §2·§0.6 — 데스크톱 읽기/선택 그리드) ──
 _READ_ROW_PX = 34          # read_grid 기본(§2 읽기 32–34) — schedule_view 등 무변경.
-_SELECT_ROW_PX = 32        # select_grid 기본(M/A 큐 밀도, §0.6 실측 31–32) — USER 는 44 variant.
+# select_grid 기본 = §1.4 compact 하한 34(밴드 34~38). 종전 32 는 폐기된 §0.6 의 실측
+# 31–32 를 근거로 삼아 신 밴드 어디에도 속하지 않았다(2026-08-18 §5 검증 지적).
+# USER·터치 화면은 호출부에서 row_height=44(cozy) variant 를 넘긴다.
+_SELECT_ROW_PX = 34
 _READ_HEADER_PX = 36       # 헤더 34–36(§2) — 그리드 헤더 계약(test_erp_select_grid) 고정.
 _READ_CHROME_PX = 16
 _READ_MIN_PX = 120
@@ -124,15 +127,20 @@ _KIT_CSS = f"""
 }}
 .erp-empty-t {{ font-size: 13px; font-weight: 600; color: {TOKENS['ink-2']}; }}
 .erp-empty-b {{ font-size: 12px; color: {TOKENS['ink-2']}; line-height: 1.4; }}
-/* §1-F/§1-A 지표 타일 스트립(분석 화면 표준·사용자 채택): 좌측 2px 보더 + 26px 모노 값
-   + 라벨(카드 박스 없음, 2줄: 라벨 + 값). 요약 수치가 있는 화면 공통 어휘. */
-.erp-metrics {{ display: flex; flex-wrap: wrap; gap: 12px; margin: .3rem 0 1rem; }}
-.erp-metric {{ flex: 1 1 130px; min-width: 0; display: flex; flex-direction: column;
-  gap: 4px; padding: 2px 18px; }}
+/* §1-F/§1-A 지표 타일 스트립(요약 수치가 있는 화면 공통 어휘, 카드 박스 없음 2줄).
+   2026-08-19 정합: ① 값 26px·단위 11.5px 가 §1.2 다섯 단계(28/20/16/14/12) 밖이었다
+   → 20 / 12. ② `flex: 1 1 130px` 은 남는 가로 폭을 타일에 흡수시켜 한 자리 숫자가
+   300px 을 차지하게 만들던 바로 그 설계다(사용자 확정 지시: "남으면 남긴다")
+   → `flex: 0 0 auto` + `width: max-content` 로 **폭을 내용이 정한다**.
+   ③ margin `.3rem 0 1rem`(4.2 / 14px)·padding `2px 18px` 가 §1.1 스케일 밖 → 4/16, 4/16.
+   대시보드는 같은 원칙을 파이썬 역산으로 구현했다(자체 타일, 이 규칙 미사용). */
+.erp-metrics {{ display: flex; flex-wrap: wrap; gap: 12px; margin: 4px 0 16px; }}
+.erp-metric {{ flex: 0 0 auto; width: max-content; min-width: 0;
+  display: flex; flex-direction: column; gap: 4px; padding: 4px 16px; }}
 .erp-metric-label {{ font-size: 12px; color: #6b665d; }}
 .erp-metric-vrow {{ display: flex; align-items: baseline; gap: 4px; }}
-.erp-metric-val {{ font-size: 26px; font-weight: 600; letter-spacing: -0.03em; color: {TOKENS['ink']}; }}
-.erp-metric-unit {{ font-size: 11.5px; color: #6b665d; }}
+.erp-metric-val {{ font-size: 20px; font-weight: 600; letter-spacing: -0.03em; color: {TOKENS['ink']}; }}
+.erp-metric-unit {{ font-size: 12px; color: #6b665d; }}
 /* 모노 강제(값) — Streamlit 이 인라인 font-family 를 제거하므로 0,3,0 규칙으로. */
 .stApp [data-testid="stMarkdownContainer"] .erp-metric-val {{
   font-family: 'IBM Plex Mono','Consolas','Menlo',monospace; font-variant-numeric: tabular-nums;
@@ -423,7 +431,10 @@ def grid_shell(key: str, *, nrows: int, ncols: int, fingerprint, render,
 _READ_BASE_CSS = {
     ".ag-header": {"background-color": "transparent",
                    "border-bottom": "1px solid " + TOKENS["line-strong"]},
-    ".ag-header-cell": {"font-weight": "600", "font-size": "12.5px"},
+    # color 를 명시하지 않으면 AG 테마 기본 rgba(28,26,23,0.6) 이 캔버스 #f4f2ee 위에
+    # 4.39:1 로 합성돼 §5 하한(4.5)에 미달한다(2026-08-18 실측). ink-2 로 고정 → 8.50:1.
+    ".ag-header-cell": {"font-weight": "600", "font-size": "12.5px",
+                        "color": TOKENS["ink-2"]},
     # overflow:hidden 은 아래 말줄임 규칙이 성립하기 위한 전제다.
     # (셀 좌우 패딩은 7px 로 헤더 8px 와 1px 어긋나 있으나, AG 테마의 `.ag-ltr .ag-cell` 이
     #  더 높은 특이도라 여기서 덮이지 않는다 — 실측으로 무효 확인 후 죽은 선언을 두지 않았다.
@@ -1070,7 +1081,10 @@ _SELECT_LIST = partial(
     "erp_select_list",
     html="<div id='erp-select-list'></div>",
     css=f"""
-    #erp-select-list {{ font-family:inherit; }}
+    /* CCv2 컴포넌트의 shadow root 는 앱 폰트를 상속받지 못하고 Arial 로 떨어진다
+       (2026-08-19 내 근무표 계측에서 확인 — `font-family:inherit` 이 무효). 스택을
+       명시한다. modules/ui.py 의 --cd-sans 와 같은 값이며 두 곳이 갈리면 안 된다. */
+    #erp-select-list {{ font-family:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",-apple-system,sans-serif; }}
     .esl-row {{ display:flex; flex-direction:column; gap:2px; width:100%;
       padding:8px 12px 8px 10px; border:0; border-left:2px solid transparent;
       border-bottom:1px solid {TOKENS['line']}; background:transparent; cursor:pointer;

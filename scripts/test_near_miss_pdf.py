@@ -4,6 +4,7 @@ DB 비의존(순수 함수). 실행: PYTHONUTF8=1 .venv/Scripts/python.exe scrip
 """
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 
@@ -34,7 +35,7 @@ def _page_count(pdf: bytes) -> int:
 
 BASE = {
     "report_no": "202607-0001", "status": "SUBMITTED", "reporter_emp_no": "1001",
-    "dept_code": "PET1", "incident_date": "2026-07-15", "proposed_grade": "D",
+    "dept_code": "PET1", "incident_date": "2026-07-15",
     "confirmed_grade": "", "cause_code": "SLIP",
     "incident_content": "PET 원료실 계획서 수정 중 바닥의 기름막에 미끄러짐.",
     "work_content": "생산계획서 수정·부착", "site_description": "원료실 입구 통로",
@@ -43,10 +44,15 @@ BASE = {
 }
 
 
-def _data(report):
+def _data(report, **kw):
+    # status_label 은 호출부(near_miss_view._STATUS_LABEL)가 넘기는 실제 표시 라벨을 쓴다 —
+    # '제출'이 아니라 '제출됨'(2026-08-14 6화면 어휘 통일). _STATUS_RGB 키와 일치해야
+    # 상태 색이 기본값으로 떨어지지 않는다.
+    kw.setdefault("status_label", "제출됨")
+    kw.setdefault("status_effect", "평가 착수 전 — 보고자 수정 가능")
     return near_miss_pdf.report_to_pdf_data(
         report, reporter="김관리", dept="PET생산부(본동)",
-        status_label="제출", cause_label="미끄러짐",
+        cause_label="미끄러짐", **kw,
     )
 
 
@@ -56,6 +62,26 @@ check("report_to_pdf_data: 보고번호 매핑", data["report_no"] == "202607-00
 check("report_to_pdf_data: 사진 파일명만(경로 제거)", data["photo_names"] == ["photo1.jpg", "photo2.png"])
 check("report_to_pdf_data: 본문 섹션(작업명+WHAT/TASK/SITE/CAUSE/ACTION)=6",
       len(data["sections"]) == 6 and data["sections"][1][0] == "WHAT")
+
+# ── 2026-08-18 §7.2-1b 제안등급 폐기 · §3.6 어휘 · §3.3 상태의 결과 ──
+check("제안등급을 PDF data 에 싣지 않는다(§7.2-1b)", "proposed_grade" not in data)
+check("평가 등급은 confirmed_grade 에서만 온다(빈 값은 '미정')",
+      data["confirmed_grade"] == "미정")
+_build_src = inspect.getsource(near_miss_pdf.build_report_pdf)
+check("메타 라벨이 정본 '평가 등급'(생성 소스)",
+      '"평가 등급"' in _build_src
+      and '"제안등급"' not in _build_src and '"확정등급"' not in _build_src)
+check("메타 셀에서 제안등급 값을 읽지 않음",
+      'data.get("proposed_grade")' not in _build_src)
+check("§3.6 상태 색 키가 화면 표시 라벨과 동일(제출됨·평가중)",
+      set(near_miss_pdf._STATUS_RGB) == {"제출됨", "평가중", "평가완료", "종결", "반려"})
+check("호출부 status_label('제출됨')이 색 매핑에 적중", data["status"] in near_miss_pdf._STATUS_RGB)
+check("§3.3 상태의 결과가 data 에 실린다",
+      data["status_effect"] == "평가 착수 전 — 보고자 수정 가능")
+check("status_effect 미지정이면 빈 문자열(기존 호출부 호환)",
+      near_miss_pdf.report_to_pdf_data(
+          BASE, reporter="-", dept="-", status_label="종결",
+          cause_label="미끄러짐")["status_effect"] == "")
 
 pdf = near_miss_pdf.build_report_pdf(data)
 check("bytes 반환", isinstance(pdf, (bytes, bytearray)))

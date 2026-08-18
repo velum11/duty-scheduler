@@ -2,6 +2,8 @@
 
 순수 생성 함수 ``build_report_pdf(data) -> bytes`` 는 도메인·DB 를 모른다(단위 테스트 대상).
 호출부(near_miss_view)가 report dict + 표시맵으로 ``report_to_pdf_data`` 를 만들어 넘긴다.
+상태 라벨·등급 어휘·상태의 결과 표기(§3.3)는 화면과 같은 값을 호출부에서 받는다 — 이
+모듈이 코드값에서 한글 표기를 파생하지 않는다(§3.6 어휘 단일화).
 DB(modules/db.py·supabase_repository.py)는 건드리지 않는다(writeScope 분리 — 사진 데이터는
 별도 워커). 한글은 동봉 폰트(fonts/NotoSansKR-Regular.ttf, SIL OFL) 우선, 없으면 시스템
 한글 폰트(맑은고딕/Noto/Nanum) 폴백. 사진 이미지 임베드는 사진 기능 완성 후 후속(현재는
@@ -21,8 +23,11 @@ _ACCENT = (194, 65, 12)    # #c2410c (좌측 보더·강조)
 _LINE = (207, 200, 189)    # #cfc8bd (헤어라인)
 _WARN = (156, 50, 50)      # #9c3232 (반려)
 
+# 상태 라벨(한글)→색. **키는 호출부가 넘기는 표시 라벨 그대로**여야 한다 — 종전 '제출'은
+# 화면(_STATUS_LABEL)의 '제출됨'과 달라 매칭에 실패해 색이 기본값(_INK2)으로 떨어졌다.
+# 2026-08-18 §3.6 어휘 통일: 제출됨 · 평가중(구 '검토중') · 평가완료 · 종결 · 반려.
 _STATUS_RGB = {
-    "제출": (138, 98, 18), "검토중": (47, 77, 153), "평가완료": (47, 107, 69),
+    "제출됨": (138, 98, 18), "평가중": (47, 77, 153), "평가완료": (47, 107, 69),
     "종결": (92, 86, 77), "반려": (156, 50, 50),
 }
 
@@ -71,7 +76,7 @@ class _ReportPDF(FPDF):
 def build_report_pdf(data: dict) -> bytes:
     """구조화된 보고서 dict → A4 세로 PDF bytes. 도메인·DB 비의존(순수).
 
-    ``data`` 키: report_no·status·reporter·dept·incident_date·proposed_grade·confirmed_grade·
+    ``data`` 키: report_no·status·status_effect·reporter·dept·incident_date·confirmed_grade·
     cause·rejection_reason·sections([(tag,label,value)])·photo_names([str]).
     """
     font_path = _resolve_font()
@@ -97,26 +102,37 @@ def build_report_pdf(data: dict) -> bytes:
         pdf._f(11)
         pdf.set_text_color(*_STATUS_RGB.get(status, _INK2))
         pdf.cell(0, 6, f"상태: {status}", new_x="LMARGIN", new_y="NEXT")
+        # §3.3 — 상태 이름 밑에 그 상태의 결과(무엇이 막히고 열리는지)를 한 줄로.
+        effect = str(data.get("status_effect") or "").strip()
+        if effect:
+            pdf._f(9)
+            pdf.set_text_color(*_MUT)
+            pdf.cell(0, 5, effect, new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
     _hairline(pdf, w)
 
-    # ── 메타(신고자·소속·발생일·제안등급·확정등급·발생원인) — 3열 그리드 ──
+    # ── 메타(신고자·소속·발생일·평가 등급·발생원인) — 3열 그리드 ──
+    # 2026-08-18: 제안등급 셀 폐기(§7.2-1b, 항상 비는 값) → 6칸 2줄에서 5칸으로 줄었다.
+    # 마지막 셀이 남은 열을 모두 차지하게 해 빈 칸을 남기지 않는다(열 시작 x 는 그대로라
+    # 위·아래 줄의 열 정렬은 유지된다).
     meta = [
         ("신고자", data.get("reporter")), ("소속", data.get("dept")),
-        ("발생일", data.get("incident_date")), ("제안등급", data.get("proposed_grade")),
-        ("확정등급", data.get("confirmed_grade")), ("발생원인", data.get("cause")),
+        ("발생일", data.get("incident_date")),
+        ("평가 등급", data.get("confirmed_grade")), ("발생원인", data.get("cause")),
     ]
     col_w = w / 3.0
     for i in range(0, len(meta), 3):
+        row = meta[i:i + 3]
         y0 = pdf.get_y()
-        for j, (label, value) in enumerate(meta[i:i + 3]):
+        for j, (label, value) in enumerate(row):
             x = _MARGIN + j * col_w
+            cell_w = col_w * (3 - j) if j == len(row) - 1 else col_w
             pdf.set_xy(x, y0)
             pdf._f(8); pdf.set_text_color(*_MUT)
-            pdf.cell(col_w, 4.5, str(label), new_x="LEFT", new_y="NEXT")
+            pdf.cell(cell_w, 4.5, str(label), new_x="LEFT", new_y="NEXT")
             pdf.set_x(x)
             pdf._f(11); pdf.set_text_color(*_INK)
-            pdf.cell(col_w, 5.5, str(value or "-"))
+            pdf.cell(cell_w, 5.5, str(value or "-"))
         pdf.set_y(y0 + 12)
     pdf.ln(1)
     _hairline(pdf, w)
@@ -182,8 +198,13 @@ def _section_block(pdf: FPDF, tag: str, label: str, value: str, w: float) -> Non
 
 # ── report dict → build_report_pdf 입력 data (표시맵은 호출부가 넘긴다) ──
 def report_to_pdf_data(report: dict, *, reporter: str, dept: str,
-                       status_label: str, cause_label: str) -> dict:
-    """도메인 report dict + 해석된 표시값 → PDF data. 사진은 photo_paths 파일명만 싣는다."""
+                       status_label: str, cause_label: str,
+                       status_effect: str = "") -> dict:
+    """도메인 report dict + 해석된 표시값 → PDF data. 사진은 photo_paths 파일명만 싣는다.
+
+    ``status_effect``(§3.3 상태의 결과)는 호출부가 화면과 **같은 어휘**로 계산해 넘긴다 —
+    이 모듈은 도메인을 모르므로 상태 코드에서 스스로 파생하지 않는다. 미지정이면 출력하지
+    않는다(기존 호출부 호환)."""
     def _c(v) -> str:
         return "" if v is None else str(v).strip()
 
@@ -201,10 +222,11 @@ def report_to_pdf_data(report: dict, *, reporter: str, dept: str,
     return {
         "report_no": _c(report.get("report_no")) or "(번호 미상)",
         "status": status_label,
+        "status_effect": _c(status_effect),
         "reporter": reporter or "-",
         "dept": dept or "-",
         "incident_date": _c(report.get("incident_date")) or "-",
-        "proposed_grade": _c(report.get("proposed_grade")) or "없음",
+        # 제안등급(proposed_grade)은 싣지 않는다(§7.2-1b 폐기 — 입력 경로가 없어 항상 빈다).
         "confirmed_grade": _c(report.get("confirmed_grade")) or "미정",
         "cause": cause_label or "-",
         "rejection_reason": _c(report.get("rejection_reason")),

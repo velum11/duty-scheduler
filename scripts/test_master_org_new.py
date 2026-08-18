@@ -358,6 +358,20 @@ check("▸ 열림 중복칩 제거 — 행 강조(ms-row-linked)로 충분",
       "_LINK_CHIP" not in src and "▸ 열림" not in src and "include_linked_rows=True" in src)
 check("최소 열폭 축소(1366·1280px 3열 가로스크롤·잘림 방지) — 코드명 minWidth 완화",
       "minWidth\": 116" not in src and "minWidth\": 106" not in src)
+# 라이브 부서 시트 8열은 폭을 flex(=남은 자리)가 아니라 값의 실측 잉크폭에서 역산한다.
+# flex 가 하나라도 살아 있으면 값이 없는 열이 다시 가장 넓어진다(2026-08-18 실측:
+# 대분류 162 · 중분류 162 · 비고 180 이 전 행 빈 값이었다).
+_dept_cfg = master_org._dept_col_config()
+check("부서 시트 전 열이 고정폭 — flex 잔존 0 (남는 가로 폭은 어느 열도 흡수하지 않는다)",
+      all(float(c.get("flex", 0)) == 0 for c in _dept_cfg.values()))
+check("값이 폭을 구속하는 열(코드명)은 실측 최대 잉크 + 셀 패딩 이상",
+      _dept_cfg["코드명"].get("width", 0) >= 132)
+check("값 0건 열(대분류·중분류·비고)은 구 flex 렌더폭(162/162/180)보다 좁다",
+      _dept_cfg["대분류"]["width"] < 162 and _dept_cfg["중분류"]["width"] < 162
+      and _dept_cfg["비고"]["width"] < 180)
+check("minWidth 는 헤더가 잘리지 않는 하한(헤더 잉크+16) 이상",
+      _dept_cfg["대분류"]["minWidth"] >= 51 and _dept_cfg["중분류"]["minWidth"] >= 51
+      and _dept_cfg["코드명"]["minWidth"] >= 51 and _dept_cfg["비고"]["minWidth"] >= 39)
 check("액션바 keyed __bar 컨테이너는 미라우팅 보존 시트에만(부서는 액션바 없음)",
       src.count(".page_id}__bar\")") == 2)
 check("표준 배너 순서 — 확인/폐기 배너를 표 위 슬롯 뒤 banner_slot 으로(3시트)",

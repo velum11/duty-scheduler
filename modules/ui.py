@@ -495,7 +495,9 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
 .crumb { font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--ink-3);
   letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crumb .crumb-mod { color: var(--ink-2); }
-.crumb .crumb-sep { margin: 0 7px; color: var(--line-strong); }
+/* 구분자에 선 토큰(--line-strong #cfc8bd)을 쓰면 텍스트 대비 1.59:1 로 §5 하한 미달.
+   색 선언을 두지 않고 부모 .crumb 의 --ink-3(캔버스 위 5.10:1)를 상속한다. */
+.crumb .crumb-sep { margin: 0 7px; }
 .crumb .crumb-scr { color: var(--ink); font-weight: 600; }
 /* 헤더 우측 날짜/범위 스탬프 (화면이 채우는 슬롯 — 비면 폭 0) */
 .hdr-stamp { font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--ink-2);
@@ -719,7 +721,8 @@ div[data-testid="stLayoutWrapper"]:has(> .st-key-user_topbar) {
   display:flex; align-items:baseline; gap:.4rem; min-width:0; white-space:nowrap;
 }
 .ub-app { flex:0 0 auto; font-size:12.5px; font-weight:700; color:var(--cd-ink-3); letter-spacing:.01em; }
-.ub-sep { flex:0 0 auto; font-size:12.5px; color:var(--cd-line-strong); }
+/* 위와 같은 사유 — 선 토큰이 아니라 ink-3 를 쓴다(§5 대비 하한). */
+.ub-sep { flex:0 0 auto; font-size:12.5px; color:var(--cd-ink-3); }
 .ub-screen {
   min-width:0; font-size:15px; font-weight:600; color:var(--cd-ink); letter-spacing:-.01em;
   overflow:hidden; text-overflow:ellipsis;

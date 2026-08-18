@@ -36,7 +36,7 @@ _PAGE_ID = "near_miss_stats"
 
 # 상태 라벨 — 6화면 단일 어휘(2026-08-14: '제출'→'제출됨', DESIGN §2 배지 표기).
 _STATUS_LABEL = {
-    "SUBMITTED": "제출됨", "IN_REVIEW": "검토중", "EVALUATED": "평가완료",
+    "SUBMITTED": "제출됨", "IN_REVIEW": "평가중", "EVALUATED": "평가완료",
     "CLOSED": "종결", "REJECTED": "반려",
 }
 # 발생원인 라벨 — 6화면 단일 어휘(2026-08-14). 분포 블록의 라벨 트랙은 76px(≤768px 64px)라
@@ -254,10 +254,10 @@ def _kpi_group_html(group_label: str, kpis: list[tuple]) -> str:
 
 def _kpi_cards_cumulative(status_counts: dict, total: int, overdue: int | None,
                           ym: str) -> tuple[str, list[tuple]]:
-    """누적 그룹(해당월 말까지): 총 건수·평가 대기·검토중·평가완료·기한초과·보고서 종결률.
+    """누적 그룹(해당월 말까지): 총 건수·평가 대기·평가중·평가완료·기한초과·보고서 종결률.
 
     dc §1-F 6지표 구성을 그대로 누적 관점으로 쓴다. '평가 대기'=제출됨(검토 착수 전) 백로그,
-    '검토중'=IN_REVIEW. 기한초과는 역할 게이트(파사드) 결과를 그대로 표시한다.
+    '평가중'=IN_REVIEW. 기한초과는 역할 게이트(파사드) 결과를 그대로 표시한다.
     렌더는 하지 않고 ``(그룹 라벨, 타일 목록)`` 만 돌려준다(두 그룹 폭 통일 — `_kpi_section`)."""
     submitted = status_counts.get("SUBMITTED", 0)
     in_review = status_counts.get("IN_REVIEW", 0)
@@ -266,7 +266,7 @@ def _kpi_cards_cumulative(status_counts: dict, total: int, overdue: int | None,
     return f"누적 · {_ym_dot(ym)}까지", [
         ("총 건수", str(total), "건", "ALL", False),
         ("평가 대기", str(submitted), "건", "PENDING", submitted > 0),
-        ("검토중", str(in_review), "건", "IN REVIEW", False),
+        ("평가중", str(in_review), "건", "IN REVIEW", False),
         ("평가완료", str(evaluated), "건", "DONE", False),
         ("기한초과", _overdue_label(overdue), "", "OVERDUE", bool(overdue)),
         ("보고서 종결률", _closure_rate_label(closed, evaluated), "", "CLOSED", False),
@@ -369,7 +369,7 @@ def _chart_block(title: str, note: str | None, rows: list[tuple[str, int]],
         "<section class='nmf-block'>"
         "<div class='nmf-bhead'>"
         f"<span class='nmf-btitle'>{escape(title)}</span>"
-        f"<span class='nmf-bmeta' style='{_MONO}'>{meta}</span>"
+        f"<span class='nmf-bmeta'>{meta}</span>"
         "</div>"
         f"<div class='nmf-rows'>{''.join(body)}</div>"
         "</section>"
@@ -381,9 +381,10 @@ def _inject_style() -> None:
         f"""
 <style>
 /* §1-F 분석형 — 지표 스트립(좌측 보더) + 분포 4블록(카드 없음, 상단 헤어라인 구획). */
-/* 지표 그룹 오버라인(누적/당월 구분) — 모노 소문자 라벨, 카드 아님. */
-.nmf-kgroup {{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.12em;
-  color:{_MUT}; margin:.5rem 0 .35rem; }}
+/* 지표 그룹 오버라인(누적/당월 구분) — 카드 아님. 값이 한글("누적 · 2026.08까지")이라
+   모노·자간을 쓰지 않는다: IBM Plex Mono 에 한글 글리프가 없어 글자마다 폴백 폰트로
+   떨어지고 자간까지 겹쳐 "누 적"처럼 벌어진다. */
+.nmf-kgroup {{ font-size:10.5px; color:{_MUT}; margin:.5rem 0 .35rem; }}
 /* 지표 스트립 = 고정 트랙 그리드. 누적(6)·당월(4)이 같은 트랙 수를 공유해 카드 폭이
    행 간에 동일하고, 지표가 적은 행은 늘어나지 않고 남는 칸을 비운다. 트랙 수는 렌더 시
    데이터에서 파생해 주입한다(_kpi_grid_css). 타일은 라벨+값 2줄(영문 오버라인 없음). */
@@ -401,8 +402,8 @@ def _inject_style() -> None:
   border-top:1px solid {_LINE_STRONG}; display:flex; flex-direction:column; gap:12px; }}
 .nmf-bhead {{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; }}
 .nmf-btitle {{ font-size:13.5px; font-weight:600; color:{_INK}; }}
-.nmf-bmeta {{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.08em;
-  color:{_MUT}; white-space:nowrap; }}
+/* 블록 메타는 "당월 2026.08 · 미평가=미확정" 처럼 한글이 섞이므로 모노·자간 제외. */
+.nmf-bmeta {{ font-size:10.5px; color:{_MUT}; white-space:nowrap; }}
 .nmf-rows {{ display:flex; flex-direction:column; gap:10px; }}
 .nmf-row {{ display:grid; grid-template-columns:76px minmax(0,1fr) 52px; gap:10px;
   align-items:center; }}
@@ -419,7 +420,6 @@ def _inject_style() -> None:
 /* 모노 강제 — 전역 `.stApp [data-testid=stMarkdownContainer] *`(특이도 0,2,0)를 이기려면
    0,3,0 이상이어야 한다(숫자·오버라인이 sans 로 떨어지는 것 방지). 인라인과 병행 못박음. */
 .stApp [data-testid="stMarkdownContainer"] .nmf-kval,
-.stApp [data-testid="stMarkdownContainer"] .nmf-bmeta,
 .stApp [data-testid="stMarkdownContainer"] .nmf-rcount,
 .stApp [data-testid="stMarkdownContainer"] .nmf-rpct {{
   font-family:'IBM Plex Mono','Consolas','Menlo',monospace;

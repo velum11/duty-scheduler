@@ -24,8 +24,10 @@ _MODE_KEY = "my_schedule_mode"
 _MODE_SHORT = "약칭"
 _MODE_NAME = "명칭"
 _GROUP_ORDER = ("주간", "야간", "OFF", "휴가")
-# 합계 dot 색 — 근무형태 §2 색 계열(주=파랑·야=적·OFF=중립·휴가=녹). 근무 chip 은 개별
-# 근무형태 DB hex 를 쓰지만, 합계는 그룹 집계라 그룹 대표색(§2)으로 dot 을 찍는다.
+# 합계 dot 색 — DESIGN §1.3 의미 색의 글자값(진행·정보 #2f4d99 / 부정·반려 #9c3232 /
+# 비활성·장식 #8b857c / 완료·정상 #2f6b45)을 주·야·OFF·휴가에 매핑한 것이다. 근무 chip 은
+# 개별 근무형태 DB hex 를 쓰지만, 합계는 그룹 집계라 그룹 대표색으로 dot 을 찍는다.
+# (종전 주석의 "§2 색 계열"은 색이 §2 에 있던 옛 판의 인용이다 — 현행 §2 는 화면 유형이다.)
 _GROUP_COLOR = {"주간": "#2f4d99", "야간": "#9c3232", "OFF": "#8b857c", "휴가": "#2f6b45"}
 
 
@@ -51,27 +53,56 @@ _MONTH_PICKER = partial(
     "duty_month_wheel_picker",
     html="<div id='duty-month-wheel'></div>",
     css="""
-    #duty-month-wheel { min-height:40px; font-family:inherit; }
-    .wheel-nav { display:inline-grid; grid-template-columns:30px minmax(118px, auto) 30px; align-items:center; gap:8px; }
-    .wheel-nav .previous, .wheel-nav .next { height:30px; width:30px; border:1px solid #e2ddd4; border-radius:8px; background:#fff; color:#6b665d; cursor:pointer; font:inherit; font-size:13px; }
+    /* CCv2 shadow root 는 앱 본문 폰트를 상속받지 못한다 — 2026-08-18 실측에서 이 안의
+       computed font-family 가 Arial 로 떨어졌다(호스트가 스타일 격리된다). 화면 나머지와
+       같은 스택·본문 크기를 명시한다.
+       --wheel-row 44px = DESIGN §1.4 cozy 히트영역 하한(§3.4 가 이 화면을 "모바일 우선"
+       으로 지목한다). 휠 옵션 높이이자 스크롤 스냅 단위이며, 휠 컬럼 높이(5행)와 상하
+       여백(2행)은 §1.1 간격 스케일이 아니라 이 행 높이의 정수배로 계산되는 스냅 기하다
+       (§1.1 예외 — 사유: 선택 줄이 컬럼 정중앙에 오려면 여백이 정확히 정수 행이어야
+       하고, JS 의 scrollTop 계산도 같은 행 높이를 쓴다). */
+    #duty-month-wheel { --wheel-row:44px; min-height:var(--wheel-row); font-size:14px;
+      font-family:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",-apple-system,sans-serif; }
+    /* 월 이동은 이 화면의 주 내비게이션이라 히트영역 우선순위가 가장 높다 → 세 버튼 모두
+       44px 이상. 폭에는 고정 숫자를 주지 않는다: 좌우는 히트영역 하한이, 가운데는 아래
+       ghost 라벨(표기 최대 길이)이 정한다. */
+    .wheel-nav { display:inline-grid; grid-template-columns:auto auto auto; align-items:center; gap:8px; }
+    .wheel-nav .previous, .wheel-nav .next { display:flex; align-items:center; justify-content:center;
+      min-width:var(--wheel-row); min-height:var(--wheel-row); padding:0;
+      border:1px solid #e2ddd4; border-radius:8px; background:#fff; color:#6b665d; cursor:pointer;
+      font:inherit; font-size:16px; }
     .wheel-nav .previous:hover, .wheel-nav .next:hover { border-color:#cfc8bd; }
-    .wheel-nav .month-title { height:30px; border:0; background:transparent; color:#1c1a17; cursor:pointer; font-size:16px; font-weight:600; letter-spacing:-0.02em; text-align:center; }
+    .wheel-nav .previous:active, .wheel-nav .next:active { background:#fdf3ec; border-color:#c2410c; }
+    .wheel-nav button:focus-visible { outline:2px solid #c2410c; outline-offset:2px; }
+    /* 제목 폭은 "YYYY년 12월"(연·월 표기의 최대 길이)을 숨긴 ghost 로 예약한다. 종전
+       minmax(118px,auto) 는 내용과 무관한 숫자였고, 폭을 내용에 맡기면 1월↔12월 한 자리
+       차이로 ‹ › 위치가 달마다 흔들린다. tabular-nums 로 자릿수 폭을 고정해 ghost 가
+       정확한 상한이 되게 한다(실측 근거: 4자리 연도는 어떤 값이든 같은 폭). */
+    .wheel-nav .month-title { display:grid; min-height:var(--wheel-row); padding:0 8px; border:0;
+      background:transparent; color:#1c1a17; cursor:pointer; font:inherit; font-size:16px;
+      font-weight:600; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; text-align:center; }
+    .wheel-nav .month-title > span { grid-area:1/1; place-self:center; white-space:nowrap; }
+    .wheel-nav .month-title .ghost { visibility:hidden; }
+    .wheel-nav .month-title:hover .live { color:#b4451a; }
     .wheel-backdrop { position:fixed; inset:0; z-index:9999; display:flex; align-items:center; justify-content:center; background:rgba(28,26,23,.28); }
-    .wheel-sheet { width:min(420px,calc(100vw - 32px)); border-radius:8px; background:#fbfaf8; box-shadow:0 18px 45px rgba(0,0,0,.22); padding:18px; }
-    .wheel-heading { color:#1c1a17; font-size:15px; font-weight:600; text-align:center; } .wheel-columns { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:14px 0; }
-    .wheel-column { position:relative; height:220px; overflow:hidden; } .wheel-column::before, .wheel-column::after { content:''; position:absolute; z-index:1; left:0; right:0; height:88px; pointer-events:none; }
+    .wheel-sheet { width:min(420px,calc(100vw - 32px)); border-radius:8px; background:#fbfaf8; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:16px; }
+    .wheel-heading { color:#1c1a17; font-size:16px; font-weight:600; text-align:center; }
+    .wheel-columns { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:16px 0; }
+    .wheel-column { position:relative; height:calc(var(--wheel-row) * 5); overflow:hidden; }
+    .wheel-column::before, .wheel-column::after { content:''; position:absolute; z-index:1; left:0; right:0; height:calc(var(--wheel-row) * 2); pointer-events:none; }
     .wheel-column::before { top:0; background:linear-gradient(#fbfaf8 20%,rgba(251,250,248,0)); } .wheel-column::after { bottom:0; background:linear-gradient(rgba(251,250,248,0),#fbfaf8 80%); }
-    .wheel-column .selection-line { position:absolute; z-index:0; top:88px; left:0; right:0; height:44px; border-top:1px solid #cfc8bd; border-bottom:1px solid #cfc8bd; }
-    .wheel-list { position:relative; z-index:2; height:220px; overflow-y:auto; scroll-snap-type:y mandatory; scrollbar-width:none; padding:88px 0; box-sizing:border-box; } .wheel-list::-webkit-scrollbar { display:none; }
-    .wheel-option { height:44px; scroll-snap-align:center; color:#a09a90; font-size:1rem; line-height:44px; text-align:center; } .wheel-option.is-selected { color:#1c1a17; font-weight:600; }
-    .wheel-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; } .wheel-actions button { min-height:38px; border:1px solid #e2ddd4; border-radius:8px; background:#fff; color:#1c1a17; cursor:pointer; font:inherit; font-weight:600; }
+    .wheel-column .selection-line { position:absolute; z-index:0; top:calc(var(--wheel-row) * 2); left:0; right:0; height:var(--wheel-row); border-top:1px solid #cfc8bd; border-bottom:1px solid #cfc8bd; }
+    .wheel-list { position:relative; z-index:2; height:calc(var(--wheel-row) * 5); overflow-y:auto; scroll-snap-type:y mandatory; scrollbar-width:none; padding:calc(var(--wheel-row) * 2) 0; box-sizing:border-box; } .wheel-list::-webkit-scrollbar { display:none; }
+    /* 비선택 옵션 #6b665d — 종전 #a09a90 은 캔버스 대비 2.5:1 로 §1.3 이 읽는 텍스트에
+       금지한 값이다(선택 항목은 #1c1a17/600 로 계속 구분된다). */
+    .wheel-option { height:var(--wheel-row); scroll-snap-align:center; color:#6b665d; font-size:14px; line-height:var(--wheel-row); text-align:center; font-variant-numeric:tabular-nums; } .wheel-option.is-selected { color:#1c1a17; font-weight:600; }
+    .wheel-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; } .wheel-actions button { min-height:var(--wheel-row); padding:0 16px; border:1px solid #e2ddd4; border-radius:8px; background:#fff; color:#1c1a17; cursor:pointer; font:inherit; font-size:14px; font-weight:600; }
     .wheel-actions .confirm { border-color:#c2410c; background:#c2410c; color:#fff; }
-    /* 폰 폭에서도 월 이동 + 표시 전환이 한 줄에 남도록 내비 폭만 줄인다(‹ › 버튼
-       30px 히트영역과 min-height 40px 은 유지 — 제목 최소폭 floor·간격·글자만 축소). */
+    /* 폰 폭에서 줄이는 것은 간격뿐이다 — 히트영역 44px(§1.4)과 글자 크기(§1.2)는 좁은
+       폭에서도 내리지 않는다(종전에는 여기서 30px·15px 로 내려가 계약을 깼다). */
     @media (max-width:640px) {
-      .wheel-nav { grid-template-columns:30px auto 30px; gap:3px; }
-      .wheel-nav .month-title { font-size:15px; }
-      .wheel-backdrop { align-items:flex-end; } .wheel-sheet { width:100vw; border-radius:10px 10px 0 0; padding:18px 16px 22px; }
+      .wheel-nav { gap:4px; }
+      .wheel-backdrop { align-items:flex-end; } .wheel-sheet { width:100vw; border-radius:8px 8px 0 0; padding:16px; }
     }
     """,
     js="""
@@ -79,7 +110,13 @@ _MONTH_PICKER = partial(
       const { data, setTriggerValue, parentElement } = component;
       const root = parentElement.querySelector('#duty-month-wheel') || parentElement;
       const year = Number(data.year), month = Number(data.month);
-      root.innerHTML = `<div class="wheel-nav"><button class="previous" aria-label="이전 달">‹</button><button class="month-title" aria-label="연월 선택">${year}년 ${month}월</button><button class="next" aria-label="다음 달">›</button></div>`;
+      // ROW = CSS --wheel-row(44px, §1.4 cozy). 휠 스크롤 계산과 CSS 스냅 기하가 같은
+      // 행 높이를 써야 선택 줄과 값이 어긋나지 않는다.
+      const ROW = 44;
+      // ghost = 이 연도에서 나올 수 있는 가장 긴 표기("YYYY년 12월"). 보이지 않지만 제목
+      // 버튼의 폭을 정한다 → 달을 넘겨도 ‹ › 가 좌우로 움직이지 않는다(폭이 고정 숫자가
+      // 아니라 실제 표기 최대 길이에서 나온다). aria 는 버튼 aria-label 이 담당한다.
+      root.innerHTML = `<div class="wheel-nav"><button class="previous" aria-label="이전 달">‹</button><button class="month-title" aria-label="연월 선택"><span class="ghost" aria-hidden="true">${year}년 12월</span><span class="live">${year}년 ${month}월</span></button><button class="next" aria-label="다음 달">›</button></div>`;
       root.querySelector('.previous').onclick = () => setTriggerValue('month_change', { type: 'shift', offset: -1 });
       root.querySelector('.next').onclick = () => setTriggerValue('month_change', { type: 'shift', offset: 1 });
       root.querySelector('.month-title').onclick = () => openWheel();
@@ -96,9 +133,9 @@ _MONTH_PICKER = partial(
           const list = overlay.querySelector(`[data-wheel="${name}"]`);
           const options = Array.from(list.querySelectorAll('.wheel-option'));
           const index = options.findIndex(option => Number(option.dataset.value) === initial);
-          requestAnimationFrame(() => { list.scrollTop = Math.max(0, index) * 44; mark(list, options[index]); });
+          requestAnimationFrame(() => { list.scrollTop = Math.max(0, index) * ROW; mark(list, options[index]); });
           let timer;
-          list.addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(() => { const active = Math.round(list.scrollTop / 44); const option = options[Math.max(0, Math.min(options.length - 1, active))]; if (option) { setValue(Number(option.dataset.value)); mark(list, option); } }, 80); });
+          list.addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(() => { const active = Math.round(list.scrollTop / ROW); const option = options[Math.max(0, Math.min(options.length - 1, active))]; if (option) { setValue(Number(option.dataset.value)); mark(list, option); } }, 80); });
         };
         bind('year', year, value => { selectedYear = value; }); bind('month', month, value => { selectedMonth = value; });
         overlay.querySelector('.cancel').onclick = () => overlay.remove();
@@ -163,33 +200,58 @@ def _name_display_map(work_types: pd.DataFrame, display_of: dict) -> dict:
 
 
 def _styles() -> str:
-    # dc.html isMySched 달력 골격 + §2 팔레트. 카드 없음(셀=헤어라인/틴트). 작은 의미
-    # 텍스트는 #6b665d 이상(A-2). 근무 chip·합계 dot 색은 근무형태 DB hex(§2 예외 SoT).
+    # dc.html isMySched 달력 골격 + §1.3 팔레트. 카드 없음(셀=헤어라인/틴트). 작은 의미
+    # 텍스트는 #6b665d 이상(§1.3 "읽는 텍스트의 최저 대비" — 종전 주석의 "A-2" 는 DESIGN
+    # 변경이력의 부록 폐기로 사라진 절이다, 2026-08-18 정정). 근무 chip·합계 dot 색은
+    # 근무형태 DB hex(§1.3 도메인 색 예외 — 팔레트가 아니라 데이터다).
     return """
 <style>
 /* 제목 블록(브레드크럼·제목 25/600·설명 13.5·모드 배지)은 근무표 편성·월간 근무표와
    같은 공용 크롬(erp.screen_frame)이 소유한다 — 종전 .my-title 은 이 화면만의 사설
    제목이라 높이(40 vs 30)·위치(top 96.8 vs 105.9)·설명 유무가 갈렸다(2026-08-14 검수). */
+/* 타이포 — §1.2 는 28/20/16/14/12 다섯 단계뿐이다. 이 화면에 흩어져 있던 12.5·13.5·
+   14.5·15px 은 어느 것도 그 다섯에 없었다(2026-08-18 실측 55곳). 역할로 다시 배정한다:
+   메타·라벨(사용자·소속, 보조 안내, 요일 머리, 날짜 숫자) = 12, 값(합계 수치, 근무 chip,
+   전환 버튼) = 14, 대상 제목(월 표기, 연월 시트 제목) = 16. */
 /* 헤더 줄: 사용자·소속(좌) | 근무형태 합계 dot(우) — 하단 헤어라인 */
-.my-head { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px;
-  padding:8px 0 14px; margin:2px 0 4px; border-bottom:1px solid #e0dbd2; }
-.my-emp { font-size:12.5px; color:#6b665d; line-height:1.45; }
+.my-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;
+  padding:8px 0 12px; margin:0 0 4px; border-bottom:1px solid #e0dbd2; }
+.my-emp { font-size:12px; color:#6b665d; line-height:1.45; }
 .my-emp strong { color:#1c1a17; font-weight:600; }
 /* 보조 안내 1줄 — st.caption 은 Streamlit 기본 글꼴(Source Sans)로 렌더돼 이 화면만
    본문 글꼴(IBM Plex Sans KR)에서 벗어났다(2026-08-14 실측). 다른 두 근무표 화면의
-   보조 텍스트(.se-note/.sv-rotate)와 같은 12.5px·#4a453d 로 맞춘다. */
-.my-note { font-size:12.5px; color:#4a453d; margin:2px 0 6px; line-height:1.4; }
-.my-totals { margin-left:auto; display:flex; flex-wrap:wrap; gap:10px 14px; }
-.my-total { display:inline-flex; align-items:baseline; gap:6px; white-space:nowrap; }
-.my-total .dot { width:8px; height:8px; border-radius:3px; align-self:center; flex:0 0 auto; }
+   보조 텍스트(.se-note/.sv-rotate)와 같은 역할이라 §1.2 label 12px·#4a453d 로 맞춘다. */
+.my-note { font-size:12px; color:#4a453d; margin:4px 0 8px; line-height:1.4; }
+.my-totals { margin-left:auto; display:flex; flex-wrap:wrap; gap:8px 16px; }
+.my-total { display:inline-flex; align-items:baseline; gap:4px; white-space:nowrap; }
+.my-total .dot { width:8px; height:8px; border-radius:2px; align-self:center; flex:0 0 auto; }
 .my-total .lab { font-size:12px; color:#6b665d; }
-.my-total .val { font-family:'IBM Plex Mono',monospace; font-size:13.5px; font-weight:600; color:#1c1a17; }
-/* 표시 방식(약칭/명칭) 전환 — 두 버튼 동일 폭(내용 길이 무관, 2026-08-11 사용자 요구).
-   min-height 32px: 데스크톱 ERP 조작 대상 하한(§0.6·§4)이다. 실측 28px 로 월 이동
-   버튼(30px)보다도 낮아 한 줄 안에서 높이가 어긋나 보였다. */
-div[data-testid="stSegmentedControl"] button,
-div[data-testid="stButtonGroup"] button {
-  min-width:84px; min-height:32px; justify-content:center; }
+.my-total .val { font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600;
+  color:#1c1a17; font-variant-numeric:tabular-nums; }
+/* 표시 방식(약칭/명칭) 전환.
+   높이 — §3.4 가 이 화면을 "모바일 우선 = 밀도 cozy"로 지목하므로 44px 이상(§1.4).
+     종전 32px 은 터치 하한 미달이었고 1440·390 실측이 동일해 좁은 폭 보정도 없었다.
+   폭 — "두 버튼 동일 폭"(2026-08-11 사용자 요구)을 고정 숫자 대신 레이아웃으로 만든다.
+     버튼 줄을 width:fit-content 그리드로 두고 열을 1fr 로 깔면 모든 열이 가장 넓은 열의
+     max-content 폭으로 맞춰진다 → 폭이 실제 라벨 길이에서 나오고, 라벨이 바뀌어도 동일
+     폭이 유지된다. 종전 min-width:84px 은 내용과 무관한 값이었다(실측: '약칭'='명칭'
+     =24.98px @14px/400 IBM Plex Sans KR — 한글 100자 반복 폭 ÷ 100 = 12.488px/자,
+     좌우 패딩 16+16 → 실제 버튼 폭 55.86px. 84px 은 28px 을 근거 없이 더 잡고 있었다).
+   글자 — Streamlit 기본은 0.875rem(실측 12.25px)으로 §1.2 다섯 단계 밖이라 값 14px 로 올린다. */
+.st-key-my_schedule_mode div[data-testid="stButtonGroup"] > div,
+.st-key-my_schedule_mode div[data-testid="stSegmentedControl"] > div {
+  display:grid; grid-auto-flow:column; grid-auto-columns:1fr; width:fit-content;
+  column-gap:0; row-gap:0; }
+.st-key-my_schedule_mode div[data-testid="stButtonGroup"] button,
+.st-key-my_schedule_mode div[data-testid="stSegmentedControl"] button {
+  min-width:0; min-height:44px; padding:0 16px; font-size:14px; justify-content:center; }
+/* 라벨은 버튼 안 <p> 로 렌더되고 Streamlit 이 0.875em(실측 12.25px)을 건다 — §1.2 밖이라
+   버튼과 같은 14px 로 맞춘다. 내부 span 의 gap 도 §1.1 값(8px)으로 정리한다. */
+.st-key-my_schedule_mode div[data-testid="stButtonGroup"] button p,
+.st-key-my_schedule_mode div[data-testid="stSegmentedControl"] button p {
+  font-size:14px; margin:0; }
+.st-key-my_schedule_mode div[data-testid="stButtonGroup"] button span,
+.st-key-my_schedule_mode div[data-testid="stSegmentedControl"] button span { gap:8px !important; }
 /* ── 상단 한 행: 월 이동(좌) + 약칭/명칭 전환(우) ─────────────────────────────
    2026-08-13 실 DOM 실측으로 확인한 사실(추정 아님):
      · st.container(key="my_toprow") 는 flex 컨테이너 자신(stHorizontalBlock)에
@@ -202,7 +264,11 @@ div[data-testid="stButtonGroup"] button {
        flex 첫 항목이 한 줄을 통째로 먹어 전환이 다음 줄로 밀렸다.
        1차 수정은 파이썬(_month_navigation 의 width="content"), 아래 CSS 는 보강이다.
    emotion 규칙은 단일 클래스(0-1-0)라 아래 2단 선택자(0-2-0)가 !important 없이 이긴다. */
-.st-key-my_toprow { align-items:center; flex-wrap:wrap; row-gap:6px; }
+/* Streamlit 가로 컨테이너의 gap 은 0.6rem(root 14px 기준 실측 8.4px)이라 §1.1 스케일
+   밖이다. gap=None 으로 넘겨도 emotion 규칙이 남아 두 클래스 선택자(0-2-0)로도 지므로
+   여기서만 !important 로 §1.1 값을 확정한다(키 지정 컨테이너 한정). */
+.stHorizontalBlock.st-key-my_toprow { align-items:center; flex-wrap:wrap;
+  row-gap:8px !important; column-gap:8px !important; }
 .st-key-my_toprow > .st-key-my_schedule_wheel_picker { flex:0 1 auto; width:fit-content;
   min-width:0; }
 /* CCv2 shadow host 2겹은 emotion 으로 width:100% 가 박혀 있어 content 폭으로 낮춘다. */
@@ -211,49 +277,68 @@ div[data-testid="stButtonGroup"] button {
 .st-key-my_toprow > .st-key-my_schedule_mode { flex:0 0 auto; width:fit-content;
   margin-left:auto; }
 .my-calendar { width:100%; }
-.my-weekdays, .my-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
-/* 요일 머리 = 표 헤더 역할 → 12.5/600(DESIGN §3, 근무표 편성·월간 표 헤더와 같은 값).
-   종전 11.5px 은 두 표 화면의 헤더보다 작아 같은 정보가 화면마다 다른 크기로 보였다. */
-.my-weekday { font-size:12.5px; font-weight:600; color:#6b665d; padding:6px 0 8px; text-align:center; }
+/* 7열 균등 그리드 — 요일 축은 내용 길이와 무관하게 균등해야 같은 요일이 세로로 정렬된다.
+   여기서 역산 대상은 셀 폭이 아니라 그 안의 chip 이다. gap 은 §1.1 스케일(8/폰 4). */
+.my-weekdays, .my-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; }
+/* 요일 머리 = 표 헤더 역할 → §1.2 label 12px 에 헤더 굵기 600(근무표 편성·월간 표 헤더와
+   같은 역할). 종전 12.5/11.5px 은 §1.2 다섯 단계 밖이었다. */
+.my-weekday { font-size:12px; font-weight:600; color:#6b665d; padding:4px 0 8px; text-align:center; }
 .my-weekday.sat { color:#2f4d99; } .my-weekday.sun { color:#9c3232; }
-/* 셀: 카드 아님 — 투명 배경 + 헤어라인 보더, 오늘만 오렌지 보더+옅은 틴트 */
-.my-day { min-width:0; min-height:72px; display:flex; flex-direction:column; gap:6px;
-  border:1px solid #e0dbd2; border-radius:9px; padding:8px 6px; background:transparent; }
+/* 셀: 카드 아님 — 투명 배경 + 헤어라인 보더, 오늘만 오렌지 보더+옅은 틴트.
+   min-height 는 §1.1 예외(데이터 밀도 — 6주 × 7열이 스크롤 없이 들어가야 한다). 값은
+   내용에서 역산한다: 상하 패딩 8+8 + 날짜줄 12(line-height 1) + gap 4 + chip 24 = 56 이
+   내용 하한이고, 근무가 없는 날도 같은 높이를 유지하도록 72(=8의 배수)로 둔다.
+   패딩·gap 자체는 §1.1 스케일 값이다. */
+.my-day { min-width:0; min-height:72px; display:flex; flex-direction:column; gap:4px;
+  border:1px solid #e0dbd2; border-radius:8px; padding:8px 4px; background:transparent; }
 .my-day.is-today { border-color:#c2410c; background:rgba(255,255,255,.75); }
 .my-day.empty { min-height:0; padding:0; border:0; }
-/* 날짜 숫자 = 모노 수치(컨텍스트 줄 .se-ctx .num / .sv-ctx .num 과 같은 12.5/600 모노).
-   선택자를 .my-day .my-date(0,2,0)로 올린다 — 단일 클래스(0,1,0)로는 마크다운 컨테이너
-   본문 글꼴 규칙에 져서 모노가 sans 로 렌더됐다(2026-08-14 실측). */
-.my-day .my-date { font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-weight:600;
+/* 날짜 숫자 = 모노 수치(컨텍스트 줄 .se-ctx .num / .sv-ctx .num 과 같은 역할) → §1.2
+   label 12px/600 모노. 선택자를 .my-day .my-date(0,2,0)로 올린다 — 단일 클래스(0,1,0)로는
+   마크다운 컨테이너 본문 글꼴 규칙에 져서 모노가 sans 로 렌더됐다(2026-08-14 실측). */
+.my-day .my-date { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
   color:#6b665d; line-height:1; font-variant-numeric:tabular-nums; }
 .my-day.is-sat .my-date { color:#2f4d99; } .my-day.is-sun .my-date { color:#9c3232; }
-/* 근무형태 표시값 = 표 본문 역할 → 14.5px(DESIGN §8-6·부속서 A-3). 편성·월간 그리드 셀과
-   같은 값이다(종전 12.5px 은 같은 근무값이 화면마다 다른 크기로 보이던 원인).
-   긴 명칭은 말줄임 + title 툴팁으로 흡수한다(min-width:0 은 flex 축소 허용). */
-.my-duty { display:flex; align-items:center; justify-content:center; min-height:22px;
-  border-radius:6px; font-size:14.5px; font-weight:600; line-height:1.15; padding:4px 3px;
+/* 근무형태 표시값 = 표 본문 역할 → §1.2 body 14px(굵기만 600 으로 올려 셀 안에서 값을
+   먼저 읽게 한다). 편성·월간 그리드 셀과 같은 값이다.
+   종전 값 14.5px 의 근거 주석은 "DESIGN §8-6·부속서 A-3" 을 들었으나 DESIGN 변경이력의
+   부록 폐기로 그 절은 존재하지 않는다 — 현행 근거는 §1.2 다섯 단계뿐이고 14.5 는 그 안에
+   없다(2026-08-18 정정).
+   min-height 24px 도 내용에서 나온다: 14px × line-height 1.15 = 16.1 + 상하 패딩 4+4 =
+   24.1 → §1.1 값 24.
+   폭은 내용 폭이다 — align-self:center 로 셀의 남는 가로폭을 흡수하지 않는다(종전에는
+   flex stretch 라 '주' 한 글자 chip 이 1440 에서 183.9px 로 늘어났다: 폭이 내용과 무관
+   하게 정해지던 자리다. 남는 폭은 남긴다). 좌우 패딩 8px 은 §1.1 값이고, 상한은 셀
+   안폭(max-width:100%)이며 넘치면 말줄임 + title 툴팁으로 흡수한다.
+   실측 근거 @14/600 IBM Plex Sans KR: 최장 명칭 '경조(자녀결혼)' 87.39px → chip 103.4px
+   < 1440 셀 안폭 185.9px. 폰(390)은 셀 안폭 41.69px 이라 좌우 패딩을 4px 로 낮춰 약칭
+   최장 '야-4' 26.53px → chip 34.5px 로 말줄임 없이 들어간다. */
+.my-duty { display:flex; align-items:center; justify-content:center; align-self:center;
+  min-height:24px; max-width:100%; border-radius:4px; font-size:14px; font-weight:600;
+  line-height:1.15; padding:4px 8px;
   min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .my-duty.is-empty { background:transparent; }
+/* 폰 폭에서 줄이는 것은 간격뿐이다 — 글자 크기(§1.2)·히트영역(§1.4)은 그대로 둔다.
+   chip 좌우 패딩만 8→4px 로 낮춘다: 390 실측 셀 안폭 41.69px 대비 약칭 최장
+   '야-4' 26.53 + 8 = 34.5px, 'OFF' 26.13 + 8 = 34.1px 로 말줄임 없이 들어간다. */
 @media (max-width:640px) {
-  .my-emp { font-size:12px; }
-  .my-head { padding:6px 0 10px; }
-  /* 전환 버튼 min-width 84px 은 계약이라 못 줄인다 → 행 간격만 좁혀 한 줄을 지킨다. */
-  .st-key-my_toprow { column-gap:4px; }
-  .my-weekdays, .my-calendar-grid { gap:3px; } .my-weekday { font-size:11.5px; padding:4px 0 6px; }
-  .my-day { min-height:58px; padding:6px 3px; gap:4px; border-radius:7px; }
-  .my-date { font-size:11.5px; } .my-duty { font-size:13px; min-height:20px; padding:3px 2px; }
+  .my-head { padding:4px 0 8px; }
+  .stHorizontalBlock.st-key-my_toprow { column-gap:4px !important; }
+  .my-weekdays, .my-calendar-grid { gap:4px; } .my-weekday { padding:4px 0; }
+  .my-day { min-height:58px; padding:4px; gap:4px; }
+  .my-duty { padding:4px; }
 }
 /* 폰 가로(낮은 뷰포트): 달력이 화면을 최대로 쓰도록 상하 여백만 압축한다 — 월간 근무표
    _SV_CSS 의 같은 미디어쿼리와 동일한 규율이다(폰트·색·히트영역은 그대로, 줄이는 것은
    여백과 '한 줄 설명'뿐). 종전에는 max-width:640 만 있어 844×390 가로에서 데스크톱
    치수 그대로 렌더돼 달력이 화면 밖으로 밀렸다(2026-08-14 실측: 달력 top 259.9·높이 416). */
 @media (orientation:landscape) and (max-height:540px) {
-  section[data-testid="stMain"] .block-container { padding-bottom:.5rem !important; }
+  section[data-testid="stMain"] .block-container { padding-bottom:8px !important; }
   .ms-desc { display:none !important; }
   .my-head { padding:4px 0 8px !important; margin:0 !important; }
-  .my-weekday { padding:2px 0 4px !important; }
-  .my-weekdays, .my-calendar-grid { gap:3px !important; }
-  .my-day { min-height:44px !important; padding:4px 3px !important; gap:3px !important; }
+  .my-weekday { padding:0 0 4px !important; }
+  .my-weekdays, .my-calendar-grid { gap:4px !important; }
+  .my-day { min-height:44px !important; padding:4px !important; gap:4px !important; }
 }
 </style>
 """
@@ -303,7 +388,8 @@ def _calendar_html(rows: pd.DataFrame, year: int, month: int, work_types: dict,
             classes.append("is-sat")
         elif duty_date.weekday() == 6:
             classes.append("is-sun")
-        # 근무 chip = 근무형태 DB hex 배경(§2 예외 SoT) + WCAG 대비 텍스트(흰/검).
+        # 근무 chip = 근무형태 DB hex 배경(§1.3 "도메인 색은 이 팔레트의 예외") + WCAG
+        # 대비 텍스트(흰/검).
         # title: 좁은 셀에서 말줄임된 명칭의 전문을 보증한다(편성·월간 그리드의
         # tooltipField 와 같은 역할 — 길이 차이는 말줄임 + 툴팁으로 흡수).
         duty = (
@@ -402,7 +488,9 @@ def render(user: dict) -> None:
     if st.session_state.get(_MODE_KEY) not in (_MODE_SHORT, _MODE_NAME):
         st.session_state.pop(_MODE_KEY, None)
     # 월 이동(좌)과 약칭/명칭 전환(우)을 한 행에 — 남는 우측 공간 활용(2026-08-12 사용자 요구).
-    with st.container(key="my_toprow", horizontal=True, gap="small",
+    # gap=None: Streamlit 기본 가로 gap 은 0.6rem(실측 8.4px)으로 §1.1 스케일 밖이라
+    # 컨테이너 gap 을 끄고 _styles() 에서 8px(폰 4px)로 선언한다.
+    with st.container(key="my_toprow", horizontal=True, gap=None,
                       vertical_alignment="center"):
         _month_navigation(year, month)
         mode = st.segmented_control(

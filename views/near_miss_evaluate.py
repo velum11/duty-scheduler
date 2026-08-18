@@ -1,30 +1,50 @@
-"""아차사고 평가 관리 — 큐 처리형(DESIGN.md §1-A).
+"""아차사고 평가 관리 — WORKLIST(DESIGN.md §2).
 
-신판 DESIGN.md §1-A "큐 처리형" 골격을 그대로 구현한다(색 리스킨이 아니라 구조 교체):
+§2 WORKLIST 골격을 그대로 구현한다(2026-08-18 §7.1 확정 이관 — 구 "큐 칩 스트립 +
+전체폭 상세" 골격 폐기):
 
-    제목/설명 → [지표 스트립] → 헤어라인 → [큐 칩 스트립] → 헤어라인
-    → [선택 건 전체폭 상세] → 헤어라인 → [하단 액션 바]
+    제목/설명 → [상태 탭: 평가 대기 n · 평가중 n · 전체 n] → 헤어라인
+    → 2열( 목록 33% | 상세 67% )
+      목록 : 2줄 고정 행(제목/경과일 · 보고번호·소속/분류) + 좌측 2px 상태 보더, 자체 스크롤
+      상세 : 식별자 + 상태 배지 + 상태 결과 + 대상 제목 + 메타
+             → 주요 내용 표(라벨 열 + 값 열 1개) → 첨부 → 결정(근거 뒤: 등급 → 의견 → 실행)
 
-- 좌우 분할·행 체크박스·"케이스를 선택하세요" 빈 패널을 쓰지 않는다(§0 금지 1·2).
-- 진입 시 큐의 첫 건이 자동 선택된다. 칩 클릭 = 선택(오렌지 칩), 이전/다음으로 순회.
-- 본문에 빈 아이콘 툴바 띠를 넣지 않는다(§0 금지 3) — 아이콘은 상단 52px 헤더에만.
-- 카드(테두리+radius+그림자) 금지(§0 금지 5) — 구획은 헤어라인 + 여백만.
-- 색·크기·간격은 §2~§4 값만 사용(§0 금지 8, 새 색 없음).
-
-레퍼런스 골격: ``아차사고 관리.dc.html`` isEval 블록(509~583).
+이관에서 바뀐 것(구조·표기만, 기능 계약 불변)
+  - **지표 타일 제거**(§4-1·§2) — ``erp.metric_strip`` 3장(평가 대기·검토중·대기 합계)을
+    없애고 그 건수를 **상태 탭 라벨**로 옮겼다. 탭은 목록을 실제로 바꾼다(합계 타일은
+    앞 두 타일의 합이라 새 정보가 없었다).
+  - **어휘 통일**(§3.6) — ``검토중 → 평가중`` · ``검토착수 → 평가착수`` ·
+    ``확정 등급 → 평가 등급``. **영문 코드값(``IN_REVIEW``·``confirmed_grade``)은 불변**이며
+    한글 라벨만 통일한다.
+  - **상태의 결과 표기**(§3.3) — 배지 옆에 그 상태가 무엇을 막고 여는지 한 줄
+    (``평가중`` 옆 ``보고자 수정 잠김`` — ``docs/database.md`` 보고자 수정 컷오프).
+  - **보완요청 활성 게이트 정정**(§7.4 P1) — 종전 활성 판정은 006 프로브였는데 실행부
+    ``db.request_near_miss_revision`` 은 **007 프로브**로 fail-closed 차단한다. 006 만
+    적용된 배포에서 버튼이 눌리고 실패했다. 활성 판정을 **실행부와 같은 007 기준**으로
+    맞추고, 비활성 사유는 툴팁이 아니라 **화면에 쓴다**(§3.2·§4-3).
+  - **목록 정렬** — 경과일(접수일 ``created_at`` 기준, §7.2-4) 내림차순. 오래 묵은 건이
+    위로 온다. 경과일에는 색을 칠하지 않는다(§7.2-4-b, SLA 미정).
 
 기능 계약(불변 — 표현 계층만 교체):
   - 권한 게이트 ``auth.can_evaluate_near_miss(user)``.
-  - 상태 전이 4종: 검토착수(SUBMITTED→IN_REVIEW) · 평가확정(evaluate_near_miss) ·
+  - 상태 전이 4종: 평가착수(SUBMITTED→IN_REVIEW) · 평가확정(evaluate_near_miss) ·
     보완요청(IN_REVIEW→SUBMITTED, request_near_miss_revision) · 반려(→REJECTED).
-    반려·보완요청은 '의견' 필수(dc 와 동일한 단일 의견 입력 — 반려는 rejection_reason,
-    보완요청은 사유로 재사용). 신원은 서버측(current_user=auth.get_current_user())으로 확정.
+    반려·보완요청은 '의견' 필수(단일 의견 입력 — 반려는 rejection_reason, 보완요청은
+    사유로 재사용). 신원은 서버측(current_user=auth.get_current_user())으로 확정.
   - 등급 세그먼트 값은 ``db.NEAR_MISS_GRADES`` 도메인 소스에서 파생(하드코딩 없음).
   - 모든 파사드 호출은 ``modules/db.py`` 만 사용(repository 직접 호출 없음). stale 충돌은
     파사드 원문 메시지를 배너로 그대로 노출(가공 금지).
+
+범위 밖(이번 이관에서 건드리지 않는 것)
+  - 빈도×강도 매트릭스 등급 입력(§7.1) — ``frequency``/``severity`` migration(§7.2-1e)이
+    없어 저장할 곳이 없다. 기존 등급 세그먼트를 그대로 둔다.
+  - ``NEAR_MISS_TRANSITIONS``·``docs/database.md``·migration — ``data-contract`` 소관(§7.3-4).
 """
-# DESIGN.md §1-A 큐 처리형 — 읽기 큐(칩) + 전체폭 상세/워크플로.
+# DESIGN.md §2 WORKLIST — 상태 탭 + 2열(목록 33% / 상세 67%).
 SCREEN_ARCHETYPE = "WORKLIST"
+# §0 — 이 화면이 내리는 결정(기계 검증은 아직 없다, §5).
+SCREEN_DECISION = "이 건을 평가중으로 올릴 것인가, 등급을 확정할 것인가, 반려·보완요청할 것인가"
+SCREEN_EVIDENCE = ("사고 내용", "작업·현장 설명", "원인·대책", "첨부 사진", "접수 경과일")
 
 from html import escape
 
@@ -32,11 +52,11 @@ import pandas as pd
 import streamlit as st
 
 from modules import auth, db
-from views.common import erp, scaffold
+from views.common import erp, scaffold, worklist
 from views.common.photo_paths import normalize_photo_paths
 from views.common.photos import render_photo_thumbs
 from views.master import (
-    TOKENS,
+    LIFECYCLE_BADGE,
     DraftState,
     Readiness,
     ReadinessState,
@@ -52,28 +72,34 @@ _PAGE_ID = _STATE.page_id
 # (SoT 는 db.py, 여기서는 화면 필터링용 상수 복제).
 _PENDING_STATUSES = ("SUBMITTED", "IN_REVIEW")
 
+# §3.6 어휘: 진행 상태는 '평가중'(구 '검토중'). 영문 코드값은 불변이며 한글 라벨만 통일한다.
+# (라벨 사전이 3화면에 복제돼 있는 것은 §3.6 이 지적한 미결이며 단일 출처화는 별건이다.)
 _STATUS_LABEL = {
     "SUBMITTED": "제출됨",
-    "IN_REVIEW": "검토중",
+    "IN_REVIEW": "평가중",
     "EVALUATED": "평가완료",
     "REJECTED": "반려",
     "CLOSED": "종결",
 }
-# 등급 색·순서 — 조회/내 아차사고와 **같은 매핑**(TOKENS 재사용, 새 색 없음). 상세 메타의
-# 등급을 공용 등급 마크(셰브런+색 텍스트)로 렌더하기 위한 값이다(2026-08-14 표기 통일).
-_GRADE_COLOR = {
-    "S": TOKENS["danger"], "A": TOKENS["gold"], "B": TOKENS["warn"],
-    "C": TOKENS["info"], "D": TOKENS["ink-3"],
+# §3.3 — 상태는 배지로, 그 상태의 **결과**(무엇을 막고 무엇을 여는지)는 별도 표기로 적는다.
+# 근거: docs/database.md "보고자 수정 컷오프"(보고자는 SUBMITTED 에서만 수정 가능).
+_STATUS_EFFECT = {
+    "SUBMITTED": "보고자 수정 가능 · 평가자 미지정",
+    "IN_REVIEW": "보고자 수정 잠김",
+    "EVALUATED": "개선조치 등록 단계",
+    "REJECTED": "보고자 재제출 대기",
+    "CLOSED": "이후 전이 없음",
 }
-_GRADE_LEVEL = {"S": 4, "A": 3, "B": 2, "C": 1, "D": 0}
+# 목록 행 좌측 2px 보더 색(§2: 상태는 줄 수가 아니라 보더 색으로 표현한다). 상태 배지와
+# **같은 의미 색**을 쓴다(§1.3 의미 색은 상태마다 새로 만들지 않는다).
+_STATUS_ACCENT = {code: pal["text"] for code, pal in LIFECYCLE_BADGE.items()}
 
+# 등급 마크(_grade_mark)·등급 색 매핑은 이 화면에서 제거했다 — 유일한 소비처가 상세 메타의
+# **제안등급**이었고 §7.2-1b(2026-08-18 사용자 결정)로 제안등급 표시를 폐기했기 때문이다.
+# 이 화면의 큐는 SUBMITTED/IN_REVIEW 뿐이라 confirmed_grade 는 항상 비어 있어 대체 표시도
+# 두지 않는다(빈 자리를 만들지 않도록 메타는 발생일·접수 경과·소속·신고자로 재배분).
+# DB 컬럼 proposed_grade 는 미사용으로 남긴다(컬럼 제거 판단은 data-contract 소관).
 
-def _grade_mark(grade, empty: str) -> str:
-    """등급 마크 HTML(공용 kit primitive) — 빈 값은 중립 점 마커 + ``empty`` 라벨."""
-    g = str(grade or "").strip().upper()
-    if not g:
-        return erp.grade_mark_html(empty, TOKENS["ink-3"], level=None)
-    return erp.grade_mark_html(g, _GRADE_COLOR.get(g, TOKENS["ink-2"]), level=_GRADE_LEVEL.get(g))
 # 발생원인 코드→한글 라벨(§3.1: 분류축=평문, 색 없음) — 아차사고 6화면 단일 어휘
 # (2026-08-14: HIT 충돌→부딪힘·DROP 낙하→낙하물, KOSHA 현행 용어 기준).
 _CAUSE_LABEL = {
@@ -88,72 +114,103 @@ _NOT_READY_MSG = (
 _PROBE_ERROR_MSG = (
     "아차사고 스키마 상태 확인 실패 — 재확인이 필요합니다(확인 전까지 평가는 차단됩니다)."
 )
+# §7.4 P1 — 보완요청 실행부(db.request_near_miss_revision)가 요구하는 **007** 프로브의
+# 비활성 사유. 실행부 원문(_NEAR_MISS_REVISION_NOT_READY_MESSAGE)과 같은 사실을 말한다.
+_REVISION_NOT_READY_MSG = "보완요청 스키마(007)가 적용되지 않아 보완 사유를 저장할 수 없습니다."
+_REVISION_PROBE_ERROR_MSG = "보완요청 스키마(007) 상태를 확인하지 못했습니다."
 _STALE_MARK = "이미 변경"  # db._NEAR_MISS_STALE_MESSAGE 원문 일부 — kind 분기(warning vs error).
 
 _SEL_KEY = "nm_eval_selected_id"       # 상세에 열린 보고서 id(문자열)
+_TAB_KEY = "nm_eval_tab"               # 상태 탭 선택(§2: 탭이 목록을 실제로 바꾼다)
 _OP_KEY = "nm_eval_opinion_"           # 평가 의견(반려·보완요청 공용) prefix + id
-_GRADE_KEY = "nm_eval_grade_"          # 확정 등급 선택 prefix + id
+_GRADE_KEY = "nm_eval_grade_"          # 평가 등급 선택 prefix + id
 _EVAL_ACTIVE_KEY = "nm_eval_active_id"  # 직전 렌더의 활성 케이스 id(케이스 전환 시 등급 선택 초기화)
 
-# ── §2 팔레트 (팔레트 밖 색 금지 §0-8) — 리터럴로 고정해 새 색 유입을 원천 차단한다. ──
+# 상태 탭 — 라벨은 §3.6 어휘("평가 대기 → 평가중"), 값은 상태 코드(불변)로 매핑한다.
+# 탭 라벨 문자열에 건수를 섞지 않고 format_func 로 붙인다: 건수가 바뀔 때마다 옵션 문자열이
+# 달라지면 세션에 보관된 선택값이 옵션 목록에서 사라져 탭이 초기화된다.
+_TABS: tuple[str, ...] = ("평가 대기", "평가중", "전체")
+_TAB_STATUSES = {
+    "평가 대기": ("SUBMITTED",),
+    "평가중": ("IN_REVIEW",),
+    "전체": _PENDING_STATUSES,
+}
+
+# 목록 열 자체 스크롤 높이(§2: 목록과 상세는 독립 스크롤). 1366×768 기준 상단 크롬을 뺀
+# 잔여 높이 근사이며 간격 토큰이 아니라 뷰포트 파생값이다.
+_LIST_HEIGHT = 520
+
+# ── §1.3 팔레트 (토큰 밖 색 금지 §4-7) — 리터럴로 고정해 새 색 유입을 원천 차단한다. ──
 _INK = "#1c1a17"          # 본문
 _INK2 = "#4a453d"         # 보조(섹션 라벨)
-# Codex P1: 이 파일의 _FAINT 는 모두 읽는 작은 텍스트(라벨·모노 오버라인·메타)에
-# 쓰이므로 #6b665d(5.1:1↑)로 상향한다 — #8b857c(3.27:1)·#a09a90(2.5:1)은 읽는 텍스트 금지.
-_FAINT = "#6b665d"        # 읽는 캡션·모노 오버라인(구 #a09a90)
+_FAINT = "#6b665d"        # 읽는 텍스트 최저 대비(5.1:1) — 이보다 옅은 회색은 읽는 텍스트 금지
+_LINE = "#e6e2da"         # 행 헤어라인
 _LINE_SEC = "#e0dbd2"     # 섹션 헤어라인
-_ACCENT_TEXT = "#b4451a"
-_ACCENT_TINT = "#fdf3ec"
+_DANGER = "#9c3232"       # 부정 의미(반려) 글자
+_DANGER_BG = "#fbeeee"
+_DANGER_LINE = "#f0d9d9"
 # 인라인 style 속성 안에 그대로 들어가므로 **큰따옴표**로 감싼다(작은따옴표는 금지).
 # style='font-family:{_MONO};…' 에 작은따옴표 계열 값을 넣으면 속성이 첫 내부 따옴표에서
-# 끊겨 style 전체가 소실된다(2026-08-14 실측: <span ibm="" plex="">1</span> — 26px·600·
-# 모노·액센트색이 모두 무효화돼 KPI 숫자가 14px sans 로 렌더). CSS 블록 안에서도 유효.
+# 끊겨 style 전체가 소실된다(2026-08-14 실측). CSS 블록 안에서도 유효.
 _MONO = '"IBM Plex Mono", monospace'
 
-# 화면 스코프 CSS(칩·세그먼트·나브·의견 입력) — 선택 상태는 색+형태 이중부호화(오렌지 배경
-# +굵기). 히트영역 ≥32px. primary=선택/CTA 는 전역 오렌지 액센트(modules/ui.py) 재사용.
+# 화면 스코프 CSS — §1.2 다섯 단계(28/20/16/14/12)와 §1.4 compact 히트영역(34~38px)만 쓴다.
 _EVAL_CSS = f"""
 <style>
-/* 큐 칩(선택=primary 오렌지, 비선택=secondary 흰+테두리) — pill, 히트영역 32px */
-[class*="st-key-nmq_"] button {{
-  border-radius:999px !important; min-height:32px !important; height:auto !important;
-  padding:5px 14px !important; font-size:12.5px !important; font-weight:600 !important;
-  white-space:nowrap !important; line-height:1.2 !important;
+/* 상태 탭 — compact 히트영역 34px(공용 기본 30.1px 미달 보정). 선택 표시는 Streamlit
+   기본(액센트)을 그대로 쓴다. 선택자는 위젯 key(_TAB_KEY)에서 오는 st-key 클래스다.
+   한글 라벨이라 모노·letter-spacing 을 걸지 않는다(본문 sans 상속). */
+.st-key-nm_eval_tab button {{
+  min-height:34px !important; font-weight:600 !important;
 }}
-/* 등급 세그먼트(선택=primary 오렌지) — 모노 코드, radius 7, 히트영역 32px */
+/* 라벨 글자는 button 이 아니라 내부 <p> 가 소유한다 — button 에만 font-size 를 걸면
+   실제 글자는 Streamlit 기본 12.25px 로 남는다(2026-08-18 실측). §1.2 14px 로 고정. */
+.st-key-nm_eval_tab button p {{ font-size:14px !important; font-weight:600 !important; }}
+/* 선택 탭 라벨: 기본 액센트 #c2410c 는 10% 틴트 배경(#efe0d7) 위에서 4.03:1 로 §5
+   하한(4.5) 미달이다(실측). hover 액센트 #a3350a 로 내리면 5.31:1. */
+.st-key-nm_eval_tab button[aria-checked="true"] p {{ color:#a3350a !important; }}
+/* <599px: 목록 고정 높이(520)가 콘텐츠보다 커서 빈 공간이 생기고 상세가 폴드 밖으로
+   밀린다(390 에서 469px 공백 실측). 좁은 폭에서는 콘텐츠 높이로 푼다. */
+@media (max-width:598px) {{
+  .st-key-nm_eval_listbox {{ height:auto !important; max-height:none !important; }}
+}}
+/* 평가 등급 세그먼트(선택=primary 액센트) — 모노 코드, 히트영역 34px */
 [class*="st-key-nmg_"] button {{
   border-radius:7px !important; min-width:44px !important; min-height:34px !important;
   padding:6px 12px !important; font-family:{_MONO} !important; font-size:14px !important;
   font-weight:600 !important;
 }}
-/* 이전/다음 나브 — 32x32 정사각 */
-.st-key-nm_qprev button, .st-key-nm_qnext button {{
-  min-width:32px !important; width:32px !important; min-height:32px !important; height:32px !important;
-  padding:0 !important; border-radius:7px !important; font-size:14px !important;
-}}
-/* 액션 버튼(검토착수/보완요청/반려/평가확정) — 히트영역 34px */
+/* 액션 버튼(평가착수/보완요청/반려/평가확정) — 히트영역 34px */
 [class*="st-key-nm_act_"] button {{
-  min-height:34px !important; border-radius:8px !important; font-size:13px !important;
+  min-height:34px !important; border-radius:8px !important; font-size:14px !important;
   font-weight:600 !important; white-space:nowrap !important;
 }}
-/* 세그먼트 인라인 라벨 */
-.nm-seg-label {{ font-size:12.5px; font-weight:500; color:{_INK2}; white-space:nowrap; }}
-.nm-qhead {{ display:flex; align-items:center; gap:8px; margin:2px 0 6px; }}
-.nm-qhead .t {{ font-size:14px; font-weight:600; color:{_INK}; }}
-.nm-qhead .c {{ font-family:{_MONO}; font-size:11px; font-weight:600; padding:2px 8px;
-  border-radius:999px; background:{_ACCENT_TINT}; color:{_ACCENT_TEXT}; }}
-.nm-qpos {{ font-family:{_MONO}; font-size:11.5px; color:{_FAINT}; white-space:nowrap; }}
+/* 반려는 부정 의미 색(§3.2) — 같은 크기·같은 색 버튼 4개 나열을 색으로 가른다. */
+[class*="st-key-nm_act_reject_"] button {{
+  background:{_DANGER_BG} !important; border-color:{_DANGER_LINE} !important;
+  color:{_DANGER} !important;
+}}
+[class*="st-key-nm_act_reject_"] button:disabled {{ color:{_FAINT} !important; }}
+/* 비활성 라벨은 Streamlit 기본 #9e9c98(2.46:1, §1.3 팔레트 밖)이다. WCAG 는 비활성을
+   예외로 두지만 한 액션 행에서 2.46:1 과 5.04:1 이 섞이는 것은 결함이라 통일한다. */
+[class*="st-key-nm_act_"] button:disabled p {{ color:{_FAINT} !important; }}
+[class*="st-key-nm_act_"] button p {{ font-size:14px !important; font-weight:600 !important; }}
+.nm-seg-label {{ font-size:12px; font-weight:500; color:{_INK2}; white-space:nowrap; }}
+/* 결정 블록 라벨 — 한글이라 letter-spacing 을 주지 않는다(자간이 벌어진다). */
+.nm-sec {{ font-size:12px; font-weight:600; color:{_INK2}; margin:0 0 6px; }}
+/* 비활성 사유(§3.2·§4-3: 툴팁에만 두지 않는다) */
+.nm-gate {{ font-size:12px; color:{_INK2}; line-height:1.6; margin:6px 0 0;
+  text-wrap:pretty; }}
 </style>
 """
 
 
 # ---------- 진입 ----------
 def render(user: dict) -> None:
-    # 제목 크롬만(아이콘 툴바 밴드 없음 §0-3) — 아이콘은 상단 52px 헤더에만.
     erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="평가 관리",
-        desc="등록된 아차사고를 검토해 등급을 확정하거나 반려합니다.",
+        desc="등록된 아차사고를 평가해 등급을 확정하거나 반려합니다.",
         breadcrumb="아차사고 › 평가 관리",
         badges=scaffold.mode_badge(),
     )
@@ -168,6 +225,7 @@ def render(user: dict) -> None:
 
 
 def _readiness() -> ReadinessState:
+    """006 아차사고 스키마 — 평가착수·평가확정·반려 쓰기 게이트."""
     state = db.near_miss_schema_probe()
     if state == db.READINESS_READY:
         return ReadinessState.ready()
@@ -176,13 +234,31 @@ def _readiness() -> ReadinessState:
     return ReadinessState.not_ready(_NOT_READY_MSG)
 
 
+def _revision_readiness() -> ReadinessState:
+    """007 보완요청 스키마 — **보완요청 전용** 쓰기 게이트(§7.4 P1).
+
+    보완요청 실행부(``db.request_near_miss_revision``)는 006 이 아니라 007 프로브로
+    fail-closed 차단한다. 화면이 006 으로 활성을 판정하면 006 만 적용된 배포에서 버튼이
+    눌리고 실패한다(§3.2 위반). 실행부와 **같은 프로브**를 읽어 판정을 일치시킨다.
+    ``modules/db.py`` 는 수정하지 않는다(data-contract 소관).
+    """
+    state = db.near_miss_improvement_schema_probe()
+    if state == db.READINESS_READY:
+        return ReadinessState.ready()
+    if state == db.READINESS_PROBE_ERROR:
+        return ReadinessState.probe_error(_REVISION_PROBE_ERROR_MSG)
+    return ReadinessState.not_ready(_REVISION_NOT_READY_MSG)
+
+
 def _render_body(user: dict) -> None:
     show_flash(_STATE)
     readiness = _readiness()
+    revision_readiness = _revision_readiness()
     readiness.banner()
     if readiness.state is Readiness.PROBE_ERROR:
         if st.button("스키마 재확인", key="nm_eval__recheck", icon=":material/refresh:"):
             db.near_miss_schema_probe(force=True)
+            db.near_miss_improvement_schema_probe(force=True)
             st.rerun()
 
     try:
@@ -194,41 +270,36 @@ def _render_body(user: dict) -> None:
         st.error("평가 대기 목록을 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # ── 지표 스트립(제목 바로 아래 첫 블록 §0-4) — 좌측 2px 보더 + 26px 모노 숫자.
-    # 화면 로컬 HTML 대신 공용 kit(erp.metric_strip)을 쓴다: 조회·내 아차사고와 **같은 타일**
-    # (라벨 12px / 값 26px·600 모노 / 단위 11.5px)이 되어 6화면 지표 어휘가 하나로 모인다. ──
-    subm = inrev = 0
-    if reports is not None and not reports.empty:
-        counts = reports["status"].astype(str).value_counts()
-        subm = int(counts.get("SUBMITTED", 0))
-        inrev = int(counts.get("IN_REVIEW", 0))
-    total = subm + inrev
-    erp.metric_strip([
-        ("평가 대기", subm, "건", "SUBMITTED", True),
-        ("검토중", inrev, "건", "IN REVIEW", False),
-        ("대기 합계", total, "건", "PENDING", False),
-    ])
+    # ── 상태 탭(§2) — 지표 타일 대신 여기에 건수를 싣는다(§4-1). 탭은 목록을 실제로 바꾼다. ──
+    tab = _render_tabs(_tab_counts(reports))
     _hairline()
 
-    ordered = _ordered_ids(reports)
-    if not ordered:
-        st.markdown(
-            f"<div style='padding:22px 0;font-size:14.5px;color:{_INK2};'>"
-            "현재 평가 대기 중인 아차사고가 없습니다.</div>",
-            unsafe_allow_html=True,
-        )
-        return
+    ordered = _ordered_ids(reports, _TAB_STATUSES[tab])
+    reports_by_id = {}
+    if reports is not None and not reports.empty:
+        reports_by_id = {str(r["id"]): r for _, r in reports.iterrows()}
 
-    # 진입 시 첫 건 자동 선택(§1-A) — 선택이 없거나 큐에서 사라진 경우.
+    # 선택 보관은 호출부 책임(erp.select_list 계약). 탭 전환으로 선택이 목록에서 빠지면
+    # 첫 건으로 되돌린다 — 상세가 빈 채로 남지 않게 한다.
     selected_id = st.session_state.get(_SEL_KEY)
     if selected_id not in ordered:
-        selected_id = ordered[0]
+        selected_id = ordered[0] if ordered else None
         st.session_state[_SEL_KEY] = selected_id
 
-    reports_by_id = {str(r["id"]): r for _, r in reports.iterrows()}
-    _render_queue_chips(ordered, reports_by_id, selected_id)
-    _hairline()
-    _render_detail(user, readiness, selected_id)
+    list_col, detail_col = erp.master_detail_frame(list_ratio=1, detail_ratio=2)
+    with list_col:
+        picked = _render_list(ordered, reports_by_id, selected_id, tab)
+        if picked and picked != selected_id:
+            st.session_state[_SEL_KEY] = picked
+            st.rerun()
+    with detail_col:
+        if selected_id is None:
+            erp.detail_empty(
+                "처리할 건이 없습니다",
+                f"'{tab}' 탭에 표시할 아차사고가 없습니다. 다른 상태 탭을 확인하세요.",
+            )
+            return
+        _render_detail(user, readiness, revision_readiness, selected_id)
 
 
 # ---------- 데이터 ----------
@@ -242,11 +313,35 @@ def _load_pending_reports() -> pd.DataFrame:
     return df[mask].reset_index(drop=True)
 
 
-def _ordered_ids(df: pd.DataFrame) -> list[str]:
+def _tab_counts(df: pd.DataFrame) -> dict[str, int]:
+    """상태 탭 라벨에 붙는 건수(§4-1: 지표는 탭 안의 건수로 표현한다).
+
+    '전체'는 평가 대기 큐 전체(SUBMITTED+IN_REVIEW)이며, 탭이 없으면 선택할 수 없으므로
+    §4-1 이 금지한 "읽기만 하는 합계 타일"과 다르다 — 이 값은 목록을 바꾼다.
+    """
+    counts = {name: 0 for name in _TABS}
+    if df is None or df.empty:
+        return counts
+    by_status = df["status"].astype(str).value_counts()
+    for name, statuses in _TAB_STATUSES.items():
+        counts[name] = int(sum(int(by_status.get(code, 0)) for code in statuses))
+    return counts
+
+
+def _ordered_ids(df: pd.DataFrame, statuses: tuple[str, ...]) -> list[str]:
+    """탭 상태로 거른 뒤 **경과일 내림차순**(오래 묵은 건 먼저)으로 정렬한다(§7.2-4-b).
+
+    경과일은 접수일(``created_at``) 파생이다 — ``incident_date`` 는 동순위 tie-break 로만
+    쓴다(같은 날 접수분 안에서 발생일이 최근인 건을 위로).
+    """
     if df is None or df.empty:
         return []
-    frame = df.sort_values("incident_date", ascending=False, kind="stable")
-    return [str(v) for v in frame["id"].tolist()]
+    frame = df[df["status"].astype(str).isin(statuses)]
+    if frame.empty:
+        return []
+    return worklist.order_by_elapsed([
+        (r["id"], r.get("created_at"), r.get("incident_date")) for _, r in frame.iterrows()
+    ])
 
 
 def _reporter_label(emp_no) -> str:
@@ -261,125 +356,174 @@ def _reporter_label(emp_no) -> str:
     return f"{name}({emp_no})" if name else emp_no
 
 
-# ---------- 지표 스트립 ----------
-# 지표 타일 렌더는 공용 kit(``erp.metric_strip``)이 소유한다 — 화면 로컬 HTML 복제를 제거해
-# 조회·내 아차사고·개선조치와 타일 지오메트리·폰트가 어긋날 여지를 없앴다(2026-08-14).
-
-
 def _hairline() -> None:
     st.markdown(
-        f"<div style='border-top:1px solid {_LINE_SEC};margin:2px 0 10px;'></div>",
+        f"<div style='border-top:1px solid {_LINE_SEC};margin:4px 0 12px;'></div>",
         unsafe_allow_html=True,
     )
 
 
-# ---------- 큐 칩 스트립 ----------
-def _render_queue_chips(ordered: list[str], reports_by_id: dict, selected_id: str) -> None:
-    """평가 대기 큐를 칩 스트립으로 렌더(§1-A·§7: st.button 반복 + session_state.sel).
+# ---------- 상태 탭 ----------
+def _render_tabs(counts: dict[str, int]) -> str:
+    """상태 탭을 렌더하고 선택된 탭 이름을 반환한다(§2 골격의 두 번째 블록).
 
-    선택 칩 = 오렌지(primary), 나머지 = 흰+테두리(secondary). 우측에 [n/m] + 이전/다음."""
-    idx = ordered.index(selected_id)
-    st.markdown(
-        f"<div class='nm-qhead'><span class='t'>평가 대기 큐</span>"
-        f"<span class='c'>{len(ordered)}</span></div>",
-        unsafe_allow_html=True,
+    ``st.tabs`` 를 쓰지 않는다 — 기본값이 모든 탭을 미리 렌더해 "탭이 목록을 바꾼다"는
+    §2 계약이 성립하지 않는다. ``st.segmented_control`` 은 클릭=rerun 이라 필터링이 자동
+    성립한다(``my_schedule.py`` 실사용 선례). ``required=True`` 로 선택 해제를 막아
+    "아무 탭도 아닌" 상태를 만들지 않는다.
+    """
+    # 첫 진입 탭은 **비어 있지 않은 첫 탭**이다(§3.5: 애초에 빈 영역이 생기지 않게 배치).
+    # 처리 우선순위 순서(평가 대기 → 평가중 → 전체)로 훑어 건수가 있는 첫 탭을 고른다.
+    # 이미 사용자가 고른 탭이 있으면 건드리지 않는다 — 처리 후 그 탭이 0 이 됐다고 화면이
+    # 제멋대로 옮겨 가면 방금 무엇을 했는지 알 수 없다.
+    if st.session_state.get(_TAB_KEY) not in _TABS:
+        st.session_state[_TAB_KEY] = next(
+            (name for name in _TABS if counts.get(name, 0)), _TABS[0])
+    picked = st.segmented_control(
+        "상태",
+        _TABS,
+        key=_TAB_KEY,
+        required=True,
+        format_func=lambda name: f"{name} {counts.get(name, 0)}",
+        label_visibility="collapsed",
+        width="content",
     )
-    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
-        for rid in ordered:
-            r = reports_by_id.get(rid, {})
-            short = str(r.get("report_no") or rid)[-8:]
-            title = str(r.get("work_name") or "(제목 없음)")
-            if len(title) > 22:
-                title = title[:21] + "…"
-            picked = st.button(
-                f"{short} · {title}",
-                key=f"nmq_{rid}",
-                type="primary" if rid == selected_id else "secondary",
-            )
-            if picked and rid != selected_id:
-                st.session_state[_SEL_KEY] = rid
-                st.rerun()
-        # 우측: 위치 + 이전/다음
-        st.markdown(f"<span class='nm-qpos'>{idx + 1}/{len(ordered)}</span>",
-                    unsafe_allow_html=True)
-        if st.button("‹", key="nm_qprev", help="이전 건",
-                     disabled=idx <= 0, type="secondary"):
-            st.session_state[_SEL_KEY] = ordered[idx - 1]
-            st.rerun()
-        if st.button("›", key="nm_qnext", help="다음 건",
-                     disabled=idx >= len(ordered) - 1, type="secondary"):
-            st.session_state[_SEL_KEY] = ordered[idx + 1]
-            st.rerun()
+    return picked if picked in _TABS else _TABS[0]
 
 
-# ---------- 전체폭 상세 + 액션 바 ----------
-def _detail_read_html(report: dict, status: str) -> str:
-    """선택 건 전체폭 상세(§1-A) — 보고번호+상태 배지 / 제목 / 우측 메타 / 본문 블록.
+# ---------- 목록 열(33%) ----------
+def _list_items(ordered: list[str], reports_by_id: dict) -> list[dict]:
+    """§2 목록 행 2줄 고정 — 1줄: 제목 / 경과일, 2줄: 보고번호·소속 / 분류.
 
-    본문 블록 WHAT·TASK·SITE·CAUSE·ACTION = 좌측 2px 보더 + 모노 오버라인 + 라벨 + 본문
-    14.5px/1.7. 긴 항목 flex:2 1 420px, 짧은 항목 flex:1 1 260px(2열로 자연 채움)."""
+    식별자만 있는 행은 정렬 순서 외에 아무 판단도 돕지 못하므로 "무엇을 먼저 처리할지 고를
+    근거"(경과일·소속·분류)를 함께 싣는다. 상태는 줄을 늘리지 않고 좌측 2px 보더 색으로만
+    표현한다(§2·§4-5 — 행 높이가 상태에 따라 달라지면 안 된다).
+    """
+    items: list[dict] = []
+    for rid in ordered:
+        # ``or {}`` 를 쓰지 않는다 — 값이 pandas Series 라 truthiness 평가에서
+        # ValueError("truth value of a Series is ambiguous")로 화면이 통째로 죽는다.
+        r = reports_by_id.get(rid)
+        if r is None:
+            r = {}
+        status = str(r.get("status") or "")
+        cause = str(r.get("cause_code") or "")
+        dept = str(r.get("dept_code") or "").strip()
+        klass = _CAUSE_LABEL.get(cause, cause) or "-"
+        items.append({
+            "key": rid,
+            "line1_left": str(r.get("work_name") or "(제목 없음)"),
+            "line1_right": worklist.elapsed_label(r.get("created_at")),
+            # line2_left 는 kit 이 **모노**로 렌더한다(.esl-mono) — IBM Plex Mono 에는 한글
+            # 글리프가 없어 한글을 넣으면 글자마다 폴백돼 자간이 벌어진다. 영숫자 식별자만.
+            "line2_left": str(r.get("report_no") or rid),
+            # 소속·분류는 sans 쪽(line2_right)에 모아 둔다(둘 다 한글이 올 수 있다).
+            "line2_right": f"{dept} · {klass}" if dept else klass,
+            "accent": _STATUS_ACCENT.get(status, ""),
+        })
+    return items
+
+
+def _render_list(ordered: list[str], reports_by_id: dict, selected_id, tab: str) -> str | None:
+    """목록 열 렌더 — 이번 run 에 새로 클릭된 자연키를 반환한다(선택 보관은 호출부)."""
+    with st.container(height=_LIST_HEIGHT, border=False, key="nm_eval_listbox"):
+        return erp.select_list(
+            "nm_eval_list",
+            _list_items(ordered, reports_by_id),
+            selected=str(selected_id) if selected_id is not None else None,
+            empty=f"'{tab}' 탭에 표시할 건이 없습니다.",
+        )
+
+
+# ---------- 상세 열(67%) ----------
+def _detail_head_html(report: dict, status: str) -> str:
+    """상세 머리 — 식별자(16/600 모노) + 상태 배지 + **상태 결과**(§3.3) + 대상 제목(20/600)
+    + 메타(발생일·접수·소속·신고자)."""
     report_no = escape(str(report.get("report_no") or "-"))
     badge = lifecycle_badge_html(status, _STATUS_LABEL.get(status, status))
+    effect = escape(_STATUS_EFFECT.get(status, ""))
     title = escape(str(report.get("work_name") or "(제목 없음)"))
 
-    # 등급은 조회 화면과 같은 등급 마크(셰브런+색 텍스트, erp.grade_mark_html)로 렌더한다 —
-    # 같은 데이터(등급)가 화면마다 평문/마크로 갈리지 않게 한 어휘로 통일(2026-08-14).
+    # 세 번째 항목(mono)은 **영숫자 전용 문자열에만** 켠다 — IBM Plex Mono 에는 한글
+    # 글리프가 없어 한글에 모노를 걸면 글자마다 폴백 폰트로 떨어져 자간이 벌어진다.
+    # 발생일(ISO 날짜)만 모노이고, '12일'·'오늘'(경과)·부서코드·신고자는 본문 sans 를 쓴다.
     meta = [
-        ("발생일", escape(str(report.get("incident_date") or "-"))),
-        ("신고자", escape(_reporter_label(report.get("reporter_emp_no")))),
-        ("부서", escape(str(report.get("dept_code") or "-"))),
-        ("제안등급", _grade_mark(report.get("proposed_grade"), empty="미지정")),
+        ("발생일", escape(str(report.get("incident_date") or "-")), True),
+        ("접수 경과", escape(worklist.elapsed_label(report.get("created_at"))), False),
+        ("소속", escape(str(report.get("dept_code") or "-")), False),
+        ("신고자", escape(_reporter_label(report.get("reporter_emp_no"))), False),
     ]
     meta_cells = "".join(
-        f"<div style='display:flex;flex-direction:column;gap:3px;'>"
-        f"<span style='font-size:10.5px;letter-spacing:0.08em;color:{_FAINT};font-family:{_MONO};'>"
-        f"{escape(label)}</span>"
-        f"<span style='font-size:13.5px;color:{_INK};line-height:1.35;'>{value}</span></div>"
-        for label, value in meta
+        f"<div style='display:flex;flex-direction:column;gap:2px;min-width:0;'>"
+        f"<span style='font-size:12px;color:{_FAINT};'>{escape(label)}</span>"
+        f"<span style='font-size:14px;color:{_INK};line-height:1.4;"
+        + (f"font-family:{_MONO};font-variant-numeric:tabular-nums;" if mono else "")
+        + f"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{value}</span></div>"
+        for label, value, mono in meta
     )
-    head = (
-        "<div style='padding:4px 0 18px;display:flex;flex-wrap:wrap;align-items:flex-start;"
-        "justify-content:space-between;gap:14px 20px;'>"
-        "<div style='display:flex;flex-direction:column;gap:7px;min-width:0;'>"
-        "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;'>"
-        f"<span style='font-family:{_MONO};font-size:18px;font-weight:600;color:{_INK};'>{report_no}</span>"
-        f"{badge}</div>"
-        f"<span style='font-size:17px;color:{_INK};font-weight:600;letter-spacing:-0.02em;'>{title}</span>"
-        "</div>"
-        f"<div style='display:flex;flex-wrap:wrap;gap:12px 26px;'>{meta_cells}</div>"
+    return (
+        "<div style='padding:2px 0 14px;display:flex;flex-direction:column;gap:8px;'>"
+        "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;'>"
+        f"<span style='font-family:{_MONO};font-size:16px;font-weight:600;color:{_INK};'>{report_no}</span>"
+        f"{badge}"
+        f"<span style='font-size:12px;color:{_INK2};'>{effect}</span></div>"
+        f"<span style='font-size:20px;font-weight:600;color:{_INK};line-height:1.35;"
+        f"text-wrap:pretty;'>{title}</span>"
+        f"<div style='display:flex;flex-wrap:wrap;gap:8px 32px;padding-top:4px;"
+        f"border-top:1px solid {_LINE};'>{meta_cells}</div>"
         "</div>"
     )
 
+
+def _detail_body_html(report: dict) -> str:
+    """주요 내용 표 — **라벨 열 + 값 열 1개**(§3.1·§4-4).
+
+    값 열을 둘 이상 두면 길이가 다른 산문의 폭을 맞출 수 없어 반드시 어긋난다(이 저장소에서
+    같은 결함이 세 번 재발했다). 라벨 열 폭은 §2 FORM_ENTRY 의 130px 과 같은 값을 써
+    등록 화면과 필드 순서·라벨 폭을 일치시킨다.
+    """
     cause = str(report.get("cause_code") or "")
     cause_detail = str(report.get("cause_detail") or "")
-    cause_val = _CAUSE_LABEL.get(cause, cause) + (f" · {cause_detail}" if cause_detail else "")
-    blocks = [
-        ("WHAT", "사고 내용", str(report.get("incident_content") or ""), True),
-        ("TASK", "작업 내용", str(report.get("work_content") or ""), False),
-        ("SITE", "현장 설명", str(report.get("site_description") or ""), False),
-        ("CAUSE", "원인", cause_val, False),
-        ("ACTION", "대책", str(report.get("countermeasure") or ""), True),
+    cause_val = (_CAUSE_LABEL.get(cause, cause) or "-") + (
+        f" · {cause_detail}" if cause_detail else "")
+    rows = [
+        ("사고 내용", str(report.get("incident_content") or "")),
+        ("작업 내용", str(report.get("work_content") or "")),
+        ("현장 설명", str(report.get("site_description") or "")),
+        ("원인", cause_val),
+        ("대책", str(report.get("countermeasure") or "")),
     ]
-    block_cells = []
-    for tag, label, value, long in blocks:
-        flex = "2 1 420px" if long else "1 1 260px"
-        body = escape(value).strip() or "-"
-        block_cells.append(
-            f"<div style='flex:{flex};min-width:0;border-left:2px solid {_LINE_SEC};"
-            "padding-left:14px;display:flex;flex-direction:column;gap:6px;'>"
-            f"<span style='font-size:11px;letter-spacing:0.1em;color:{_FAINT};font-family:{_MONO};'>{tag}</span>"
-            f"<span style='font-size:12.5px;font-weight:600;color:{_INK2};'>{escape(label)}</span>"
-            f"<p style='margin:0;font-size:14.5px;line-height:1.7;color:{_INK};text-wrap:pretty;"
-            f"white-space:pre-wrap;'>{body}</p></div>"
-        )
-    body_blocks = (
-        "<div style='padding:22px 0 22px;border-top:1px solid "
-        f"{_LINE_SEC};display:flex;flex-wrap:wrap;gap:22px 32px;'>{''.join(block_cells)}</div>"
+    cells = "".join(
+        "<div style='display:flex;gap:16px;padding:8px 0;"
+        f"border-top:1px solid {_LINE};'>"
+        f"<span style='flex:0 0 130px;font-size:12px;color:{_INK2};font-weight:600;"
+        "line-height:1.6;'>" + escape(label) + "</span>"
+        f"<span style='flex:1 1 auto;min-width:0;font-size:14px;line-height:1.7;color:{_INK};"
+        "white-space:pre-wrap;text-wrap:pretty;'>"
+        + (escape(value).strip() or "-") + "</span></div>"
+        for label, value in rows
     )
-    return head + body_blocks
+    return f"<div style='margin:0 0 4px;'>{cells}</div>"
 
 
-def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
+def _gate_notes(notes: list[tuple[str, str | None]]) -> None:
+    """비활성 사유를 화면에 쓴다(§3.2·§4-3 — 툴팁에만 두지 않는다).
+
+    마우스를 올려야 알 수 있으면 모르는 것과 같고, 사유 없는 회색 버튼은 고장과 구분되지
+    않는다. ``notes``: ``[(버튼 라벨, 사유 or None)]`` — 사유가 있는 것만 한 줄로 모은다.
+    """
+    lines = [f"<b>{escape(label)}</b> 비활성 — {escape(reason)}"
+             for label, reason in notes if reason]
+    if not lines:
+        return
+    st.markdown(
+        "<div class='nm-gate'>" + "<br>".join(lines) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_detail(user: dict, readiness: ReadinessState,
+                   revision_readiness: ReadinessState, selected_id) -> None:
     try:
         report = db.get_near_miss_report(selected_id)
     except db.DATA_SOURCE_ERRORS as exc:
@@ -393,30 +537,37 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
     if report is None or status not in _PENDING_STATUSES:
         # 다른 평가자가 먼저 처리했거나 삭제됨 — stale 선택 해제 후 재조회 안내.
         st.session_state.pop(_SEL_KEY, None)
-        st.markdown(
-            f"<div style='padding:22px 0;font-size:14.5px;color:{_INK2};'>"
-            "이 케이스는 더 이상 대기 중이 아닙니다. 다른 사용자가 먼저 처리했을 수 있습니다 — "
-            "새로고침한 뒤 다시 선택하세요.</div>",
-            unsafe_allow_html=True,
+        erp.detail_empty(
+            "더 이상 대기 중이 아닙니다",
+            "다른 사용자가 먼저 처리했을 수 있습니다 — 새로고침한 뒤 다시 선택하세요.",
         )
         return
 
-    # ── 전체폭 상세(읽기 HTML) ──
-    st.markdown(_detail_read_html(report, status), unsafe_allow_html=True)
+    # ── 근거(§2: 근거 → 결정 컨트롤 → 실행 버튼) ──
+    st.markdown(_detail_head_html(report, status), unsafe_allow_html=True)
+    st.markdown(_detail_body_html(report), unsafe_allow_html=True)
 
-    # ── 하단 액션 바(§1-A): 등급 세그먼트 S~D | 의견 입력 | 검토착수 보완요청 반려 [평가확정] ──
+    # 참조성 첨부(사진)도 판정 근거다 — 결정 컨트롤보다 **앞**에 온다(§2).
+    photos = normalize_photo_paths(report.get("photo_paths"))
+    with st.expander(f"첨부 사진 ({len(photos)}건)", expanded=bool(photos)):
+        if photos:
+            render_photo_thumbs(photos, key_prefix=f"nmeval_thumb_{selected_id}")
+        else:
+            st.caption("첨부된 사진이 없습니다.")
+
+    # ── 결정 컨트롤: 평가 등급(§3.6 어휘) + 평가 의견 ──
     st.markdown(
-        f"<div style='border-top:1px solid {_LINE_SEC};margin:2px 0 12px;'></div>",
+        f"<div style='border-top:1px solid {_LINE_SEC};margin:12px 0 12px;'></div>",
         unsafe_allow_html=True,
     )
     grades = list(db.NEAR_MISS_GRADES)  # 도메인 소스 파생(하드코딩 금지)
     grade_key = f"{_GRADE_KEY}{selected_id}"
-    # 큐 이동/재진입 시 이전 등급 선택을 초기화한다(직전 렌더의 활성 케이스와 다르면 fresh 진입).
-    # 같은 케이스 내 등급 버튼 상호작용(동일 id rerun)에서는 초기화하지 않아 선택이 유지된다.
+    # 케이스 전환/재진입 시 이전 등급 선택을 초기화한다(직전 렌더의 활성 케이스와 다르면
+    # fresh 진입). 같은 케이스 내 등급 버튼 상호작용에서는 초기화하지 않아 선택이 유지된다.
     if st.session_state.get(_EVAL_ACTIVE_KEY) != selected_id:
         st.session_state[_EVAL_ACTIVE_KEY] = selected_id
         st.session_state.pop(grade_key, None)
-    # 확정 등급 기본은 **미선택**(S 자동 선택 제거) — 평가자가 명시적으로 고르게 한다.
+    # 평가 등급 기본은 **미선택** — 평가자가 명시적으로 고르게 한다.
     cur_grade = st.session_state.get(grade_key)
     if cur_grade not in grades:
         cur_grade = ""
@@ -431,9 +582,9 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
     review_disabled = (not can_write) or status != "SUBMITTED"
     review_help = (
         readiness.message if not can_write
-        else ("이미 검토에 착수한 케이스입니다." if status != "SUBMITTED" else None)
+        else ("이미 평가에 착수한 건입니다." if status != "SUBMITTED" else None)
     )
-    # 평가확정: 확정 등급 미선택이면 비활성(+안내). 검토착수·보완요청·반려는 등급 무관(현행 유지).
+    # 평가확정: 평가 등급 미선택이면 비활성(+안내). 평가착수·보완요청·반려는 등급 무관.
     eval_disabled = (not can_write) or (not grade_selected)
     if not can_write:
         eval_help = readiness.message
@@ -441,12 +592,14 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
         eval_help = "등급을 선택하세요."
     else:
         eval_help = None
-    # 보완요청(IN_REVIEW→SUBMITTED): 검토중 케이스만, 의견 필수. 반려와 별개 의미.
-    revision_disabled = (not can_write) or status != "IN_REVIEW" or not opinion
-    if not can_write:
-        revision_help = readiness.message
+    # 보완요청(IN_REVIEW→SUBMITTED): 평가중 건만, 의견 필수. 반려와 별개 의미.
+    # §7.4 P1 — 쓰기 가능 판정은 **실행부와 같은 007 프로브**(revision_readiness)로 한다.
+    can_revise = revision_readiness.write_enabled
+    revision_disabled = (not can_revise) or status != "IN_REVIEW" or not opinion
+    if not can_revise:
+        revision_help = revision_readiness.message
     elif status != "IN_REVIEW":
-        revision_help = "검토중(IN_REVIEW) 케이스만 보완요청할 수 있습니다."
+        revision_help = "평가중(IN_REVIEW) 건만 보완요청할 수 있습니다."
     elif not opinion:
         revision_help = "평가 의견을 입력하세요(보완요청 시 필수)."
     else:
@@ -458,9 +611,10 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
         else (None if opinion else "평가 의견을 입력하세요(반려 시 필수).")
     )
 
-    # 등급 세그먼트 — 확정 등급 라벨 + S~D 버튼(선택=오렌지 primary).
+    # 평가 등급 세그먼트 — 라벨 + S~D 버튼(선택=액센트 primary).
+    st.markdown("<div class='nm-sec'>결정</div>", unsafe_allow_html=True)
     with st.container(horizontal=True, gap="small", vertical_alignment="center"):
-        st.markdown("<span class='nm-seg-label'>확정 등급</span>", unsafe_allow_html=True)
+        st.markdown("<span class='nm-seg-label'>평가 등급</span>", unsafe_allow_html=True)
         for g in grades:
             hit = st.button(g, key=f"nmg_{g}_{selected_id}",
                             type="primary" if g == cur_grade else "secondary")
@@ -468,14 +622,14 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
                 st.session_state[grade_key] = g
                 st.rerun()
 
-    # 의견 입력(flex:1) + 액션 버튼 — 반려·보완요청 공용 단일 의견(dc 정본).
+    # 의견 입력 + 실행 버튼 — 반려·보완요청 공용 단일 의견.
+    st.text_input(
+        "평가 의견 · 반려·보완요청 시 필수",
+        key=op_key, width="stretch", disabled=not can_write,
+        placeholder="평가 의견을 한 줄로",
+    )
     with st.container(horizontal=True, gap="small", vertical_alignment="bottom"):
-        st.text_input(
-            "평가 의견 · 반려·보완요청 시 필수",
-            key=op_key, width="stretch", disabled=not can_write,
-            placeholder="검토 의견을 한 줄로",
-        )
-        review = st.button("검토착수", key=f"nm_act_review_{selected_id}",
+        review = st.button("평가착수", key=f"nm_act_review_{selected_id}",
                            disabled=review_disabled, help=review_help, type="secondary")
         revision = st.button("보완요청", key=f"nm_act_revision_{selected_id}",
                              disabled=revision_disabled, help=revision_help, type="secondary")
@@ -483,18 +637,16 @@ def _render_detail(user: dict, readiness: ReadinessState, selected_id) -> None:
                            disabled=reject_disabled, help=reject_help, type="secondary")
         evaluate = st.button("평가확정", key=f"nm_act_eval_{selected_id}",
                              disabled=eval_disabled, help=eval_help, type="primary")
-
-    # ── 참조성 첨부(사진) — U5: 자리표시자 제거, 서명 URL 썸네일 뷰어 실구현(읽기 전용). ──
-    photos = normalize_photo_paths(report.get("photo_paths"))
-    with st.expander(f"첨부 사진 ({len(photos)}건)", expanded=bool(photos)):
-        if photos:
-            render_photo_thumbs(photos, key_prefix=f"nmeval_thumb_{selected_id}")
-        else:
-            st.caption("첨부된 사진이 없습니다.")
+    _gate_notes([
+        ("평가착수", review_help if review_disabled else None),
+        ("보완요청", revision_help if revision_disabled else None),
+        ("반려", reject_help if reject_disabled else None),
+        ("평가확정", eval_help if eval_disabled else None),
+    ])
 
     grade = st.session_state.get(grade_key, cur_grade)
     if review:
-        _run_action(user, "검토착수", lambda: db.update_near_miss_status(
+        _run_action(user, "평가착수", lambda: db.update_near_miss_status(
             selected_id, "IN_REVIEW", current_user=auth.get_current_user(),
         ))
     if evaluate:
@@ -533,5 +685,5 @@ def _run_action(user: dict, label: str, call) -> None:
         _STATE.set_flash("error", f"{label} 처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.")
         st.rerun()
     _STATE.set_flash("success", f"{label} 완료.")
-    st.session_state.pop(_SEL_KEY, None)  # 처리된 케이스는 큐에서 빠지므로 상세를 닫는다.
+    st.session_state.pop(_SEL_KEY, None)  # 처리된 건은 큐에서 빠지므로 상세를 닫는다.
     st.rerun()

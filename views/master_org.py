@@ -190,8 +190,8 @@ _ORG_PAGE_CSS = """
    순서·특이도로 이김). 2·3열은 좌측 세로 헤어라인(#cfc8bd)으로만 구분한다. */
 .st-key-org_group__sheet, .st-key-org_dept__sheet, .st-key-org_unit__sheet {
   background:transparent !important; border:none !important; border-radius:0 !important;
-  box-shadow:none !important; padding:.2rem .9rem .1rem !important; }
-/* 단일 시트가 된 부서 시트는 좌우 안쪽 여백을 두지 않는다 — .9rem(12.6px) + 바깥
+  box-shadow:none !important; padding:4px 12px !important; }  /* §1.1 스케일(구 .2rem/.9rem/.1rem = 2.8/12.6/1.4px) */
+/* 단일 시트가 된 부서 시트는 좌우 안쪽 여백을 두지 않는다 — 위 규칙의 좌우 12px + 바깥
    `org__sheets` 의 공용 카드 패딩·1px 테두리가 겹쳐 표·상태 스트립만 제목·조건 줄보다
    14.5px 안으로 들어가 있었다(2026-08-14 실측 x 268.5 vs 253.5). 사용자·근무형태 화면은
    같은 자리에서 253.5 라 세 화면의 좌측 기준선이 어긋났다. 3열 시절의 잔재이므로
@@ -202,7 +202,10 @@ _ORG_PAGE_CSS = """
    사용자·근무형태 화면에는 없는 상자라 같이 걷는다. */
 .st-key-org__sheets {
   background:transparent !important; border:none !important; border-radius:0 !important;
-  box-shadow:none !important; padding-left:0 !important; padding-right:0 !important; }
+  box-shadow:none !important; padding:0 !important; }
+  /* 상하 패딩도 0 으로 — 공용 `[class*="__sheet"]`(views/master/style.py:434) 이 이 래퍼에도
+     .2rem/.1rem(2.8/1.4px)을 얹어 §1.1 스케일 밖 여백이 남아 있었다(실측). 안쪽 부서
+     시트가 이미 4px 을 갖고 있으므로 래퍼는 0 이 맞다. */
 .st-key-org_dept__sheet { padding-left:0 !important; padding-right:0 !important; }
 /* 단일 시트 전환(2026-08-07) — 부서 시트는 더 이상 2열이 아니므로 좌측 헤어라인을 걷는다.
    (조 시트 규칙은 미라우팅 보존 코드용으로만 남김) */
@@ -232,13 +235,15 @@ _ORG_PAGE_CSS = """
    (.mu-crow 14px/600 + 12px/600 모노 pill)·근무형태 관리(.wt-crow 동일)와 크기가
    달랐다(§0-6 라벨 11px 이하 금지 위반 포함). 공용 정의는 소유 밖이라 이 페이지
    스코프에서만 같은 값으로 덮는다 — 구조·문구·계약은 그대로다. */
-.ms-sheet-head { padding:.55rem 0 .5rem; gap:10px; }
+/* 세로 간격·gap 은 §1.1 스케일(4·8·12·16·24·32·40)만 쓴다. 구 값 .55rem/.5rem/10px
+   (=7.7/7/10px)은 스케일 밖이었다. */
+.ms-sheet-head { padding:8px 0; gap:8px; }
 .ms-sheet-head .t { font-size:14px; font-weight:600; }
 .ms-sheet-head .cnt { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
-  padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d;
+  padding:4px 8px; border-radius:999px; background:#f1eee8; color:#4a453d;
   border:none; font-variant-numeric:tabular-nums; }
 /* 상태·필터 칩도 근무형태 관리와 같은 12px/600 로 올린다(공용 .ms-chip 은 9.52px 로 렌더). */
-.ms-chip { font-size:12px; padding:2px 8px; font-variant-numeric:tabular-nums; }
+.ms-chip { font-size:12px; padding:4px 8px; gap:4px; font-variant-numeric:tabular-nums; }
 
 /* 잠김 상태 밀도 완화(기능 보존) — 슬림 플레이스홀더 + 잠긴 시트 액션바 숨김. */
 .st-key-org_dept__sheet .ms-locked, .st-key-org_unit__sheet .ms-locked {
@@ -529,20 +534,54 @@ def _dept_col_config(*, attendance_editable: bool = True) -> dict:
     if not attendance_editable:
         attendance["cellClass"] = "md-c-center ms-cell-readonly"
     return {
-        "대분류": {"flex": 0.9, "minWidth": 110, "cellClass": "md-c-left",
-                 "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
-        "중분류": {"flex": 0.9, "minWidth": 110, "cellClass": "md-c-left",
-                 "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
+        # ── 열 폭은 flex 가 아니라 **그 열 값의 실측 잉크폭**에서 역산한다 ──
+        # flex 는 폭을 내용이 아니라 "남은 자리"로 정한다. 그 결과 값이 한 건도 없는
+        # 열이 화면에서 가장 넓어져 있었다(2026-08-18 실렌더 계측 @1440, 사이드바 제외
+        # 그리드 뷰포트 1167px: 대분류 162 · 중분류 162 · 비고 180 — 세 열 모두 전 행
+        # 값 잉크 0. 필터를 "전체"로 바꿔도 같은 3행·같은 빈 값이었다).
+        # 남는 가로 폭은 **어느 열에도 흡수시키지 않고 남긴다** — 표 폭이 화면 폭을
+        # 따라다니면 같은 열이 화면마다 다른 폭이 되고, 스캔 기준선이 매번 달라진다.
+        #
+        # 역산 규칙: 폭 = ceil(max(헤더 잉크 + 헤더 좌우 패딩 16, 값 최대 잉크 + 셀 좌우
+        # 패딩 14, 컨트롤 16 + 14)). 패딩은 실측값이다(.ag-header-cell 8/8 · .ag-cell 7/7).
+        # 잉크폭은 실렌더 computed style(셀 14.5px/400 · 헤더 12.5px/600)을 복사한 hidden
+        # span 으로 쟀고, 한글 계수는 같은 span 에 100자를 넣어 100 으로 나눠(반올림 오차
+        # 제거) 실측했다 — 셀 13.34px/자 · 헤더 11.50px/자.
+        # minWidth 는 "헤더가 잘리지 않는 하한"(헤더 잉크+16)이다. flex 가 없으므로 자동
+        # 축소에는 관여하지 않고, 사용자가 열을 직접 좁힐 때의 바닥으로만 쓰인다.
+        #
+        # 값이 0건인 열(대분류·중분류·비고)은 이 화면 안에 역산 재료가 없다. 헤더 하한만
+        # 쓰면 첫 글자를 넣는 순간 잘리므로, **저장소 안에 실재하는 같은 값의 표본**을
+        # 근거로 잡고 그 출처를 남긴다. 실제 값이 생기면 그때 다시 재서 갱신한다.
+        #
+        # 대분류/중분류 84 = "PVC생산부"/"PVC생산팀" 잉크 69.84 + 14.
+        #   표본 출처: scripts/test_schedule_contracts.py:659·695-697 의 계층 값. 헤더
+        #   하한(34.5+16=50.5)보다 이쪽이 크다. migration 009 가 대분류를 그룹명으로
+        #   백필하므로(docs/database.md:140) 더 긴 값이 들어올 수 있고, 그때는 셀이
+        #   말줄임되며 열은 사용자가 직접 넓힐 수 있다(resizable).
+        "대분류": {"flex": 0, "width": 84, "minWidth": 52, "cellClass": "md-c-left",
+                 "editable": _EDIT_UNLESS_PROTECTED},
+        "중분류": {"flex": 0, "width": 84, "minWidth": 52, "cellClass": "md-c-left",
+                 "editable": _EDIT_UNLESS_PROTECTED},
         # 코드·순서·사용 폭은 기준정보 3화면 공통 규격(2026-08-14 재검수):
         # 코드/식별 108 · 순서 74 · 사용 여부 토글 72.
         "코드": {"flex": 0, "width": 108, "minWidth": 96, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
-        "코드명": {"flex": 1.3, "minWidth": 150, "cellClass": "md-c-left",
-                 "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},
+        # 코드명 136 = 이 열 값의 실측 최대 "PET생산부(원료실)" 잉크 117.91 + 셀 패딩 14
+        # = 131.91 에, **값이 폭을 구속하는 유일한 열**이라 §1.1 한 칸(4px)을 서체 폴백
+        # 여유로 더했다 — 그리드 iframe 은 부모의 IBM Plex 를 상속하지 않고 시스템 기본
+        # sans-serif 로 그려서(실측) 배포 PC 마다 잉크폭이 달라질 수 있다(DESIGN §7.2-23).
+        # 그보다 길어지면 말줄임이고, 열은 사용자가 직접 넓힐 수 있다(resizable).
+        # (구 flex 1.3 은 같은 화면에서 235px 로 그려져 103px 이 빈 자리였다.)
+        "코드명": {"flex": 0, "width": 136, "minWidth": 52, "cellClass": "md-c-left",
+                 "editable": _EDIT_UNLESS_PROTECTED},
         _ATTENDANCE_COL: attendance,
         "순서": {"flex": 0, "width": 74, "minWidth": 68, "maxWidth": 110,
                 "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
-        "비고": {"flex": 1.0, "minWidth": 120, "cellClass": "md-c-left",
+        # 비고 116 = 값 0건이고 이 열의 표본도 저장소에 없어, 같은 역할(기준정보 자유
+        # 서술)의 실데이터 최대인 data/sample/work_types.csv 의 description
+        # "야간 근무(6시간)"(10자) 잉크 101.8 + 14 에서 역산했다.
+        "비고": {"flex": 0, "width": 116, "minWidth": 40, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED},
         "사용": {"flex": 0, "width": 72, "minWidth": 66, "maxWidth": 90,
                 "cellClass": "md-c-center", "editable": _EDIT_UNLESS_PROTECTED},
@@ -705,11 +744,12 @@ def _summary_chips(rows: pd.DataFrame, params: dict, *, dirty: int = 0, sel: int
     # 구 margin(.1rem/.2rem)은 헤더 패딩과 3px 겹치고 아래와는 0px 로 붙어, 칩 줄이
     # 두 블록 사이에 끼인 것처럼 읽혔다(실측 t313–329, 헤더 b316). 액션바가 있던
     # 자리를 이 줄이 이어받은 뒤에도 같은 여백으로 그리드와 분리한다.
+    # 값은 §1.1 스케일만 쓴다(구 .35rem/.45rem/.5rem/.3rem = 4.9/6.3/7/4.2px 은 스케일 밖).
     st.markdown(
         "<div style='display:flex;justify-content:space-between;align-items:center;"
-        "gap:.5rem;margin:.35rem 0 .45rem'>"
-        f"<div style='display:flex;gap:.3rem;flex-wrap:wrap'>{left}</div>"
-        f"<div style='display:flex;gap:.3rem;flex:0 0 auto'>{right}</div></div>",
+        "gap:8px;margin:8px 0'>"
+        f"<div style='display:flex;gap:4px;flex-wrap:wrap'>{left}</div>"
+        f"<div style='display:flex;gap:4px;flex:0 0 auto'>{right}</div></div>",
         unsafe_allow_html=True,
     )
 
