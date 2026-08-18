@@ -14,7 +14,7 @@
 - 승인 시 확정(승인·사용완료) 겹침 백스톱은 유지한다(신청 시점 차단의 경합 보루).
 """
 # DESIGN.md §0 MASTER_DETAIL — 목록(테이블 선택) + 전체폭 상세/워크플로.
-SCREEN_ARCHETYPE = "MASTER_DETAIL"
+SCREEN_ARCHETYPE = "WORKLIST"
 
 from datetime import date
 

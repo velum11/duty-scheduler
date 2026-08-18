@@ -30,7 +30,7 @@
 from __future__ import annotations
 
 # DESIGN.md §0 MASTER_DETAIL — 목록(표 선택) + 전체폭 상세/워크플로.
-SCREEN_ARCHETYPE = "MASTER_DETAIL"
+SCREEN_ARCHETYPE = "READ_VIEW"
 
 from datetime import date, timedelta
 from html import escape

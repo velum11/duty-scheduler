@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 # DESIGN.md §1-A 큐 처리형 — 읽기 큐(칩) + 전체폭 상세/워크플로.
-SCREEN_ARCHETYPE = "MASTER_DETAIL"
+SCREEN_ARCHETYPE = "WORKLIST"
 
 from datetime import date, timedelta
 from html import escape

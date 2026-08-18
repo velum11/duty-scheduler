@@ -1,6 +1,6 @@
 """화면 유형 규약(DESIGN.md §0)의 공용 스캐폴드.
 
-모든 신규 화면·구조 변경 화면은 5유형 중 하나를 ``SCREEN_ARCHETYPE`` 상수로
+모든 신규 화면·구조 변경 화면은 6유형 중 하나를 ``SCREEN_ARCHETYPE`` 상수로
 선언하고, 페이지 크롬은 크롬 손제작 없이 이 모듈의 :func:`page_chrome` 로만
 생성한다(§0 집행 장치). 이 모듈은 ``views/master`` 공통 기반의 기존 공개 API
 (:func:`~views.master.master_screen_head`, :func:`~views.master.inject_page_styles`
@@ -34,9 +34,11 @@ from modules import db as _db
 from modules import nav as _nav
 from views import master as _master
 
-#: 강제되는 6개 화면 유형 코드(DESIGN.md §0 표와 1:1 대응).
-#: ``MASTER_DETAIL`` 은 읽기 목록 + 상세/워크플로 화면(아차사고 평가) — 상단 액션바는
-#: 조회·새로고침(page)만이고 평가·반려·종결 등 쓰기는 상세 영역(scope action)에 둔다.
+#: 강제되는 6개 화면 유형 코드(DESIGN.md §2 화면 유형과 1:1 대응, 순서도 §2와 같다).
+#: ``WORKLIST`` 는 처리할 건을 골라 결정하는 화면(평가 관리·개선조치 관리 등) — 상태 탭 +
+#: 2열(목록 33% / 상세 67%). 2026-08-18 결정으로 구 ``MASTER_DETAIL`` 을 대체했다: 한 코드에
+#: 판정 화면과 "내 것" 조회 화면이 섞여 골격을 하나로 규정할 수 없었기 때문이다(조회 3화면은
+#: ``READ_VIEW`` 로 이동). **유형 선언만 먼저 바뀌었고 4화면의 레이아웃 이관은 별도 단계다.**
 #: ``FORM_ENTRY`` 는 단건 레코드 입력·제출 폼(니어미스 신청 등) — 헤더 크롬 +
 #: 라벨드 필드 폼 본문 + 제출 컨트롤 + 저장 결과 배너(``views/master/lifecycle``
 #: ``PersistResult``/``ledger_banner`` 계약 개념 재사용). EDIT_GRID 와 달리 그리드
@@ -44,12 +46,12 @@ from views import master as _master
 #: 코드 강제 범위이며, 폼 본문·제출·배너의 시각 품질은 visual-qa + 사용자 sign-off
 #: 게이트다. §6 반응형(1366×768 baseline·좁은 폭 무오버플로)을 따른다.
 ARCHETYPES: tuple[str, ...] = (
-    "EDIT_GRID",
+    "WORKLIST",
     "READ_VIEW",
+    "FORM_ENTRY",
+    "EDIT_GRID",
     "MATRIX_EDIT",
     "DASHBOARD",
-    "FORM_ENTRY",
-    "MASTER_DETAIL",
 )
 
 

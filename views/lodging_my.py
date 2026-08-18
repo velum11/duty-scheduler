@@ -19,7 +19,7 @@ USER 소관이라 행 피치 44px(터치 variant)이고, 상세 열기는 **행 
   오조작 방지이고, 권한·상태 판정은 여전히 ``run_action`` 이 소유한다.
 """
 # DESIGN.md §0 MASTER_DETAIL — 목록(테이블 선택) + 전체폭 상세/워크플로.
-SCREEN_ARCHETYPE = "MASTER_DETAIL"
+SCREEN_ARCHETYPE = "READ_VIEW"
 
 from datetime import date
 

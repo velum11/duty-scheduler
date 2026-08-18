@@ -11,7 +11,7 @@
 ``work_request_data.action_blocker`` 단일 출처를 그대로 툴팁에 쓴다.
 """
 # DESIGN.md §1-A 큐 처리형 — 읽기 큐(칩) + 전체폭 상세/워크플로.
-SCREEN_ARCHETYPE = "MASTER_DETAIL"
+SCREEN_ARCHETYPE = "WORKLIST"
 
 from html import escape
 

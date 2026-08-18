@@ -24,7 +24,7 @@
     파사드 원문 메시지를 배너로 그대로 노출(가공 금지).
 """
 # DESIGN.md §1-A 큐 처리형 — 읽기 큐(칩) + 전체폭 상세/워크플로.
-SCREEN_ARCHETYPE = "MASTER_DETAIL"
+SCREEN_ARCHETYPE = "WORKLIST"
 
 from html import escape
 

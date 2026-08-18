@@ -440,6 +440,15 @@ EXPECTED = {
     "master_work_types": "EDIT_GRID",
     "master_departments": "EDIT_GRID",
     "master_teams": "EDIT_GRID",
+    # 2026-08-18 MASTER_DETAIL 분할 — 판정은 WORKLIST, "내 것" 조회는 READ_VIEW.
+    # 여기 고정해 두면 이후 누가 되돌려도 이 검사에서 잡힌다.
+    "near_miss_evaluate": "WORKLIST",
+    "near_miss_improvement": "WORKLIST",
+    "work_request_handle": "WORKLIST",
+    "lodging_manage": "WORKLIST",
+    "near_miss_my": "READ_VIEW",
+    "lodging_my": "READ_VIEW",
+    "work_request_my": "READ_VIEW",
 }
 
 
@@ -490,11 +499,14 @@ for name, expected in EXPECTED.items():
 # ===========================================================================
 print("(c) 스캐폴드 검증 — 잘못된 유형 ValueError / 목록 정합")
 check(
-    "ARCHETYPES == DESIGN.md §0 6유형",
+    "ARCHETYPES == DESIGN.md §2 6유형(순서 포함)",
     scaffold.ARCHETYPES == (
-        "EDIT_GRID", "READ_VIEW", "MATRIX_EDIT", "DASHBOARD", "FORM_ENTRY", "MASTER_DETAIL",
+        "WORKLIST", "READ_VIEW", "FORM_ENTRY", "EDIT_GRID", "MATRIX_EDIT", "DASHBOARD",
     ),
 )
+# 2026-08-18: 구 MASTER_DETAIL 폐기 — 판정 화면과 "내 것" 조회가 한 코드에 섞여 골격을
+# 하나로 규정할 수 없었다. 되돌림 방지로 부재를 명시 검증한다.
+check("구 유형 'MASTER_DETAIL' 부재", "MASTER_DETAIL" not in scaffold.ARCHETYPES)
 try:
     scaffold._validate_archetype("NOT_A_TYPE")
     check("잘못된 유형은 ValueError", False)

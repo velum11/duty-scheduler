@@ -11,7 +11,7 @@
   ``work_request_data.action_blocker`` / ``update_request`` 가 서버측에서 재확인한다.
 """
 # DESIGN.md §1-B 목록형 아코디언 — 읽기 목록 + 인라인 펼침 상세/워크플로.
-SCREEN_ARCHETYPE = "MASTER_DETAIL"
+SCREEN_ARCHETYPE = "READ_VIEW"
 
 from datetime import date
 

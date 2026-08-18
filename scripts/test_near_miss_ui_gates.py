@@ -156,16 +156,20 @@ check("stats 뷰는 overdue 를 파사드로 위임(near_miss_overdue_count)",
       "near_miss_overdue_count" in stats_render_src)
 
 
-# ===== 5) 개선조치 관리(near_miss_improvement) MASTER_DETAIL 폐루프 =====
+# ===== 5) 개선조치 관리(near_miss_improvement) WORKLIST 폐루프 =====
 print("개선조치 관리 CAPA 폐루프")
-check("SCREEN_ARCHETYPE == 'MASTER_DETAIL'", nmi.SCREEN_ARCHETYPE == "MASTER_DETAIL")
+check("SCREEN_ARCHETYPE == 'WORKLIST'", nmi.SCREEN_ARCHETYPE == "WORKLIST")
 render_src = inspect.getsource(nmi.render)
 # Phase2: 진입가드는 배정 기반 접근 facade 로(평가 능력 단독이 아니라 담당자·확인자 포함).
 check("진입가드: has_near_miss_improvement_access(배정 기반)",
       "has_near_miss_improvement_access" in render_src)
 body_src = inspect.getsource(nmi._render_body)
-# §1-A 큐 처리형: 좌우 분할(master_detail_frame) 제거 → 큐 칩 스트립 + 전체폭 상세.
-check("§1-A 큐 칩 스트립(좌우분할 제거)",
+# 과도기 검사(2026-08-18): 이 화면은 유형만 WORKLIST 로 바뀌었고 레이아웃은 아직 구
+# 골격(큐 칩 스트립 + 전체폭 상세)이다. 아래는 "현재 상태가 그대로인지"를 지키는 것이지
+# 좌우분할을 영구 금지하는 규칙이 아니다 — 구 DESIGN.md §0-2 의 금지 조항은 폐기됐다.
+# 레이아웃 이관(DESIGN.md §2 WORKLIST: 상태 탭 + 2열 33/67) 시 이 검사를 반대 방향으로
+# 재작성한다: master_detail_frame 실호출 + 비율 인자(list_ratio=1, detail_ratio=2) 검증.
+check("과도기: 구 큐 칩 스트립 유지(레이아웃 미이관)",
       "_render_queue_chips" in body_src and "master_detail_frame" not in body_src)
 check("진입 시 첫 건 자동 선택", "ordered[0]" in body_src)
 # Phase2: 큐는 actor-aware(list_near_miss_improvements) + 담당자 스코핑(_scope_reports).
