@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field as dc_field
+from functools import partial
 from html import escape
 from typing import Any, Callable
 
@@ -1045,3 +1046,123 @@ def detail_actions(page_id: str, actions: list[tuple]) -> dict:
                 disabled=disabled, help=help_, use_container_width=True,
             )
     return clicks
+
+
+# ============================================================ select_list
+# WORKLIST(§2) 목록 열 전용 선택 컴포넌트.
+#
+# **왜 새로 만드는가** — 기존 두 수단이 구조적으로 이 요구를 못 받는다:
+#   * `st.button` : label 이 inline 요소만 허용해 "2줄 고정 행"(제목/경과일 + 번호·소속/분류)을
+#     한 버튼 안에 그릴 수 없다.
+#   * `select_grid`: `_SELECT_COL_CONFIG_ALLOWED` 가 `cellRenderer` 를 화이트리스트에서 **의도적으로**
+#     차단한다(SELECT 는 편집 capability 가 아니라는 §0.5 계약). 그 차단을 뚫는 대신 목록 전용
+#     컴포넌트를 따로 둔다 — 차단은 옳고, 요구가 그리드가 아닐 뿐이다.
+# 그래서 `my_schedule` 의 월 선택기와 같은 `st.components.v2` 패턴으로 만든다(선례 재사용).
+#
+# DESIGN §2 WORKLIST 계약을 컴포넌트가 강제한다:
+#   * 행은 **2줄 고정**. 상태에 따라 줄 수가 달라지지 않는다 — 선점·잠금 같은 상태는
+#     좌측 2px 보더 색(`accent`)으로만 표현한다.
+#   * 행에는 "무엇을 먼저 처리할지 고를 근거"가 들어간다(경과일·소속·분류). 호출부가
+#     `line1_right`/`line2_*` 에 그 값을 넣는다.
+#   * 선택은 위치가 아니라 **자연키**로 오간다(정렬·필터가 바뀌어도 같은 건이 열린다).
+_SELECT_LIST = partial(
+    st.components.v2.component,
+    "erp_select_list",
+    html="<div id='erp-select-list'></div>",
+    css=f"""
+    #erp-select-list {{ font-family:inherit; }}
+    .esl-row {{ display:flex; flex-direction:column; gap:2px; width:100%;
+      padding:8px 12px 8px 10px; border:0; border-left:2px solid transparent;
+      border-bottom:1px solid {TOKENS['line']}; background:transparent; cursor:pointer;
+      font:inherit; text-align:left; }}
+    .esl-row:hover {{ background:{TOKENS['surface-2']}; }}
+    .esl-row:focus-visible {{ outline:2px solid {TOKENS['navy']}; outline-offset:-2px; }}
+    /* 선택 = 색 + 좌측 굵은 바 이중부호화(§3.3 색 단독 금지) */
+    /* 선택 표시는 select_grid(_SELECT_CSS)와 **같은 어휘**를 쓴다 — 같은 목록 역할이
+       화면마다 다른 색이면 안 된다(틴트 배경 + 좌측 바 navy). */
+    .esl-row.is-sel {{ background:{TOKENS['selected-bg']}; border-left-color:{TOKENS['navy']}; }}
+    .esl-l1, .esl-l2 {{ display:flex; align-items:baseline; gap:8px; min-width:0; }}
+    .esl-t {{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      font-size:14px; color:{TOKENS['ink']}; }}
+    .esl-row.is-sel .esl-t {{ font-weight:600; }}
+    .esl-r {{ flex:0 0 auto; font-size:12px; color:{TOKENS['ink-3']}; white-space:nowrap; }}
+    .esl-m {{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      font-size:12px; color:{TOKENS['ink-2']}; }}
+    .esl-mono {{ font-family:"IBM Plex Mono", monospace; font-variant-numeric:tabular-nums; }}
+    .esl-empty {{ padding:16px 12px; font-size:14px; color:{TOKENS['ink-2']}; }}
+    """,
+    js="""
+    export default function(component) {
+      const { data, setTriggerValue, parentElement } = component;
+      const root = parentElement.querySelector('#erp-select-list') || parentElement;
+      const items = Array.isArray(data.items) ? data.items : [];
+      const selected = data.selected == null ? null : String(data.selected);
+      if (!items.length) {
+        root.innerHTML = `<div class="esl-empty">${data.empty || '표시할 건이 없습니다.'}</div>`;
+        return;
+      }
+      const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+        (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      root.innerHTML = items.map((it) => {
+        const k = esc(it.key);
+        const sel = String(it.key) === selected ? ' is-sel' : '';
+        const bar = it.accent ? ` style="border-left-color:${esc(it.accent)}"` : '';
+        return `<button type="button" class="esl-row${sel}" data-key="${k}"${sel ? '' : bar}
+                  aria-pressed="${sel ? 'true' : 'false'}">
+          <span class="esl-l1"><span class="esl-t">${esc(it.line1_left)}</span>
+            <span class="esl-r">${esc(it.line1_right)}</span></span>
+          <span class="esl-l2"><span class="esl-m esl-mono">${esc(it.line2_left)}</span>
+            <span class="esl-r">${esc(it.line2_right)}</span></span>
+        </button>`;
+      }).join('');
+      root.querySelectorAll('.esl-row').forEach((el) => {
+        el.onclick = () => setTriggerValue('pick', { key: el.dataset.key });
+      });
+    }
+    """,
+)
+
+
+def select_list(
+    key: str,
+    items: list[dict],
+    *,
+    selected: str | None = None,
+    empty: str = "표시할 건이 없습니다.",
+    height: int | None = None,
+) -> str | None:
+    """WORKLIST 목록 열(2줄 고정 행) — 클릭한 행의 **자연키**를 반환한다.
+
+    ``items`` 각 원소(모두 선택 인자, 없으면 빈 칸):
+      ``key``(필수·자연키) · ``line1_left``(제목) · ``line1_right``(경과일 등) ·
+      ``line2_left``(식별자·소속 — 모노) · ``line2_right``(분류) · ``accent``(좌측 2px 상태색).
+
+    반환값은 "이번 run 에서 새로 클릭된 키"이며, 클릭이 없으면 ``None`` 이다. 선택 상태의
+    보관은 호출부(세션 키) 책임이다 — 컴포넌트는 표시(``selected``)와 클릭 전달만 한다.
+    ``height`` 를 주면 목록이 자체 스크롤한다(상세와 독립 스크롤, §2 WORKLIST 2열).
+    """
+    payload = []
+    for it in items or []:
+        k = str(it.get("key", "")).strip()
+        if not k:
+            continue  # 자연키 없는 행은 선택 계약이 성립하지 않으므로 싣지 않는다
+        payload.append({
+            "key": k,
+            "line1_left": it.get("line1_left", ""),
+            "line1_right": it.get("line1_right", ""),
+            "line2_left": it.get("line2_left", ""),
+            "line2_right": it.get("line2_right", ""),
+            "accent": it.get("accent", ""),
+        })
+    result = _SELECT_LIST()(
+        key=key,
+        data={"items": payload, "selected": selected, "empty": empty},
+        on_pick_change=lambda: None,
+        width="stretch",
+        height=height if height is not None else "content",
+    )
+    picked = result.get("pick") if isinstance(result, dict) else None
+    if isinstance(picked, dict):
+        got = str(picked.get("key", "")).strip()
+        return got or None
+    return None

@@ -121,7 +121,18 @@ DESIGN.md 전문과 docs/WORKLOG.md 최상단 2026-08-18 항목을 먼저 읽어
 - 회귀 기준선: scripts/test_*.py 35개 전부 통과(원격 쓰기 test_supabase_crud.py 제외)
 
 [남은 것 — 이 순서로]
-2단계(직접) erp.select_list 신규 작성.
+2단계 **완료(2026-08-15)** — `erp.select_list` 작성·노출·계약테스트(23 checks) 완료.
+  시그니처: `select_list(key, items, *, selected=None, empty=..., height=None) -> str | None`
+  items 원소: key(자연키·필수) / line1_left(제목) / line1_right(경과일) /
+  line2_left(식별자·소속, 모노) / line2_right(분류) / accent(좌측 2px 상태색).
+  반환은 "이번 run 에 새로 클릭된 키"뿐이고 **선택 상태 보관은 호출부(세션 키) 책임**이다.
+  height 를 주면 목록이 자체 스크롤한다(상세와 독립 — §2 2열).
+  선택 표시는 select_grid 와 같은 어휘(틴트 + 좌측 바 navy)로 맞췄다.
+  select_grid 의 cellRenderer 차단(_SELECT_COL_CONFIG_ALLOWED)은 **뚫지 않았다** — 그 차단은
+  옳고 요구가 그리드가 아니었을 뿐이라, my_schedule 의 components.v2 선례로 별도 컴포넌트를 만들었다.
+  → 3단계를 바로 시작할 수 있다.
+
+  (구 계획 원문) erp.select_list 신규 작성.
   WORKLIST 목록 행이 2줄 고정인데 st.button 은 label 이 inline 요소만 허용하고,
   select_grid 는 kit.py:653 _SELECT_COL_CONFIG_ALLOWED 가 cellRenderer 를 구조적으로
   차단한다. my_schedule.py:49 의 st.components.v2 패턴을 본떠 만든다.

@@ -9,6 +9,7 @@ ReadinessState)은 ``views/master`` 가 계속 소유하며 이 키트는 **구�
     condition_panel  col-N 우측 인라인 라벨 조건(필터) 패널
     read_grid        AgGrid READ 어댑터(편집 자산 없음 — action열·paste·editable·unsafe_jscode 제거)
     select_grid      AgGrid 단일 선택 목록 어댑터(read_grid 와 별개 capability, 자연키 반환)
+    select_list      WORKLIST 목록 열(2줄 고정 행) 선택 컴포넌트 — 자연키 반환
     status_region    요약 카드 + readiness 배너
     status_badge_html/meta_col_html/field_block  MASTER_DETAIL 상세 순수 표시 primitive(도메인 무지)
 
@@ -31,6 +32,7 @@ from views.common.erp.kit import (
     read_grid,
     screen_frame,
     select_grid,
+    select_list,
     status_badge_html,
     status_region,
     metric_strip,
@@ -45,6 +47,7 @@ __all__ = [
     "condition_panel",
     "read_grid",
     "select_grid",
+    "select_list",
     "grid_shell",
     "grid_skeleton_html",
     "status_region",
