@@ -121,7 +121,7 @@ DESIGN.md 전문과 docs/WORKLOG.md 최상단 2026-08-18 항목을 먼저 읽어
 - 회귀 기준선: scripts/test_*.py 35개 전부 통과(원격 쓰기 test_supabase_crud.py 제외)
 
 [남은 것 — 이 순서로]
-2단계 **완료(2026-08-15)** — `erp.select_list` 작성·노출·계약테스트(23 checks) 완료.
+2단계 **완료(2026-08-18)** — `erp.select_list` 작성·노출·계약테스트(23 checks) 완료.
   시그니처: `select_list(key, items, *, selected=None, empty=..., height=None) -> str | None`
   items 원소: key(자연키·필수) / line1_left(제목) / line1_right(경과일) /
   line2_left(식별자·소속, 모노) / line2_right(분류) / accent(좌측 2px 상태색).
@@ -146,7 +146,11 @@ DESIGN.md 전문과 docs/WORKLOG.md 최상단 2026-08-18 항목을 먼저 읽어
   이관 시 test_near_miss_ui_gates.py:168 을 반대 방향으로 재작성한다
   (지금은 "구 골격 유지"를 지키는 과도기 검사다).
   끝나면 visual-qa 로 §5 측정 — 대비율, 1366×768 겹침·잘림, 목록 행 높이 편차.
-  **§5 검증은 이 프로젝트에서 아직 한 번도 실행된 적이 없다.**
+  §5 는 **측정 게이트만 1회 실행됐다**(459f127: 대시보드·근무형태 관리·평가 관리를
+  1366x768 / 1024x768 / 375x812 로 계측 — 제목 28px/600, 설명 12px, 아이콘 겹침 0,
+  가로 스크롤 0, 렌더 예외 0). **기계 게이트와 사람 게이트는 여전히 미실행**이고,
+  목록 행 높이 편차는 3단계 이후에야 측정 대상이 생긴다.
+  이때 BACKLOG 의 공용 히트영역 30.1px(§1.4 compact 34px 미달) 건을 함께 실측한다.
 
 4단계(직접) 확정값 적용: 등록 폼 라벨 열+하단 고정 바, 대시보드 역할 통합(_render_user 폐기),
   조회 컬럼 재구성, 제안등급 표시 4곳 제거, 어휘 통일(_STATUS_LABEL 단일 출처화가 선행),
@@ -164,9 +168,10 @@ DESIGN.md 전문과 docs/WORKLOG.md 최상단 2026-08-18 항목을 먼저 읽어
 글로벌 PLAYBOOK 이 ui-feature 에 데이터 계약 변경을 금지한다. 한 Owner 가 다 하지 않는다.
 
 [반드시 알아야 할 함정]
-- views/lodging_request.py(+271)·views/common/proto.py(+59)·views/workspace.py(+7)·
-  scripts/test_sidebar_ui.py(+6) 에 이 세션이 만들지 않은 미커밋 변경이 있다(병행 작업).
+- 미커밋 병행 작업은 **views/lodging_request.py(+271) 과 views/common/proto.py 두 파일뿐**이다.
   AGENTS.md 에 따라 보존한다. 커밋에 넣지 마라.
+  (앞선 인계본은 views/workspace.py 와 scripts/test_sidebar_ui.py 도 병행 작업으로 적었으나
+   **오분류다** — 실렌더 검증 세션의 산출물이고 459f127 로 이미 커밋됐다. 찾지 마라.)
   **단 proto.py 안에는 이 세션이 넣은 1줄 수정이 섞여 있다** — `MONO` 상수를
   `'"IBM Plex Mono", monospace'`(내부 큰따옴표)로 바꾼 것으로, 숙소예약·업무요청 3화면의
   신청번호 style 소실을 막는다. hunk 분리 스테이징이 CRLF 문제로 두 번 실패해 커밋하지
@@ -182,7 +187,7 @@ DESIGN.md 전문과 docs/WORKLOG.md 최상단 2026-08-18 항목을 먼저 읽어
 빈도×강도 격자의 눈금 라벨과 20칸 등급 배치. 구조(5×4·행렬법·중대성 우선 두 규칙)는
 확정이므로 사내 위험성평가 기준표를 받으면 값만 교체한다. 화면·코드는 그대로다.
 
-[완료된 조사 — 2026-08-15]
+[완료된 조사 — 2026-08-18]
 .claude 문서 감사 **완료·수정됨**. DESIGN.md 재편(§0 결정문장/§1 토큰/§2 화면유형/
 §3 패턴/§4 금지/§5 검증)으로 사라진 §0.6·§0.3·§8 인용 15곳을 실제 섹션으로 교체했다:
   screen-design/SKILL.md 4 · screen-design/evals 2 · visual-review/SKILL.md 2 ·
