@@ -38,6 +38,14 @@ service role key는 서버 전용입니다. HTML, custom component, 브라우저
 2. `supabase/migrations/002_schedule_assignments.sql`
 3. `supabase/migrations/003_org_structure.sql`
 4. `supabase/migrations/004_org_groups.sql`
+5. `supabase/migrations/006_near_miss.sql`
+6. `supabase/migrations/007_near_miss_improvement.sql`
+7. `supabase/migrations/008_password_auth.sql`
+8. `supabase/migrations/009_org_category_and_tenure.sql`
+9. `supabase/migrations/010_capabilities_and_emails.sql`
+10. `supabase/migrations/011_dept_attendance_target.sql`
+
+**005는 결번입니다.** 파일이 존재하지 않으며 누락이 아닙니다.
 
 적용 전에는 `docs/database.md`의 마지막 확인 상태와 대상 프로젝트의 live schema를 read-only로 비교합니다. 문서 기록만으로 적용 여부를 단정하지 않습니다.
 
@@ -47,6 +55,7 @@ service role key는 서버 전용입니다. HTML, custom component, 브라우저
 - 002는 기존 행을 백필하지 않는 DDL 전용 migration입니다.
 - 003은 조직 확장 컬럼과 제한적 백필을 포함합니다.
 - 004는 `organization_groups` 1급 테이블 신설 + `departments.group_id` FK + 무손실 백필이며, 003의 그룹 컬럼 모델을 대체합니다(상세는 `docs/database.md` §4).
+- 006·007은 아차사고 도메인입니다. 앱이 런타임 probe로 적용 여부를 판정하며(`modules/db.py::near_miss_schema_probe` / `near_miss_improvement_schema_probe`), 미적용이면 쓰기를 fail-closed로 차단합니다. **006만 적용된 상태에서 007이 필요한 기능(보완요청)이 활성으로 보이는 결함이 있습니다** — `DESIGN.md` §7.4.
 - 사용자 승인 없이 SQL을 실행하지 않습니다.
 - 적용 후 앱 프로세스를 재시작하고 관련 readiness와 화면 저장을 확인합니다.
 

@@ -1,6 +1,9 @@
 # WorkOps
 
-Streamlit과 Supabase로 만든 사내 근무표·기준정보·아차사고 개선 통합 관리 애플리케이션(구 생산 근무표 관리)입니다. 관리자는 기준정보와 월별 근무표를 관리하고, 조장은 담당 범위의 근무표를 편성·조회하며, 일반 사용자는 본인 근무표를 확인합니다.
+Streamlit과 Supabase로 만든 사내 현장 운영관리 애플리케이션(구 생산 근무표 관리)입니다. 두 업무 축을 다룹니다.
+
+- **근무표** — 관리자는 기준정보와 월별 근무표를 관리하고, 조장은 담당 범위를 편성·조회하며, 일반 사용자는 본인 근무표를 확인합니다.
+- **아차사고** — 현장에서 등록하고, 평가자가 등급을 확정하며, 개선조치를 배정·확인합니다.
 
 이 저장소의 문서는 현재 구현과 안전한 개발에 필요한 내용만 유지합니다. 과거 계획이나 작업 기록은 제품 요구사항으로 사용하지 않습니다.
 
@@ -11,10 +14,11 @@ Streamlit과 Supabase로 만든 사내 근무표·기준정보·아차사고 개
 - 월별 근무표 편성·조회 및 개인 근무표 조회
 - 사용자, 조직, 근무형태 기준정보 관리
 - 월별 부서·운영단위 편성 스냅샷
+- 아차사고 등록·평가·개선조치·조회·분석 (사진 첨부, 상태 전이, PDF 출력)
 - `sample`과 `supabase` 데이터 모드
 - 기준정보 AG Grid 편집, 여러 셀 붙여넣기, 저장 전 검증
 
-앱의 공식 이름은 `modules/config.py`의 `APP_NAME`을 기준으로 합니다. ADMIN/MANAGER 사이드바에는 짧은 표시명인 `교대 근무표`가 사용됩니다.
+앱의 공식 이름은 `modules/config.py`의 `APP_NAME`(`WorkOps`)을 기준으로 합니다. 사이드바·탭 제목 모두 `WorkOps` 단독으로 표시하며 한글 부제를 두지 않습니다 — 모듈이 계속 늘어나는 한 범위를 규정하는 이름은 곧 틀리기 때문입니다(2026-08-18 결정).
 
 ## 빠른 실행
 
@@ -36,11 +40,18 @@ Supabase 설정과 원격 테스트 절차는 `docs/supabase-setup.md`를 참고
 
 | 권한 | 화면 |
 |---|---|
-| ADMIN | 대시보드, 근무표 편성, 월간 근무표, 내 근무표, 사용자 관리, 조직 관리, 근무형태 관리 |
-| MANAGER | 대시보드, 근무표 편성, 월간 근무표, 내 근무표 |
-| USER | 대시보드, 월간 근무표, 내 근무표 |
+| ADMIN | 대시보드 · 근무표 3(편성·월간·내 근무표) · 아차사고 6 · 기준정보 4(사용자·부서·조·근무형태) |
+| MANAGER | 대시보드 · 근무표 3 · 아차사고 6 |
+| USER | 대시보드 · 월간 근무표 · 내 근무표 · 아차사고 6 |
+
+아차사고 6화면은 `등록 · 내 아차사고 · 평가 관리 · 개선조치 관리 · 조회 · 분석`입니다.
+이 중 **평가 관리**는 평가 능력(`auth.can_evaluate_near_miss`), **개선조치 관리**는 배정 기반 접근 능력으로 노출됩니다 — role이 아니라 능력 게이트라 안전담당자인 USER에게도 보입니다.
 
 `부서 관리`와 `조 관리`의 레거시 route는 호환을 위해 남아 있지만 실제 화면은 `views/master_org.py`로 위임합니다.
+
+### 프로토타입 (라우팅되지 않음)
+
+`업무요청` 3화면과 `숙소 예약` 4화면은 `app.py`에 라우팅되지 않고 `scripts/preview_new_screens.py`로만 열립니다. 선언된 22개 화면 중 실제 서비스되는 것은 15개입니다.
 
 ## 테스트
 
@@ -48,11 +59,15 @@ Supabase 설정과 원격 테스트 절차는 `docs/supabase-setup.md`를 참고
 
 일반적인 변경은 수정 범위에 맞는 스크립트만 실행합니다.
 
+아래는 대표 예시일 뿐 고정 목록이 아닙니다. 변경 범위에 맞는 선택은 `test-selection` 스킬과 현재 `scripts/test_*.py` 목록을 기준으로 합니다.
+
 ```powershell
 python scripts/test_login_auth.py
 python scripts/test_sidebar_ui.py
 python scripts/test_master_org.py
 python scripts/test_schedule_contracts.py
+python scripts/test_screen_scaffold.py      # 화면 유형 선언·크롬 검증
+python scripts/test_near_miss_ui_gates.py   # 아차사고 화면 계약
 python -m compileall -q app.py modules views scripts
 git diff --check
 ```
@@ -88,9 +103,19 @@ views/
   master_users.py              사용자 관리
   master_org.py                조직 관리
   master_work_types.py         근무형태 관리
+  near_miss_submit.py          아차사고 등록
+  near_miss_my.py              내 아차사고
+  near_miss_evaluate.py        평가 관리
+  near_miss_improvement.py     개선조치 관리
+  near_miss_view.py            아차사고 조회
+  near_miss_stats.py           아차사고 분석
+  near_miss_pdf.py             아차사고 PDF 출력
+  work_request_*.py            업무요청 3화면 (프로토타입, 미라우팅)
+  lodging_*.py                 숙소 예약 4화면 (프로토타입, 미라우팅)
   workspace.py                 공용 그리드·조회 UI
   master/                      기준정보 화면군 공통 기반(크롬·상태·그리드·저장)
-  common/                      화면 유형 규약 스캐폴드(DESIGN.md §0)
+  common/                      화면 유형 규약 스캐폴드(DESIGN.md §2)
+  common/erp/                  중립 구조 키트(레이아웃 primitive)
 supabase/migrations/           순서가 있는 스키마 변경
 scripts/                       로컬 계약 테스트와 승인형 원격 도구
 docs/                          제품·데이터·운영 문서
