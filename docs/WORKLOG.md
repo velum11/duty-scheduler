@@ -2,6 +2,38 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-08-18 · 설계 기준 재수립 — DESIGN.md 전면 재작성 (문서·규약만, **화면 코드 무변경**)
+
+- **가장 먼저 알 것**: 오늘 바뀐 건 **기준과 문서**다. 22개 화면 중 골격이 바뀐 것은 **0개**이고 `DESIGN.md` §5 검증도 **한 번도 실행하지 않았다**. 목업은 전부 정적 HTML(OS temp)이라 `.orca/PLAYBOOK.md`의 "실렌더 프로토타입 기본" 규율을 따르지 않았다 — 구현 단계에서 전환해야 한다.
+- **DESIGN.md 구조 교체**: 구판(§0 금지 8 + §1 화면골격 A~F + 부속서 정정 8건)을 폐기하고 **§0 결정 문장(`SCREEN_DECISION`) → §1 토큰 → §2 화면 유형 → §3 공통 패턴 → §4 금지(이유 필수) → §5 검증 → §7 미해결**로 재작성. 화면별 픽셀값을 규정하지 않는다. 폐기 항목과 사유는 문서 부록에 남겼다.
+  - 근본 원인 진단: 구판은 **블록 순서와 픽셀값만 규정하고 "이 화면이 무엇을 결정하는지"를 적지 않아**, 명세를 지켜도 목적이 드러나지 않는 화면이 나왔다.
+- **화면 유형 `WORKLIST` 신설 · `MASTER_DETAIL` 폐기 — 유형 선언까지는 적용 완료**(§7.1 1단계)
+  - `scaffold.py` `ARCHETYPES` 교체: `("WORKLIST","READ_VIEW","FORM_ENTRY","EDIT_GRID","MATRIX_EDIT","DASHBOARD")` — **순서도 DESIGN.md §2와 일치**시켰다.
+  - 7화면 `SCREEN_ARCHETYPE` 이관: 판정 4개(`near_miss_evaluate`·`near_miss_improvement`·`work_request_handle`·`lodging_manage`) → `WORKLIST`, "내 것" 조회 3개(`near_miss_my`·`lodging_my`·`work_request_my`) → `READ_VIEW`. 잔재 0.
+  - 테스트: `test_screen_scaffold.py` 튜플 갱신 + **`MASTER_DETAIL` 부재 검증 추가** + `EXPECTED`에 7화면 고정(되돌림 방지). `test_near_miss_ui_gates.py:161` → `WORKLIST`.
+  - **`test_near_miss_ui_gates.py:168`은 뒤집지 않았다.** 유형만 바뀌고 레이아웃은 아직 구 골격(칩 스트립)이라, 현 상태를 지키는 **과도기 검사**로 제목·주석만 재작성했다. 레이아웃 이관 시 반대 방향(`master_detail_frame` 실호출 + 비율 인자 `list_ratio=1, detail_ratio=2`)으로 다시 쓴다.
+  - 결과: `test_screen_scaffold` 129 · `test_near_miss_ui_gates` 99 통과.
+- **타이포 최대 위반 해소**(§7.2-10 1단계): `views/master/style.py`의 `.ms-title` **25px→28px**(-.025em→-.02em), `.ms-desc` **13.5px→12px**. **이 한 선택자가 22개 화면 제목을 전부 지배**했다. `test_sidebar_ui.py`의 값 검증을 함께 갱신하고 **구값(25px/13.5px) 재유입 방지 검사를 추가**했다.
+- **1단계 완료 후 전체 회귀**: `scripts/test_*.py` 35개 **실패 0** · `compileall` 통과.
+- **아차사고 평가 결정 다수**(전부 문서 확정, 코드 미반영)
+  - **등급 = 가능성 × 중대성 5×4 격자, 행렬법**(KOSHA KRAS 척도). **곱셈법은 쓰지 않는다** — `중대성 4(사망) × 가능성 2 = 8점 → C`가 되어 중대성이 묻히고 20칸 분포가 `D 10 / A 1`로 치우친다. 격자 규칙 둘: **중대성 4는 최소 A, 중대성 1은 최대 C**. 눈금 라벨·칸 값은 아직 임시(사내 기준표 받으면 값만 교체).
+  - **오버라이드 허용 + 변경 사유 필수**. 사유 없이는 평가확정 비활성. 산출 등급은 컬럼 없이 두 축에서 파생.
+  - **제안등급(`proposed_grade`) 표시 전면 폐기** — 등록 폼에 입력 경로가 없어 신규 건은 항상 비는데 4곳에서 표시 중이었다(`near_miss_evaluate:331`, `near_miss_my:287,430`, `near_miss_view:350,619`, `near_miss_pdf:106,207`).
+  - **즉시 확정(`SUBMITTED→EVALUATED`)·착수 없이 반려(`SUBMITTED→REJECTED`) 차단**. `db.py:1743` `NEAR_MISS_TRANSITIONS`와 `database.md:183` 전이표를 함께 고쳐야 하며 **`data-contract` 소관**이다(`ui-feature`는 데이터 계약 변경 금지).
+  - **담당자 선점** `review_started_by`/`review_started_at` 신설(강도 2=경고, 잠그지 않음). 검토착수의 실제 기능이 **보고자 수정 잠금**(`database.md:189`)인데 화면이 이를 한 번도 말하지 않았다.
+  - **경과일 = 접수일(`created_at`) 기준**. `incident_date`가 아니다. 반송 재제출 건도 최초 접수부터 누적(리셋하면 반송 반복으로 지표를 0으로 되돌릴 수 있음). **계산 코드는 아직 없다.**
+- **어휘 통일**: `평가 대기 → 평가중 → 평가완료` / `평가착수` / `평가 등급`. 폐기: 검토중·검토착수·확정등급. **영문 코드값(`IN_REVIEW`·`confirmed_grade`)은 불변** — 코드값이 한글 표기를 규정하지 않는다. 전제로 `_STATUS_LABEL` 단일 출처화 필요(현재 3화면 이상 복제).
+- **대시보드 역할 분기 폐기**: `dashboard.py:132`의 USER 전용 `_render_user`(카드 5장)를 없애고 전 역할 같은 화면. 권한은 **데이터 범위로만** 갈린다(ADMIN 전사 / MANAGER·USER 자기 부서). 명단에서 본인만 표시.
+- **근무형태**: 종류 수를 고정하지 않는다(늘어남). **약칭(`short_label`)이 설계 기준**(실측 최대 3자) — 입력 제약으로 걸어야 화면이 데이터에 인질로 안 잡힌다. 색은 **§1.3 "도메인 색" 예외** 신설로 정리 — 사용자가 등록하는 값이라 팔레트로 제한하지 않되, 대비 계산(`_textOn`)과 "구분은 약칭이 담당" 두 계약이 붙는다.
+- **프로젝트 스킬 5종 개명**: `duty-erp-ui→screen-design`, `duty-ux→ux-review`, `duty-visual-critique→visual-review`, `duty-data-contract→data-contract`, `duty-test-selection→test-selection`. `duty-app`(SKILL.md 없는 빈 디렉터리) 삭제. 참조 21파일 동시 갱신. **git이 rename으로 인식**하도록 스테이징함 — 파일시스템 rename만 하면 `commit -am`이 스킬을 통째로 지운다.
+- **브랜드 부제 폐기**: 사이드바·탭 제목을 `WorkOps` 단독으로. 종전 `현장운영`(2026-08-13 확정)은 시험성적서·계측기 주기관리 모듈이 들어오면서 범위를 좁게 규정하게 됐다. **모듈이 계속 느는 한 어떤 한글 부제도 같은 문제를 겪는다**(§3.6에 원칙으로 기록).
+- **발견한 결함(P1, 미수정)**: 평가 관리 **보완요청 버튼이 활성인데 클릭하면 실패**한다. 활성 게이트는 006 프로브(`near_miss_evaluate.py:171`), 실행부는 007 프로브(`db.py:2566`)로 fail-closed. 006만 적용된 배포에서 발생.
+- **발견한 위험(미해결)**: UI 서체 IBM Plex를 **Google Fonts CDN에서 `@import`**한다(`ui.py:37`, 동봉 아님). **외부망 차단 환경에서는 폴백**되어 §1.2 타이포 기준이 지켜지지 않는다. 사내망 정책 확인 필요.
+- **회귀 기준선**: `scripts/test_*.py` **35개 전부 통과**(원격 쓰기 `test_supabase_crud.py` 제외). 이관 중 이 숫자가 떨어지면 위 3개 외에는 범위 이탈이다.
+- **문서 정합**: `HANDOFF_PROMPT.md` 전면 재작성(구판은 폐기 규칙을 그대로 재지시하는 상태였다 — 붙여넣으면 반대 화면이 나옴). `README.md`에 아차사고 7파일·프로토타입 구분·테스트 2종 보강. `supabase-setup.md`에 006~011 추가 및 **005 결번** 명시. `CLAUDE.md`·`README.md`의 `§0` 오인용을 §2로 정정. `THIRD_PARTY_NOTICES.md`에 IBM Plex 항목(CDN 로드, 미동봉) 추가.
+- **미결(§7.2에 19건)**: 격자 눈금 라벨·칸 값, migration 3건(`frequency`/`severity`, `review_started_*`, `proposed_grade` 제거 여부 — **한 번에 묶어 게이트 1회**), `requirements.md`에 아차사고 계약 전무, 구판 § 번호 dangling(화면 docstring 22개 + `screen-design/SKILL.md` 5곳 + `BACKLOG.md` 3건), `screen-design/references/` 비어 있음, §4-1 vs 지표 스트립 9화면, 타이포 5단 준수 화면 0개(`views/master/style.py:211` 한 줄이 22화면 제목 지배), 신규 모듈 4종(시험성적서·계측기 주기관리·숙소·업무요청) 유입 예정.
+- **주의**: `views/lodging_request.py`에 **이 세션이 만들지 않은 미커밋 변경 271줄**이 있다(달력 직접 선택기·체크리스트 제거, 2026-08-18 병행 작업). `AGENTS.md`에 따라 보존했고 커밋에 포함하지 않았다.
+
 ## 2026-08-13 · [베타] 오후 — 실사용 피드백 일괄 반영 + 브랜딩 확정 (커밋 3c92371~917af8a, 전부 배포됨)
 
 - **모바일 USER 셸 개편**: 하단 탭바(7항목 잘림+Manage app 겹침) 제거 → 상단 앱바 52px sticky + `st.popover` 햄버거 메뉴 시트. 진입점 단일화, `nav.user_menu(caps)` 유도.
