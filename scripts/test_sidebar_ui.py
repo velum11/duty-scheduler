@@ -294,6 +294,12 @@ check("설명 12px 크롬 — DESIGN.md §1.2 label", "font-size:12px" in mstyle
 # 스케일 밖 구값 재유입 방지(§1.2: 28·20·16·14·12 만).
 check("타이틀 크롬에 구값(25px/13.5px) 부재",
       "font-size:25px" not in mstyle and "font-size:13.5px" not in mstyle)
+# 2026-08-18: views/workspace.py 에 .ms-title{1.18rem/700}·.ms-desc{0.82rem} 사본이 남아
+# 있었다(주입 함수 호출부 0건이라 런타임 영향은 없었으나 구값 재유입 경로였다). 실렌더
+# 확인에서 발견해 제거했고, 타이포 단일 출처가 views/master/style.py 임을 여기서 고정한다.
+_ws_src = (ROOT / "views" / "workspace.py").read_text(encoding="utf-8")
+check("workspace.py 에 .ms-title/.ms-desc 사본 정의 없음",
+      ".ms-title { font-size" not in _ws_src and ".ms-desc { font-size" not in _ws_src)
 check("본문 브레드크럼(.ms-crumb) 숨김(상단 헤더가 소유)", ".ms-crumb { display:none;" in mstyle)
 check("중립 액션 스트립 토큰(파랑 아님)", "--ms-band:#fbfaf8" in mstyle)
 # 상단 52px 헤더(modules/ui.py) — MODULE / SCREEN 모노 브레드크럼 + 연결 pill

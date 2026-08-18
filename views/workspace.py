@@ -975,9 +975,10 @@ def selectable_master_grid(
 # 한 번에 한 화면만 렌더되므로 공용 컨테이너/버튼 key(ms_*)를 재사용한다.
 _MASTER_CSS = """
 <style>
-/* 제목 + 한 줄 설명 */
-.ms-title { font-size: 1.18rem; font-weight: 700; color: #26241F; letter-spacing: -0.01em; margin: 0; line-height: 1.9rem; }
-.ms-desc { font-size: 0.82rem; color: #8A8880; margin: 0 0 0.45rem; line-height: 1.35; }
+/* 제목 + 한 줄 설명 — 타이포는 views/master/style.py 가 단일 출처다(DESIGN.md §1.2).
+   여기 있던 사본(.ms-title 1.18rem/700 · .ms-desc 0.82rem)은 2026-08-18 제거했다.
+   이 블록은 아래 master_screen_head 에서만 주입되고 그 함수는 호출부가 0건이므로
+   런타임 영향은 없지만, 구값이 되살아나는 경로를 남기지 않는다. */
 /* 컴팩트 필터 행 */
 .st-key-ms_filter { margin: 0 0 0.1rem; }
 .st-key-ms_filter div[data-testid="stHorizontalBlock"] { align-items: flex-end; }
