@@ -1,5 +1,5 @@
 ---
-name: duty-erp-ui
+name: screen-design
 description: Build, refine, or review workops Streamlit ERP screens while preserving domain behavior, dense data-entry usability, and the repository's current screen contracts. Use for any visual, layout, interaction, component, or styling change in views.
 ---
 
@@ -74,7 +74,7 @@ Use 2 variants for smaller changes that still leave a direction choice. Skip var
 
 ## Verification
 
-- Run focused screen contracts and the tests selected by `$duty-test-selection`.
+- Run focused screen contracts and the tests selected by `$test-selection`.
 - Use `$pixel-qa` for rendered geometry, overflow, clipping, contrast, and state checks.
 - Confirm sample/mock mode first. Use real backends only under explicit user authorization and with writes disabled unless separately approved.
 - Report preserved behavior, changed behavior, visual checks, and anything not verified.

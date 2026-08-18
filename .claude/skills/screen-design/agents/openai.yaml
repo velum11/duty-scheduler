@@ -1,4 +1,4 @@
 interface:
   display_name: "Duty ERP UI"
   short_description: "Safe Streamlit ERP screen development"
-  default_prompt: "Use $duty-erp-ui to implement or refine this workops screen safely."
+  default_prompt: "Use $screen-design to implement or refine this workops screen safely."

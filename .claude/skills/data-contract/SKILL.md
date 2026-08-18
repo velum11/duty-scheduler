@@ -1,5 +1,5 @@
 ---
-name: duty-data-contract
+name: data-contract
 description: Analyze or change workops domain models, repositories, validators, authentication, Supabase readiness, and persistence behavior. Use whenever work can affect stored data, identities, relationships, lifecycle states, or sample-versus-live behavior.
 ---
 
@@ -34,7 +34,7 @@ Protect business data before optimizing implementation convenience.
 
 ## Verification and report
 
-Use `$duty-test-selection` to choose focused tests. Report:
+Use `$test-selection` to choose focused tests. Report:
 
 1. Contract being protected or changed
 2. Evidence and affected call path

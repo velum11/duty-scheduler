@@ -1,5 +1,5 @@
 ---
-name: duty-visual-critique
+name: visual-review
 description: Qualitative visual design review for implemented workops screens in this repository — layout, typography, colour, hierarchy, component consistency, interaction states, responsive quality — judged against "does this look professionally made or developer-made". Preloaded on the workops visual-qa agent; complements pixel-qa (quantitative) and never replaces user sign-off. The narrow wording minimizes accidental selection elsewhere.
 ---
 
@@ -7,7 +7,7 @@ description: Qualitative visual design review for implemented workops screens in
 
 구현된 실화면을 **정성 시각 품질** 관점으로 검수한다. `pixel-qa`(정량: 지오메트리·겹침·잘림·대비
 수치)와 **병행**하며 서로 대체하지 않는다. 데이터·기능·사용성 흐름은 소관 밖
-(사용성은 `duty-ux`, 계약은 contract-qa).
+(사용성은 `ux-review`, 계약은 contract-qa).
 
 구조 출처(보존 이식): jezweb/claude-skills `design-review` — MIT License
 (Copyright (c) 2025 Jeremy Dawes (Jezweb)). 7축 루브릭·심각도 버킷·판정 기준을 차용하고

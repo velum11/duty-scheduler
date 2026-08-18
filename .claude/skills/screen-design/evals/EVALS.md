@@ -1,6 +1,6 @@
 # Duty ERP UI — Evals
 
-Document-based evaluation cases for the `duty-erp-ui` skill. No execution harness:
+Document-based evaluation cases for the `screen-design` skill. No execution harness:
 a reviewer reads the agent transcript for a case and scores it against the observable
 checklist. Each case has four parts — Scenario, Input (verbatim user request), Expected
 behavior (observable items only), Fail criteria. Keep cases small; add more only when a
@@ -63,7 +63,7 @@ improvement without changing data, filters, actions, or navigation.
       actions remain distinct).
 - [ ] Verifies AG Grid / iframe / rerun-managed surfaces by their actual rendered
       geometry, not assumed values.
-- [ ] Runs the focused screen contracts / `$duty-test-selection` tests and uses
+- [ ] Runs the focused screen contracts / `$test-selection` tests and uses
       `$pixel-qa` for rendered geometry, overflow, clipping, and state checks.
 - [ ] Reports preserved behavior, changed behavior, visual checks, and anything not
       verified.

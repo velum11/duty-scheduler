@@ -1,12 +1,12 @@
 ---
-name: duty-ux
+name: ux-review
 description: Usability (UX) review for workops ERP screens and screen designs in this repository — task flow, next-action clarity, form usability, error recovery, status feedback, and cognitive load, scored with a 0–4 severity scale. Preloaded on designated workops agents; the narrow workops-only wording is to minimize accidental selection elsewhere (it does not technically prevent it).
 ---
 
 # Duty UX — 사용성 검토 (휴리스틱 평가)
 
 workops 화면·설계안을 **사용성 관점**(사용자가 일을 얼마나 쉽게 끝내는가)으로 검토한다.
-시각 품질(레이아웃·타이포·색)은 `duty-visual-critique`/`pixel-qa` 소관, 데이터 계약(저장·권한·정확성)은
+시각 품질(레이아웃·타이포·색)은 `visual-review`/`pixel-qa` 소관, 데이터 계약(저장·권한·정확성)은
 contract-qa/data-contract 소관이다. 이 스킬은 **과업 흐름·발견성·피드백·오류 회복·인지 부하**만 다룬다.
 
 구조 출처(보존 이식): wondelai/skills `ux-heuristics` 및 mastepanoski/claude-skills
@@ -63,7 +63,7 @@ workops ERP 맥락으로 재작성했다. 라이선스 전문·허가 문구는 
 
 숫자만으로 근거 없는 정밀도를 만들지 않는다 — 각 finding에 **사용자 영향·발생 빈도·지속성·
 증거 상태(실측/코드/추정)** 를 함께 기록한다. 이 0–4 척도는 UX 전용이다 —
-`duty-visual-critique`의 High/Medium/Low(시각)와 **서로 변환하지 않는다**(UX 4=과업 차단·
+`visual-review`의 High/Medium/Low(시각)와 **서로 변환하지 않는다**(UX 4=과업 차단·
 데이터/보안, visual High=깨져 보임 — 의미가 다르다).
 
 ## 산출 형식 (Must/Should/Nice)
@@ -84,7 +84,7 @@ workops ERP 맥락으로 재작성했다. 라이선스 전문·허가 문구는 
 
 - 평가 입력은 **설계 서술·코드·라이브 DOM 텍스트**를 기본으로 하고, 필요하면 스크린샷을
   보조 증거로 쓸 수 있다(`.orca/artifacts/`·temp에만 저장, 비밀 미포함).
-- 색 대비 측정은 `pixel-qa` 소관(중복 금지). 시각 위계·"단정함"은 `duty-visual-critique` 소관.
+- 색 대비 측정은 `pixel-qa` 소관(중복 금지). 시각 위계·"단정함"은 `visual-review` 소관.
 - X/10 종합 점수 산출 금지 — 실렌더·측정 증거 없는 점수화는 프로젝트 룰 위반.
   심각도별 finding 목록이 산출의 전부다.
 - 휴리스틱 검토는 실제 사용성 테스트가 아니다 — 긴 라벨·고밀도 데이터·empty/error/loading·
