@@ -75,9 +75,18 @@ html, body, .stApp { font-size: 14px; }
    0.875rem(=12.25px)이라, 화면이 button 에만 font-size 를 걸면 실제 글자는 그대로
    12.25px 로 남는다 — 대시보드·내 근무표·아차사고 등록이 각각 이 함정에 걸렸다.
    <p> 가 버튼의 값을 물려받게 해서 이 부류의 결함을 한 번에 없앤다(§1.2). */
-.stApp div.stButton > button p,
-.stApp div.stFormSubmitButton > button p,
-.stApp div[data-testid="stButtonGroup"] button p {
+/* 실측 체인(Streamlit 1.59.1):
+     button(14px) > div > span > div[stMarkdownContainer](12.25px) > p(12.25px)
+   12.25px 를 들고 있는 것은 중간 span 이 아니라 **버튼 안의 stMarkdownContainer** 다.
+   그래서 p 에만 inherit 을 걸면 p 가 그 컨테이너(12.25)를 상속해 그대로 남는다 —
+   컨테이너부터 상속시켜야 버튼 값(14px)이 글자까지 내려온다. 아이콘 span
+   (stIconMaterial)은 다른 가지라 영향받지 않는다. */
+.stApp div.stButton > button [data-testid="stMarkdownContainer"],
+.stApp div.stButton > button [data-testid="stMarkdownContainer"] p,
+.stApp div.stFormSubmitButton > button [data-testid="stMarkdownContainer"],
+.stApp div.stFormSubmitButton > button [data-testid="stMarkdownContainer"] p,
+.stApp div[data-testid="stButtonGroup"] button [data-testid="stMarkdownContainer"],
+.stApp div[data-testid="stButtonGroup"] button [data-testid="stMarkdownContainer"] p {
   font-size: inherit !important; font-weight: inherit !important; }
 .stApp { background: var(--cd-canvas); color: var(--cd-ink); }
 /* 모노: 사번·보고번호·시간·건수·브레드크럼(코드/숫자 계열) */

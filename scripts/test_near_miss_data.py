@@ -1361,8 +1361,12 @@ def test_near_miss_actor_end_to_end_real_flag() -> None:
             calls["sofl"] += 1
             return str(emp).strip() == "SO1"  # 006 컬럼 값(True)
 
-        def repo_eval(report_id, grade, *, evaluator_emp_no, expected_status, updated_by):
+        def repo_eval(report_id, grade, *, evaluator_emp_no, expected_status, updated_by,
+                      expected_revision_at=None, clear_revision=False):
+            # 보완요청 CAS 인자(2026-08-19) — 이 시나리오는 보완요청이 없는 건이라
+            # 고정값은 None, 해제는 False 여야 한다(과잉 해제 금지).
             calls["eval"] += 1
+            assert expected_revision_at is None and clear_revision is False
             return {"id": report_id, "status": "EVALUATED", "confirmed_grade": grade,
                     "evaluator_emp_no": evaluator_emp_no}
 

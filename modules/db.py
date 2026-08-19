@@ -1830,6 +1830,11 @@ _NEAR_MISS_SERVER_FIELDS = frozenset({
     "dept_code", "department_id",
     "confirmed_grade", "evaluated_at",
     "rejection_reason", "is_active",
+    # 보완요청 3필드도 서버 확정이다 — 보고자가 본문 수정 payload 에 실어 자기 건의
+    # 보완요청을 지우거나(재제출 위장) 남의 이름으로 요청을 만들 수 없다. 기록은
+    # request_near_miss_revision, 해제는 resubmit_near_miss 전용 경로만 소유한다.
+    "revision_request_reason", "revision_requested_at",
+    "revision_requested_by_emp_no", "revision_requested_by_user_id",
     "created_by", "updated_by", "created_at", "updated_at",
 })
 
@@ -1842,6 +1847,36 @@ _NEAR_MISS_STALE_MESSAGE = (
 # 평가(EVALUATED 확정)를 시작할 수 있는 사전(pre-evaluation) 상태. 이미 평가/종결된
 # 보고서(EVALUATED/CLOSED)는 재평가로 덮어쓸 수 없다(lost update 방지).
 _NEAR_MISS_PRE_EVAL_STATES = frozenset({"SUBMITTED", "IN_REVIEW"})
+
+# 보완요청(반송)을 걸 수 있는 상태(2026-08-19 사용자 결정으로 확대 — 종전 IN_REVIEW 전용).
+# 평가자 화면에서 '평가 착수'(SUBMITTED→IN_REVIEW) 단계가 폐지돼 평가 대기(SUBMITTED)에서
+# 곧장 보완요청·반려·평가확정을 한다. 화면이 착수를 몰래 대신 눌러 주는 2회 쓰기(중간
+# 실패 시 상태 어긋남)를 만들지 않고, 파사드가 SUBMITTED 를 직접 받는다.
+#   - SUBMITTED 보완요청은 **상태 전이가 아니다.** 결과 상태가 SUBMITTED 로 같고 실제로
+#     바뀌는 것은 보완요청 3필드뿐이다. 그래서 NEAR_MISS_TRANSITIONS 는 손대지 않으며,
+#     허용표의 자기 전이 차단(update_near_miss_status 진입부)은 이 경로를 거치지 않는다.
+#   - IN_REVIEW 보완요청은 종전대로 IN_REVIEW→SUBMITTED 반송이다(재개된 건 등).
+#   - EVALUATED/CLOSED/REJECTED 는 계속 차단한다. 평가가 끝난 건을 사유만 붙여 되돌리는
+#     경로를 만들지 않는다 — 재개는 update_near_miss_status(EVALUATED→IN_REVIEW) 소관이고
+#     CAPA 초기화를 동반한다.
+_NEAR_MISS_REVISION_STATES = frozenset({"SUBMITTED", "IN_REVIEW"})
+
+# 보완요청 CAS 의 '인자 없음'(고정하지 않음)과 '그때 요청이 없었음'(NULL 고정)을 구분하는
+# sentinel. supabase_repository._UNPINNED 와 같은 역할이며 계층마다 자기 것을 쓴다.
+_UNPINNED = object()
+
+
+def _near_miss_revision_at(record) -> str | None:
+    """읽은 보고서의 보완요청 시각(없으면 None). 쓰기 조건 고정(CAS)의 기준값이다.
+
+    미해소 보완요청은 **SUBMITTED 에서만** 존재한다(views/common/near_miss.status_label
+    과 같은 규칙). status 만으로는 "보완요청 걸린 SUBMITTED" 와 "재제출된 SUBMITTED" 가
+    구분되지 않으므로, 모든 보고서 쓰기는 읽은 시점의 이 값을 함께 고정한다 — 그 사이
+    다른 평가자가 새 요청을 걸었거나 보고자가 재제출했으면 0행(stale)이 된다."""
+    value = (record or {}).get("revision_requested_at")
+    text = str(value or "").strip()
+    # pandas 결측(NaT/nan)이 문자열로 새어 들어오면 "없음"과 구분되지 않는다.
+    return None if text in ("", "NaT", "nan", "None") else text
 
 # 서버측 인가 실패(능력·소유자 게이트 미충족) 메시지. 상태전이·평가확정은 평가자
 # (ADMIN/MANAGER/안전담당자) 능력이 필요하고, REJECTED→SUBMITTED 재개만 보고자 본인
@@ -2086,7 +2121,8 @@ def _sample_near_miss_record(payload: dict, store: pd.DataFrame) -> dict:
 
 def _sample_update_near_miss(
     report_id, *, expected_status=None, owner_emp_no=None, expected_photo_paths=None,
-    clear_eval: bool = False, allow_null=(), **changes
+    clear_eval: bool = False, clear_revision: bool = False,
+    expected_revision_at=_UNPINNED, allow_null=(), **changes
 ) -> bool:
     """sample 스토어의 단일 보고서 필드를 변경한다(존재하는 컬럼만).
 
@@ -2124,11 +2160,24 @@ def _sample_update_near_miss(
         owners = store.loc[mask, "reporter_emp_no"].astype(str).str.strip()
         if not (owners == str(owner_emp_no).strip()).all():
             return False
+    if expected_revision_at is not _UNPINNED:
+        # 보완요청 CAS — supabase 의 _pin_revision(WHERE revision_requested_at=?) 대응.
+        # 읽은 시점에 요청이 없었으면 지금도 없어야 하고, 있었으면 그 요청 그대로여야
+        # 한다. 어긋나면 False → 파사드가 stale 오류를 낸다(못 본 변경 덮어쓰기 방지).
+        for i in store.index[mask]:
+            if _near_miss_revision_at({"revision_requested_at": store.at[i, "revision_requested_at"]}) \
+                    != expected_revision_at:
+                return False
     allow_null = set(allow_null)
     if clear_eval:
         store.loc[mask, "confirmed_grade"] = None
         store.loc[mask, "evaluator_emp_no"] = ""
         store.loc[mask, "evaluated_at"] = None
+    if clear_revision:
+        # SUBMITTED 이탈 — 3필드를 함께 비운다(supabase all-or-none CHECK 와 같은 형태).
+        store.loc[mask, "revision_request_reason"] = None
+        store.loc[mask, "revision_requested_by_emp_no"] = ""
+        store.loc[mask, "revision_requested_at"] = None
     indices = store.index[mask]
     for column, value in changes.items():
         if column in store.columns and (value is not None or column in allow_null):
@@ -2545,6 +2594,10 @@ def update_near_miss_status(
     # 재개(EVALUATED→IN_REVIEW): report 평가필드 초기화(clear_eval)와 함께 확인된
     # 개선조치도 CONFIRMED→PENDING 으로 되돌린다(확인 근거가 재개 후에도 남지 않게 — 007).
     reopening = cur_status == "EVALUATED" and target == "IN_REVIEW"
+    # 평가확정과 같은 규칙(F1·F2): SUBMITTED 를 떠나는 전이는 미해소 보완요청을 함께
+    # 끝내고, 모든 전이는 읽은 보완요청 상태를 조건에 고정한다.
+    revision_at = _near_miss_revision_at(current)
+    clear_revision = revision_at is not None and cur_status == "SUBMITTED"
     if is_sample_mode():
         # 재개는 report 전이(clear_eval) + 확인 개선조치 초기화의 2단계다. sample 은 세션-로컬
         # dict 라 완전 트랜잭션이 불가하므로 best-effort 롤백으로 부분성공을 막는다(Codex P2):
@@ -2553,6 +2606,7 @@ def update_near_miss_status(
         snapshot = get_near_miss_report(report_id) if reopening else None
         ok = _sample_update_near_miss(
             report_id, expected_status=cur_status, clear_eval=clear_eval,
+            expected_revision_at=revision_at, clear_revision=clear_revision,
             status=target, rejection_reason=reason,
         )
         if not ok:
@@ -2588,13 +2642,14 @@ def update_near_miss_status(
         return supabase_repository.update_near_miss_status(
             report_id, target, expected_status=cur_status, rejection_reason=reason,
             clear_evaluation=clear_eval, updated_by=attribution,
+            expected_revision_at=revision_at, clear_revision=clear_revision,
         )
     finally:
         _invalidate_near_miss()
 
 
 def request_near_miss_revision(report_id, reason: str, *, current_user) -> dict | None:
-    """보완요청(반송): IN_REVIEW→SUBMITTED 로 되돌리며 보완 사유를 서버측으로 기록한다.
+    """보완요청(반송): 상태를 SUBMITTED 로 두고 보완 사유를 서버측으로 기록한다.
 
     반려(REJECTED, 종결분기)와 의미가 다르며 ``rejection_reason`` 을 재사용하지 않는다.
     보완요청은 보고자에게 재작성을 요청하는 것이고, 반려는 종결(폐기) 분기다.
@@ -2603,7 +2658,12 @@ def request_near_miss_revision(report_id, reason: str, *, current_user) -> dict 
     - 요청자(revision_requested_by)·요청시각은 payload/위젯이 아니라 인증된 ``current_user``
       에서 **서버측 확정**한다(위조 무시). 인가는 평가 능력(auth.can_evaluate_near_miss)
       이 필수다(화면 게이트를 계약으로 승격).
-    - 보완요청은 평가중(IN_REVIEW)에서만 가능하다. 재개(EVALUATED→IN_REVIEW)와는 다른 전이다.
+    - 허용 상태는 ``_NEAR_MISS_REVISION_STATES``(SUBMITTED·IN_REVIEW)다. **평가 대기
+      (SUBMITTED)에서 곧장 보완요청할 수 있다**(2026-08-19 — 평가 착수 단계 폐지). 이때는
+      결과 상태가 같아 **상태 전이가 아니라 보완요청 3필드 기록**이며, IN_REVIEW 에서는
+      종전대로 SUBMITTED 로 반송한다. 어느 경우든 접수일(``created_at``)은 건드리지 않아
+      경과일이 최초 접수부터 누적된다(DESIGN §7.2-4-c).
+    - EVALUATED/CLOSED/REJECTED 는 차단한다. 재개(EVALUATED→IN_REVIEW)는 별개 전이다.
     - supabase 는 007 보완요청 컬럼이 준비된 경우에만 기록한다. 미적용/probe 오류면
       fail-closed 로 차단한다(사유를 저장할 수 없는 상태에서 반송만 만들지 않음).
     """
@@ -2615,21 +2675,31 @@ def request_near_miss_revision(report_id, reason: str, *, current_user) -> dict 
     if current is None:
         raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
     cur_status = str(current.get("status") or "").strip()
-    if cur_status != "IN_REVIEW":
+    if cur_status not in _NEAR_MISS_REVISION_STATES:
         raise ValueError(
-            f"보완요청(반송)은 평가중(IN_REVIEW) 상태에서만 가능합니다: 현재 {cur_status}"
+            "보완요청(반송)은 평가 대기(SUBMITTED)·평가중(IN_REVIEW) 상태에서만 "
+            f"가능합니다: 현재 {cur_status}"
         )
     from modules import auth  # 지연 import(순환 회피)
     if not auth.can_evaluate_near_miss(actor):
         raise ValueError(_NEAR_MISS_NOT_AUTHORIZED_MESSAGE)
     requester = actor["emp_no"]  # 서버귀속(위조 requested_by 무시)
     if is_sample_mode():
+        # 2026-08-19: 보완요청 3필드를 **보고서 레코드 안에** 함께 기록한다(구 세션-로컬
+        # _NEAR_MISS_REVISION_STORE 폐기). supabase 가 near_miss_reports 의 세 컬럼을 한
+        # UPDATE 로 쓰는 것과 같은 형태이며, 이렇게 해야 목록 조회 payload(NEAR_MISS_COLUMNS)
+        # 에도 두 모드가 같은 키로 실린다 — 화면의 '보완요청' 파생 라벨이 모드에 따라
+        # 달라지지 않는다. 상태·평가필드 해제와 한 번에 적용해 부분 기록을 만들지 않는다
+        # (supabase all-or-none CHECK 와 같은 성질).
         ok = _sample_update_near_miss(
             report_id, expected_status=cur_status, clear_eval=True, status="SUBMITTED",
+            expected_revision_at=_near_miss_revision_at(current),
+            revision_request_reason=reason_text,
+            revision_requested_by_emp_no=requester,
+            revision_requested_at=datetime.now(timezone.utc).isoformat(),
         )
         if not ok:
             raise ValueError(_NEAR_MISS_STALE_MESSAGE)
-        _nm_sample_record_revision(report_id, reason_text, requester)
         return get_near_miss_report(report_id)
     # supabase: 007 보완요청 컬럼이 있어야 사유를 기록할 수 있다. 3-state fail-closed —
     # NOT_READY(미적용)·PROBE_ERROR(불명) 모두 차단해 사유 없는 반송을 막는다.
@@ -2638,6 +2708,70 @@ def request_near_miss_revision(report_id, reason: str, *, current_user) -> dict 
     try:
         return supabase_repository.request_near_miss_revision(
             report_id, reason_text, requester_emp_no=requester, expected_status=cur_status,
+            expected_revision_at=_near_miss_revision_at(current),
+        )
+    finally:
+        _invalidate_near_miss()
+
+
+def resubmit_near_miss(report_id, *, current_user) -> dict | None:
+    """재제출(보완 완료): 보완요청 3필드를 비워 평가자 쪽에서 '보완 완료'로 보이게 한다.
+
+    보완요청은 이미 상태를 IN_REVIEW→SUBMITTED 로 되돌려 놓았으므로 **새 상태 전이도 새
+    상태 코드도 필요하지 않다**(migration 불요). 재제출이 하는 일은 "보완이 끝났다"는
+    표시, 즉 3필드 해제 하나뿐이다. 화면이 파생하는 라벨(제출됨 vs 보완요청)이 이 값으로
+    갈린다.
+
+    **인가는 전적으로 서버측(여기)에서 판정한다** — 화면 게이트를 신뢰하지 않는다:
+      1. 신원은 payload 가 아니라 인증된 ``current_user`` 에서 ``_near_miss_actor`` 로
+         확정한다(사번만 신뢰하고 role·부서는 DB 권위 레코드에서 재도출, 비활성 차단).
+      2. **본인 보고서만** — 저장된 ``reporter_emp_no`` 와 행위자 권위 사번의 정확 일치
+         (trim only, casefold 아님 — 수정·사진 경로와 같은 소유자 계약). 평가 능력은
+         이 경로를 열지 않는다(재제출은 보고자의 행위다).
+      3. **보완요청이 걸린 상태에서만** — 상태가 SUBMITTED 이고 보완요청 사유가 실제로
+         남아 있어야 한다. 보완요청이 없는 평범한 제출 건에는 재제출할 것이 없다.
+    조건이 하나라도 어긋나면 ValueError 로 차단한다(빈 값·성공 위장 없음, fail-closed).
+    supabase 는 UPDATE 자체에도 소유자·상태 조건을 함께 걸어 TOCTOU 를 막는다.
+
+    사유를 저장·해제할 007 컬럼이 없으면(NOT_READY / PROBE_ERROR) 차단한다 — 007 미적용
+    환경에서는 애초에 보완요청이 만들어지지 않으므로 재제출할 대상도 없다.
+    """
+    actor = _near_miss_actor(current_user, action="아차사고 재제출")
+    current = get_near_miss_report(report_id)
+    if current is None:
+        raise ValueError(f"아차사고 보고서를 찾을 수 없습니다: {report_id}")
+    # 소유자 게이트(서버측) — 저장된 보고자 원본 사번과 권위 사번의 정확 일치.
+    owner = str(current.get("reporter_emp_no") or "").strip()
+    if owner != actor["emp_no"]:
+        raise ValueError("재제출은 본인이 등록한 아차사고에만 할 수 있습니다.")
+    cur_status = str(current.get("status") or "").strip()
+    if cur_status != "SUBMITTED":
+        raise ValueError(
+            f"재제출은 제출됨(SUBMITTED) 상태에서만 가능합니다: 현재 {cur_status}"
+        )
+    if not str(current.get("revision_request_reason") or "").strip():
+        raise ValueError("보완요청이 걸린 보고서만 재제출할 수 있습니다.")
+    if is_sample_mode():
+        # 3필드를 한 번에 해제한다(all-or-none — 하나만 지우면 supabase CHECK 위반이고
+        # sample 에서도 '사유 없는 요청자'라는 불가능한 상태가 된다). owner_emp_no 로
+        # 스토어 갱신에도 소유자 조건을 걸어 supabase 조건부 UPDATE 와 동형화한다.
+        ok = _sample_update_near_miss(
+            report_id, expected_status="SUBMITTED", owner_emp_no=actor["emp_no"],
+            expected_revision_at=_near_miss_revision_at(current),
+            allow_null=("revision_request_reason", "revision_requested_at"),
+            revision_request_reason=None,
+            revision_requested_by_emp_no="",   # supabase 자연키 계약의 '요청자 없음' 표기
+            revision_requested_at=None,
+        )
+        if not ok:
+            raise ValueError(_NEAR_MISS_STALE_MESSAGE)
+        return get_near_miss_report(report_id)
+    if near_miss_improvement_schema_probe() != READINESS_READY:
+        raise supabase_repository.SupabaseDataError(_NEAR_MISS_REVISION_NOT_READY_MESSAGE)
+    try:
+        return supabase_repository.clear_near_miss_revision_request(
+            report_id, reporter_emp_no=actor["emp_no"], expected_status="SUBMITTED",
+            expected_revision_at=_near_miss_revision_at(current),
         )
     finally:
         _invalidate_near_miss()
@@ -2677,9 +2811,15 @@ def evaluate_near_miss(
         raise ValueError(_NEAR_MISS_STALE_MESSAGE)
     # 평가 귀속(updated_by)은 세션 평가자로 확정한다(서버측).
     attribution = evaluator
+    # 미해소 보완요청은 SUBMITTED 에서만 존재한다 — 평가확정으로 그 상태를 떠나므로
+    # 3필드를 같은 쓰기에서 비운다. 남겨 두면 나중 재개에서 옛 사유가 "보완요청"으로
+    # 되살아난다(Codex F1). 동시에 읽은 요청 상태를 고정해, 보고자가 그 사이 재제출한
+    # 새 본문을 못 보고 등급을 확정하는 일을 막는다(Codex F2).
+    revision_at = _near_miss_revision_at(current)
     if is_sample_mode():
         ok = _sample_update_near_miss(
             report_id, expected_status=cur_status, status="EVALUATED",
+            expected_revision_at=revision_at, clear_revision=revision_at is not None,
             confirmed_grade=grade, evaluator_emp_no=evaluator,
             evaluated_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -2690,6 +2830,7 @@ def evaluate_near_miss(
         return supabase_repository.evaluate_near_miss(
             report_id, grade, evaluator_emp_no=evaluator,
             expected_status=cur_status, updated_by=attribution,
+            expected_revision_at=revision_at, clear_revision=revision_at is not None,
         )
     finally:
         _invalidate_near_miss()
@@ -2730,27 +2871,11 @@ def near_miss_stats(by: str = "status", filters: dict | None = None) -> dict:
 # RPC·trigger 로 강제한다. 신원·인가는 아차사고 보고 경로(P1-a)와 같은 패턴을 미러한다.
 NEAR_MISS_IMPROVEMENT_COLUMNS = supabase_repository.NEAR_MISS_IMPROVEMENT_COLUMNS
 _NEAR_MISS_IMPROVEMENT_STORE = "store_near_miss_improvements"
-# sample 모드 보완요청(revision_request) 세션-로컬 저장소(report_id→사유/요청자/시각).
-# supabase 는 near_miss_reports 의 revision_request_* 컬럼(007)에 기록하므로 read 계약이
-# NEAR_MISS_COLUMNS 에 아직 노출되지 않는다(표시는 UI 소관 — BACKLOG defer). 저장 위치만
-# 모드별로 다르고 파사드 뒤로 감춰지며, 서버귀속·사유필수 동작은 두 모드가 일치한다.
-_NEAR_MISS_REVISION_STORE = "store_near_miss_revision_requests"
-
-
-def _nm_revision_store() -> dict:
-    """sample 보완요청 backing store(report_id→revision_request 자연키, 세션 유지)."""
-    if _NEAR_MISS_REVISION_STORE not in st.session_state:
-        st.session_state[_NEAR_MISS_REVISION_STORE] = {}
-    return st.session_state[_NEAR_MISS_REVISION_STORE]
-
-
-def _nm_sample_record_revision(report_id, reason: str, requester_emp_no: str) -> None:
-    """sample: 보완요청 사유·요청자·요청시각을 서버측 값으로 기록(위조 무시는 파사드가 보장)."""
-    _nm_revision_store()[str(report_id)] = {
-        "revision_request_reason": str(reason),
-        "revision_requested_by_emp_no": str(requester_emp_no),
-        "revision_requested_at": datetime.now(timezone.utc).isoformat(),
-    }
+# 2026-08-19: sample 전용 보완요청 세션 저장소(_NEAR_MISS_REVISION_STORE)를 폐기했다.
+# 종전에는 sample 이 별도 dict, supabase 가 near_miss_reports 컬럼에 기록해 **저장 위치가
+# 모드마다 달랐고**, 그래서 목록 조회 payload 에는 두 모드 어디에도 실리지 않았다(화면이
+# 보완요청을 알 수 없던 원인). 이제 두 모드 모두 보고서 레코드의 revision_request_* 세
+# 필드에 기록하고 NEAR_MISS_COLUMNS 로 함께 실려 나간다(parity).
 
 
 def _sample_restore_near_miss(report_id, snapshot: dict) -> None:
@@ -2771,10 +2896,24 @@ def _sample_restore_near_miss(report_id, snapshot: dict) -> None:
 def get_near_miss_revision_request(report_id) -> dict | None:
     """보고서의 마지막 보완요청(사유/요청자 사번/요청시각) 또는 None. 표시용(읽기).
 
-    sample 은 세션 저장소에서, supabase 는 007 컬럼에서 읽는다. 007 미적용이면 None."""
+    두 모드 모두 보고서 레코드의 revision_request_* 3필드에서 읽는다(2026-08-19 parity).
+    007 미적용이면 컬럼이 없어 None(정상 부재). 사유가 비어 있으면 요청이 없는 것이다
+    (all-or-none — 사유 없이 요청자/시각만 남는 상태는 만들어지지 않는다).
+
+    **이미 목록 payload 에 같은 3필드가 실려 있으므로 목록 화면은 이 함수를 부르지
+    않는다** — 행마다 부르면 그게 곧 N+1 이다. 단건 상세에서만 쓰는 편의 조회다."""
     if is_sample_mode():
-        rec = _nm_revision_store().get(str(report_id))
-        return dict(rec) if rec else None
+        record = get_near_miss_report(report_id)
+        if not record:
+            return None
+        reason = str(record.get("revision_request_reason") or "").strip()
+        if not reason:
+            return None
+        return {
+            "revision_request_reason": reason,
+            "revision_requested_by_emp_no": str(record.get("revision_requested_by_emp_no") or ""),
+            "revision_requested_at": str(record.get("revision_requested_at") or "") or None,
+        }
     return supabase_repository.get_near_miss_revision_request(report_id)
 
 # 클라이언트(화면)가 payload 로 보내도 파사드가 무시하고 서버측에서만 확정하는 필드.
@@ -2930,6 +3069,60 @@ def _near_miss_improvement_raw(report_id) -> dict | None:
     return supabase_repository.get_near_miss_improvement(report_id)
 
 
+def _near_miss_improvement_raw_bulk(report_ids) -> dict[str, dict]:
+    """``_near_miss_improvement_raw`` 의 **일괄** 판(스코핑 없음, 내부·집계 전용).
+
+    supabase 는 ``in_("report_id", …)`` 청크 조회 한 번(200건당 1왕복)이다 — 보고서마다
+    단건 조회를 도는 N+1 을 대체한다. sample 은 세션 dict 조회라 왕복 개념이 없다.
+    actor 필터는 호출부가 한다(``list_near_miss_improvements``)."""
+    ids = [rid for rid in (report_ids or []) if rid is not None]
+    if not ids:
+        return {}
+    if is_sample_mode():
+        store = _nmi_store()
+        out: dict[str, dict] = {}
+        for rid in ids:
+            rec = store.get(str(rid))
+            if rec:
+                out[str(rid)] = dict(rec)
+        return out
+    return supabase_repository.get_near_miss_improvements_bulk(ids)
+
+
+def get_near_miss_improvement_status_map(report_ids) -> dict[str, dict]:
+    """보고서 id 목록 → ``{report_id(str): {submit_status, confirm_status}}`` **상태값 전용**.
+
+    아차사고 조회(READ_VIEW)의 '개선조치' 열을 채우기 위한 경로다. 반환은 조치 단계를
+    파생할 최소값(``submit_status``/``confirm_status``)뿐이고 조치 본문·담당자·확인자·
+    기한은 **조회 대상에 넣지 않는다** — 그 접근은 actor 스코핑을 거치는
+    ``get_near_miss_improvement`` / ``list_near_miss_improvements`` 가 계속 소유한다.
+
+    왕복 수는 supabase 에서 **보고서 200건당 1회**다(``IN_FILTER_CHUNK`` 청크,
+    ``get_user_emails_bulk`` 와 같은 관행). 목록 길이에 비례하는 단건 조회(N+1)를 새로
+    만들지 않는다.
+
+    **스코핑 범위(판단 근거)** — 아차사고 조회는 전 사용자에게 열린 회사 전체 조회이고
+    신고자·사고 내용을 이미 그대로 보여준다(views/near_miss_view 접근 범위 결정).
+    개선조치의 **단계 라벨**은 그보다 노출이 좁은 파생값이라 같은 범위로 둔다. 007
+    미적용이면 빈 dict(정상 부재)이고, readiness 일시오류는 예외로 전파된다(오류를
+    '개선조치 없음'으로 위장하지 않는다)."""
+    ids = [rid for rid in (report_ids or []) if rid is not None]
+    if not ids:
+        return {}
+    if is_sample_mode():
+        store = _nmi_store()
+        out: dict[str, str] = {}
+        for rid in ids:
+            rec = store.get(str(rid))
+            if rec:
+                out[str(rid)] = {
+                    "submit_status": str(rec.get("submit_status") or ""),
+                    "confirm_status": str(rec.get("confirm_status") or ""),
+                }
+        return out
+    return supabase_repository.get_near_miss_improvement_status_map(ids)
+
+
 def get_near_miss_improvement(report_id, *, current_user) -> dict | None:
     """보고서의 개선조치(자연키 dict) 또는 None — **actor-aware 스코핑(current_user 필수)**.
 
@@ -2965,17 +3158,18 @@ def list_near_miss_improvements(report_ids, *, current_user) -> dict:
     **actor-aware 큐 스코핑(current_user 필수)**: 권한자(평가자/ADMIN)는 전체를, 그 외 인증
     사용자는 자신이 저장된 담당자이거나 지정 확인자인 개선조치만 본다. 미배정/조회 None 은
     결과에서 빠진다. current_user 는 필수다(fail-open 제거) — 스코핑 없는 전량 조회가
-    필요한 내부·집계 경로는 명시적으로 ``_near_miss_improvement_raw`` 를 순회한다."""
+    필요한 내부·집계 경로는 명시적으로 ``_near_miss_improvement_raw`` 를 쓴다.
+
+    2026-08-19: 조회를 **일괄 1회**(``_near_miss_improvement_raw_bulk``)로 바꿨다. 종전에는
+    report_id 마다 단건 조회를 돌아 큐 길이만큼 왕복이 났다(N+1). 반환 계약(스코핑된
+    report_id→dict)은 불변이고 actor 필터도 그대로다 — 조회 방식만 바뀐다."""
     from modules import auth  # 지연 import(순환 회피)
     actor = _near_miss_actor(current_user, action="개선조치 조회")
-    out: dict = {}
-    for rid in (report_ids or []):
-        imp = _near_miss_improvement_raw(rid)  # 스코핑 없이 원본 조회 후 actor 필터
-        if imp is None:
-            continue
-        if auth.can_access_improvement(actor, imp):
-            out[str(rid)] = imp
-    return out
+    raw = _near_miss_improvement_raw_bulk(report_ids)  # 스코핑 없이 일괄 조회 후 actor 필터
+    return {
+        rid: imp for rid, imp in raw.items()
+        if auth.can_access_improvement(actor, imp)
+    }
 
 
 def _has_active_improvement_assignment(actor: dict) -> bool:

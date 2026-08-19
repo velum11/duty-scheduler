@@ -46,6 +46,7 @@ import streamlit as st
 from modules import auth, db, photo_storage, ui
 from views import workspace
 from views.common import erp, scaffold
+from views.common import near_miss as nm_common
 from views.common.photo_paths import normalize_photo_paths
 from views.common.photos import render_photo_thumbs
 from views.master import TOKENS, banner, sheet_head
@@ -72,6 +73,9 @@ _STATUS_EFFECT = {
     "REJECTED": "보고자 수정 잠김 — 반려 사유 확인",
     "CLOSED": "종결 — 변경 불가",
 }
+# 보완요청이 걸린 SUBMITTED 건의 결과 표기(§3.3). 상태 코드는 SUBMITTED 그대로지만 보고자가
+# 할 일이 다르다 — 그냥 기다리는 것이 아니라 **고쳐서 다시 내야** 평가가 재개된다.
+_REVISION_EFFECT = "보완요청됨 — 내용을 수정한 뒤 재제출하세요"
 # 발생원인 라벨 — 6화면 단일 어휘(2026-08-14 통일, 조회/평가/개선조치/분석/등록과 동일 dict).
 # 종전 이 화면만 쓰던 복합 라벨('부딪힘·충돌'·'미끄러짐·넘어짐'·'화상·고온')은 KOSHA 현행
 # 단문 용어로 정리했다 — 같은 코드가 화면마다 다른 문구로 보이던 불일치 제거 + 원인 열 폭 통일.
@@ -171,9 +175,13 @@ _COL_CONFIG = {
 
 _MINE_CSS = """
 <style>
-/* 상세 '내용 수정' 버튼 — 히트영역 34px (U8: 제출 취소 버튼 제거로 셀렉터 단일화) */
-[class*="st-key-nm_my_editbtn_"] button {
-  min-height:34px !important; border-radius:8px !important; font-size:13px !important; }
+/* 상세 액션('내용 수정' · 보완요청 건의 '재제출') — 히트영역 34px(§1.4 compact 밴드).
+   글자는 §1.2 네 단계의 body(14px) — 종전 13px 은 스케일 밖 값이었다(2026-08-19 정합). */
+[class*="st-key-nm_my_editbtn_"] button,
+[class*="st-key-nm_my_resubmit_"] button {
+  min-height:34px !important; border-radius:8px !important; font-size:14px !important; }
+[class*="st-key-nm_my_editbtn_"] button p,
+[class*="st-key-nm_my_resubmit_"] button p { font-size:14px !important; }
 </style>
 """
 
@@ -326,7 +334,10 @@ def _to_display(reports: pd.DataFrame) -> pd.DataFrame:
             "작업명": _clean(r.get("work_name")) or "(제목 없음)",
             "사고내용": _clean(r.get("incident_content")) or "-",
             "등급": _clean(r.get("confirmed_grade")) or "-",
-            "상태": _STATUS_LABEL.get(status, status) or "-",
+            # 상태 라벨은 공용 파생을 쓴다(조회 화면과 같은 값) — 보완요청이 걸린
+            # SUBMITTED 는 '보완요청'으로 보인다. 종전에는 갓 등록한 건과 구분되지 않아
+            # 보고자가 보완이 요청된 사실을 목록에서 알 수 없었다(2026-08-19).
+            "상태": nm_common.status_label(r, _STATUS_LABEL, default="-") or "-",
         })
     return pd.DataFrame(rows, columns=[_KEY_FIELD] + _DISPLAY_COLUMNS)
 
@@ -378,6 +389,11 @@ def _render_list(user: dict, reports: pd.DataFrame) -> None:
     _render_detail(user, report, _clean(report.get("status")))
 
 
+def _revision_pending(report: dict) -> bool:
+    """이 건에 미해소 보완요청이 걸려 있는가(조회 payload 의 3필드 파생 — 추가 조회 없음)."""
+    return nm_common.has_revision_request(report)
+
+
 def _detail_anchor_html(report: dict, status: str) -> str:
     """상세 앵커 한 줄 — 보고번호(모노 16/600) + 상태 배지 + 상태의 결과(§3.3). 표 아래
     상세가 **어느 건**인지 고정한다(수정 안전: 잘못된 건을 고치지 않게). 배지는 공용 kit
@@ -387,11 +403,13 @@ def _detail_anchor_html(report: dict, status: str) -> str:
     무엇을 막고 여는지를 배지 옆에 적어야 한다(하단 '제출됨 상태에서만 수정할 수 있습니다'
     캡션은 수정 진입부까지 내려가야 보이므로 §4-3 취지에 못 미쳤다)."""
     report_no = _clean(report.get("report_no")) or "(번호 미상)"
+    revision = _revision_pending(report)
     badge = erp.status_badge_html(
-        _STATUS_LABEL.get(status, status or "-"),
-        _STATUS_COLOR.get(status, TOKENS["ink-3"]),
+        nm_common.status_label(report, _STATUS_LABEL, default="-") or "-",
+        # 보완요청은 진행·정보 색(§1.3) — 상태마다 새 색을 만들지 않는다.
+        TOKENS["info"] if revision else _STATUS_COLOR.get(status, TOKENS["ink-3"]),
     )
-    effect = _STATUS_EFFECT.get(status, "")
+    effect = _REVISION_EFFECT if revision else _STATUS_EFFECT.get(status, "")
     effect_html = (f"<span style='font-size:12px;color:{_MUT};'>{escape(effect)}</span>"
                    if effect else "")
     return (
@@ -412,10 +430,20 @@ def _render_detail(user: dict, report: dict, status: str) -> None:
         st.markdown(_detail_anchor_html(report, status), unsafe_allow_html=True)
         st.markdown(_steps_html(status), unsafe_allow_html=True)
 
+        # 직전 액션(재제출·수정 저장) 결과 — rerun 을 넘겨 온 문구를 여기서 한 번 표시한다.
+        # 배너를 그린 **직후** st.rerun() 하면 그 화면은 즉시 버려져 사용자는 아무것도 못
+        # 본다(2026-08-19 실렌더 확인: 재제출 성공 배너가 한 번도 보이지 않았다). 사진
+        # 첨부/삭제가 이미 쓰던 stash→flush 관행을 액션 전반으로 넓힌다.
+        _flush_action_msg(report.get("id"))
+
         # ── 피드백 배너 — 반려(warn)와 보완요청(info)은 별개 시각·문구를 유지한다. ──
         if status == "REJECTED" and _clean(report.get("rejection_reason")):
             banner("warn", f"반려 사유: {_clean(report.get('rejection_reason'))}")
-        if status == "SUBMITTED":
+        # 보완요청 3필드가 조회 payload 에 함께 실리므로(2026-08-19) **걸려 있는 건에만**
+        # 사유 조회를 한다. 종전에는 SUBMITTED 건마다 무조건 조회를 돌아, 보완요청이 없는
+        # 대다수 건에서도 왕복이 났다. 조회 실패 표면화 계약은 그대로다.
+        revision = _revision_pending(report)
+        if status == _EDITABLE_STATUS and revision:
             _render_revision_banner(report.get("id"))
 
         st.markdown(_detail_blocks_html(report), unsafe_allow_html=True)
@@ -423,8 +451,8 @@ def _render_detail(user: dict, report: dict, status: str) -> None:
         # ── 사진(읽기 그리드) + 소유자·SUBMITTED 첨부/삭제. ──
         _render_my_photos(report, status)
 
-        # ── 워크플로(SUBMITTED 자기수정) — 소유자+제출됨에서만. ──
-        _render_edit_entry(user, report, status)
+        # ── 워크플로(SUBMITTED 자기수정 · 보완요청 건 재제출) — 소유자+제출됨에서만. ──
+        _render_edit_entry(user, report, status, revision)
         st.markdown(f"<div style='height:8px'></div>", unsafe_allow_html=True)
 
 
@@ -527,10 +555,26 @@ def _render_revision_banner(report_id) -> None:
     reason = _clean(rev.get("revision_request_reason"))
     if not reason:
         return
-    requester = _clean(rev.get("revision_requested_by_emp_no"))
-    at = _clean(rev.get("revision_requested_at"))
-    meta = " / ".join(p for p in (requester, at) if p)
+    # 요청자는 사번이 아니라 이름으로 쓴다(조회 화면과 같은 표기). 조회 실패·미매핑이면
+    # 사번 원문으로 폴백한다 — 부가 라벨 때문에 배너 자체를 잃지 않는다.
+    requester = _requester_label(_clean(rev.get("revision_requested_by_emp_no")))
+    # 요청'일' — ISO 타임스탬프 전체(2026-08-19T06:17:33.030003+00:00)는 배너 한 줄에서
+    # 읽히지 않고 §3.5(담백한 실무체)에도 어긋난다. 날짜까지만 쓴다.
+    at = _clean(rev.get("revision_requested_at"))[:10]
+    meta = " · ".join(p for p in (requester, at) if p)
     banner("info", f"보완요청: {reason}" + (f" — 요청 {meta}" if meta else ""))
+
+
+def _requester_label(emp_no: str) -> str:
+    """보완요청자 표시 라벨(이름, 없으면 사번). 조회 실패는 사번 폴백으로 흡수한다."""
+    if not emp_no:
+        return ""
+    try:
+        record = db.find_user_by_emp_no(emp_no)
+    except Exception:  # noqa: BLE001 — 부가 라벨 조회 실패(배너 본문은 유지).
+        return emp_no
+    name = _clean(record.get("name")) if record else ""
+    return name or emp_no
 
 
 def _render_my_photos(report: dict, status: str) -> None:
@@ -640,6 +684,18 @@ def _delete_my_photo(report_id, path: str) -> None:
     st.rerun()
 
 
+def _stash_action_msg(report_id, kind: str, text: str) -> None:
+    """rerun 을 넘겨 다음 렌더의 상세 머리에서 표시할 액션 결과 문구를 세션에 보관한다."""
+    st.session_state[f"nm_my_actionmsg_{report_id}"] = (kind, text)
+
+
+def _flush_action_msg(report_id) -> None:
+    """stash 한 액션 결과 문구를 한 번 표시하고 소비한다(재표시 없음)."""
+    msg = st.session_state.pop(f"nm_my_actionmsg_{report_id}", None)
+    if msg:
+        banner(msg[0], msg[1])
+
+
 def _stash_photo_msg(report_id, kind: str, text: str) -> None:
     """rerun 을 넘겨 다음 렌더에서 표시할 사진 처리 결과 문구를 세션에 보관한다."""
     st.session_state[f"nm_my_photomsg_{report_id}"] = (kind, text)
@@ -652,8 +708,16 @@ def _flush_photo_msg(report_id) -> None:
         banner(msg[0], msg[1])
 
 
-def _render_edit_entry(user: dict, report: dict, status: str) -> None:
-    """SUBMITTED 상태에서만 본문 수정 진입을 노출한다(소유자 검증은 facade 소관). 제출 취소는 범위 밖."""
+def _render_edit_entry(user: dict, report: dict, status: str,
+                       revision: bool = False) -> None:
+    """SUBMITTED 상태에서만 본문 수정 진입을 노출한다(소유자 검증은 facade 소관).
+
+    보완요청이 걸린 건에는 **[재제출]** 을 함께 낸다 — 보고자가 고친 뒤 "보완이 끝났다"고
+    알릴 경로다. 재제출은 상태를 바꾸지 않고 보완요청 3필드를 비워, 평가자 화면에서
+    '보완요청'이 아니라 다시 '제출됨'으로 보이게 한다(새 DB 상태값 없음).
+
+    §3.2 — 보완요청이 없는 건에는 재제출 버튼을 **그리지 않는다**(불가능한 전이는 그리지
+    않는다). 상시 비활성 버튼은 거짓 어포던스다. 제출 취소는 계약 미확정이라 범위 밖."""
     if status != _EDITABLE_STATUS:
         st.caption("제출됨 상태에서만 내용을 수정할 수 있습니다.")
         return
@@ -663,14 +727,49 @@ def _render_edit_entry(user: dict, report: dict, status: str) -> None:
 
     rid = str(report.get("id"))
     edit_key = f"nm_my_edit_open_{rid}"
-    # U8: '제출 취소' 자리표시자(항상 비활성) 버튼을 제거한다 — 상시 비활성 버튼은 거짓 어포던스다.
-    # 제출 취소 계약(SUBMITTED 회수→DRAFT/삭제 등 상태전이·권한·감사)이 확정되면 그때 파사드
-    # (예: withdraw_near_miss_report)와 함께 실 배선한다(현재는 계약 미확정이라 UI 미노출).
-    if st.button("내용 수정", key=f"nm_my_editbtn_{rid}", type="secondary"):
+    resubmit_ready = revision and hasattr(db, "resubmit_near_miss")
+    with st.container(horizontal=True, gap="small", vertical_alignment="bottom"):
+        edit_hit = st.button("내용 수정", key=f"nm_my_editbtn_{rid}", type="secondary")
+        # 재제출은 이 시점의 주 액션이다 — 수정만 하고 알리지 않으면 평가가 재개되지 않는다.
+        resubmit_hit = st.button(
+            "재제출", key=f"nm_my_resubmit_{rid}", type="primary",
+        ) if resubmit_ready else False
+    if resubmit_ready:
+        st.caption("보완 내용을 저장한 뒤 [재제출]을 누르면 평가자에게 보완 완료로 표시됩니다.")
+    if edit_hit:
         st.session_state[edit_key] = not bool(st.session_state.get(edit_key, False))
         st.rerun()
+    if resubmit_hit:
+        _resubmit(report.get("id"))
     if st.session_state.get(edit_key):
         _render_edit_form(user, report)
+
+
+def _resubmit(report_id) -> None:
+    """재제출을 파사드에 위임한다 — **인가 판정은 서버측(파사드)이 한다**.
+
+    화면은 버튼을 그릴지만 정하고, 본인 건인지·보완요청이 걸렸는지·상태가 맞는지는
+    ``db.resubmit_near_miss`` 가 인증 세션(``auth.get_current_user()``)으로 다시 판정한다
+    — 화면 판정만 믿지 않는다(다른 화면·직접 호출에도 같은 계약이 걸린다).
+
+    실패는 fail-closed 로 표면화한다: 도메인 오류(ValueError)는 파사드 원문을 그대로
+    보여주고, 그 외는 원문을 감춘 일반 안내로 접는다. 어느 경우에도 성공으로 위장하거나
+    조용히 넘어가지 않는다."""
+    try:
+        db.resubmit_near_miss(report_id, current_user=auth.get_current_user())
+    except ValueError as exc:
+        banner("danger", f"재제출하지 못했습니다 — {exc}")
+        return
+    except db.DATA_SOURCE_ERRORS as exc:
+        banner("danger", f"재제출 중 오류가 발생했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
+        return
+    except Exception:
+        banner("danger", "재제출 중 오류가 발생했습니다. 목록을 재조회한 뒤 다시 시도하세요.")
+        return
+    # 성공 문구는 rerun 을 넘겨 표시한다 — 여기서 바로 그리면 이어지는 rerun 이 그 화면을
+    # 버려 사용자는 결과를 볼 수 없다(실패 경로는 rerun 하지 않으므로 즉시 표시가 맞다).
+    _stash_action_msg(report_id, "success", "재제출했습니다. 평가자에게 보완 완료로 표시됩니다.")
+    st.rerun()
 
 
 def _render_edit_form(user: dict, report: dict) -> None:
@@ -748,5 +847,6 @@ def _save_edit(report_id, payload: dict) -> None:
     except Exception:
         banner("danger", "수정 중 오류가 발생했습니다. 목록을 재조회한 뒤 다시 시도하세요.")
         return
-    banner("success", "아차사고 내용을 수정했습니다.")
+    # 재제출과 같은 이유로 rerun 을 넘겨 표시한다(직후 rerun 이 배너를 삼키던 기존 결함).
+    _stash_action_msg(report_id, "success", "아차사고 내용을 수정했습니다.")
     st.rerun()

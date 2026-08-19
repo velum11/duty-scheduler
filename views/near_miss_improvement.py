@@ -52,6 +52,7 @@ import streamlit as st
 from modules import auth, db
 from views import workspace
 from views.common import erp, scaffold, worklist
+from views.common import near_miss as nm_common
 from views.master import (
     TOKENS,
     DraftState,
@@ -346,20 +347,12 @@ def _impr_stage(imp) -> str:
     """개선조치 한 건의 '조치 단계' 라벨(제출/확인 상태 파생 — 탭·행·상세 단일 어휘).
 
     미작성(imp 없음) < 작성중(DRAFT) < 확인대기(SUBMITTED·PENDING) < 확인됨(CONFIRMED) /
-    반려(REJECTED). 확정 상태(확인됨/반려)를 제출 상태보다 우선 판정한다."""
-    if not imp:
-        return "미작성"
-    confirm = str(imp.get("confirm_status") or "").strip()
-    submit = str(imp.get("submit_status") or "").strip()
-    if confirm == "CONFIRMED":
-        return "확인됨"
-    if confirm == "REJECTED":
-        return "반려"
-    if submit == "SUBMITTED":
-        return "확인대기"
-    if submit == "DRAFT":
-        return "작성중"
-    return "미작성"
+    반려(REJECTED). 확정 상태(확인됨/반려)를 제출 상태보다 우선 판정한다.
+
+    2026-08-19: 파생 자체는 공용(``views.common.near_miss.improvement_stage``)으로 옮겼다 —
+    아차사고 조회의 '개선조치' 열이 같은 낱말을 써야 하고, 두 화면이 각자 파생하면 한쪽만
+    바뀌는 §3.6 결함이 그대로 재발한다. 이 함수는 화면 로컬 이름을 유지하는 얇은 위임이다."""
+    return nm_common.improvement_stage(imp)
 
 
 def _is_overdue(imp, today: str) -> bool:

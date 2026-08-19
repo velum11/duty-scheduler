@@ -1826,6 +1826,11 @@ NEAR_MISS_STATUSES = ("SUBMITTED", "IN_REVIEW", "EVALUATED", "CLOSED", "REJECTED
 # 화면(파사드)이 보는 자연키 계약. id/report_no + 자연키(reporter_emp_no/
 # evaluator_emp_no/dept_code). reporter/evaluator/부서는 ID/FK 로 저장하고 여기서
 # 조인해 자연키로 되돌린다(다른 테이블 관행과 동일).
+# 보완요청 3필드(revision_request_*, 007)는 2026-08-19 부터 이 계약에 포함된다. 종전에는
+# 컬럼이 있어도 목록 payload 에 실리지 않아, 보완요청으로 IN_REVIEW→SUBMITTED 로 되돌아온
+# 건이 **갓 등록한 건과 화면에서 구분되지 않았다**(둘 다 '제출됨'). 상태 코드는 그대로 두고
+# (새 DB 상태값·migration 없음) 화면이 이 3필드로 '보완요청'을 파생한다.
+# 007 미적용이면 `select *` 에 컬럼이 없어 전부 None 이 된다(정상 부재 — 추가 왕복 없음).
 NEAR_MISS_COLUMNS = [
     "id", "report_no", "status",
     "work_name", "work_content", "incident_content", "countermeasure", "site_description",
@@ -1833,6 +1838,7 @@ NEAR_MISS_COLUMNS = [
     "cause_code", "cause_detail", "incident_date",
     "reporter_emp_no", "evaluator_emp_no", "dept_code",
     "photo_paths", "rejection_reason", "evaluated_at",
+    "revision_request_reason", "revision_requested_by_emp_no", "revision_requested_at",
     "is_active", "created_at", "updated_at",
 ]
 
@@ -1969,6 +1975,15 @@ def _near_miss_natural(rows: list[dict]) -> list[dict]:
             "photo_paths": photo,
             "rejection_reason": row.get("rejection_reason") or None,
             "evaluated_at": str(row.get("evaluated_at") or "") or None,
+            # 보완요청 3필드 — 요청자는 다른 사람 참조와 같이 FK→사번으로 되돌린다.
+            # 이미 로드된 emp_by_id 를 재사용하므로 추가 왕복이 없다. 007 미적용이면
+            # 세 값 모두 None(all-or-none CHECK 와 같은 형태의 부재).
+            "revision_request_reason": row.get("revision_request_reason") or None,
+            "revision_requested_by_emp_no": (
+                emp_by_id.get(str(row.get("revision_requested_by_user_id")), "")
+                if row.get("revision_requested_by_user_id") is not None else ""
+            ),
+            "revision_requested_at": str(row.get("revision_requested_at") or "") or None,
             "is_active": _clean_bool(row.get("is_active")),
             "created_at": str(row.get("created_at") or ""),
             "updated_at": str(row.get("updated_at") or ""),
@@ -2375,9 +2390,45 @@ def set_near_miss_photo_paths(
     return _near_miss_natural([saved])[0]
 
 
+# 미해소 보완요청은 **SUBMITTED 에서만** 존재한다(views/common/near_miss.status_label 이
+# 파생하는 규칙과 같은 문장). 그래서 상태가 SUBMITTED 를 떠나는 쓰기는 3필드를 같은
+# UPDATE 에서 비우고(clear_revision), 보고서 쓰기는 **읽은 시점의 보완요청 상태**를
+# WHERE 에 고정한다(_pin_revision). 고정하지 않으면 status 만으로는 "보완요청 걸린
+# SUBMITTED" 와 "재제출된 SUBMITTED" 가 구분되지 않아 못 본 변경을 덮어쓴다.
+_REVISION_NULLS = {
+    "revision_request_reason": None,
+    "revision_requested_by_user_id": None,
+    "revision_requested_at": None,
+}
+
+# expected_revision_at 의 '인자 없음'(고정하지 않음)과 '그때 요청이 없었음'(NULL 고정)을
+# 구분하는 sentinel. None 은 후자다.
+_UNPINNED = object()
+
+
+def _pin_revision(query, expected_at):
+    """읽은 시점의 보완요청 상태를 UPDATE 조건에 고정한다(007 적용 환경에서만).
+
+    ``expected_at`` 은 호출부가 읽은 ``revision_requested_at`` 이다. None 이면 '그때
+    보완요청이 없었다'는 뜻이라 지금도 NULL 이어야 하고, 값이 있으면 **그 요청 그대로**
+    여야 한다. 그 사이 다른 평가자가 새 보완요청을 걸었거나 보고자가 재제출했으면 0행이
+    되어 stale 오류가 난다 — 보지 못한 변경을 덮어쓰지 않는다(fail-closed).
+
+    007 미적용이면 컬럼 자체가 없어 조건을 걸 수 없다. 그 환경에서는 보완요청이 애초에
+    만들어지지 않으므로 고정할 상태도 없다(무조건 통과가 아니라 대상 부재)."""
+    if expected_at is _UNPINNED:
+        return query
+    if not near_miss_improvement_extensions_ready():
+        return query
+    if expected_at is None:
+        return query.is_("revision_requested_at", "null")
+    return query.eq("revision_requested_at", str(expected_at).strip())
+
+
 def update_near_miss_status(
     report_id, status: str, *, expected_status=None, rejection_reason=None,
     clear_evaluation: bool = False, updated_by=None,
+    clear_revision: bool = False, expected_revision_at=_UNPINNED,
 ) -> dict | None:
     """아차사고 상태를 변경한다(전이 검증은 파사드가 수행 후 호출).
 
@@ -2406,11 +2457,17 @@ def update_near_miss_status(
         updates["confirmed_grade"] = None
         updates["evaluator_user_id"] = None
         updates["evaluated_at"] = None
+    if clear_revision:
+        # SUBMITTED 를 떠나므로 미해소 보완요청도 함께 끝난다. 3필드를 같은 UPDATE 에서
+        # 비워 all-or-none CHECK 를 만족시키고, 나중 재개(REJECTED→SUBMITTED)에서 옛 사유가
+        # '보완요청'으로 되살아나는 것을 막는다(Codex F1).
+        updates.update(_REVISION_NULLS)
     if updated_by is not None:
         updates["updated_by"] = _clean_text(updated_by, nullable=True)
     query = client().table(NEAR_MISS_TABLE).update(updates).eq("id", report_id)
     if expected_status is not None:
         query = query.eq("status", str(expected_status).strip())
+    query = _pin_revision(query, expected_revision_at)
     response = _execute(query, "상태변경", NEAR_MISS_TABLE)
     saved = (response.data or [None])[0]
     if saved is None:
@@ -2423,6 +2480,7 @@ def update_near_miss_status(
 def evaluate_near_miss(
     report_id, confirmed_grade: str, *, evaluator_emp_no: str,
     expected_status=None, updated_by=None,
+    clear_revision: bool = False, expected_revision_at=_UNPINNED,
 ) -> dict | None:
     """평가 확정: status=EVALUATED + 확정등급/평가자/평가시각 설정.
 
@@ -2446,9 +2504,14 @@ def evaluate_near_miss(
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": _clean_text(updated_by, nullable=True),
     }
+    if clear_revision:
+        updates.update(_REVISION_NULLS)   # SUBMITTED 이탈 — 상태변경과 같은 규칙(F1)
     query = client().table(NEAR_MISS_TABLE).update(updates).eq("id", report_id)
     if expected_status is not None:
         query = query.eq("status", str(expected_status).strip())
+    # 보완요청을 본 채로 평가하면 그 요청 그대로일 때만 확정된다 — 보고자가 그 사이
+    # 재제출했으면 0행(stale)이라 **바뀐 본문을 못 보고 등급을 매기는 일**이 없다(F2).
+    query = _pin_revision(query, expected_revision_at)
     response = _execute(query, "평가", NEAR_MISS_TABLE)
     saved = (response.data or [None])[0]
     if saved is None:
@@ -2705,6 +2768,66 @@ def get_near_miss_improvement(report_id) -> dict | None:
     )
     natural = _near_miss_improvement_natural(rows)
     return natural[0] if natural else None
+
+
+def get_near_miss_improvements_bulk(report_ids) -> dict[str, dict]:
+    """보고서 id 목록의 개선조치를 **왕복 1회(청크당 1회)** 로 모아 report_id(str)→자연키 dict.
+
+    종전 큐 enrich 는 보고서마다 ``get_near_miss_improvement`` 를 불러 N+1 왕복이었다
+    (목록 200건이면 200왕복). ``in_("report_id", …)`` 한 번으로 대체한다. 목록이 길면
+    URL 길이 한계 때문에 :data:`IN_FILTER_CHUNK`(200) 단위로 끊어 조회하고 합친다 —
+    ``get_user_emails_bulk`` 와 같은 관행이며 왕복 수는 ``ceil(len/200)`` 이다.
+
+    007 미적용이면 빈 dict(정상 부재). readiness 일시오류(PROBE_ERROR)는 예외 전파
+    (오류를 '개선조치 없음'으로 위장하지 않는다 — ``_near_miss_improvement_read_gate``).
+
+    **스코핑 없음** — actor 필터는 호출부(``db.list_near_miss_improvements``)가 한다."""
+    ids = [rid for rid in (report_ids or []) if rid is not None]
+    if not ids:
+        return {}
+    if not _near_miss_improvement_read_gate():
+        return {}
+    rows: list[dict] = []
+    for chunk in _filter_chunks(list(ids)):
+        rows.extend(_select_all(
+            NEAR_MISS_IMPROVEMENT_TABLE, "*",
+            lambda query, c=chunk: query.in_("report_id", list(c)),
+        ))
+    return {
+        str(rec.get("report_id")): rec
+        for rec in _near_miss_improvement_natural(rows)
+        if rec.get("report_id") is not None
+    }
+
+
+def get_near_miss_improvement_status_map(report_ids) -> dict[str, dict]:
+    """보고서 id 목록 → ``{report_id: {submit_status, confirm_status}}`` (**상태값만**).
+
+    아차사고 조회(READ_VIEW)의 '개선조치' 열 전용 투영이다. 조치 본문·담당자·확인자·
+    기한 등 사람/내용 필드는 **아예 SELECT 하지 않는다** — 그 접근은 actor 스코핑을 거치는
+    ``get_near_miss_improvement`` 가 계속 소유한다. 열이 필요로 하는 것은 단계 라벨뿐이다.
+
+    왕복은 :data:`IN_FILTER_CHUNK`(200) 청크당 1회다(N+1 아님). 007 미적용이면 빈 dict."""
+    ids = [rid for rid in (report_ids or []) if rid is not None]
+    if not ids:
+        return {}
+    if not _near_miss_improvement_read_gate():
+        return {}
+    out: dict[str, dict] = {}
+    for chunk in _filter_chunks(list(ids)):
+        rows = _select_all(
+            NEAR_MISS_IMPROVEMENT_TABLE, "report_id,submit_status,confirm_status",
+            lambda query, c=chunk: query.in_("report_id", list(c)),
+        )
+        for row in rows:
+            rid = row.get("report_id")
+            if rid is None:
+                continue
+            out[str(rid)] = {
+                "submit_status": str(row.get("submit_status") or ""),
+                "confirm_status": str(row.get("confirm_status") or ""),
+            }
+    return out
 
 
 def _nmi_raw(report_id) -> dict | None:
@@ -3029,8 +3152,14 @@ def reopen_near_miss_report(report_id, *, actor_emp_no: str) -> dict | None:
 
 def request_near_miss_revision(
     report_id, reason: str, *, requester_emp_no: str, expected_status=None,
+    expected_revision_at=_UNPINNED,
 ) -> dict | None:
-    """보완요청(반송): IN_REVIEW→SUBMITTED + revision_request 3필드(사유/요청자/시각) 기록.
+    """보완요청(반송): status=SUBMITTED + revision_request 3필드(사유/요청자/시각) 기록.
+
+    소스 상태는 파사드(``db.request_near_miss_revision``)가 SUBMITTED·IN_REVIEW 로 제한한다.
+    IN_REVIEW 에서는 SUBMITTED 로 되돌리는 전이이고, **SUBMITTED 에서는 상태가 그대로라
+    전이가 아니라 3필드 기록**이다(2026-08-19 평가 착수 단계 폐지). 어느 쪽이든 이 UPDATE
+    문은 동일하며 ``expected_status`` 조건만 달라진다.
 
     보완요청 컬럼(revision_request_reason 등, 007)이 있어야 한다. 요청자 사번은 users 로
     해소해 ``revision_requested_by_user_id`` (FK)로 저장한다 — 서버귀속(파사드가 인증 actor
@@ -3064,12 +3193,61 @@ def request_near_miss_revision(
     query = client().table(NEAR_MISS_TABLE).update(updates).eq("id", report_id)
     if expected_status is not None:
         query = query.eq("status", str(expected_status).strip())
+    # 읽은 시점의 보완요청 상태 고정 — 두 평가자가 같은 SUBMITTED 건에 동시에 보완요청을
+    # 걸면 뒤엣것이 앞엣것을 조용히 덮어쓰던 경합을 막는다(Codex F2).
+    query = _pin_revision(query, expected_revision_at)
     response = _execute(query, "보완요청", NEAR_MISS_TABLE)
     saved = (response.data or [None])[0]
     if saved is None:
         if expected_status is not None:
             raise SupabaseDataError(_NM_STALE_MESSAGE)  # 조건부 0행 = 이미 전이됨/변경됨
         return get_near_miss_report(report_id)
+    return _near_miss_natural([saved])[0]
+
+
+def clear_near_miss_revision_request(
+    report_id, *, reporter_emp_no: str, expected_status: str = "SUBMITTED",
+    expected_revision_at=_UNPINNED,
+) -> dict | None:
+    """재제출: 보완요청 3필드를 **함께** NULL 로 비운다(상태는 SUBMITTED 그대로).
+
+    보완요청은 이미 IN_REVIEW→SUBMITTED 로 되돌려 놓았으므로 재제출에 새 상태 전이가
+    필요하지 않다 — 남은 것은 "보완이 끝났다"는 표시(3필드 해제)뿐이다. 그래서 상태
+    코드도 새 상태값도 만들지 않는다(migration 불요).
+
+    all-or-none CHECK(``near_miss_reports_revision_request_all_or_none``)를 만족하도록
+    세 컬럼을 한 UPDATE 에서 전부 NULL 로 놓는다(하나만 지우면 CHECK 위반).
+
+    **인가는 파사드가 소유하지만 이 UPDATE 도 조건을 함께 건다**(방어 심층화):
+    ``id`` + ``status=expected_status`` + ``reporter_user_id=<보고자>`` 를 WHERE 에 넣어,
+    파사드 판정과 실제 UPDATE 사이(TOCTOU)에 상태가 바뀌었거나 보고자가 아니면 0행이
+    되어 stale 오류가 난다 — 조건 없는 광범위 UPDATE 로 새지 않는다(fail-closed).
+    보고자 사번을 user_id 로 해석하지 못하면 UPDATE 를 보내지 않고 예외로 막는다."""
+    if not near_miss_improvement_extensions_ready():
+        raise SupabaseDataError(_NMI_NOT_READY_MESSAGE)
+    user_by_emp, _ = _user_maps()
+    reporter = _clean_text(reporter_emp_no)
+    if reporter not in user_by_emp:
+        raise SupabaseDataError(f"보고자 사번을 찾을 수 없습니다: {reporter}")
+    updates = {
+        "revision_request_reason": None,
+        "revision_requested_by_user_id": None,
+        "revision_requested_at": None,
+        "updated_by": reporter,
+    }
+    query = (
+        client().table(NEAR_MISS_TABLE).update(updates)
+        .eq("id", report_id)
+        .eq("status", str(expected_status).strip())
+        .eq("reporter_user_id", user_by_emp[reporter])
+    )
+    # 보고자가 **읽은 그 요청**만 해소한다 — 사이에 평가자가 새 보완요청을 걸었으면
+    # 0행이 되어 stale 오류가 난다(못 본 요청을 재제출로 지우지 않는다, Codex F2).
+    query = _pin_revision(query, expected_revision_at)
+    response = _execute(query, "재제출", NEAR_MISS_TABLE)
+    saved = (response.data or [None])[0]
+    if saved is None:
+        raise SupabaseDataError(_NM_STALE_MESSAGE)  # 조건부 0행 = 이미 전이됨/소유자 아님
     return _near_miss_natural([saved])[0]
 
 

@@ -114,26 +114,39 @@ check("base 4 항목은 caps 없이도 USER 노출",
       {"near_miss_submit", "near_miss_my", "near_miss_view", "near_miss_stats"} <= user_ids_no_caps)
 
 
-# ===== 2) 평가 관리 평가착수 배선 =====
-# §3.6 어휘: 시작 액션은 '평가착수'다(구 '검토착수' 폐기 — 화면명·역할·완료 상태가 전부
-# '평가' 어근인데 시작 액션만 '검토'였다). 영문 코드값 IN_REVIEW 는 그대로 둔다.
-print("평가 관리 평가착수")
+# ===== 2) 평가 관리 액션 3종(평가 착수 폐지) =====
+# 2026-08-19 사용자 결정: **'평가 착수'를 제거한다.** 평가 대기(SUBMITTED)에서 곧장
+# 보완요청·반려·평가확정을 누른다. 종전 이 자리에는 평가착수 배선을 지키는 검사
+# (라벨 존재 · update_near_miss_status(...,"IN_REVIEW") · status=='SUBMITTED' 게이트 ·
+# primary/secondary 위계)가 있었고, **결정에 따라 반대 방향(부재 고정)으로 재작성**했다.
+# 상태값 IN_REVIEW 자체는 폐기하지 않는다(통계·PDF·개선조치가 쓴다) — 이 화면에서
+# **만들지 않을 뿐**이다. 어휘(§3.6)도 액션이 없어진 만큼 '검토착수' 잔재 검사만 남긴다.
+print("평가 관리 액션 3종(평가 착수 폐지)")
 detail_src = inspect.getsource(nme._render_detail)
-check("평가착수 scope 액션 라벨 존재", '"평가착수"' in detail_src or "'평가착수'" in detail_src)
-check("구 어휘 '검토착수' 잔재 없음", "검토착수" not in detail_src)
-check("평가착수 → update_near_miss_status(..., \"IN_REVIEW\", ...)",
-      "IN_REVIEW" in detail_src and "update_near_miss_status" in detail_src)
-check("평가착수 활성 게이트: status == 'SUBMITTED'",
-      'status != "SUBMITTED"' in detail_src)
-check("평가착수는 current_user=auth.get_current_user() 전달(신원 서버측 확정)",
+_eval_src_all = inspect.getsource(nme)
+# 라벨은 **버튼 생성 자리**로 본다 — 소스에 낱말이 있는지로 보면 "평가 착수를 없앴다"고
+# 설명하는 주석이 검사를 깨뜨린다(같은 이유로 아래 created_at 검사도 ast 로 고쳤다).
+_buttons = re.findall(r'st\.button\(\s*"([^"]+)"', detail_src)
+check("평가착수 버튼 없음", not any("착수" in label for label in _buttons))
+check("구 어휘 '검토착수' 버튼도 없음", "검토착수" not in _buttons)
+# 남은 update_near_miss_status 호출은 반려 하나뿐이다 — IN_REVIEW 로 올리는 배선이
+# 어떤 이름으로도 남아 있지 않은지 호출 단위로 본다(문자열 존재 여부가 아니라 인자로).
+_status_calls = re.findall(r"db\.update_near_miss_status\([^;]*?\n\s*\)", detail_src, re.S)
+check("update_near_miss_status 호출은 반려(REJECTED) 하나뿐",
+      len(_status_calls) == 1 and '"REJECTED"' in _status_calls[0]
+      and "IN_REVIEW" not in _status_calls[0])
+check("평가착수 버튼 key(nm_act_review_) 잔재 없음", "nm_act_review_" not in _eval_src_all)
+check(f"액션 3종만 존재(보완요청·반려·평가확정) — 실제: {_buttons}",
+      _buttons == ["보완요청", "반려", "평가확정"])
+check("남은 액션도 current_user=auth.get_current_user() 전달(신원 서버측 확정)",
       "current_user=auth.get_current_user()" in detail_src)
 # 종결 버튼은 이 화면에 없다(개선조치 소관) — 회귀 방지. detail_actions 튜플에 종결 라벨 없음.
 check("평가 화면에 종결 버튼 미도입(detail_actions 라벨 없음)",
       '("종결"' not in detail_src and "'종결'," not in detail_src)
-# §3.2 액션 위계 — 평가확정만 primary CTA, 평가착수는 보조(secondary) 버튼.
-check("평가확정만 primary CTA(평가착수는 보조 secondary)",
+# §3.2 액션 위계 — 평가확정만 primary CTA, 보완요청은 보조(secondary), 반려는 부정 의미 색.
+check("평가확정만 primary CTA(보완요청은 보조 secondary)",
       'st.button("평가확정"' in detail_src and 'type="primary"' in detail_src
-      and 'st.button("평가착수"' in detail_src and 'type="secondary"' in detail_src)
+      and 'st.button("보완요청"' in detail_src and 'type="secondary"' in detail_src)
 
 
 # ===== 3) stats 보고서 종결률 =====
@@ -227,7 +240,17 @@ check("쓰기 활성은 readiness.write_enabled 게이트", "readiness.write_ena
 print("평가 보완요청")
 check("보완요청 scope 액션 라벨 존재", '"보완요청"' in detail_src)
 check("보완요청 → request_near_miss_revision 파사드", "request_near_miss_revision" in detail_src)
-check("보완요청 활성 게이트: status == 'IN_REVIEW'", 'status != "IN_REVIEW"' in detail_src)
+# 2026-08-19: 평가 착수 폐지로 보완요청 허용 상태가 IN_REVIEW 단독 → SUBMITTED·IN_REVIEW
+# 로 넓어졌다(파사드 db._NEAR_MISS_REVISION_STATES). 화면 활성 판정과 실행부가 어긋나면
+# 눌리는데 실패하는 버튼이 다시 생기므로(§7.4 P1) **두 집합이 같음**을 고정한다.
+check("보완요청 활성 게이트: 화면 상태 집합 존재", hasattr(nme, "_REVISION_STATUSES"))
+check("보완요청 허용 상태 = 평가 대기·평가중",
+      set(nme._REVISION_STATUSES) == {"SUBMITTED", "IN_REVIEW"})
+check("화면 집합 == 실행부 집합(db._NEAR_MISS_REVISION_STATES)",
+      set(nme._REVISION_STATUSES) == set(db._NEAR_MISS_REVISION_STATES))
+check("보완요청 게이트가 그 집합으로 판정", "_REVISION_STATUSES" in detail_src)
+check("평가 대기(SUBMITTED)에서 보완요청이 비활성되지 않는다",
+      "SUBMITTED" in nme._REVISION_STATUSES)
 # §1-A 단일 의견 필드(dc 정본) — 반려·보완요청 공용, 각각 의견 필수. 반려=rejection_reason,
 # 보완요청=사유로 재사용하되 버튼·facade·의미는 별개(반려≠보완요청).
 check("단일 의견 필드 공용(반려=rejection_reason, 보완요청=사유; 각각 필수)",
@@ -315,23 +338,52 @@ check("제안등급 입력 경로 없음(§7.2-1b — 등급은 확정등급만)
 check("제출 시 전체 재검증(_validate) 계약 유지", "_validate(" in sub_render)
 check("사진 스테이징-후-첨부 유지(_render_photo_stage)", "_render_photo_stage" in sub_render)
 
-# ----- 9b) 폭·밀도·리듬 (2026-08-18 실렌더 계측 기반 재작성) -----
+# ----- 9b) 폭·밀도·리듬 (2026-08-19 Pretendard 재계측 기반 갱신) -----
 # 종전에는 폭이 "날짜 160 / 코드 180 / 서술 전폭"이라 한 줄 답을 받는 칸이 1021px 이었고,
 # 같은 부류인 날짜(160)와 코드(180)가 서로 다른 폭이라 우측 가장자리가 어긋났다. 폭을
-# **값의 실측 길이에서 역산한 3계단**으로 바꾸고 그 계단을 여기서 고정한다.
-# (실측: 한글 12.488px/자 @14px — `views/near_miss_submit.py` 의 _KO_ADV_PX 주석 참조)
+# **값의 실측 길이·가독 상한에서 역산한 3계단**으로 바꾸고 그 계단을 여기서 고정한다.
+#
+# 2026-08-19 갱신 사유(옛 수치를 고정하던 판정을 바꾼 근거):
+#  (1) §1.2 개정으로 글꼴이 Pretendard 하나가 되면서 IBM Plex 기준 계수(12.488/7.952)가
+#      폐지됐다 — 같은 방식으로 다시 재 12.10/7.79 를 얻었다(등록 폼 컨트롤 computed style
+#      복사 + 100자 반복 ÷100, :8554 실렌더).
+#  (2) 고정폭 3계단은 1440 에서 값 열 오른쪽을 651px 비워 "폼이 화면과 무관해" 보였다.
+#      상한 원칙은 유지하고 **상한값만** 가독 권장(라틴 45~75자)의 상단으로 올린 뒤,
+#      실폭은 CSS `min(100%, 상한)`/`clamp(하한, 비율, 상한)` 으로 화면 폭을 따라가게 했다.
+#      계단 비율(1 : 1.93 : 3.71)은 유지된다 — 부류가 섞이면 우측 가장자리가 다시 흩어진다.
 _KO = nmsub._KO_ADV_PX
-check("글자 폭 계수는 실측 상수로 코드에 남아 있다(추정치 주석 금지)",
-      abs(_KO - 12.488) < 0.01 and abs(nmsub._LAT_ADV_PX - 7.952) < 0.01)
-check("짧은 값(날짜·코드) 폭 = 최장 코드 라벨에서 역산한 140",
-      nmsub._W_SHORT == 140 and nmsub._W_SHORT >= 91.88 + 14 + 28 + 2)
-check("한 줄 구(작업명·원인 상세) 폭 = 20자 역산 272",
-      nmsub._W_LINE == 272 and nmsub._W_LINE >= 20 * _KO + 17.5)
-check("서술 폭 = 한 줄 40자 역산 524(가독 상한 안)",
-      nmsub._W_PROSE == 524 and nmsub._W_PROSE >= 40 * _KO + 21)
+_LAT = nmsub._LAT_ADV_PX
+check("글자 폭 계수는 Pretendard 실측 상수로 코드에 남아 있다(추정치 주석 금지)",
+      abs(_KO - 12.10) < 0.01 and abs(_LAT - 7.79) < 0.01)
+check("짧은 값(날짜·코드) 상한 164 / 하한은 최장 코드 라벨(89.31+44=133.31)을 담는다",
+      nmsub._W_SHORT == 164 and nmsub._W_SHORT_MIN == 136
+      and nmsub._W_SHORT_MIN >= 89.31 + 14 + 28 + 2)
+check("한 줄 구(작업명·원인 상세) 상한 316 / 하한은 20자 역산 272",
+      nmsub._W_LINE == 316 and nmsub._W_LINE_MIN == 272
+      and nmsub._W_LINE_MIN >= 20 * _KO + 17.5)
+check("서술 상한 608 = 라틴 45~75자 권장의 상단(75자)을 실측 계수로 환산한 값",
+      nmsub._W_PROSE == 608
+      and 45 * _LAT + 23 <= nmsub._W_PROSE <= 75 * _LAT + 23 + 4)  # +4 = 4px 격자 올림
+check("계단 비율은 종전(1 : 1.943 : 3.743)에서 1% 미만으로만 움직인다",
+      abs(nmsub._W_LINE / nmsub._W_SHORT - 272 / 140) < 0.02
+      and abs(nmsub._W_PROSE / nmsub._W_SHORT - 524 / 140) < 0.04)
 check("폭 계단은 3개뿐 — 값 열을 전부 채우는 컨트롤이 없다",
       len({nmsub._W_SHORT, nmsub._W_LINE, nmsub._W_PROSE}) == 3
       and 'width="stretch"' not in sub_render)
+# 폭은 고정이 아니라 `min(100%, 상한)` 이다(2026-08-19 요구) — 좁으면 줄고 넓으면 상한에서
+# 선다. 계단↔필드 배정은 _W_TIERS 하나가 단일 출처이고 필수 8필드를 빠짐없이 덮는다.
+_tier_css = nmsub._tier_css()
+check("서술은 min(100%, 608px) — 화면 폭을 따라가되 상한에서 멈춘다",
+      "min(100%, 608px)" in _tier_css)
+check("짧은 두 계단은 clamp(하한, 비율, 상한) — 세 계단이 같은 비율로 줄어든다",
+      "clamp(136px, 27%, 164px)" in _tier_css and "clamp(272px, 52%, 316px)" in _tier_css)
+check("계단 CSS 는 위젯 키 클래스에 걸려 8필드를 모두 덮는다(_W_TIERS 단일 출처)",
+      all(f".st-key-nm_f_{k}" in _tier_css for _l, k in nmsub._REQUIRED)
+      and sum(len(keys) for _e, keys in nmsub._W_TIERS) == len(nmsub._REQUIRED))
+check("남는 폭은 한쪽에 몰리지 않는다 — 폼 블록을 본문 폭 800 으로 좁혀 중앙 정렬",
+      "max-width:800px" in nmsub._FORM_CSS
+      and "margin-left:auto" in nmsub._FORM_CSS
+      and 'st-key-nm_css' in nmsub._FORM_CSS)
 check("날짜·원인 코드는 **같은** 폭 상수를 쓴다(우측 가장자리 일치)",
       sub_render.count("width=_W_SHORT") == 2)
 check("서술 4칸은 **같은** 폭 상수를 쓴다", sub_render.count("width=_W_PROSE") == 4)
@@ -381,8 +433,18 @@ check("확정등급 기본 미선택(S/grades[0] 자동선택 제거)",
 check("평가확정은 등급 미선택 시 비활성(grade_selected 게이트)",
       "grade_selected" in eval_src and "not grade_selected" in eval_src)
 check("미선택 안내 문구('등급을 선택하세요')", "등급을 선택하세요" in eval_src)
-check("평가착수/보완요청/반려는 등급 무관(현행 게이트 유지)",
-      'status != "SUBMITTED"' in eval_src and 'status != "IN_REVIEW"' in eval_src and "not opinion" in eval_src)
+# 2026-08-19: 평가착수가 없어져 등급 무관 액션은 보완요청·반려 둘이다. 종전 검사는 이제
+# 없는 게이트('status != "SUBMITTED"' = 평가착수)를 요구했으므로 남은 두 게이트로 고친다.
+_gate_exprs = re.findall(r"^\s*(?:revision|reject)_disabled = .*?(?=\n\s*(?:if|#|\w+ =))",
+                         eval_src, re.M | re.S)
+check("보완요청·반려 게이트 식을 둘 다 찾음", len(_gate_exprs) == 2)
+check("보완요청·반려는 등급 무관(게이트 식에 grade_selected 없음)",
+      not any("grade_selected" in expr for expr in _gate_exprs))
+check("보완요청·반려 게이트는 상태 집합·의견 필수로만 판정",
+      "_REVISION_STATUSES" in _gate_exprs[0] and "not opinion" in _gate_exprs[0]
+      and "not opinion" in _gate_exprs[1])
+check("평가확정은 평가 착수 없이 SUBMITTED 에서 가능(상태 게이트 없음)",
+      'status != "SUBMITTED"' not in eval_src)
 check("케이스 전환 시 이전 등급 선택 초기화(_EVAL_ACTIVE_KEY)",
       "_EVAL_ACTIVE_KEY" in eval_src and "grade_key, None" in eval_src)
 check("등급 목록 db 파생(하드코딩 금지)", "list(db.NEAR_MISS_GRADES)" in eval_src)
@@ -538,12 +600,74 @@ check("경과일: 값 없음/파싱 실패는 0 으로 위장하지 않고 None�
       and _wl.elapsed_label(None, today=_today) == "-")
 check("경과일: 미래 타임스탬프는 음수 대신 0 클램프",
       _wl.elapsed_days("2026-08-20T00:00:00+00:00", today=_today) == 0)
-# §7.2-4-c 반송 누적 — 보완요청(IN_REVIEW→SUBMITTED)은 created_at 을 바꾸지 않으므로
-# 경과일이 최초 접수부터 누적된다. 리셋 경로를 만들면 반송을 반복해 지연을 0 으로 되돌릴
-# 수 있다. 파사드 원문에 created_at 재설정이 없음을 함께 고정한다.
-_revision_src = inspect.getsource(db.request_near_miss_revision)
-check("반송(보완요청)이 created_at 을 재설정하지 않는다(최초 접수부터 누적)",
-      "created_at" not in _revision_src)
+# §7.2-4-c 반송 누적 — 보완요청은 created_at 을 바꾸지 않으므로 경과일이 최초 접수부터
+# 누적된다. 리셋 경로를 만들면 반송을 반복해 지연을 0 으로 되돌릴 수 있다. 파사드·리포지토리
+# 원문에 created_at **재설정이 없음**을 함께 고정한다.
+import ast  # noqa: E402
+import textwrap  # noqa: E402
+
+
+def _written_keys(func) -> set[str]:
+    """함수 본문이 **실제로 쓰는(write) 컬럼 키** 집합.
+
+    2026-08-19 정정: 종전 검사는 소스 문자열에 낱말이 있는지만 봤다
+    (``"created_at" not in inspect.getsource(...)``). 그래서 **그 계약을 설명하는
+    독스트링·주석이 검사를 깨뜨렸다** — 문서를 지워야 통과하는 검사는 문서를 지우라는
+    압력이 되므로 거친 검사 쪽을 고친다. 지켜야 할 계약은 "보완요청이 ``created_at`` 을
+    재설정하지 않는다"이지 "낱말이 안 나온다"가 아니다.
+
+    그래서 ``ast`` 로 파싱해 **값을 쓰는 자리의 키**만 모은다:
+      - 호출 키워드 인자 이름 — ``_sample_update_near_miss(..., created_at=...)``
+      - dict 리터럴의 문자열 키 — ``updates = {"created_at": ...}`` / ``.update({...})``
+      - 첨자 대입의 문자열 키 — ``updates["created_at"] = ...``
+    독스트링·주석·설명 문자열은 어느 경우에도 걸리지 않고, 실제 재설정은 셋 중 하나로
+    반드시 드러난다(파사드는 dict/키워드로만 컬럼을 넘긴다).
+    """
+    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            keys.update(kw.arg for kw in node.keywords if kw.arg)
+        elif isinstance(node, ast.Dict):
+            keys.update(k.value for k in node.keys
+                        if isinstance(k, ast.Constant) and isinstance(k.value, str))
+        elif isinstance(node, (ast.Assign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                if (isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                        and isinstance(t.slice.value, str)):
+                    keys.add(t.slice.value)
+    return keys
+
+
+# 헬퍼 자기검사 — 이 검사가 없으면 "아무것도 못 잡는 헬퍼"도 통과한다(거친 검사로
+# 되돌아가지 않게, 그리고 반대로 무력한 검사가 되지도 않게 양쪽을 고정한다).
+def _probe_doc_only(rec):
+    """created_at 은 건드리지 않는다(설명 문자열 — 쓰기가 아니다)."""
+    rec["created_at"]  # 읽기도 쓰기가 아니다
+    return dict(status="SUBMITTED")
+
+
+def _probe_writes(rec):
+    """설명에는 없지만 실제로 재설정하는 경우."""
+    return {"created_at": rec}
+
+
+check("_written_keys: 독스트링·주석·읽기는 쓰기로 세지 않는다",
+      "created_at" not in _written_keys(_probe_doc_only)
+      and "status" in _written_keys(_probe_doc_only))
+check("_written_keys: 실제 재설정(dict 키)은 잡아낸다",
+      "created_at" in _written_keys(_probe_writes))
+check("_written_keys: 키워드 인자도 쓰기로 잡는다",
+      "revision_request_reason" in _written_keys(db.request_near_miss_revision))
+check("반송(보완요청)이 created_at 을 재설정하지 않는다(파사드, 최초 접수부터 누적)",
+      "created_at" not in _written_keys(db.request_near_miss_revision))
+# 실제 UPDATE payload 를 만드는 곳은 리포지토리다 — 같은 계약을 같은 방식으로 고정한다.
+check("반송(보완요청)이 created_at 을 재설정하지 않는다(리포지토리 UPDATE payload)",
+      "created_at" not in _written_keys(db.supabase_repository.request_near_miss_revision))
+check("_written_keys: dict 리터럴 키는 쓰기로 잡는다(리포지토리 updates)",
+      "revision_request_reason" in _written_keys(
+          db.supabase_repository.request_near_miss_revision))
 _created = "2026-08-01T00:00:00+00:00"
 check("반송 전후로 경과일이 동일(누적)",
       _wl.elapsed_days(_created, today=_today) == 17

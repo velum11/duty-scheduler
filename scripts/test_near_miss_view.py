@@ -154,22 +154,27 @@ def test_to_display() -> None:
         out = nmv._to_display(raw)
 
         # 2026-08-18 사용자 확정 순서: 문서번호 · 발생일 · 원인 · 작업명 · 소속 · 신고자 ·
-        # 등급 · **상태(제일 우측)**. 헤더 낱말은 '보고번호' 유지(어휘 단일화는 §3.6 별건).
+        # 등급 · 상태. 헤더 낱말은 '보고번호' 유지(어휘 단일화는 §3.6 별건).
+        # 2026-08-19 사용자 지시로 **개선조치 열을 상태 오른쪽**에 덧붙였다 — 상태(보고서
+        # 진행)와 개선조치(후속 조치 진행)는 다른 축이라 합치지 않는다. 종전 계약
+        # ("상태가 제일 우측")은 이 지시로 갱신된다.
         check(
-            "출력 열 집합·순서 고정(확정 지시 순서 — 상태가 제일 우측)",
+            "출력 열 집합·순서 고정(확정 지시 순서 + 개선조치가 상태 오른쪽)",
             list(out.columns) == [
                 "보고번호", "발생일", "원인", "작업명", "사고내용", "소속", "신고자",
-                "등급", "상태",
+                "등급", "상태", "개선조치",
             ],
         )
-        check("상태는 마지막 열", list(out.columns)[-1] == "상태")
+        check("개선조치는 상태 바로 오른쪽(마지막 열)",
+              list(out.columns)[-1] == "개선조치"
+              and list(out.columns).index("개선조치") == list(out.columns).index("상태") + 1)
         check("원인은 발생일 바로 뒤(마지막 열 아님)",
               list(out.columns).index("원인") == list(out.columns).index("발생일") + 1)
         check("표시에 '제안등급' 열 없음(§7.2-1b — 되돌림 방지)",
               "제안등급" not in out.columns)
         check("등급 열은 confirmed_grade 만 싣는다(제안 값이 새지 않음)",
               out.iloc[0]["등급"] == "A")
-        check("표시 열 목록도 9열(_DISPLAY_COLUMNS)", nmv._DISPLAY_COLUMNS == list(out.columns))
+        check("표시 열 목록도 10열(_DISPLAY_COLUMNS)", nmv._DISPLAY_COLUMNS == list(out.columns))
         # 2026-08-19: 사고내용 추가 — 행을 특정하는 서술 값이 없어 목록이 읽히지 않았다.
         check("사고내용 열 존재(작업명 바로 뒤)",
               list(out.columns).index("사고내용") == list(out.columns).index("작업명") + 1)
@@ -199,10 +204,11 @@ def test_to_display() -> None:
                   "소속": 116,      # 96.2('PET생산부(원료실)') + 16
                   "신고자": 64,     # 성명 4자 여유
                   "등급": 40,       # 값 1자라 헤더('등급' 22.1) + 16 이 폭을 정한다
-                  "상태": 64,       # 44.2('평가완료' 4자) + 16
+                  "상태": 64,       # 44.2('평가완료'·'보완요청' 4자) + 16
+                  "개선조치": 64,   # 44.2('확인대기' 4자 = 헤더 '개선조치' 4자) + 16
               })
-        check("폭 비율 합 1060(fitGridWidth 가 이 비율로 남는 폭을 나눈다)",
-              sum(cfg["width"] for cfg in nmv._COL_CONFIG.values()) == 1060)
+        check("폭 비율 합 1124(fitGridWidth 가 이 비율로 남는 폭을 나눈다)",
+              sum(cfg["width"] for cfg in nmv._COL_CONFIG.values()) == 1124)
         check("등급만 maxWidth 로 묶음(값 1자라 비례 확대 무의미)",
               nmv._COL_CONFIG["등급"].get("maxWidth") == 64
               and not any("maxWidth" in c for k, c in nmv._COL_CONFIG.items() if k != "등급"))

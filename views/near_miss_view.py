@@ -30,6 +30,7 @@ import streamlit.components.v1 as components
 from modules import db, ui
 from views import near_miss_pdf, workspace
 from views.common import erp
+from views.common import near_miss as nm_common
 from views.common.photo_paths import normalize_photo_paths
 from views.common.photos import render_photo_thumbs
 from views.master import TOKENS, banner, sheet_head
@@ -68,6 +69,10 @@ _STATUS_EFFECT = {
     "REJECTED": "보고자 수정 잠김 — 반려 사유 확인",
     "CLOSED": "종결 — 변경 불가",
 }
+# 보완요청이 걸린 SUBMITTED 건의 결과 표기(§3.3). 상태 코드는 SUBMITTED 그대로지만 그
+# 상태가 여는 일이 다르다 — 평가자는 새 건이 아니라 **보고자의 재제출을 기다리는 중**이다.
+# 문구는 평가 관리(near_miss_evaluate)·내 아차사고와 같은 낱말을 쓴다.
+_REVISION_EFFECT = "보고자 재제출 대기 — 보완 후 재제출"
 # 상태 색(이중부호화 — 라벨 텍스트는 항상 함께 표시되므로 색은 보조 신호).
 # 값은 DESIGN §2 상태 배지 = ``views/master/style.py::LIFECYCLE_BADGE`` 와 **같은 색**으로
 # 맞춘다(2026-08-14): 종전 이 화면은 제출됨=파랑·평가중=황토로 두 상태가 서로 바뀌어 있어,
@@ -165,10 +170,15 @@ def _read_field(label: str, value: str) -> None:
 # (near_miss_submit 접수 배너)를 이미 병용하고 있어, 낱말 교체는 §3.6 어휘 단일화로 한
 # 번에 해야 한다(이 두 파일 밖으로 파급 — 등록 완료 배너·DESIGN §1.2 예시). 범위 밖이라
 # 순서만 지시대로 바꾸고 낱말은 보고 항목으로 남긴다.
+#
+# 2026-08-19 사용자 지시로 **개선조치 열을 상태 열 오른쪽**에 덧붙인다. 상태(보고서 진행)와
+# 개선조치(후속 조치 진행)는 다른 축이라 한 열에 합치지 않고 나란히 둔다 — 판정 결과인
+# 상태 다음에 그 결과로 시작된 조치가 오는 순서다.
 _DISPLAY_COLUMNS = [
     # 사고내용은 이 표에서 행을 특정하는 유일한 서술 값이다 — 작업명은 "원료 투입"처럼
     # 짧고 여러 건이 겹친다. 남는 폭을 메우려는 게 아니라 목록을 읽을 수 있게 만든다.
     "보고번호", "발생일", "원인", "작업명", "사고내용", "소속", "신고자", "등급", "상태",
+    "개선조치",
 ]
 
 # ── 컬럼 폭 — **실제 값의 최대 길이에서 역산한 고정폭**(flex 없음). ─────────────────────
@@ -215,7 +225,12 @@ _COL_CONFIG = {
     "소속": {"width": 116},
     "신고자": {"width": 64},
     "등급": {"width": 40, "maxWidth": 64},
+    # 상태 라벨 최장은 '평가완료'·'보완요청' 4자(44.2) — 보완요청 파생 라벨이 늘어도 폭은
+    # 그대로다(닫힌 집합의 4자 상한).
     "상태": {"width": 64},
+    # 개선조치 단계 라벨(미작성·작성중·확인대기·확인됨·반려, 부재는 '-')의 최장은
+    # '확인대기' 4자(44.2)이고 헤더 '개선조치'도 4자(44.2)라 44.2 + 16 = 60.2 → 64.
+    "개선조치": {"width": 64},
 }
 
 
@@ -284,8 +299,16 @@ def render(user: dict) -> None:
             ui.empty_state("등록된 아차사고 보고서가 없습니다.", head="아차사고 조회")
         return
 
+    # 개선조치 단계 열(2026-08-19) — 조회 결과 **전체를 한 번에** 조회해 매핑한다.
+    # 행마다 부르면 그게 곧 N+1 이다(파사드가 IN_FILTER_CHUNK 청크로 200건당 1왕복).
+    # 조회 실패는 빈 값으로 위장하지 않고 인라인 경고로 표면화한다 — '-' 는 "개선조치가
+    # 없다"는 뜻이라 조회 실패를 그렇게 표기하면 사실과 다른 화면이 된다(오류≠부재).
+    impr_map, impr_failed = _improvement_stages(df)
+    if impr_failed:
+        banner("warn", "개선조치 상태를 불러오지 못했습니다. '개선조치' 열은 실제 상태가 아닙니다.")
+
     try:
-        display = _to_display(df)
+        display = _to_display(df, impr_map)
     except db.DATA_SOURCE_ERRORS as exc:
         st.error(f"사용자·부서 정보를 불러오지 못해 목록을 표시할 수 없습니다. ({exc})")
         return
@@ -323,6 +346,20 @@ def render(user: dict) -> None:
     if st.session_state.get(_SEL_KEY):
         st.write("")
         _render_result_detail(df)
+
+
+def _improvement_stages(df: pd.DataFrame) -> tuple[dict, bool]:
+    """조회 결과 전체의 개선조치를 **1회 조회**해 report_id(str)→개선조치 dict 로 만든다.
+
+    반환 ``(매핑, 조회실패)``. 파사드(``db.get_near_miss_improvement_status_map``)는 보고서
+    200건당 1왕복(``IN_FILTER_CHUNK``)이며 보고서 수에 비례하는 단건 조회를 하지 않는다.
+    007 미적용은 빈 dict(정상 부재 → 전 행 '-'), 실제 조회 오류만 ``True`` 로 올린다."""
+    if df is None or df.empty or "id" not in df.columns:
+        return {}, False
+    try:
+        return db.get_near_miss_improvement_status_map(list(df["id"])), False
+    except Exception:  # noqa: BLE001 — 부가 열 조회 실패(목록 본문은 계속 렌더).
+        return {}, True
 
 
 def _view_metrics(df: pd.DataFrame) -> list[tuple]:
@@ -402,16 +439,23 @@ def _render_result_detail(df: pd.DataFrame) -> None:
     # ── 반려 사유(있을 때) — 종결 분기의 경고 배너. ──
     if status == "REJECTED" and _clean(report.get("rejection_reason")):
         banner("warn", f"반려 사유: {_clean(report.get('rejection_reason'))}")
+    # ── 보완요청(있을 때) — 재작성 요청이라 반려(warn·종결분기)와 **다른 시각**(info)이다.
+    #    사유·요청자·요청일은 이미 목록 payload 에 실려 있으므로 추가 조회를 하지 않는다. ──
+    revision_pending = nm_common.has_revision_request(report)
+    if revision_pending:
+        _render_revision_note(report, name_of)
 
     # ── 읽기 메타(§1-A: 라벨 모노 오버라인 + 값, 박스 없이 flex 나열 — 평가·개선조치 상세와
     #    통일). 형식 분리(§3.1): 상태=pill / 등급=grade_mark(셰브런+색텍스트) / 발생원인=평문. ──
+    status_text = nm_common.status_label(report, _STATUS_LABEL, default="-") or "-"
     status_badge = erp.status_badge_html(
-        _STATUS_LABEL.get(status, status or "-"),
-        _STATUS_COLOR.get(status, TOKENS["ink-3"]),
+        status_text,
+        # 보완요청은 진행·정보 색(IN_REVIEW 와 같은 §1.3 의미 색) — 새 색을 만들지 않는다.
+        TOKENS["info"] if revision_pending else _STATUS_COLOR.get(status, TOKENS["ink-3"]),
     )
     # §3.3: 배지 옆에 그 상태의 **결과**를 한 줄로 붙인다(상태 이름만으로는 무엇이 막히고
     # 열리는지 알 수 없다). 제안등급 열이 빠지면서 생긴 폭을 이 표기가 쓴다.
-    effect = _STATUS_EFFECT.get(status, "")
+    effect = _REVISION_EFFECT if revision_pending else _STATUS_EFFECT.get(status, "")
     if effect:
         status_badge += (
             f"<span style='margin-left:8px;font-size:12px;color:{_META_FAINT};'>"
@@ -452,9 +496,10 @@ def _render_result_detail(df: pd.DataFrame) -> None:
         report,
         reporter=name_of.get(emp, emp) or "-",
         dept=dept_of.get(dept, dept) or "-",
-        status_label=_STATUS_LABEL.get(status, status or "-"),
+        # 출력물도 화면과 같은 파생 라벨·결과를 쓴다 — 인쇄본만 '제출됨'으로 보이면 안 된다.
+        status_label=status_text,
         cause_label=_CAUSE_LABEL.get(cause, cause) or "-",
-        status_effect=_STATUS_EFFECT.get(status, ""),  # §3.3 — 출력물에도 상태의 결과를 남긴다
+        status_effect=effect,  # §3.3 — 출력물에도 상태의 결과를 남긴다
     )
     fname = f"{pdf_data['report_no']}.pdf"
     try:
@@ -477,6 +522,23 @@ def _render_result_detail(df: pd.DataFrame) -> None:
                 "<script>document.getElementById('nmvdl').click();</script>",
                 height=0,
             )
+
+
+def _render_revision_note(report: dict, name_of: dict) -> None:
+    """보완요청 안내(사유 · 요청자 · 요청일) — info 배너.
+
+    반려(``warn``, 종결 분기)와 시각·문구를 나눈다: 보완요청은 재작성 요청이지 폐기가
+    아니다. 값은 목록 payload 의 revision_request 3필드에서 그대로 읽는다(추가 조회 없음).
+    요청자는 사번을 이름으로 라벨링하되 매핑이 없으면 사번 원문을 그대로 쓴다."""
+    reason = _clean(report.get("revision_request_reason"))
+    if not reason:
+        return
+    requester = _clean(report.get("revision_requested_by_emp_no"))
+    who = name_of.get(requester, requester)
+    # 요청 시각은 날짜까지만 쓴다(ISO 타임스탬프 전체는 배너 한 줄에서 읽히지 않는다).
+    at = _clean(report.get("revision_requested_at"))[:10]
+    meta = " · ".join(p for p in (who, at) if p)
+    banner("info", f"보완요청: {reason}" + (f" — 요청 {meta}" if meta else ""))
 
 
 def _photo_overline(count: int) -> None:
@@ -675,7 +737,11 @@ def _clean(value) -> str:
     return str(value).strip()
 
 
-def _to_display(df: pd.DataFrame) -> pd.DataFrame:
+def _to_display(df: pd.DataFrame, impr_map: dict | None = None) -> pd.DataFrame:
+    """표시 10열 프레임. ``impr_map`` 은 report_id(str)→개선조치 dict(상태값)이며, 없으면
+    개선조치 열은 전 행 '-' 다(007 미적용·조회 실패도 같은 표기 — 실패는 호출부가 배너로
+    따로 말한다)."""
+    impr_map = impr_map or {}
     users = db.get_users()
     name_of = {
         str(r["emp_no"]): str(r["name"]) for _, r in users.iterrows()
@@ -700,6 +766,9 @@ def _to_display(df: pd.DataFrame) -> pd.DataFrame:
             "소속": dept_name_of.get(dept, dept) or "-",
             "신고자": name_of.get(emp, emp) or "-",
             "등급": _clean(r.get("confirmed_grade")) or "-",
-            "상태": _STATUS_LABEL.get(_clean(r.get("status")), _clean(r.get("status"))),
+            # 상태 라벨은 공용 파생을 쓴다 — 보완요청이 걸린 SUBMITTED 는 '보완요청'으로
+            # 보인다(코드값 SUBMITTED 는 그대로, 새 DB 상태값 없음).
+            "상태": nm_common.status_label(r, _STATUS_LABEL),
+            "개선조치": nm_common.improvement_cell(impr_map.get(str(r.get("id")))),
         })
     return pd.DataFrame(rows)

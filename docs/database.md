@@ -180,7 +180,7 @@ near_miss_reports
 
 | 현재 | 허용 전이 | 행위자 | 의미 |
 |---|---|---|---|
-| `SUBMITTED` | `IN_REVIEW`, `EVALUATED`, `REJECTED` | 평가자(ADMIN/MANAGER/안전담당자) | 검토 착수 / 즉시 확정 / 반려 |
+| `SUBMITTED` | `IN_REVIEW`, `EVALUATED`, `REJECTED` | 평가자(ADMIN/MANAGER/안전담당자) | 평가 착수 / 즉시 확정 / 반려 |
 | `IN_REVIEW` | `EVALUATED`, `REJECTED`, `SUBMITTED` | 평가자 | 확정 / 반려 / 보고자에게 반송 |
 | `EVALUATED` | `CLOSED`, `IN_REVIEW` | 평가자 | 종결 / 재개(평가 필드 초기화) |
 | `REJECTED` | `SUBMITTED` | 평가자·보고자 | 재제출을 위한 재개 |
@@ -190,5 +190,10 @@ near_miss_reports
 - **보존(is_active)은 archival 전용, 철회 아님**: `is_active`는 위 "보존" 항목(§2 `near_miss_reports`)대로 **archival 전용 관리 플래그**이며 상태(status)와 직교합니다. `is_active=false`는 목록에서 감추는 관리 조작(예: 오등록 정리)일 뿐 "철회"의 의미가 아닙니다(상태는 그대로 보존, 이력 미삭제). 006에는 별도의 `WITHDRAWN` 상태가 없으므로 **보고자 자기철회는 006 범위 밖**이며(보고자에게 철회 권한을 부여하지 않음), 필요하면 별도 설계·승인으로 다룹니다.
 - **행위자 신원(server-side)**: 보고자(`reporter_user_id`)·평가자(`evaluator_user_id`)·`evaluated_at`·보고 시점 부서(`department_id`)는 화면 위젯 값이 아니라 인증된 세션 사용자(`auth.get_current_user()`)에서 파사드가 서버측으로 확정합니다. 특히 부서는 세션 dict 의 값이 아니라 그 사번으로 조회한 **DB 권위 사용자 레코드**에서 다시 도출합니다(위조된 `current_user`로 타 부서 귀속 불가). 화면은 `modules/db.py::create_near_miss_report(..., current_user=...)`·`evaluate_near_miss(..., current_user=...)`에 세션 사용자를 넘겨야 하며, payload 의 신원·`created_by`/`updated_by` 필드는 무시됩니다(위조 방지·서버 확정).
 - **평가(confirm) 의미**: `evaluate_near_miss`는 **평가 이전 상태(`SUBMITTED`/`IN_REVIEW`)**에서만 `EVALUATED`로 전이하며 `confirmed_grade`·`evaluator_user_id`·`evaluated_at`을 함께 설정합니다. 이미 `EVALUATED`/`CLOSED`인 보고서를 재평가로 덮어쓸 수 없습니다(두 번째 평가자는 "상태가 이미 변경됨"을 받습니다 — 조건부 UPDATE 로 lost update 차단). 평가상태(`EVALUATED`/`CLOSED`)를 벗어나는 전이는 이 세 필드를 함께 초기화해 제약을 충족합니다.
+- **보완요청(revision) 의미**: 보완요청은 `modules/db.py::request_near_miss_revision` 전용 경로이며 사유(`revision_request_reason` 3필드, 007)를 필수로 함께 기록합니다. 허용 소스 상태는 `modules/db.py::_NEAR_MISS_REVISION_STATES` = `{SUBMITTED, IN_REVIEW}`입니다(2026-08-19 사용자 결정 — 평가자 화면의 '평가 착수' 단계 폐지에 맞춰 종전 `IN_REVIEW` 전용에서 확대).
+  - `IN_REVIEW`에서는 `SUBMITTED`로 되돌리는 **전이**입니다(위 표의 `IN_REVIEW → SUBMITTED`).
+  - `SUBMITTED`에서는 결과 상태가 같아 **전이가 아니라 보완요청 3필드 기록**입니다. 따라서 `NEAR_MISS_TRANSITIONS`에 `SUBMITTED → SUBMITTED` 자기 전이를 추가하지 않으며(허용표는 어떤 상태도 자기 자신을 포함하지 않습니다), 이 경로는 `update_near_miss_status`의 허용표 검사를 거치지 않습니다. 조건부 UPDATE는 `expected_status = SUBMITTED`로 걸려 TOCTOU 보호는 그대로입니다.
+  - `EVALUATED`/`CLOSED`/`REJECTED`는 차단합니다 — 평가가 끝난 건을 사유만 붙여 되돌리는 경로를 만들지 않습니다(재개는 `EVALUATED → IN_REVIEW`이며 확인된 개선조치 초기화를 동반합니다).
+  - 보완요청은 `created_at`을 재설정하지 않아 경과일이 최초 접수부터 누적됩니다(반송 반복으로 지연을 0으로 되돌리는 경로 없음).
 - **반려(reject) 의미**: `REJECTED`는 사유(`rejection_reason`)를 필수로 요구합니다(DB 제약). 반려는 삭제가 아니라 상태이며 이력을 보존합니다.
 - **종결(close) 의미**: `CLOSED`는 평가가 끝난 보고서의 최종 상태로, 이후 전이가 없습니다(재개가 필요하면 별도 승인 절차로 다룹니다).

@@ -13,9 +13,9 @@
   - **지표 타일 제거**(§4-1·§2) — ``erp.metric_strip`` 3장(평가 대기·검토중·대기 합계)을
     없애고 그 건수를 **상태 탭 라벨**로 옮겼다. 탭은 목록을 실제로 바꾼다(합계 타일은
     앞 두 타일의 합이라 새 정보가 없었다).
-  - **어휘 통일**(§3.6) — ``검토중 → 평가중`` · ``검토착수 → 평가착수`` ·
-    ``확정 등급 → 평가 등급``. **영문 코드값(``IN_REVIEW``·``confirmed_grade``)은 불변**이며
-    한글 라벨만 통일한다.
+  - **어휘 통일**(§3.6) — ``검토중 → 평가중`` · ``확정 등급 → 평가 등급``. **영문 코드값
+    (``IN_REVIEW``·``confirmed_grade``)은 불변**이며 한글 라벨만 통일한다.
+    (같이 통일했던 ``검토착수 → 평가착수`` 는 아래 2026-08-19 결정으로 액션 자체가 없어졌다.)
   - **상태의 결과 표기**(§3.3) — 배지 옆에 그 상태가 무엇을 막고 여는지 한 줄
     (``평가중`` 옆 ``보고자 수정 잠김`` — ``docs/database.md`` 보고자 수정 컷오프).
   - **보완요청 활성 게이트 정정**(§7.4 P1) — 종전 활성 판정은 006 프로브였는데 실행부
@@ -25,10 +25,27 @@
   - **목록 정렬** — 경과일(접수일 ``created_at`` 기준, §7.2-4) 내림차순. 오래 묵은 건이
     위로 온다. 경과일에는 색을 칠하지 않는다(§7.2-4-b, SLA 미정).
 
+2026-08-19 사용자 결정 — **'평가 착수' 폐지**
+  평가자는 평가 대기(SUBMITTED)에서 **곧장 보완요청·반려·평가확정**을 한다. 착수는 그 자체로
+  아무 판정도 아니면서 모든 판정 앞에 클릭 한 번을 더 놓던 단계였다.
+  - 액션은 4개 → **3개**(보완요청 · 반려 · 평가확정). ``update_near_miss_status(...,
+    "IN_REVIEW")`` 배선을 이 화면에서 제거했다.
+  - 상태 전이표(``db.NEAR_MISS_TRANSITIONS``)는 손대지 않는다 — SUBMITTED→EVALUATED·
+    SUBMITTED→REJECTED 가 이미 허용돼 있었다(migration 불요).
+  - **보완요청만 저장 계약이 넓어졌다**: ``db.request_near_miss_revision`` 이 종전 IN_REVIEW
+    전용이었는데 ``_NEAR_MISS_REVISION_STATES``(SUBMITTED·IN_REVIEW)로 확대됐다. 화면이
+    보완요청 직전에 몰래 IN_REVIEW 로 올리는 2회 쓰기(중간 실패 시 상태 어긋남)를 만들지
+    않는다 — 사용자가 없애라고 한 단계를 뒤로 숨기는 것이기도 하다.
+  - ``IN_REVIEW``(평가중) **상태값과 탭은 그대로 둔다**(통계·PDF·개선조치가 쓴다). 다만 이
+    화면에는 이제 IN_REVIEW 를 만드는 경로가 없으므로 '평가중' 탭에는 재개
+    (EVALUATED→IN_REVIEW, 파사드 경로) 또는 과거 데이터로 남은 건만 보인다. 탭 구성 변경은
+    사용자 결정 사항이라 이번에 건드리지 않았다.
+
 기능 계약(불변 — 표현 계층만 교체):
   - 권한 게이트 ``auth.can_evaluate_near_miss(user)``.
-  - 상태 전이 4종: 평가착수(SUBMITTED→IN_REVIEW) · 평가확정(evaluate_near_miss) ·
-    보완요청(IN_REVIEW→SUBMITTED, request_near_miss_revision) · 반려(→REJECTED).
+  - 상태 전이 3종: 평가확정(evaluate_near_miss, SUBMITTED/IN_REVIEW→EVALUATED) ·
+    보완요청(request_near_miss_revision — SUBMITTED 는 상태 유지, IN_REVIEW 는 반송) ·
+    반려(→REJECTED).
     반려·보완요청은 '의견' 필수(단일 의견 입력 — 반려는 rejection_reason, 보완요청은
     사유로 재사용). 신원은 서버측(current_user=auth.get_current_user())으로 확정.
   - 등급 세그먼트 값은 ``db.NEAR_MISS_GRADES`` 도메인 소스에서 파생(하드코딩 없음).
@@ -43,7 +60,7 @@
 # DESIGN.md §2 WORKLIST — 상태 탭 + 2열(목록 33% / 상세 67%).
 SCREEN_ARCHETYPE = "WORKLIST"
 # §0 — 이 화면이 내리는 결정(기계 검증은 아직 없다, §5).
-SCREEN_DECISION = "이 건을 평가중으로 올릴 것인가, 등급을 확정할 것인가, 반려·보완요청할 것인가"
+SCREEN_DECISION = "이 건의 등급을 확정할 것인가, 반려할 것인가, 보완을 요청할 것인가"
 SCREEN_EVIDENCE = ("사고 내용", "작업·현장 설명", "원인·대책", "첨부 사진", "접수 경과일")
 
 from html import escape
@@ -53,6 +70,7 @@ import streamlit as st
 
 from modules import auth, db
 from views.common import erp, scaffold, worklist
+from views.common import near_miss as nm_common
 from views.common.photo_paths import normalize_photo_paths
 from views.common.photos import render_photo_thumbs
 from views.master import (
@@ -72,6 +90,11 @@ _PAGE_ID = _STATE.page_id
 # (SoT 는 db.py, 여기서는 화면 필터링용 상수 복제).
 _PENDING_STATUSES = ("SUBMITTED", "IN_REVIEW")
 
+# 보완요청을 걸 수 있는 상태 — 실행부 ``db._NEAR_MISS_REVISION_STATES`` 와 같은 집합이다
+# (2026-08-19 평가 착수 폐지로 SUBMITTED 포함). 활성 판정과 실행부가 어긋나면 눌리는데
+# 실패하는 버튼이 생긴다(§7.4 P1 이 고친 결함) — 두 곳의 값을 같게 유지한다.
+_REVISION_STATUSES = ("SUBMITTED", "IN_REVIEW")
+
 # §3.6 어휘: 진행 상태는 '평가중'(구 '검토중'). 영문 코드값은 불변이며 한글 라벨만 통일한다.
 # (라벨 사전이 3화면에 복제돼 있는 것은 §3.6 이 지적한 미결이며 단일 출처화는 별건이다.)
 _STATUS_LABEL = {
@@ -87,9 +110,19 @@ _STATUS_EFFECT = {
     "SUBMITTED": "보고자 수정 가능 · 평가자 미지정",
     "IN_REVIEW": "보고자 수정 잠김",
     "EVALUATED": "개선조치 등록 단계",
-    "REJECTED": "보고자 재제출 대기",
+    # 2026-08-19 문구 정정: 종전 '보고자 재제출 대기'는 사실이 아니었다. 반려(REJECTED)는
+    # 종결 분기이고 보고자 화면(내 아차사고)에는 반려 건을 되살리는 진입점이 없다 —
+    # 수정도 잠긴다. 실제로 보고자의 재제출을 기다리는 것은 **보완요청**(아래
+    # _REVISION_EFFECT)이며, 그 문구는 그쪽으로 옮겼다.
+    "REJECTED": "종결 분기 — 보고자 수정 잠김",
     "CLOSED": "이후 전이 없음",
 }
+# 보완요청(반송)으로 되돌아온 SUBMITTED 건. 상태 코드는 갓 등록한 건과 같지만 평가자가
+# 기다리는 것이 다르다 — 새 건이 아니라 **보고자의 재제출**이다. 보고자 화면에 실제
+# 재제출 경로(db.resubmit_near_miss → 내 아차사고 [재제출])가 생겨 이 문구가 사실이 된다.
+# 재제출하면 보완요청 3필드가 비어 이 라벨이 자동으로 '제출됨'으로 되돌아간다.
+_REVISION_LABEL = nm_common.REVISION_LABEL
+_REVISION_EFFECT = "보고자 재제출 대기 — 보완 후 재제출"
 # 목록 행 좌측 2px 보더 색(§2: 상태는 줄 수가 아니라 보더 색으로 표현한다). 상태 배지와
 # **같은 의미 색**을 쓴다(§1.3 의미 색은 상태마다 새로 만들지 않는다).
 _STATUS_ACCENT = {code: pal["text"] for code, pal in LIFECYCLE_BADGE.items()}
@@ -180,12 +213,13 @@ _EVAL_CSS = f"""
   padding:6px 12px !important; font-family:{_MONO} !important; font-size:14px !important;
   font-weight:600 !important;
 }}
-/* 액션 버튼(평가착수/보완요청/반려/평가확정) — 히트영역 34px */
+/* 액션 버튼(보완요청/반려/평가확정) — 히트영역 34px */
 [class*="st-key-nm_act_"] button {{
   min-height:34px !important; border-radius:8px !important; font-size:14px !important;
   font-weight:600 !important; white-space:nowrap !important;
 }}
-/* 반려는 부정 의미 색(§3.2) — 같은 크기·같은 색 버튼 4개 나열을 색으로 가른다. */
+/* 반려는 부정 의미 색(§3.2) — 보완요청·반려·평가확정 셋이 색으로 갈린다
+   (보조 / 부정 / 주 액션). */
 [class*="st-key-nm_act_reject_"] button {{
   background:{_DANGER_BG} !important; border-color:{_DANGER_LINE} !important;
   color:{_DANGER} !important;
@@ -225,7 +259,7 @@ def render(user: dict) -> None:
 
 
 def _readiness() -> ReadinessState:
-    """006 아차사고 스키마 — 평가착수·평가확정·반려 쓰기 게이트."""
+    """006 아차사고 스키마 — 평가확정·반려 쓰기 게이트(보완요청은 007, 아래 별도)."""
     state = db.near_miss_schema_probe()
     if state == db.READINESS_READY:
         return ReadinessState.ready()
@@ -440,8 +474,12 @@ def _detail_head_html(report: dict, status: str) -> str:
     """상세 머리 — 식별자(16/600 모노) + 상태 배지 + **상태 결과**(§3.3) + 대상 제목(20/600)
     + 메타(발생일·접수·소속·신고자)."""
     report_no = escape(str(report.get("report_no") or "-"))
-    badge = lifecycle_badge_html(status, _STATUS_LABEL.get(status, status))
-    effect = escape(_STATUS_EFFECT.get(status, ""))
+    # 보완요청으로 반송된 건은 상태 코드가 SUBMITTED 라 갓 등록한 건과 구분되지 않는다.
+    # 라벨·결과 표기만 파생한다 — 코드값·색(LIFECYCLE_BADGE[SUBMITTED])·레이아웃은 불변.
+    revision = nm_common.has_revision_request(report)
+    badge = lifecycle_badge_html(
+        status, _REVISION_LABEL if revision else _STATUS_LABEL.get(status, status))
+    effect = escape(_REVISION_EFFECT if revision else _STATUS_EFFECT.get(status, ""))
     title = escape(str(report.get("work_name") or "(제목 없음)"))
 
     # 세 번째 항목(mono)은 **영숫자 전용 문자열에만** 켠다 — IBM Plex Mono 에는 한글
@@ -579,12 +617,9 @@ def _render_detail(user: dict, readiness: ReadinessState,
     opinion = str(st.session_state.get(op_key, "") or "").strip()
 
     # 활성 게이트(불변 계약 보존)
-    review_disabled = (not can_write) or status != "SUBMITTED"
-    review_help = (
-        readiness.message if not can_write
-        else ("이미 평가에 착수한 건입니다." if status != "SUBMITTED" else None)
-    )
-    # 평가확정: 평가 등급 미선택이면 비활성(+안내). 평가착수·보완요청·반려는 등급 무관.
+    # 평가확정: 평가 등급 미선택이면 비활성(+안내). 보완요청·반려는 등급 무관.
+    # 평가 착수 없이 평가 대기(SUBMITTED)에서 바로 확정한다 — 파사드
+    # db.evaluate_near_miss 가 SUBMITTED/IN_REVIEW 둘 다 사전 상태로 받는다.
     eval_disabled = (not can_write) or (not grade_selected)
     if not can_write:
         eval_help = readiness.message
@@ -592,14 +627,18 @@ def _render_detail(user: dict, readiness: ReadinessState,
         eval_help = "등급을 선택하세요."
     else:
         eval_help = None
-    # 보완요청(IN_REVIEW→SUBMITTED): 평가중 건만, 의견 필수. 반려와 별개 의미.
+    # 보완요청: 평가 대기(SUBMITTED)·평가중(IN_REVIEW) 둘 다 가능, 의견 필수. 반려와 별개
+    # 의미다. 상태 조건은 실행부 db._NEAR_MISS_REVISION_STATES 와 같은 집합을 쓴다 —
+    # 이 화면의 큐가 마침 같은 두 상태라 실제로는 항상 참이지만, 두 곳이 어긋나면 눌리는데
+    # 실패하는 버튼이 다시 생기므로(§7.4 P1 재발 방지) 판정을 생략하지 않는다.
     # §7.4 P1 — 쓰기 가능 판정은 **실행부와 같은 007 프로브**(revision_readiness)로 한다.
     can_revise = revision_readiness.write_enabled
-    revision_disabled = (not can_revise) or status != "IN_REVIEW" or not opinion
+    revision_disabled = (
+        (not can_revise) or status not in _REVISION_STATUSES or not opinion)
     if not can_revise:
         revision_help = revision_readiness.message
-    elif status != "IN_REVIEW":
-        revision_help = "평가중(IN_REVIEW) 건만 보완요청할 수 있습니다."
+    elif status not in _REVISION_STATUSES:
+        revision_help = "평가 대기·평가중 건만 보완요청할 수 있습니다."
     elif not opinion:
         revision_help = "평가 의견을 입력하세요(보완요청 시 필수)."
     else:
@@ -629,8 +668,6 @@ def _render_detail(user: dict, readiness: ReadinessState,
         placeholder="평가 의견을 한 줄로",
     )
     with st.container(horizontal=True, gap="small", vertical_alignment="bottom"):
-        review = st.button("평가착수", key=f"nm_act_review_{selected_id}",
-                           disabled=review_disabled, help=review_help, type="secondary")
         revision = st.button("보완요청", key=f"nm_act_revision_{selected_id}",
                              disabled=revision_disabled, help=revision_help, type="secondary")
         reject = st.button("반려", key=f"nm_act_reject_{selected_id}",
@@ -638,26 +675,23 @@ def _render_detail(user: dict, readiness: ReadinessState,
         evaluate = st.button("평가확정", key=f"nm_act_eval_{selected_id}",
                              disabled=eval_disabled, help=eval_help, type="primary")
     _gate_notes([
-        ("평가착수", review_help if review_disabled else None),
         ("보완요청", revision_help if revision_disabled else None),
         ("반려", reject_help if reject_disabled else None),
         ("평가확정", eval_help if eval_disabled else None),
     ])
 
     grade = st.session_state.get(grade_key, cur_grade)
-    if review:
-        _run_action(user, "평가착수", lambda: db.update_near_miss_status(
-            selected_id, "IN_REVIEW", current_user=auth.get_current_user(),
-        ))
     if evaluate:
         _run_action(user, "평가확정", lambda: db.evaluate_near_miss(
             selected_id, grade, current_user=auth.get_current_user(),
         ))
     if revision:
-        # 보완요청: IN_REVIEW→SUBMITTED 반송 + 의견을 사유로 서버기록(반려와 별개 의미).
+        # 보완요청: 의견을 보완 사유로 서버기록(반려와 별개 의미). SUBMITTED 건은 상태가
+        # 그대로라 **큐에서 빠지지 않는다** — 선택을 유지해 평가자가 상태 라벨이
+        # '보완요청'으로 바뀐 것을 같은 상세에서 확인하게 한다(keep_selection).
         _run_action(user, "보완요청", lambda: db.request_near_miss_revision(
             selected_id, opinion, current_user=auth.get_current_user(),
-        ))
+        ), keep_selection=True)
     if reject:
         _run_action(user, "반려", lambda: db.update_near_miss_status(
             selected_id, "REJECTED", rejection_reason=opinion,
@@ -670,9 +704,20 @@ def _flash_kind_for(exc: Exception) -> str:
     return "warning" if _STALE_MARK in str(exc) else "error"
 
 
-def _run_action(user: dict, label: str, call) -> None:
+def _run_action(user: dict, label: str, call, *, keep_selection: bool = False) -> None:
     """평가/반려 공통 실행 — 예외를 흡수해 raw traceback 을 노출하지 않는다
-    (2단계 배너: 제목 + 파사드 원문 사유, stale 메시지는 가공 없이 그대로)."""
+    (2단계 배너: 제목 + 파사드 원문 사유, stale 메시지는 가공 없이 그대로).
+
+    ``keep_selection`` 은 처리 후에도 그 건이 **평가 대기 큐에 남는** 액션(보완요청)용이다.
+    평가확정·반려는 EVALUATED/REJECTED 로 빠져 상세를 닫아야 하지만, SUBMITTED 건의
+    보완요청은 상태가 그대로라 선택을 버리면 성공 직후 엉뚱한 건으로 튄다.
+
+    의견 입력칸은 **비우지 않는다.** ``st.session_state.pop(op_key)`` + ``st.rerun()`` 으로
+    비워도 rerun 요청에 프런트엔드가 위젯 값을 다시 실어 보내 입력칸에는 글자가 남고,
+    파사드 호출 전에 읽는 ``opinion`` 만 빈 값이 된다 — 입력칸에는 글자가 보이는데 게이트는
+    "평가 의견을 입력하세요"라고 말하는 모순 상태가 실렌더에서 재현됐다(2026-08-19 실측).
+    그래서 입력값은 그대로 두고(보낸 사유가 화면에 남는다) 모순을 만들지 않는다.
+    """
     try:
         call()
     except ValueError as exc:
@@ -685,5 +730,6 @@ def _run_action(user: dict, label: str, call) -> None:
         _STATE.set_flash("error", f"{label} 처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.")
         st.rerun()
     _STATE.set_flash("success", f"{label} 완료.")
-    st.session_state.pop(_SEL_KEY, None)  # 처리된 건은 큐에서 빠지므로 상세를 닫는다.
+    if not keep_selection:
+        st.session_state.pop(_SEL_KEY, None)  # 큐에서 빠지는 건은 상세를 닫는다.
     st.rerun()

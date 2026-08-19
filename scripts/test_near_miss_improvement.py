@@ -729,9 +729,12 @@ def _in_review_report(reporter: dict, evaluator: dict):
 
 
 def test_request_revision_sample() -> None:
-    print("request_near_miss_revision(sample): 사유필수·서버귀속·인가·IN_REVIEW→SUBMITTED (Phase1 #2)")
+    print("request_near_miss_revision(sample): 사유필수·서버귀속·인가·허용상태 "
+          "SUBMITTED/IN_REVIEW (Phase1 #2 + 2026-08-19 평가 착수 폐지)")
     _reset()
-    st.session_state.pop(db._NEAR_MISS_REVISION_STORE, None)
+    # 2026-08-19: sample 전용 보완요청 세션 저장소(_NEAR_MISS_REVISION_STORE)가 폐기됐다.
+    # 보완요청 3필드는 이제 두 모드 모두 **보고서 레코드**(revision_request_*, NEAR_MISS_COLUMNS)
+    # 에 기록되므로 _reset() 이 보고서 스토어를 비우는 것으로 초기화가 끝난다.
     reporter = _actor_of_role("USER")
     manager = _actor_of_role("MANAGER")
     rid = _in_review_report(reporter, manager)
@@ -757,9 +760,37 @@ def test_request_revision_sample() -> None:
     check("요청자 서버귀속(인증 actor 사번)", rev["revision_requested_by_emp_no"] == manager["emp_no"])
     check("요청시각 서버기록", bool(str(rev.get("revision_requested_at") or "")))
 
-    # 이미 SUBMITTED(IN_REVIEW 아님) → 차단.
-    exc2 = raises(lambda: db.request_near_miss_revision(rid, "사유", current_user=manager), ValueError)
-    check("IN_REVIEW 아니면 차단", exc2 is not None and "IN_REVIEW" in str(exc2))
+    # 2026-08-19 계약 확대 — 평가 착수(SUBMITTED→IN_REVIEW) 단계 폐지로 **SUBMITTED 에서도
+    # 보완요청을 받는다**(db._NEAR_MISS_REVISION_STATES). 종전 이 자리에는 "IN_REVIEW 아니면
+    # 차단"이 있었으나 그 계약이 사용자 결정으로 대체됐다. 그래서 같은 건에 다시 보완요청
+    # 하면 차단이 아니라 **사유 갱신**이다(반송 사유를 고쳐 다시 보내는 정상 흐름).
+    out2 = db.request_near_miss_revision(rid, "사진도 첨부하세요", current_user=manager)
+    check("SUBMITTED 재요청 허용(사유 갱신)", out2 and out2.get("status") == "SUBMITTED")
+    check("사유가 최신 값으로 갱신",
+          db.get_near_miss_revision_request(rid)["revision_request_reason"] == "사진도 첨부하세요")
+
+    # 착수 없는 신규 SUBMITTED 건도 곧장 보완요청 가능(화면이 몰래 착수를 대신 누르지 않는다).
+    rid_fresh = db.create_near_miss_report(_base_payload(), current_user=reporter)["id"]
+    out3 = db.request_near_miss_revision(rid_fresh, "덮개 사진 필요", current_user=manager)
+    check("평가 착수 없이 SUBMITTED 보완요청 허용", out3 and out3.get("status") == "SUBMITTED")
+    check("상태는 SUBMITTED 그대로(전이가 아니라 3필드 기록)",
+          db.get_near_miss_report(rid_fresh)["status"] == "SUBMITTED")
+    check("사유·요청자·시각 서버기록",
+          db.get_near_miss_revision_request(rid_fresh)["revision_requested_by_emp_no"]
+          == manager["emp_no"])
+
+    # 평가/반려가 끝난 건은 여전히 차단한다(사유만 붙여 되돌리는 경로를 만들지 않는다).
+    rid_eval = db.create_near_miss_report(_base_payload(), current_user=reporter)["id"]
+    db.evaluate_near_miss(rid_eval, "B", current_user=manager)
+    exc_ev = raises(lambda: db.request_near_miss_revision(
+        rid_eval, "사유", current_user=manager), ValueError)
+    check("EVALUATED 보완요청 차단", exc_ev is not None and "EVALUATED" in str(exc_ev))
+    rid_rej = db.create_near_miss_report(_base_payload(), current_user=reporter)["id"]
+    db.update_near_miss_status(rid_rej, "REJECTED", rejection_reason="중복",
+                               current_user=manager)
+    exc_rj = raises(lambda: db.request_near_miss_revision(
+        rid_rej, "사유", current_user=manager), ValueError)
+    check("REJECTED 보완요청 차단", exc_rj is not None and "REJECTED" in str(exc_rj))
 
     # 일반 파사드로는 IN_REVIEW→SUBMITTED 반송이 차단된다(사유 없는 반송 금지).
     rid2 = _in_review_report(reporter, manager)
@@ -782,10 +813,12 @@ def test_request_revision_supabase_path() -> None:
     db.find_user_by_emp_no = lambda emp, **kw: auth_record if str(emp).strip() == manager["emp_no"] else None
     db.get_near_miss_report = lambda rid: {"id": rid, "status": "IN_REVIEW", "reporter_emp_no": "1003"}
     db.supabase_repository.request_near_miss_revision = (
-        lambda report_id, reason, *, requester_emp_no, expected_status=None: (
+        lambda report_id, reason, *, requester_emp_no, expected_status=None,
+        expected_revision_at="<미전달>": (
             captured.update({"report_id": report_id, "reason": reason,
                              "requester_emp_no": requester_emp_no,
-                             "expected_status": expected_status})
+                             "expected_status": expected_status,
+                             "revision_at": expected_revision_at})
             or {"status": "SUBMITTED"}))
     try:
         # READY → repo 위임 + 서버귀속.
@@ -795,6 +828,10 @@ def test_request_revision_supabase_path() -> None:
         check("사유 전달", captured.get("reason") == "보완 사유")
         check("요청자 서버귀속(인증 actor)", captured.get("requester_emp_no") == manager["emp_no"])
         check("expected_status=IN_REVIEW 조건부", captured.get("expected_status") == "IN_REVIEW")
+        # 읽은 시점에 보완요청이 없었으면 "지금도 없어야 한다"(NULL 고정)를 조건으로 넘긴다
+        # — 두 평가자가 같은 건에 동시에 보완요청을 걸면 하나만 성공한다.
+        check("보완요청 없던 상태를 UPDATE 조건으로 고정(None)",
+              captured.get("revision_at") is None)
 
         # NOT_READY → fail-closed(차단, repo 미호출).
         captured.clear()
