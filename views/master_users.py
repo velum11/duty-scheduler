@@ -143,7 +143,7 @@ _MU_CSS = """
 <style>
 .mu-crow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .mu-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
-.mu-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
+.mu-crow .pill { font-size:12px; font-weight:600; font-variant-numeric:tabular-nums;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
 /* 좌측 분포(재직/퇴직)와 우측 상태 텍스트는 같은 성격의 보조 정보라 같은 크기를 쓴다 —
    종전 11.5 vs 12.5 혼재를 12px 로 통일(2026-08-19 DESIGN §1.2 네 단계 밖 값 폐지). */
@@ -153,7 +153,7 @@ _MU_CSS = """
 .mu-crow .wip, .mu-crow .calm, .mu-crow .sel, .mu-crow .hint {
   font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums; }
 .mu-crow .wip { font-weight:600; color:#b4451a; }
-.mu-crow .wip .sub { font-weight:500; color:#6b665d; margin-left:4px; }
+.mu-crow .wip .sub { font-weight:400; color:#6b665d; margin-left:4px; }
 .mu-crow .calm { color:#6b665d; }
 .mu-crow .sel { font-weight:600; color:#4a453d; }
 .mu-crow .hint { color:#6b665d; }

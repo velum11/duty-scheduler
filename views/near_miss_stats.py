@@ -384,7 +384,7 @@ def _inject_style() -> None:
 /* 지표 그룹 오버라인(누적/당월 구분) — 카드 아님. 값이 한글("누적 · 2026.08까지")이라
    모노·자간을 쓰지 않는다: IBM Plex Mono 에 한글 글리프가 없어 글자마다 폴백 폰트로
    떨어지고 자간까지 겹쳐 "누 적"처럼 벌어진다. */
-.nmf-kgroup {{ font-size:10.5px; color:{_MUT}; margin:.5rem 0 .35rem; }}
+.nmf-kgroup {{ font-size:12px; color:{_MUT}; margin:.5rem 0 .35rem; }}
 /* 지표 스트립 = 고정 트랙 그리드. 누적(6)·당월(4)이 같은 트랙 수를 공유해 카드 폭이
    행 간에 동일하고, 지표가 적은 행은 늘어나지 않고 남는 칸을 비운다. 트랙 수는 렌더 시
    데이터에서 파생해 주입한다(_kpi_grid_css). 타일은 라벨+값 2줄(영문 오버라인 없음). */
@@ -393,30 +393,30 @@ def _inject_style() -> None:
 .nmf-klabel {{ font-size:12px; color:{_MUT}; white-space:nowrap; overflow:hidden;
   text-overflow:ellipsis; }}
 .nmf-kval-row {{ display:flex; align-items:baseline; gap:4px; }}
-.nmf-kval {{ font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:26px; font-weight:600;
+.nmf-kval {{ font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:20px; font-weight:600;
   letter-spacing:-0.03em; font-variant-numeric:tabular-nums; }}
-.nmf-kunit {{ font-size:11.5px; color:{_MUT}; }}
+.nmf-kunit {{ font-size:12px; color:{_MUT}; }}
 
 .nmf-charts {{ display:flex; flex-wrap:wrap; gap:16px 28px; }}
 .nmf-block {{ flex:1 1 340px; min-width:0; padding:16px 0 8px;
   border-top:1px solid {_LINE_STRONG}; display:flex; flex-direction:column; gap:12px; }}
 .nmf-bhead {{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; }}
-.nmf-btitle {{ font-size:13.5px; font-weight:600; color:{_INK}; }}
+.nmf-btitle {{ font-size:14px; font-weight:600; color:{_INK}; }}
 /* 블록 메타는 "당월 2026.08 · 미평가=미확정" 처럼 한글이 섞이므로 모노·자간 제외. */
-.nmf-bmeta {{ font-size:10.5px; color:{_MUT}; white-space:nowrap; }}
+.nmf-bmeta {{ font-size:12px; color:{_MUT}; white-space:nowrap; }}
 .nmf-rows {{ display:flex; flex-direction:column; gap:10px; }}
 .nmf-row {{ display:grid; grid-template-columns:76px minmax(0,1fr) 52px; gap:10px;
   align-items:center; }}
-.nmf-rlabel {{ font-size:12.5px; color:{_INK2}; text-align:right; white-space:nowrap;
+.nmf-rlabel {{ font-size:12px; color:{_INK2}; text-align:right; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }}
 .nmf-track {{ height:8px; border-radius:999px; background:{_LINE}; overflow:hidden; }}
 .nmf-fill {{ height:100%; border-radius:999px; }}
 .nmf-rval {{ display:flex; align-items:baseline; gap:5px; justify-content:flex-end; }}
 .nmf-rcount {{ font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:12px; font-weight:600;
   color:{_INK}; font-variant-numeric:tabular-nums; }}
-.nmf-rpct {{ font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:10.5px; color:{_MUT};
+.nmf-rpct {{ font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:12px; color:{_MUT};
   font-variant-numeric:tabular-nums; }}
-.nmf-empty {{ font-size:12.5px; color:{_MUT}; padding:4px 0; }}
+.nmf-empty {{ font-size:12px; color:{_MUT}; padding:4px 0; }}
 /* 모노 강제 — 전역 `.stApp [data-testid=stMarkdownContainer] *`(특이도 0,2,0)를 이기려면
    0,3,0 이상이어야 한다(숫자·오버라인이 sans 로 떨어지는 것 방지). 인라인과 병행 못박음. */
 .stApp [data-testid="stMarkdownContainer"] .nmf-kval,

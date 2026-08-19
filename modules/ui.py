@@ -370,7 +370,7 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
 .sb-logo {
   flex: 0 0 auto; width: 26px; height: 26px; border-radius: 5px;
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--sb-accent); color: #FFFFFF; font-size: 14px; font-weight: 800;
+  background: var(--sb-accent); color: #FFFFFF; font-size: 14px; font-weight: 600;
 }
 .sb-title { display: flex; flex-direction: column; min-width: 0; }
 .sb-title-ko {
@@ -637,7 +637,7 @@ section[data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
 }
 .sb-rail-logo {
   width: 30px; height: 30px; border-radius: 7px; background: var(--sb-accent);
-  color: #fff; font-size: 14px; font-weight: 800;
+  color: #fff; font-size: 14px; font-weight: 600;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .st-key-sb_expand div.stButton button {

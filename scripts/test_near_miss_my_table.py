@@ -256,8 +256,9 @@ _meta_html = nmy._detail_blocks_html(REPORTS.iloc[1].to_dict())
 _meta_head = _meta_html.split("gap:20px 32px")[0]   # 본문 블록 앞까지(= 메타 영역)
 check("한글 등급 라벨에 모노 미적용", "monospace" not in _meta_head)
 check("한글 등급 라벨에 letter-spacing 미적용", "letter-spacing" not in _meta_head)
-check("라벨 크기·색 불변(10.5px / #6b665d)",
-      "font-size:10.5px" in _meta_head and nmy._MUT in _meta_head)
+# 라벨 크기는 §1.2 개정(2026-08-19, 네 단계)으로 10.5px→12px(label 계층).
+check("라벨 크기·색은 §1.2 label(12px / ink-3)",
+      "font-size:12px" in _meta_head and nmy._MUT in _meta_head)
 # §1.2(2026-08-19): 모노 서체 폐지 — 글꼴은 Pretendard 하나이고 자릿수 정렬은
 # tabular-nums 가 담당한다. 영숫자라도 별도 서체를 쓰지 않는다.
 check("영문 태그에 모노 없음(§1.2 모노 폐지)", "monospace" not in _meta_html)

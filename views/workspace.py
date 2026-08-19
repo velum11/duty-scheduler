@@ -941,7 +941,7 @@ def selectable_master_grid(
         "suppressRowClickSelection": True,
         "suppressDragLeaveHidesColumns": True,
         # 빈 목록 기본 문구(No Rows To Show)를 업무 화면 한글 문구로 교체.
-        "overlayNoRowsTemplate": "<span style='color:#8A8880;font-size:0.82rem;'>표시할 데이터가 없습니다</span>",
+        "overlayNoRowsTemplate": "<span style='color:#8A8880;font-size:12px;'>표시할 데이터가 없습니다</span>",
         "onGridReady": _NATIVE_PASTE_HANDLER,
         "onCellClicked": _ROW_ACTION_CLICK,
         "onCellKeyDown": _ROW_ACTION_KEYDOWN,
@@ -1016,7 +1016,7 @@ _MASTER_CSS = """
 /* 컴팩트 필터 행 */
 .st-key-ms_filter { margin: 0 0 0.1rem; }
 .st-key-ms_filter div[data-testid="stHorizontalBlock"] { align-items: flex-end; }
-.st-key-ms_filter label { font-size: 0.72rem !important; color: #8A8880 !important; }
+.st-key-ms_filter label { font-size: 12px !important; color: #8A8880 !important; }
 /* 공통 작업 버튼 행 (ms_*: 단일 화면 · od_*/ou_*: 조직 관리 좌/우 패널) */
 .st-key-ms_bar, .st-key-od_bar, .st-key-ou_bar { margin: 0.1rem 0 0.4rem; }
 .st-key-ms_bar div[data-testid="stHorizontalBlock"],
@@ -1026,11 +1026,11 @@ _MASTER_CSS = """
 .st-key-od_bar div.stButton > button,
 .st-key-ou_bar div.stButton > button {
   min-height: 2.2rem; height: 2.2rem; padding: 0 0.7rem; border-radius: 6px;
-  font-size: 0.82rem; font-weight: 600; white-space: nowrap; gap: 0.35rem;
+  font-size: 12px; font-weight: 600; white-space: nowrap; gap: 0.35rem;
 }
 .st-key-ms_bar div.stButton > button [data-testid="stIconMaterial"],
 .st-key-od_bar div.stButton > button [data-testid="stIconMaterial"],
-.st-key-ou_bar div.stButton > button [data-testid="stIconMaterial"] { font-size: 17px; }
+.st-key-ou_bar div.stButton > button [data-testid="stIconMaterial"] { font-size: 20px; }
 /* 저장 — 앱 네이비 primary (검정 금지) */
 .st-key-ms_save button[kind="primary"], .st-key-od_save button[kind="primary"], .st-key-ou_save button[kind="primary"] { background: #1E3A6E !important; border: 1px solid #1E3A6E !important; color: #FFFFFF !important; }
 .st-key-ms_save button[kind="primary"]:hover, .st-key-od_save button[kind="primary"]:hover, .st-key-ou_save button[kind="primary"]:hover { background: #17305C !important; border-color: #17305C !important; }
@@ -1046,10 +1046,10 @@ _MASTER_CSS = """
 .st-key-ms_del button:hover:not(:disabled), .st-key-od_del button:hover:not(:disabled), .st-key-ou_del button:hover:not(:disabled) { background: #F7EFEC !important; border-color: #C77B6B !important; }
 .st-key-ms_del button:disabled, .st-key-od_del button:disabled, .st-key-ou_del button:disabled { color: #B8B4AC !important; border-color: #E7E3DB !important; background: #FFFFFF !important; }
 /* 조직 관리 좌/우 패널 제목 (부서/조 통합 화면 전용) */
-.ms-panel { font-size: 0.92rem; font-weight: 700; color: #3D3A34; margin: 0.2rem 0 0.1rem; }
-.ms-panel small { font-weight: 500; color: #8A8880; }
+.ms-panel { font-size: 14px; font-weight: 600; color: #3D3A34; margin: 0.2rem 0 0.1rem; }
+.ms-panel small { font-weight: 400; color: #8A8880; }
 /* 건수 */
-.ms-count { font-size: 0.76rem; color: #8A8880; margin: 0.4rem 0 0; }
+.ms-count { font-size: 12px; color: #8A8880; margin: 0.4rem 0 0; }
 .ms-count b { color: #3D3A34; font-weight: 600; }
 </style>
 """

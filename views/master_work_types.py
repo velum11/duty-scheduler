@@ -259,7 +259,7 @@ _WT_CROW_CSS = """
 <style>
 .wt-crow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .wt-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
-.wt-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
+.wt-crow .pill { font-size:12px; font-weight:600; font-variant-numeric:tabular-nums;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
 .wt-crow .dist { font-size:12px; color:#6b665d; white-space:nowrap;
   font-variant-numeric:tabular-nums; }
@@ -1120,7 +1120,7 @@ def _normalize_hex(value: str):
 # ---------------------------------------------------------------------------
 _EXTRA_CSS = """
 <style>
-.ms-errlist { margin:.25rem 0 0; padding-left:1.1rem; font-size:.76rem; color:var(--ms-ink-2); }
-.ms-absorb { color:var(--ms-ink-2); font-size:.72rem; margin-top:.3rem; }
+.ms-errlist { margin:.25rem 0 0; padding-left:1.1rem; font-size:12px; color:var(--ms-ink-2); }
+.ms-absorb { color:var(--ms-ink-2); font-size:12px; margin-top:.3rem; }
 </style>
 """

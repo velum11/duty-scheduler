@@ -132,8 +132,8 @@ def _meta_cell(label: str, value: str, is_html: bool = False) -> str:
     # 모노·자간은 영숫자 전용 표기(보고번호·태그 오버라인)에만 유지한다. 크기·색은 불변.
     return (
         "<div style='display:flex;flex-direction:column;gap:3px;min-width:0;'>"
-        f"<span style='font-size:10.5px;color:{_META_FAINT};'>{escape(label)}</span>"
-        f"<span style='font-size:13.5px;color:{TOKENS['ink']};line-height:1.35;'>{v}</span></div>"
+        f"<span style='font-size:12px;color:{_META_FAINT};'>{escape(label)}</span>"
+        f"<span style='font-size:14px;color:{TOKENS['ink']};line-height:1.35;'>{v}</span></div>"
     )
 
 
@@ -147,9 +147,9 @@ def _read_field(label: str, value: str) -> None:
     body = escape(value) if str(value or "").strip() else "-"
     st.markdown(
         "<div style='margin:8px 0 0;'>"
-        f"<div style='font-size:12.5px;font-weight:600;color:{TOKENS['ink-2']};"
+        f"<div style='font-size:12px;font-weight:600;color:{TOKENS['ink-2']};"
         "margin-bottom:2px;'>" + escape(label) + "</div>"
-        f"<div style='font-size:14.5px;line-height:1.7;color:{TOKENS['ink']};"
+        f"<div style='font-size:14px;line-height:1.7;color:{TOKENS['ink']};"
         f"white-space:pre-wrap;text-wrap:pretty;'>{body}</div></div>",
         unsafe_allow_html=True,
     )
@@ -431,7 +431,7 @@ def _render_result_detail(df: pd.DataFrame) -> None:
     # ── 상단: 보고번호(제목 §2 20/700). 상태는 메타 스트립에서 pill 로 노출(§3.2). ──
     report_no = escape(_clean(report.get("report_no")) or "(번호 미상)")
     st.markdown(
-        f"<div style='font-size:20px;font-weight:700;color:{TOKENS['ink']};"
+        f"<div style='font-size:20px;font-weight:600;color:{TOKENS['ink']};"
         f"line-height:1.2;margin:2px 0 8px;'>{report_no}</div>",
         unsafe_allow_html=True,
     )
@@ -547,7 +547,7 @@ def _photo_overline(count: int) -> None:
     한글('사진')이 섞여 있어 모노·자간을 걸지 않는다(한글 글리프 부재 → 글자별 폴백 +
     letter-spacing 이중 적용으로 자간이 벌어진다). 개수는 숫자지만 라벨과 한 문자열이다."""
     st.markdown(
-        f"<div style='font-size:11px;color:{TOKENS['ink-2']};margin:14px 0 8px;'>"
+        f"<div style='font-size:12px;color:{TOKENS['ink-2']};margin:14px 0 8px;'>"
         f"사진 · {count}</div>",
         unsafe_allow_html=True,
     )

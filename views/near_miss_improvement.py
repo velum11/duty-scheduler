@@ -572,10 +572,9 @@ def _list_items(ordered: list[str], reports_by_id: dict, improvements: dict) -> 
             "key": rid,
             "line1_left": str(r.get("work_name") or "(제목 없음)"),
             "line1_right": worklist.elapsed_label(r.get("created_at")),
-            # line2_left 는 kit 의 ``.esl-mono`` 클래스로 렌더된다. 이 클래스는 2026-08-19
-            # 현재도 IBM Plex Mono 를 지정하고 있어 §1.2(Pretendard 단일)와 어긋나지만
-            # ``views/common/erp/kit.py`` 소관이라 이 화면에서 고칠 수 없다(보고 대상).
-            # 어느 쪽이든 영숫자 식별자만 넣는다 — 한글은 글자마다 폴백돼 자간이 벌어진다.
+            # line2_left 는 kit 의 ``.esl-mono`` 로 렌더된다 — §1.2 개정(모노 폐지) 이후
+            # 이 클래스는 tabular-nums 만 남았다(kit.py 정리 완료). 영숫자 식별자를 넣는
+            # 관행은 유지한다 — 자릿수 정렬이 의미 있는 값이기 때문이다.
             "line2_left": str(r.get("report_no") or rid),
             # 소속·조치 단계는 sans 쪽(line2_right)에 모아 둔다(둘 다 한글이 올 수 있다).
             "line2_right": f"{dept} · {right}" if dept else right,

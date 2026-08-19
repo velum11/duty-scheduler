@@ -415,7 +415,7 @@ def _detail_anchor_html(report: dict, status: str) -> str:
     return (
         "<div style='display:flex;flex-wrap:wrap;align-items:center;gap:10px;"
         "margin:10px 0 0;'>"
-        f"<span style='font-family:{_MONO};font-size:16px;font-weight:600;"
+        f"<span style='font-family:{_MONO};font-size:14px;font-weight:600;"
         f"color:{_INK};'>{escape(report_no)}</span>{badge}{effect_html}</div>"
     )
 
@@ -500,8 +500,8 @@ def _detail_blocks_html(report: dict) -> str:
     # 않는다 — 한글 글리프가 없어 글자별 폴백 + letter-spacing 이중 적용으로 벌어진다.
     meta_cells = "".join(
         f"<div style='display:flex;flex-direction:column;gap:3px;min-width:0;'>"
-        f"<span style='font-size:10.5px;color:{_MUT};'>{escape(label)}</span>"
-        f"<span style='font-size:13.5px;color:{_INK};line-height:1.35;'>{value}</span></div>"
+        f"<span style='font-size:12px;color:{_MUT};'>{escape(label)}</span>"
+        f"<span style='font-size:14px;color:{_INK};line-height:1.35;'>{value}</span></div>"
         for label, value in (
             ("평가 등급", _grade_mark(report.get("confirmed_grade"), empty="미정")),
         )
@@ -526,9 +526,9 @@ def _detail_blocks_html(report: dict) -> str:
         cells.append(
             f"<div style='flex:{flex};min-width:0;border-left:2px solid {_LINE_SEC};"
             "padding-left:14px;display:flex;flex-direction:column;gap:6px;'>"
-            f"<span style='font-size:11px;letter-spacing:0.1em;color:{_MUT};font-family:{_MONO};'>{tag}</span>"
-            f"<span style='font-size:12.5px;font-weight:600;color:{_INK2};'>{escape(label)}</span>"
-            f"<p style='margin:0;font-size:14.5px;line-height:1.7;color:{_INK};text-wrap:pretty;"
+            f"<span style='font-size:12px;letter-spacing:0.1em;color:{_MUT};font-family:{_MONO};'>{tag}</span>"
+            f"<span style='font-size:12px;font-weight:600;color:{_INK2};'>{escape(label)}</span>"
+            f"<p style='margin:0;font-size:14px;line-height:1.7;color:{_INK};text-wrap:pretty;"
             f"white-space:pre-wrap;'>{body}</p></div>"
         )
     return (meta + "<div style='display:flex;flex-wrap:wrap;gap:20px 32px;'>"
@@ -594,7 +594,7 @@ def _render_my_photos(report: dict, status: str) -> None:
 
     # 한글('사진')이라 모노·자간 없음(조회 화면 _photo_overline 과 같은 처리).
     st.markdown(
-        f"<div style='font-size:11px;color:{_INK2};margin:16px 0 8px;'>"
+        f"<div style='font-size:12px;color:{_INK2};margin:16px 0 8px;'>"
         f"사진 · {len(paths)}</div>",
         unsafe_allow_html=True,
     )

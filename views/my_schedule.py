@@ -62,7 +62,7 @@ _MONTH_PICKER = partial(
        (§1.1 예외 — 사유: 선택 줄이 컬럼 정중앙에 오려면 여백이 정확히 정수 행이어야
        하고, JS 의 scrollTop 계산도 같은 행 높이를 쓴다). */
     #duty-month-wheel { --wheel-row:44px; min-height:var(--wheel-row); font-size:14px;
-      font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif,-apple-system,sans-serif; }
+      font-family:"Pretendard","Malgun Gothic","Apple SD Gothic Neo",-apple-system,sans-serif; }
     /* 월 이동은 이 화면의 주 내비게이션이라 히트영역 우선순위가 가장 높다 → 세 버튼 모두
        44px 이상. 폭에는 고정 숫자를 주지 않는다: 좌우는 히트영역 하한이, 가운데는 아래
        ghost 라벨(표기 최대 길이)이 정한다. */
@@ -70,7 +70,7 @@ _MONTH_PICKER = partial(
     .wheel-nav .previous, .wheel-nav .next { display:flex; align-items:center; justify-content:center;
       min-width:var(--wheel-row); min-height:var(--wheel-row); padding:0;
       border:1px solid #e2ddd4; border-radius:8px; background:#fff; color:#6b665d; cursor:pointer;
-      font:inherit; font-size:16px; }
+      font:inherit; font-size:20px; }  /* ‹› = 글리프 — 아이콘 20px 규칙 */
     .wheel-nav .previous:hover, .wheel-nav .next:hover { border-color:#cfc8bd; }
     .wheel-nav .previous:active, .wheel-nav .next:active { background:#fdf3ec; border-color:#c2410c; }
     .wheel-nav button:focus-visible { outline:2px solid #c2410c; outline-offset:2px; }
@@ -79,14 +79,14 @@ _MONTH_PICKER = partial(
        차이로 ‹ › 위치가 달마다 흔들린다. tabular-nums 로 자릿수 폭을 고정해 ghost 가
        정확한 상한이 되게 한다(실측 근거: 4자리 연도는 어떤 값이든 같은 폭). */
     .wheel-nav .month-title { display:grid; min-height:var(--wheel-row); padding:0 8px; border:0;
-      background:transparent; color:#1c1a17; cursor:pointer; font:inherit; font-size:16px;
+      background:transparent; color:#1c1a17; cursor:pointer; font:inherit; font-size:14px;
       font-weight:600; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; text-align:center; }
     .wheel-nav .month-title > span { grid-area:1/1; place-self:center; white-space:nowrap; }
     .wheel-nav .month-title .ghost { visibility:hidden; }
     .wheel-nav .month-title:hover .live { color:#b4451a; }
     .wheel-backdrop { position:fixed; inset:0; z-index:9999; display:flex; align-items:center; justify-content:center; background:rgba(28,26,23,.28); }
     .wheel-sheet { width:min(420px,calc(100vw - 32px)); border-radius:8px; background:#fbfaf8; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:16px; }
-    .wheel-heading { color:#1c1a17; font-size:16px; font-weight:600; text-align:center; }
+    .wheel-heading { color:#1c1a17; font-size:14px; font-weight:600; text-align:center; }
     .wheel-columns { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:16px 0; }
     .wheel-column { position:relative; height:calc(var(--wheel-row) * 5); overflow:hidden; }
     .wheel-column::before, .wheel-column::after { content:''; position:absolute; z-index:1; left:0; right:0; height:calc(var(--wheel-row) * 2); pointer-events:none; }

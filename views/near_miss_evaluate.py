@@ -229,7 +229,7 @@ _EVAL_CSS = f"""
    예외로 두지만 한 액션 행에서 2.46:1 과 5.04:1 이 섞이는 것은 결함이라 통일한다. */
 [class*="st-key-nm_act_"] button:disabled p {{ color:{_FAINT} !important; }}
 [class*="st-key-nm_act_"] button p {{ font-size:14px !important; font-weight:600 !important; }}
-.nm-seg-label {{ font-size:12px; font-weight:500; color:{_INK2}; white-space:nowrap; }}
+.nm-seg-label {{ font-size:12px; font-weight:400; color:{_INK2}; white-space:nowrap; }}
 /* 결정 블록 라벨 — 한글이라 letter-spacing 을 주지 않는다(자간이 벌어진다). */
 .nm-sec {{ font-size:12px; font-weight:600; color:{_INK2}; margin:0 0 6px; }}
 /* 비활성 사유(§3.2·§4-3: 툴팁에만 두지 않는다) */
@@ -502,7 +502,7 @@ def _detail_head_html(report: dict, status: str) -> str:
     return (
         "<div style='padding:2px 0 14px;display:flex;flex-direction:column;gap:8px;'>"
         "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;'>"
-        f"<span style='font-family:{_MONO};font-size:16px;font-weight:600;color:{_INK};'>{report_no}</span>"
+        f"<span style='font-family:{_MONO};font-size:14px;font-weight:600;color:{_INK};'>{report_no}</span>"
         f"{badge}"
         f"<span style='font-size:12px;color:{_INK2};'>{effect}</span></div>"
         f"<span style='font-size:20px;font-weight:600;color:{_INK};line-height:1.35;"

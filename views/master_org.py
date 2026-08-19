@@ -220,13 +220,13 @@ _ORG_PAGE_CSS = """
 /* ── DRILL 스트립(§1-E): 그룹›부서›조 — 선택=오렌지 틴트 칩, 미선택=중립. 카드 아님(하단 헤어라인). ── */
 .ms-ctx { padding:.5rem .2rem .6rem; margin:.1rem 0 .5rem; background:transparent !important;
   border:none !important; border-bottom:1px solid #e0dbd2 !important; border-radius:0 !important;
-  box-shadow:none !important; font-size:.8rem; }
-.ms-ctx > span:first-child { font-family:'IBM Plex Mono',monospace; font-weight:600;
-  letter-spacing:.12em; text-transform:uppercase; font-size:.62rem; color:#6b665d; }
+  box-shadow:none !important; font-size:12px; }
+.ms-ctx > span:first-child { font-weight:600;
+  letter-spacing:.12em; text-transform:uppercase; font-size:12px; color:#6b665d; }
 .ms-ctx b { padding:.14rem .55rem; border-radius:7px; background:#f2f0ec; border:1px solid #e4e0d8;
   color:#5c564d; font-weight:600; }
 .ms-ctx b.pin, .ms-ctx b.sel { background:#fdf3ec; border-color:#f0dfd0; color:#b4451a; }
-.ms-ctx .arw { font-size:.92rem; color:#cfc8bd; }
+.ms-ctx .arw { font-size:12px; color:#cfc8bd; }
 .ms-ctx .none { font-style:normal; color:#6b665d; }
 
 /* ── 건수 행 타이포를 기준정보 3화면 공통값으로 맞춘다(2026-08-14 재검수) ──
@@ -239,7 +239,7 @@ _ORG_PAGE_CSS = """
    (=7.7/7/10px)은 스케일 밖이었다. */
 .ms-sheet-head { padding:8px 0; gap:8px; }
 .ms-sheet-head .t { font-size:14px; font-weight:600; }
-.ms-sheet-head .cnt { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
+.ms-sheet-head .cnt { font-size:12px; font-weight:600;
   padding:4px 8px; border-radius:999px; background:#f1eee8; color:#4a453d;
   border:none; font-variant-numeric:tabular-nums; }
 /* 상태·필터 칩도 근무형태 관리와 같은 12px/600 로 올린다(공용 .ms-chip 은 9.52px 로 렌더). */
@@ -248,7 +248,7 @@ _ORG_PAGE_CSS = """
 /* 잠김 상태 밀도 완화(기능 보존) — 슬림 플레이스홀더 + 잠긴 시트 액션바 숨김. */
 .st-key-org_dept__sheet .ms-locked, .st-key-org_unit__sheet .ms-locked {
   min-height:118px; padding:1.25rem 1rem; gap:.35rem; }
-.st-key-org_dept__sheet .ms-locked .glyph, .st-key-org_unit__sheet .ms-locked .glyph { font-size:1.1rem; }
+.st-key-org_dept__sheet .ms-locked .glyph, .st-key-org_unit__sheet .ms-locked .glyph { font-size:20px; }
 .st-key-org_dept__sheet:has(.ms-locked) div[data-testid="stHorizontalBlock"]:has(.st-key-org_dept__save),
 .st-key-org_unit__sheet:has(.ms-locked) div[data-testid="stHorizontalBlock"]:has(.st-key-org_unit__save) {
   display:none !important; }

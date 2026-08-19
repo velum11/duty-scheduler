@@ -296,8 +296,9 @@ def test_vocabulary_and_status_effect() -> None:
     meta_html = nmv._meta_cell("신고자", "1001")
     check("한글 메타 라벨에 모노 미적용", "monospace" not in meta_html)
     check("한글 메타 라벨에 letter-spacing 미적용", "letter-spacing" not in meta_html)
-    check("라벨 크기·색은 불변(10.5px / #6b665d)",
-          "font-size:10.5px" in meta_html and nmv._META_FAINT in meta_html)
+    # 라벨 크기는 §1.2 개정(2026-08-19, 네 단계 24/20/14/12)으로 10.5px→12px(label 계층).
+    check("라벨 크기·색은 §1.2 label(12px / ink-3)",
+          "font-size:12px" in meta_html and nmv._META_FAINT in meta_html)
     check("사진 오버라인도 모노·자간 제거(한글 '사진')",
           "monospace" not in inspect.getsource(nmv._photo_overline).split('"""')[-1]
           and "letter-spacing" not in inspect.getsource(nmv._photo_overline).split('"""')[-1])

@@ -277,7 +277,7 @@ BOOL_DISPLAY_RENDERER = JsCode(
     """
 )
 
-_NO_ROWS = ("<span style='color:%s;font-size:.82rem;'>표시할 데이터가 없습니다</span>"
+_NO_ROWS = ("<span style='color:%s;font-size:12px;'>표시할 데이터가 없습니다</span>"
             % style.TOKENS["ink-3"])
 
 # 화면 지정이 없을 때의 폭/정렬 기본값(문자=flex, 숫자/불리언=좁은 고정).
