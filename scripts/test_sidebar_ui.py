@@ -393,8 +393,13 @@ css_mobile = media_block(ui._CSS)
 css_desktop = ui._CSS.replace(css_mobile, "")
 check("S-02: 그림자 선택자가 모바일 블록 안에 있다",
       'div[data-testid="stElementContainer"]:has(iframe[title*="agGrid"])::after' in css_mobile)
-check("S-02: 모바일 블록 밖에는 그리드 그림자 선택자가 없다(PC 불변)",
-      'iframe[title*="agGrid"]' not in css_desktop)
+# 데스크톱 쪽에는 **그림자(::after) 선택자**만 없으면 된다 — 2026-08-19 추가된
+# 폭 추종 규칙(iframe[title*="agGrid"] { width:100% })은 절단 방지용 전역 규칙이라
+# PC 에도 의도적으로 적용된다(창 축소·줌·사이드바 펼침 시 우측 열 무언 절단 방지).
+check("S-02: 모바일 블록 밖에는 그리드 그림자 선택자가 없다(PC 그림자 불변)",
+      ':has(iframe[title*="agGrid"])' not in css_desktop)
+check("S-02: 그리드 iframe 폭 추종 규칙은 전역(절단 방지)",
+      'iframe[title*="agGrid"] { width: 100% !important; }' in css_desktop)
 check("S-02: 그림자 속성 — 우측 24px 절대배치 + 클릭 통과 + 잉크 그라데이션",
       "position: absolute" in css_mobile and "right: 1px" in css_mobile
       and "width: 24px" in css_mobile and "pointer-events: none" in css_mobile

@@ -239,6 +239,13 @@ div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] { border: no
    - 테두리(1px)와 라운드는 그대로 두려고 1px 안쪽으로 넣는다.
    - AgGrid 컴포넌트 iframe 을 가진 요소 컨테이너에만 붙는다(컴포넌트 이름 기준 — emotion
      해시 선택자 아님). PC 는 이 미디어쿼리 밖이라 그리드 외관 불변. */
+/* 컴포넌트 iframe(AgGrid)은 Streamlit 이 렌더 시점의 컨테이너 폭을 width 속성·인라인
+   스타일로 **박제**한다 — 이후 창 축소·브라우저 줌·사이드바 펼침으로 컨테이너가 좁아져도
+   iframe 은 옛 폭을 유지한 채 오른쪽이 조용히 잘린다(stAppViewContainer overflow:hidden,
+   2026-08-19 실측: 컨테이너 1216px vs iframe 1501px → 등급·상태 열 소실). 폭을 컨테이너
+   추종(100%)으로 강제한다 — 넘치는 열은 그리드 자체 가로 스크롤로 내려가 시각 신호가
+   남는다(무언 절단 금지). 높이는 건드리지 않는다. */
+.stApp iframe[title*="agGrid"] { width: 100% !important; }
 @media (max-width: 768px) {
   div[data-testid="stElementContainer"]:has(iframe[title*="agGrid"]) { position: relative; }
   div[data-testid="stElementContainer"]:has(iframe[title*="agGrid"])::after {
