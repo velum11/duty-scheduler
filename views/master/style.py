@@ -484,6 +484,9 @@ GRID_CSS: dict[str, dict] = {
     ".ag-root-wrapper": {"border": "1px solid " + TOKENS["line-strong"], "border-radius": "8px",
                          "--ag-font-family": '"Pretendard","Malgun Gothic",-apple-system,sans-serif',
                          "font-family": '"Pretendard","Malgun Gothic",-apple-system,sans-serif'},
+    # 셀 좌우 패딩 8px — 헤더(8px)와 1px 어긋남 정합. 테마가 `.ag-ltr .ag-cell` 에
+    # 7px 를 하드코딩하므로 같은 특이도로 덮는다(kit._READ_BASE_CSS 와 같은 처방).
+    ".ag-ltr .ag-cell": {"padding-left": "8px", "padding-right": "8px"},
     # AG 테마가 .ag-header-cell-text 에 700 을 준다 — §1.2 는 400·600 뿐이라 되돌린다.
     ".ag-header-cell-text": {"font-weight": "600"},
     # §1-E: 표 헤더 배경 없음 + 하단 1px #cfc8bd(line-strong). 공용(3화면 공유) — 7단계에서

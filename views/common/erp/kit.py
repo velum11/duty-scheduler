@@ -433,8 +433,17 @@ _READ_BASE_CSS = {
     # 이 선언이 없으면 부모의 웹폰트를 상속받지 못해 표만 시스템 sans 로 폴백한다
     # (§1.2 "표는 iframe 에도 글꼴을 로드해야 한다"). 폰트 파일 자체는 setup_page 의
     # 브리지가 iframe 에 <link> 로 넣는다 — 선언과 로드는 별개다.
+    # 셀 좌우 패딩은 클래스 오버라이드가 아니라 **테마 변수**로 8px 로 맞춘다 —
+    # AG 테마의 `.ag-ltr .ag-cell`(7px)이 커스텀 `.ag-cell` 보다 특이도가 높아 클래스
+    # 선언은 무효였다(BACKLOG "셀 패딩 7px, 헤더 8px 와 1px 어긋남"). 변수는 테마가
+    # 자기 규칙에서 읽는 값이라 특이도 싸움이 없다. 열 폭 실측은 자간 과대분(약 6%)의
+    # 여유가 있어 +2px/열은 흡수된다.
     ".ag-root-wrapper": {"--ag-font-family": '"Pretendard","Malgun Gothic",-apple-system,sans-serif',
                          "font-family": '"Pretendard","Malgun Gothic",-apple-system,sans-serif'},
+    # 이 st_aggrid 의 AG 빌드는 셀 패딩을 변수로 읽지 않고 `.ag-ltr .ag-cell` 에 7px 를
+    # 하드코딩한다(--ag-cell-horizontal-padding 을 루트에 걸어도 셀은 7px — 실측).
+    # 같은 특이도 선택자로 덮는다(주입 순서상 커스텀이 나중이라 이긴다).
+    ".ag-ltr .ag-cell": {"padding-left": "8px", "padding-right": "8px"},
     # AG 테마가 .ag-header-cell-text 에 700 을 준다 — §1.2 는 400·600 뿐이라 되돌린다.
     ".ag-header-cell-text": {"font-weight": "600"},
     ".ag-header": {"background-color": "transparent",
@@ -444,9 +453,7 @@ _READ_BASE_CSS = {
     ".ag-header-cell": {"font-weight": "600", "font-size": "12px",
                         "color": TOKENS["ink-2"]},
     # overflow:hidden 은 아래 말줄임 규칙이 성립하기 위한 전제다.
-    # (셀 좌우 패딩은 7px 로 헤더 8px 와 1px 어긋나 있으나, AG 테마의 `.ag-ltr .ag-cell` 이
-    #  더 높은 특이도라 여기서 덮이지 않는다 — 실측으로 무효 확인 후 죽은 선언을 두지 않았다.
-    #  정합은 테마 오버라이드가 필요해 BACKLOG 로 넘긴다.)
+    # (셀 좌우 패딩은 위 `.ag-ltr .ag-cell` 8px 가 담당한다 — 헤더 8px 와 정합.)
     ".ag-cell": {"font-size": "12px", "display": "flex", "align-items": "center",
                  "overflow": "hidden"},
     # 긴 값이 이웃 셀 위로 넘치지 않고 **말줄임(…)** 되게 한다. flex 자식은 기본
