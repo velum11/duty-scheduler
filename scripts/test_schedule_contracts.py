@@ -1409,6 +1409,21 @@ def test_month_view_attendance_scope() -> None:
     check("부서 옵션에 비대상 부서 없음", db.dept_name("MGT") not in dept_options(at))
     check("부서 옵션에 대상 부서는 그대로",
           {db.dept_name("PET1"), db.dept_name("PET2")} <= set(dept_options(at)))
+
+    # 연도 선택지 — 전량 조회(get_schedules)를 경계 조회(get_schedule_years)로 바꾼 뒤에도
+    # 위젯 옵션 집합이 종전과 같아야 한다. 기대값은 '옛 방식'(근무 행 전량에서 연도 수집)
+    # ∪ 올해 로 직접 만든다. AppTest 세션의 sample 스토어는 _base_schedules() 로 시드된다.
+    from datetime import date as _date
+
+    def year_options(app):
+        return next(list(sb.options) for sb in app.selectbox if sb.key == "schedule_view_y")
+
+    legacy_years = sorted(
+        {int(str(v)[:4]) for v in db._base_schedules()["duty_date"] if str(v)[:4].isdigit()}
+        | {_date.today().year}
+    )
+    check("연도 선택지 = 기록 있는 연도 ∪ 올해(전량 산출 방식과 동일)",
+          year_options(at) == [str(y) for y in legacy_years])
     check("표가 비지 않는다(대상 부서 근무자 조회)",
           any(d.label == "엑셀 다운로드" for d in at.get("download_button")))
 
@@ -2022,6 +2037,154 @@ def test_schedule_edit_work_type_name_axis() -> None:
     check("빈 목록도 안전(하한)", se._day_width([]) == se._DAY_W_MIN)
 
 
+def test_schedule_year_options_query() -> None:
+    """연도 선택지 경량 조회 — 값 계약(기록 있는 연도)과 요청 수 상한을 고정한다.
+
+    전량 스캔을 경계 조회 + 연도 probe 로 바꾼 변경의 회귀 잠금이다. 순수 mock 이라
+    실DB 에 접속하지 않는다.
+    """
+    from modules import supabase_repository as sr
+
+    calls = {"n": 0}
+
+    class _Q:
+        def __init__(self, dates):
+            self.dates, self.desc, self.lo, self.hi = dates, False, None, None
+
+        def select(self, *_a, **_k):
+            return self
+
+        def order(self, _col, desc=False):
+            self.desc = desc
+            return self
+
+        def limit(self, n):
+            self.n = n
+            return self
+
+        def gte(self, _col, value):
+            self.lo = value
+            return self
+
+        def lte(self, _col, value):
+            self.hi = value
+            return self
+
+    class _Resp:
+        def __init__(self, data):
+            self.data = data
+
+    def make(dates):
+        class _C:
+            def table(self, _name):
+                return _Q(dates)
+        return _C()
+
+    def fake_execute(query, _action, _table):
+        calls["n"] += 1
+        rows = [d for d in query.dates
+                if (query.lo is None or d >= query.lo) and (query.hi is None or d <= query.hi)]
+        rows.sort(reverse=bool(query.desc))
+        return _Resp([{"work_date": d} for d in rows[:1]])
+
+    saved = (sr.client, sr._execute, sr._select_all)
+    try:
+        sr._execute = fake_execute
+
+        # (a) 빈 표 → 빈 목록, 요청 1회(최소값 조회에서 끝난다)
+        sr.client = lambda: make([])
+        calls["n"] = 0
+        check("근무 기록 없으면 연도 목록도 비어 있다", sr.get_schedule_years() == [])
+        check("빈 표는 요청 1회로 끝난다", calls["n"] == 1)
+
+        # (b) 중간 연도가 비어 있으면 선택지에도 없다(값 계약 = '기록이 있는 연도')
+        sr.client = lambda: make(["2023-03-01", "2025-06-01", "2026-01-02"])
+        calls["n"] = 0
+        check("기록 없는 중간 연도는 선택지에서 제외",
+              sr.get_schedule_years() == [2023, 2025, 2026])
+        check("요청 수 = 경계 2 + 내부 연도 probe 2", calls["n"] == 4)
+
+        # (c) 단일 연도는 경계 조회 2회로 끝난다(내부 probe 없음)
+        sr.client = lambda: make(["2026-01-01", "2026-12-31"])
+        calls["n"] = 0
+        check("단일 연도 = 요청 2회", sr.get_schedule_years() == [2026] and calls["n"] == 2)
+
+        # (d) 오염된 work_date 로 구간이 폭발하면 probe 를 포기하고 전량 스캔으로 폴백한다.
+        #     상한을 잘라 연도를 누락시키지 않는다 — 값 계약은 그대로 유지된다.
+        scanned = {"n": 0}
+
+        def fake_select_all(_table, _columns="*", _query_builder=None):
+            scanned["n"] += 1
+            return [{"work_date": d} for d in ["2025-01-01", "9999-12-31"]]
+
+        sr._select_all = fake_select_all
+        sr.client = lambda: make(["2025-01-01", "9999-12-31"])
+        calls["n"] = 0
+        years = sr.get_schedule_years()
+        check("구간 폭 초과 시 전량 스캔 폴백", scanned["n"] == 1)
+        check("폴백해도 값 계약(기록 있는 연도) 유지", years == [2025, 9999])
+        check("폴백 시 probe 를 발행하지 않는다(경계 조회 2회뿐)", calls["n"] == 2)
+    finally:
+        sr.client, sr._execute, sr._select_all = saved
+
+
+def test_month_schedules_id_chunking() -> None:
+    """월 조회의 user_id in_() 청킹 — 분할해도 행이 누락되지 않고 정렬 계약이 유지된다."""
+    from modules import supabase_repository as sr
+
+    size = sr.IN_FILTER_CHUNK
+    emps = [f"E{i:04d}" for i in range(size + 2)]
+    ids = {emp: 500 + i for i, emp in enumerate(emps)}
+    id_chunks: list[list[int]] = []
+
+    class _Q:
+        def in_(self, _col, values):
+            id_chunks.append(list(values))
+            return self
+
+        def gte(self, *_a):
+            return self
+
+        def lt(self, *_a):
+            return self
+
+        def order(self, *_a, **_k):
+            return self
+
+    def fake_select_all(_table, _columns="*", query_builder=None):
+        q = _Q()
+        if query_builder is not None:
+            query_builder(q)
+        picked = id_chunks[-1]
+        # 같은 날짜 2건 + 다른 날짜 1건 — 정렬 계약(work_date, user_id) 확인용
+        rows = [{"user_id": u, "work_date": "2026-07-02", "work_type_code": "주", "note": ""}
+                for u in picked]
+        rows += [{"user_id": picked[0], "work_date": "2026-07-01",
+                  "work_type_code": "야", "note": ""}]
+        return rows
+
+    saved = (sr._user_maps, sr._select_all)
+    try:
+        sr._user_maps = lambda emp_nos=None: (
+            {e: ids[e] for e in (emp_nos or []) if e in ids},
+            {str(ids[e]): e for e in (emp_nos or []) if e in ids},
+        )
+        sr._select_all = fake_select_all
+        frame = sr.get_month_schedules(emps, 2026, 7)
+        check(f"user_id in_() 가 {size} 단위로 분할된다",
+              [len(c) for c in id_chunks] == [size, 2])
+        check("청크 결과가 누락 없이 합쳐진다",
+              len(frame) == len(emps) + len(id_chunks))
+        check("합쳐도 사번 전건이 살아 있다",
+              set(frame["emp_no"]) == set(emps))
+        check("정렬 계약(work_date → user_id) 유지",
+              list(frame["duty_date"]) == sorted(frame["duty_date"]))
+        first = frame.iloc[0]
+        check("가장 이른 날짜 행이 앞에 온다", first["duty_date"] == "2026-07-01")
+    finally:
+        sr._user_maps, sr._select_all = saved
+
+
 def main() -> int:
     for test in (
         test_normalize_schedule_month,
@@ -2051,6 +2214,8 @@ def main() -> int:
         test_schedule_edit_attendance_scope,
         test_schedule_edit_row_add_and_paste,
         test_schedule_edit_work_type_name_axis,
+        test_schedule_year_options_query,
+        test_month_schedules_id_chunking,
     ):
         test()
     print(f"\nALL PASSED ({PASSED} checks)")

@@ -21,12 +21,22 @@ from modules import config, validators
 # 사진 관련 로그는 보고서 id 와 스토리지 객체 경로(near-miss/{id}/{uuid}.jpg)만 남긴다.
 _LOG = logging.getLogger("duty.supabase_repository")
 
-# id↔자연키 매핑 memoize 의 ttl(초). db.py 파사드 읽기 캐시와 같은 짧은 staleness
-# 안전망을 쓴다 — 쓰기 후에는 db.py 의 _invalidate_* 가 이 매핑 캐시도 함께 비운다.
-_MAP_CACHE_TTL = 30
+# id↔자연키 매핑 memoize 의 ttl(초). 매핑 대상(부서·조·조직그룹 코드, 사번↔user_id)은
+# 기준정보이고, 쓰기 후에는 db.py 의 _invalidate_* 가 이 매핑 캐시도 함께 비우므로
+# TTL 은 "앱 밖에서 바뀐 경우"의 상한일 뿐이다 — db.py 의 기준정보 TTL 과 맞춘다.
+# 이 캐시에는 role·is_active 같은 신분·권한 값이 들어 있지 않다(id↔코드만).
+# 매핑에 없는 참조는 종전대로 _mapped 가 오류로 올린다(빈 값으로 만들지 않는다).
+_MAP_CACHE_TTL = 300
 
 PAGE_SIZE = 1000
 WRITE_BATCH_SIZE = 500
+# in_() 필터 인자 청크 크기. PostgREST 는 필터를 URL 쿼리스트링으로 보내므로 id 목록이
+# 길면 URL 길이 한계에 걸린다 — 목록 조회를 이 크기로 끊어 여러 번 호출한다.
+IN_FILTER_CHUNK = 200
+# 연도 선택지 probe 를 허용하는 최대 구간 폭(년). work_date 에 범위 CHECK 가 없어
+# 오염된 1건이 구간을 좌우할 수 있으므로, 이 폭을 넘으면 probe 대신 전량 스캔으로
+# 폴백한다(get_schedule_years). 30년이면 실사용 이력을 충분히 덮는다.
+_SCHEDULE_YEAR_PROBE_SPAN = 30
 REQUIRED_TABLES = ("departments", "teams", "users", "work_types", "work_schedules")
 # tracks_attendance: 근태(근무표) 등록 대상 부서 지정 (도입: migration 011).
 _BOOLEAN_COLUMNS = {"is_active", "is_work", "affects_allowance", "tracks_attendance"}
@@ -253,6 +263,12 @@ def _select_all(table: str, columns: str = "*", query_builder=None) -> list[dict
 def _chunks(records: list[dict], size: int = WRITE_BATCH_SIZE):
     for start in range(0, len(records), size):
         yield records[start:start + size]
+
+
+def _filter_chunks(values: list, size: int = IN_FILTER_CHUNK):
+    """in_() 필터에 실을 값 목록을 URL 길이 한계 안쪽 청크로 끊는다."""
+    for start in range(0, len(values), size):
+        yield values[start:start + size]
 
 
 def _upsert(table: str, records: list[dict], on_conflict: str) -> None:
@@ -505,12 +521,25 @@ def _team_maps() -> tuple[dict[tuple[str, str], int], dict[str, str]]:
 
 @st.cache_data(ttl=_MAP_CACHE_TTL, show_spinner=False)
 def _user_maps(emp_nos: Iterable[str] | None = None) -> tuple[dict[str, int], dict[str, str]]:
+    """사번 필터(없으면 전체)로 ({사번: id}, {"id": 사번}) 두 맵을 만든다.
+
+    반환 계약은 불변이다. 사번 목록이 길면 IN_FILTER_CHUNK 단위로 끊어 조회하고 합친다
+    — in_() 인자는 URL 쿼리스트링이라 인원이 늘면 길이 한계에 걸린다(이 저장소에서 가장
+    긴 in_() 가 여기다). 청크가 1개면 종전과 같은 요청 1회다.
+    """
     normalized = sorted({str(value).strip() for value in (emp_nos or []) if str(value).strip()})
 
-    def filtered(query):
-        return query.in_("emp_no", normalized) if normalized else query
-
-    rows = _select_all("users", "id,emp_no", filtered if normalized else None)
+    rows: list[dict] = []
+    if normalized:
+        for chunk in _filter_chunks(normalized):
+            rows.extend(_select_all(
+                "users", "id,emp_no",
+                lambda query, picked=chunk: query.in_("emp_no", picked).order("emp_no"),
+            ))
+    else:
+        # order 필수 — _select_all 은 range() 페이지네이션이라 정렬 없이는 페이지 경계에서
+        # 행 순서가 보장되지 않는다(사용자 1000명 초과 시 누락·중복).
+        rows = _select_all("users", "id,emp_no", lambda query: query.order("emp_no"))
     by_emp = {
         str(_required(row, "users", "emp_no")): _required(row, "users", "id")
         for row in rows
@@ -1436,8 +1465,16 @@ def upsert_month_assignments(records: list[dict], require_shift: bool = True) ->
     return result
 
 
-def _schedule_rows(query_builder=None) -> pd.DataFrame:
-    _, emp_by_id = _user_maps()
+def _schedule_rows(query_builder=None, *, emp_by_id: dict[str, str] | None = None) -> pd.DataFrame:
+    """work_schedules 행을 자연키(emp_no) 프레임으로 바꾼다.
+
+    ``emp_by_id`` 는 호출부가 **이미 해석해 둔** user_id→emp_no 맵이다. 조회를 그 맵의
+    사용자로 한정한 경우(예: 월별·개인별)에 넘기면 users 전체를 다시 받지 않는다.
+    넘기지 않으면 종전대로 전체 맵을 쓴다. 어느 쪽이든 매핑에 없는 user_id 는
+    ``_mapped`` 가 오류로 올린다(모르는 참조를 빈 값으로 만들지 않는다).
+    """
+    if emp_by_id is None:
+        _, emp_by_id = _user_maps()
     rows = _select_all(
         "work_schedules",
         "user_id,work_date,work_type_code,note",
@@ -1467,30 +1504,114 @@ def get_schedules() -> pd.DataFrame:
     return _schedule_rows(lambda query: query.order("work_date").order("user_id"))
 
 
+def _first_work_date(descending: bool) -> str:
+    """work_schedules 의 가장 이르거나 늦은 work_date(없으면 빈 문자열)."""
+    query = (
+        client().table("work_schedules")
+        .select("work_date")
+        .order("work_date", desc=descending)
+        .limit(1)
+    )
+    rows = _execute(query, "조회", "work_schedules").data or []
+    return str(rows[0]["work_date"]) if rows else ""
+
+
+def _schedule_years_by_scan() -> list[int]:
+    """work_date 전량을 훑어 연도 집합을 만든다(폴백 경로 — 종전 방식과 같은 결과)."""
+    rows = _select_all("work_schedules", "work_date", lambda query: query.order("work_date"))
+    return sorted({
+        int(str(row["work_date"])[:4])
+        for row in rows
+        if str(row.get("work_date") or "")[:4].isdigit()
+    })
+
+
+def get_schedule_years() -> list[int]:
+    """근무 기록이 **있는** 연도 목록(오름차순).
+
+    화면 연도 선택지 전용 조회다. 값 계약은 전 행을 받아 연도를 모으던 방식과 같고
+    (기록 없는 연도는 나오지 않는다), 조회 비용만 다르다: 최소·최대 work_date 2회 +
+    경계 사이 내부 연도만 존재 probe 1회씩. 경계 연도는 정의상 기록이 있으므로 probe
+    하지 않는다. 스키마 변경 없이 동작한다.
+
+    **폴백**: work_date 에 범위 CHECK 가 없어(001 스키마) 오염된 행 1건이 구간 폭을
+    좌우할 수 있고, 그러면 순차 probe 수가 폭발한다(예: 9999년 행 1건 → probe 수천 회).
+    구간 폭이 _SCHEDULE_YEAR_PROBE_SPAN 을 넘으면 probe 를 포기하고 전량 스캔으로
+    떨어진다 — 정상 데이터는 빠르고, 오염 데이터도 종전 방식과 같은 비용·같은 결과가
+    된다. 상한을 잘라 연도를 누락시키지 않는다(값 계약은 "기록이 있는 연도"다).
+    """
+    first = _first_work_date(False)
+    if not first:
+        return []
+    last = _first_work_date(True) or first
+    start, end = int(first[:4]), int(last[:4])
+    if end < start:
+        start, end = end, start
+    if end - start + 1 > _SCHEDULE_YEAR_PROBE_SPAN:
+        _LOG.warning(
+            "work_schedules 의 work_date 구간이 %d년(%d~%d)입니다 — 연도 probe 대신 "
+            "전량 스캔으로 폴백합니다. 범위를 벗어난 work_date 행이 있는지 확인하세요.",
+            end - start + 1, start, end,
+        )
+        return _schedule_years_by_scan()
+    years = [start]
+    for year in range(start + 1, end):
+        probe = (
+            client().table("work_schedules")
+            .select("work_date")
+            .gte("work_date", f"{year}-01-01")
+            .lte("work_date", f"{year}-12-31")
+            .limit(1)
+        )
+        if _execute(probe, "조회", "work_schedules").data:
+            years.append(year)
+    if end != start:
+        years.append(end)
+    return years
+
+
 def get_user_schedules(emp_no: str) -> pd.DataFrame:
-    user_by_emp, _ = _user_maps([emp_no])
+    user_by_emp, emp_by_id = _user_maps([emp_no])
     user_id = user_by_emp.get(str(emp_no).strip())
     if user_id is None:
         return _frame([], ["emp_no", "duty_date", "work_type_code", "note"], "work_schedules")
     return _schedule_rows(
-        lambda query: query.eq("user_id", user_id).order("work_date")
+        lambda query: query.eq("user_id", user_id).order("work_date"),
+        emp_by_id=emp_by_id,  # 조회를 이 사용자로 한정 — users 전체 재조회 불필요
     )
 
 
 def get_month_schedules(emp_nos: Iterable[str], year: int, month: int) -> pd.DataFrame:
     normalized = sorted({str(value).strip() for value in emp_nos if str(value).strip()})
-    user_by_emp, _ = _user_maps(normalized)
+    user_by_emp, emp_by_id = _user_maps(normalized)
     user_ids = list(user_by_emp.values())
     if not user_ids:
         return _frame([], ["emp_no", "duty_date", "work_type_code", "note"], "work_schedules")
     start = date(int(year), int(month), 1)
     next_month = date(start.year + (start.month == 12), 1 if start.month == 12 else start.month + 1, 1)
-    return _schedule_rows(
-        lambda query: query.in_("user_id", user_ids)
-        .gte("work_date", start.isoformat())
-        .lt("work_date", next_month.isoformat())
-        .order("work_date")
-        .order("user_id")
+    def rows_for(picked: list[int]) -> pd.DataFrame:
+        return _schedule_rows(
+            lambda query: query.in_("user_id", picked)
+            .gte("work_date", start.isoformat())
+            .lt("work_date", next_month.isoformat())
+            .order("work_date")
+            .order("user_id"),
+            emp_by_id=emp_by_id,  # 조회를 이 사번 집합으로 한정 — users 전체 재조회 불필요
+        )
+
+    # in_() 인자 URL 길이 한계 — 인원이 IN_FILTER_CHUNK 를 넘으면 끊어 조회한다.
+    chunks = list(_filter_chunks(sorted(int(uid) for uid in user_ids)))
+    if len(chunks) == 1:
+        return rows_for(chunks[0])
+    # 청크가 여럿일 때도 DB 정렬(work_date, user_id)을 그대로 재현한다 — 청킹 때문에
+    # 행 순서 계약이 바뀌지 않게 한다.
+    id_of = {emp: int(uid) for emp, uid in user_by_emp.items()}
+    merged = pd.concat([rows_for(chunk) for chunk in chunks], ignore_index=True)
+    return (
+        merged.assign(_uid=merged["emp_no"].map(id_of))
+        .sort_values(["duty_date", "_uid"], kind="mergesort")
+        .drop(columns="_uid")
+        .reset_index(drop=True)
     )
 
 
@@ -3230,6 +3351,34 @@ def _user_id_of(emp_no: str) -> int:
     return int(rows[0]["id"])
 
 
+def _bulk_user_ids(emp_nos) -> tuple[dict[str, int], dict[str, str]]:
+    """사번 목록 → ({사번: user_id}, {"user_id": 사번}). 순서 보존·중복 제거.
+
+    단건 ``_user_id_of`` 와 같은 실패 계약을 유지한다 — 해석되지 않는 사번이 하나라도
+    있으면 값을 만들어내지 않고 ``SupabaseDataError`` 를 올린다(호출부는 이 오류를
+    '조회 실패'로 표시하고 빈 값으로 덮어쓰지 않는다). 사번→id 해석은 캐시된
+    ``_user_maps`` 를 청크 단위로 재사용하므로 사번 수와 무관하게 요청 수가 적다.
+    """
+    wanted: list[str] = []
+    seen: set[str] = set()
+    for value in emp_nos or []:
+        emp = str(value).strip()
+        if emp and emp not in seen:
+            seen.add(emp)
+            wanted.append(emp)
+    by_emp: dict[str, int] = {}
+    by_id: dict[str, str] = {}
+    for chunk in _filter_chunks(wanted):
+        emp_map, id_map = _user_maps(chunk)
+        by_emp.update(emp_map)
+        by_id.update(id_map)
+    missing = [emp for emp in wanted if emp not in by_emp]
+    if missing:
+        shown = ", ".join(missing[:5]) + (" 외 %d건" % (len(missing) - 5) if len(missing) > 5 else "")
+        raise SupabaseDataError(f"사용자를 찾을 수 없습니다: {shown}")
+    return by_emp, by_id
+
+
 def get_user_capabilities(emp_no: str) -> list[str]:
     """부여된 capability 코드 목록(정렬). 010 미적용이면 빈 목록."""
     if not capabilities_ready():
@@ -3237,6 +3386,37 @@ def get_user_capabilities(emp_no: str) -> list[str]:
     uid = _user_id_of(emp_no)
     rows = _select_all("user_capabilities", "capability", lambda q: q.eq("user_id", uid))
     return sorted({str(r["capability"]).strip() for r in rows})
+
+
+def get_user_capabilities_bulk(emp_nos) -> dict[str, list[str]]:
+    """사번 목록 → {사번: capability 코드 목록(정렬)}. 010 미적용이면 빈 dict.
+
+    결과 계약: 요청한 사번마다 ``get_user_capabilities(사번)`` 와 같은 값을 담는다
+    (부여 없음 = 빈 목록). 사번당 2회 왕복(id 해석 + 조회)을 청크 단위 2회로 줄일
+    뿐이고 값·정렬·오류 계약은 단건과 동일하다.
+
+    **현재 호출부 없음** — 죽은 코드로 오해해 지우지 말 것. 상세 편집은 선택한 1명만
+    보므로 단건 경로(``get_user_capabilities``)를 쓰는 것이 맞고, 이 함수는 목록 화면이
+    담당 열을 갖게 될 때를 위한 이메일 bulk 의 짝이다(계약 테스트로 잠겨 있다).
+    """
+    if not capabilities_ready():
+        return {}
+    by_emp, by_id = _bulk_user_ids(emp_nos)
+    out: dict[str, set[str]] = {emp: set() for emp in by_emp}
+    ids = sorted({int(uid) for uid in by_emp.values()})
+    for chunk in _filter_chunks(ids):
+        rows = _select_all(
+            "user_capabilities", "user_id,capability",
+            # order 필수 — _select_all 은 range() 로 페이지를 넘기는데 ORDER BY 없는
+            # LIMIT/OFFSET 은 행 순서가 보장되지 않아 페이지 경계에서 누락·중복이 난다.
+            lambda query, picked=chunk: query.in_("user_id", picked).order("user_id"),
+        )
+        for row in rows:
+            emp = by_id.get(str(row["user_id"]))
+            if emp is None:  # 요청 범위 밖(동시 변경) — 만들어내지 않고 버린다
+                continue
+            out[emp].add(str(row["capability"]).strip())
+    return {emp: sorted(caps) for emp, caps in out.items()}
 
 
 def set_user_capabilities(emp_no: str, caps: list[str], *, actor_emp_no: str = "") -> None:
@@ -3279,6 +3459,38 @@ def get_user_emails(emp_no: str) -> list[dict]:
         ({"email": str(r["email"]).strip(), "scope": str(r["scope"]).strip()} for r in rows),
         key=lambda r: (r["scope"], r["email"]),
     )
+
+
+def get_user_emails_bulk(emp_nos) -> dict[str, list[dict]]:
+    """사번 목록 → {사번: [{email, scope}] (scope→email 정렬)}. 010 미적용이면 빈 dict.
+
+    결과 계약: 요청한 사번마다 ``get_user_emails(사번)`` 와 같은 값을 담는다(등록 없음
+    = 빈 목록). 사번당 2회 왕복 대신 사번→id 해석 1회 + user_emails 조회 1회(청크 단위)
+    만 쓴다 — ``notification_recipients`` 의 ``in_("user_id", ids)`` 와 같은 패턴이다.
+    """
+    if not capabilities_ready():
+        return {}
+    by_emp, by_id = _bulk_user_ids(emp_nos)
+    out: dict[str, list[dict]] = {emp: [] for emp in by_emp}
+    ids = sorted({int(uid) for uid in by_emp.values()})
+    for chunk in _filter_chunks(ids):
+        rows = _select_all(
+            "user_emails", "user_id,email,scope",
+            # order 필수 — 위 user_capabilities 와 같은 이유(페이지 경계 누락·중복 방지).
+            # 이쪽은 append 라 중복이 흡수되지 않고 추가 주소 수를 부풀린다.
+            lambda query, picked=chunk: query.in_("user_id", picked).order("user_id"),
+        )
+        for row in rows:
+            emp = by_id.get(str(row["user_id"]))
+            if emp is None:  # 요청 범위 밖(동시 변경) — 만들어내지 않고 버린다
+                continue
+            out[emp].append({
+                "email": str(row["email"]).strip(),
+                "scope": str(row["scope"]).strip(),
+            })
+    for rows_of in out.values():
+        rows_of.sort(key=lambda r: (r["scope"], r["email"]))
+    return out
 
 
 def set_user_emails(emp_no: str, rows: list[dict], *, actor_emp_no: str = "") -> None:

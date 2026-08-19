@@ -319,6 +319,8 @@ def render(user: dict) -> None:
 
     # 새로고침 의도는 렌더 시작에서 소비(재적재 판단). 나머지 액션은 그리드 렌더 뒤 소비.
     refresh_dept = _OD.take_action(REFRESH)
+    if refresh_dept:
+        db.refresh_reference_data("organization")  # 캐시를 비워야 실제 재조회가 된다
     _drop_stale_dept_draft()  # 컬럼 계약이 바뀐 코드로 갱신된 세션의 옛 draft 폐기
 
     cond = erp.condition_panel(

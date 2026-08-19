@@ -305,12 +305,14 @@ def _email_map(emp_nos) -> tuple[dict[str, str], dict[str, int], str]:
     if not db.capabilities_ready():
         return {}, {}, _EMAIL_NOT_READY_MSG
     try:
-        for emp in emps:
-            rows = db.get_user_emails(emp)
-            primary[emp] = _primary_email(rows)
-            extra[emp] = _extra_email_count(rows)
+        # 목록 1회 조회(사번당 2회 왕복하던 N+1 제거). 값·오류 계약은 단건과 동일하다.
+        rows_of = db.get_user_emails_bulk(emps)
     except db.DATA_SOURCE_ERRORS as exc:
         return {}, {}, f"알림 이메일을 불러오지 못했습니다: {exc}"
+    for emp in emps:
+        rows = rows_of.get(emp, [])
+        primary[emp] = _primary_email(rows)
+        extra[emp] = _extra_email_count(rows)
     return primary, extra, ""
 
 
@@ -1117,6 +1119,10 @@ def render(user: dict) -> None:
             st.rerun()
 
     refresh = state.take_action(REFRESH)
+    if refresh:
+        # 새로고침은 '다시 읽는다'는 뜻이다 — 읽기 캐시를 이 화면 범위만 좁게
+        # 비워야 아래 재적재가 실제 재조회가 된다(전역 clear 는 쓰지 않는다).
+        db.refresh_reference_data("users")
 
     # ---- 조건 패널(우측 인라인 라벨, KP-standard) — 위젯 key 는 기존 필터 세션 key
     #      상수(_F_ACTIVE/_F_DEPT/_F_ROLE/_F_SEARCH)를 widget_key 로 그대로 지정해

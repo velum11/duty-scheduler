@@ -1366,13 +1366,14 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
             st.session_state.get(f"{page_id}_refreshgen", 0) + 1
         )
 
-    scheds = db.get_schedules()
     depts = db.get_departments()
     teams = db.get_teams()
     today = date.today()
 
-    months = sorted({s[:7] for s in scheds["duty_date"]}) if not scheds.empty else []
-    years = sorted({int(m[:4]) for m in months} | {today.year})
+    # 연도 선택지 전용 조회 — 이 값 말고는 쓰이지 않으므로 근무표 전 행을 받지 않는다
+    # (그리드 데이터는 아래에서 월 범위로 따로 조회한다). 선택지 집합은 종전과 같다:
+    # 기록이 있는 연도 ∪ 올해.
+    years = sorted(set(db.get_schedule_years()) | {today.year})
 
     dept_names = {r["dept_code"]: r["dept_name"] for _, r in depts.iterrows()}
     # 근태 등록 대상 부서(조직 관리 지정) — 이 화면의 조회 범위. 판단 근거는 위

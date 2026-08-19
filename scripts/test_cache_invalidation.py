@@ -308,6 +308,116 @@ def test_no_change_no_write() -> None:
     check("변경 없음: 빈 원장 반환", result.ok and not result.saved_keys)
 
 
+
+# ===========================================================================
+# 읽기 TTL 분리 + 새로고침 무효화 경로 (성능 개선 2026-08-19 계약)
+# ===========================================================================
+def test_read_ttl_separation() -> None:
+    print("읽기 TTL 분리: 기준정보 vs 트랜잭션·신분")
+    import inspect
+
+    lines = inspect.getsource(db).splitlines()
+
+    def ttl_of(name: str) -> str:
+        """@st.cache_data(ttl=X) 데코레이터가 붙은 조회 함수의 TTL 상수 이름."""
+        target = "def " + name + "("
+        for i, line in enumerate(lines):
+            if line.startswith(target) and i and "cache_data(ttl=" in lines[i - 1]:
+                return lines[i - 1].split("ttl=")[1].split(",")[0].strip()
+        return ""
+
+    check("기준정보 TTL 과 트랜잭션 TTL 이 서로 다른 값으로 유지",
+          db._REFERENCE_TTL != db._READ_TTL)
+    check("트랜잭션 TTL 은 30초", db._READ_TTL == 30)
+    check("기준정보 TTL 은 300초 이상", db._REFERENCE_TTL >= 300)
+    ref = ("_fetch_departments", "_fetch_teams", "_fetch_work_types", "_fetch_shift_groups",
+           "_fetch_organization_groups", "_fetch_departments_org", "_fetch_teams_org")
+    got_ref = {name: ttl_of(name) for name in ref}
+    check("기준정보 조회는 _REFERENCE_TTL 을 쓴다",
+          all(v == "_REFERENCE_TTL" for v in got_ref.values()))
+    # users 는 role/is_active 를 실어 로그인 게이트(auth → find_user_by_emp_no)가 읽는다 —
+    # 비활성 계정이 TTL 동안 로그인 가능해지지 않도록 짧은 TTL 을 유지한다.
+    check("사용자 조회는 트랜잭션 TTL 유지(로그인 is_active 게이트 staleness 상한)",
+          ttl_of("_fetch_users") == "_READ_TTL")
+    trans = ("_fetch_schedules", "_fetch_schedule_years", "_fetch_month_schedules",
+             "_fetch_month_assignments", "_fetch_near_miss")
+    got_tr = {name: ttl_of(name) for name in trans}
+    check("근무·편성·아차사고 조회는 트랜잭션 TTL 유지",
+          all(v == "_READ_TTL" for v in got_tr.values()))
+
+
+class _ClearSpy:
+    """cache_data 객체의 .clear() 만 흉내내는 스텁."""
+
+    def __init__(self) -> None:
+        self.cleared = False
+
+    def clear(self) -> None:
+        self.cleared = True
+
+
+def test_schedule_years_cache_invalidated() -> None:
+    print("연도 선택지 캐시: 근무 저장 시 함께 무효화")
+    p = _Patch()
+    spy = _ClearSpy()
+    p.set(db, "_fetch_schedule_years", spy)
+    db._invalidate_schedules()
+    p.undo()
+    check("_invalidate_schedules 가 연도 선택지 캐시도 비운다", spy.cleared is True)
+
+    # 쓰기 파사드에서도 같은 경로를 타는지(대표 1개로 확인)
+    p = _Patch()
+    spy2 = _ClearSpy()
+    p.set(db, "_fetch_schedule_years", spy2)
+    p.set(supabase_repository, "upsert_schedules", lambda *_a, **_k: None)
+    db.save_schedules(pd.DataFrame([_SCHED_ROW]))
+    p.undo()
+    check("save_schedules 후에도 연도 선택지 캐시가 비워진다", spy2.cleared is True)
+
+
+def test_refresh_reference_data_scope() -> None:
+    print("기준정보 새로고침: 화면 범위만 좁게 무효화(전역 clear 금지)")
+    names = ("_invalidate_users", "_invalidate_departments", "_invalidate_teams",
+             "_invalidate_groups", "_invalidate_work_types", "_invalidate_schedules",
+             "_invalidate_assignments", "_invalidate_near_miss")
+    calls: list[str] = []
+    p = _Patch()
+    for name in names:
+        p.set(db, name, (lambda n: (lambda *_a, **_k: calls.append(n)))(name))
+
+    db.refresh_reference_data("work_types")
+    check("work_types 범위 = 근무형태만", calls == ["_invalidate_work_types"])
+    calls.clear()
+    db.refresh_reference_data("users")
+    check("users 범위 = 사용자 + 화면이 함께 보이는 부서·조",
+          set(calls) == {"_invalidate_users", "_invalidate_departments", "_invalidate_teams"})
+    calls.clear()
+    db.refresh_reference_data("organization")
+    check("organization 범위 = 그룹 + 부서 + 조",
+          set(calls) == {"_invalidate_groups", "_invalidate_departments", "_invalidate_teams"})
+    check("어느 범위도 근무·편성·아차사고 캐시를 건드리지 않는다",
+          not ({"_invalidate_schedules", "_invalidate_assignments", "_invalidate_near_miss"}
+               & set(calls)))
+    bad = ""
+    try:
+        db.refresh_reference_data("nope")
+    except ValueError as exc:
+        bad = str(exc)
+    p.undo()
+    check("모르는 범위는 조용히 통과하지 않는다(fail-closed)", "알 수 없는" in bad)
+
+
+def test_refresh_wired_into_master_screens() -> None:
+    print("기준정보 3화면: 새로고침 액션이 실제로 재조회가 되는가")
+    for path, scope in (("views/master_users.py", '"users"'),
+                        ("views/master_org.py", '"organization"'),
+                        ("views/master_work_types.py", '"work_types"')):
+        src = (ROOT / path).read_text(encoding="utf-8")
+        check(f"{path}: 새로고침이 자기 범위 캐시를 비운다",
+              f"refresh_reference_data({scope})" in src)
+        check(f"{path}: 전역 캐시 초기화를 쓰지 않는다", "st.cache_data.clear()" not in src)
+
+
 def main() -> int:
     print("=" * 70)
     print("cache invalidation finally 계약 (순수 mock, 무네트워크)")
@@ -319,6 +429,10 @@ def main() -> int:
     test_deactivate_user()
     test_save_departments_report()
     test_no_change_no_write()
+    test_read_ttl_separation()
+    test_schedule_years_cache_invalidated()
+    test_refresh_reference_data_scope()
+    test_refresh_wired_into_master_screens()
     print("-" * 70)
     if FAIL:
         print(f"{PASS} passed, {len(FAIL)} failed")

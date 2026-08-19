@@ -249,6 +249,15 @@ def test_page_scope():
     check("화면 간 save flag 격리", s.action_key("save") != other.action_key("save"))
 
 
+def test_refresh_invalidates_reads():
+    """새로고침은 '다시 읽는다' — 읽기 캐시를 이 화면 범위만 좁게 비운 뒤 재적재한다."""
+    src = inspect.getsource(mu)
+    check("새로고침이 기준정보 캐시를 실제로 비운다",
+          'db.refresh_reference_data("users")' in src)
+    check("전역 캐시 초기화(st.cache_data.clear)는 쓰지 않는다",
+          "st.cache_data.clear()" not in src)
+
+
 def test_source_guards():
     src = inspect.getsource(mu)
     render_src = inspect.getsource(mu.render)
@@ -732,6 +741,70 @@ def test_admin_editor_targets():
     check("대상 사번 파싱 규칙 유지(사번 · 성명)", 'split(" · ", 1)[0]' in src)
 
 
+def _email_map_bulk_app():
+    """목록 1회 조회(bulk)가 단건 반복과 같은 값을 내는지 — sample 세션 스토어로 왕복."""
+    import streamlit as _st
+    from modules import config as _cfg
+    from modules import db as _db
+    from views import master_users as _mu
+
+    cap = next(iter(_cfg.CAPABILITIES))
+    _db.set_user_emails("1001", [
+        {"email": "aa@x.com", "scope": _cfg.EMAIL_SCOPE_ALL},
+        {"email": "zz@x.com", "scope": _cfg.EMAIL_SCOPE_ALL},
+        {"email": "duty@x.com", "scope": cap},
+    ])
+    _db.set_user_emails("1002", [])
+    emps = ["1001", "1002"]
+
+    bulk = _db.get_user_emails_bulk(emps)
+    _st.session_state["bulk_eq"] = bulk == {e: _db.get_user_emails(e) for e in emps}
+    primary, extra, err = _mu._email_map(emps)
+    _st.session_state["map_primary"] = dict(primary)
+    _st.session_state["map_extra"] = dict(extra)
+    _st.session_state["map_err"] = err
+
+    # 조회가 실패하면 값을 만들어내지 않고 사유를 돌려준다(이메일 열 조회 전용 전환 근거).
+    saved = _db.get_user_emails_bulk
+
+    def _boom(_emps):
+        raise _db.DATA_SOURCE_ERRORS[1]("mock 조회 실패")
+
+    try:
+        _mu.db.get_user_emails_bulk = _boom
+        _st.session_state["map_failed"] = _mu._email_map(emps)
+    finally:
+        _mu.db.get_user_emails_bulk = saved
+
+
+def test_email_map_bulk_contract():
+    """N+1 제거(목록 1회 조회)가 단건 반복과 동일한 값·실패 계약을 유지한다."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except Exception as exc:  # noqa: BLE001
+        print(f"[SKIP] AppTest 미가용: {exc}")
+        return
+    at = AppTest.from_function(_email_map_bulk_app, default_timeout=60).run()
+    check("bulk 계약 probe 예외 없음", not at.exception, str(at.exception))
+    if at.exception:
+        return
+    check("bulk[사번] == 단건 get_user_emails(사번) (전건)", at.session_state["bulk_eq"] is True)
+    check("_email_map 대표 주소 = ALL scope 최소값",
+          at.session_state["map_primary"].get("1001") == "aa@x.com",
+          str(at.session_state["map_primary"]))
+    check("_email_map 추가 주소 수(대표 제외)",
+          at.session_state["map_extra"].get("1001") == 2
+          and at.session_state["map_extra"].get("1002") == 0,
+          str(at.session_state["map_extra"]))
+    check("정상 조회는 사유 없음", at.session_state["map_err"] == "")
+    p2, e2, err2 = at.session_state["map_failed"]
+    check("bulk 조회 실패는 빈 값 위조가 아니라 사유로 표면화",
+          p2 == {} and e2 == {} and err2.startswith("알림 이메일을 불러오지 못했습니다"), str(err2))
+    src = inspect.getsource(mu._email_map)
+    check("화면은 사번당 단건 조회(N+1)를 하지 않는다",
+          "get_user_emails_bulk" in src and "db.get_user_emails(" not in src)
+
+
 def test_email_map_not_ready():
     """010 미준비면 값을 만들지 않고 사유를 돌려준다(조회 전용 전환 근거)."""
     orig = mu.db.capabilities_ready
@@ -793,6 +866,7 @@ def main():
     test_new_row_filled()
     test_page_scope()
     test_source_guards()
+    test_refresh_invalidates_reads()
     test_render_apptest()
     test_renderers_are_components()
     test_editable_gate()
@@ -813,6 +887,7 @@ def main():
     test_email_save_roundtrip()
     test_admin_editor_targets()
     test_email_map_not_ready()
+    test_email_map_bulk_contract()
     test_summary_chips_empty_keeps_filter()
 
     print("-" * 60)

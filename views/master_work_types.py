@@ -706,6 +706,8 @@ def _add_row(state: DraftState, grid_df: pd.DataFrame) -> None:
 
 
 def _refresh(state: DraftState, params: dict) -> None:
+    # 캐시를 비워야 _load_editor 가 실제로 다시 읽는다(범위: 근무형태만).
+    db.refresh_reference_data("work_types")
     if state.is_dirty():
         st.session_state[state.pending_query_key] = params
     else:

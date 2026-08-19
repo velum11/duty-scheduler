@@ -81,7 +81,95 @@ def _probe():
     out["rcpt_wr"] = db.notification_recipients("WORK_REQUEST_OFFICER")
     out["ready"] = db.capabilities_ready()
     out["reserved"] = config.EMAIL_SCOPE_ALL not in config.CAPABILITIES
+    # 5) 목록 조회(bulk) == 단건 반복 — N+1 제거가 값을 바꾸지 않는다는 파사드 계약.
+    #    미등록 사번도 포함해 '없는 사번은 빈 값'까지 같은지 본다(sample 계약).
+    emps = ["1001", "1002", "NOSUCH"]
+    out["bulk_caps"] = db.get_user_capabilities_bulk(emps)
+    out["single_caps"] = {e: db.get_user_capabilities(e) for e in emps}
+    out["bulk_emails"] = db.get_user_emails_bulk(emps)
+    out["single_emails"] = {e: db.get_user_emails(e) for e in emps}
+    out["bulk_empty"] = (db.get_user_capabilities_bulk([]) == {}
+                         and db.get_user_emails_bulk([]) == {})
+    out["bulk_norm"] = sorted(db.get_user_emails_bulk(["  1001 ", "1001", ""]))
     st.session_state["_cap_out"] = out
+
+
+
+# ---------------------------------------------------------------------------
+# 저장소 계층 bulk 조회 — 순수 mock(가짜 조회기). 실DB 미접속·쓰기 없음.
+# in_() 인자는 URL 쿼리스트링이라 길면 한계에 걸린다 → IN_FILTER_CHUNK 단위 분할이
+# 계약이다. 분할해도 (a) 결과가 정확히 합쳐지고 (b) 어느 청크에도 없는 사번이 조용히
+# 사라지지 않고 미해석 오류로 잡히는지 고정한다(단건 _user_id_of 와 같은 실패 계약).
+# ---------------------------------------------------------------------------
+def test_bulk_chunking() -> None:
+    from modules import supabase_repository as sr
+
+    size = sr.IN_FILTER_CHUNK
+    emps = [f"E{i:04d}" for i in range(size + 1)]          # 201 → 2 청크
+    ids = {emp: 1000 + i for i, emp in enumerate(emps)}
+
+    emp_chunks: list[list[str]] = []
+    id_chunks: list[list[int]] = []
+
+    def fake_user_maps(emp_nos=None):
+        picked = [str(e).strip() for e in (emp_nos or [])]
+        emp_chunks.append(picked)
+        sub = {e: ids[e] for e in picked if e in ids}
+        return sub, {str(v): k for k, v in sub.items()}
+
+    class _Q:
+        def in_(self, col, values):
+            if col == "user_id":
+                id_chunks.append(list(values))
+            return self
+
+        def order(self, *_a, **_k):
+            return self
+
+    def fake_select_all(table, columns="*", query_builder=None):
+        q = _Q()
+        if query_builder is not None:
+            query_builder(q)
+        picked = id_chunks[-1]
+        if table == "user_emails":
+            return [{"user_id": u, "email": f"u{u}@x.com", "scope": "ALL"} for u in picked]
+        return [{"user_id": u, "capability": "LODGING_OFFICER"} for u in picked]
+
+    saved = (sr._user_maps, sr._select_all, sr.capabilities_ready)
+    try:
+        sr._user_maps = fake_user_maps
+        sr._select_all = fake_select_all
+        sr.capabilities_ready = lambda: True
+
+        got = sr.get_user_emails_bulk(emps)
+        check(f"사번 해석이 {size} 단위로 분할된다",
+              [len(c) for c in emp_chunks] == [size, 1], str([len(c) for c in emp_chunks]))
+        check(f"user_id in_() 도 {size} 단위로 분할된다",
+              [len(c) for c in id_chunks] == [size, 1], str([len(c) for c in id_chunks]))
+        check("청크 결과가 누락 없이 합쳐진다(요청 사번 전건)", set(got) == set(emps))
+        check("경계 넘어간 사번도 자기 주소를 받는다",
+              got[emps[-1]] == [{"email": f"u{ids[emps[-1]]}@x.com", "scope": "ALL"}],
+              str(got.get(emps[-1])))
+        check("합쳐진 결과에 중복 행이 없다", all(len(v) == 1 for v in got.values()))
+
+        id_chunks.clear()
+        emp_chunks.clear()
+        caps = sr.get_user_capabilities_bulk(emps)
+        check("담당 bulk 도 같은 분할·병합 계약",
+              len(caps) == len(emps) and caps[emps[-1]] == ["LODGING_OFFICER"])
+
+        # 두 번째 청크에만 있는 미해석 사번 → 조용히 사라지지 않고 오류로 표면화
+        id_chunks.clear()
+        emp_chunks.clear()
+        raised = ""
+        try:
+            sr.get_user_emails_bulk(emps + ["GHOST"])
+        except sr.SupabaseDataError as exc:
+            raised = str(exc)
+        check("미해석 사번은 빈 값이 아니라 오류(단건과 같은 실패 계약)",
+              "GHOST" in raised, raised or "예외 없음(결함)")
+    finally:
+        sr._user_maps, sr._select_all, sr.capabilities_ready = saved
 
 
 def main() -> None:
@@ -106,6 +194,14 @@ def main() -> None:
           str(o.get("rcpt_wr")))
     check("sample capabilities_ready=True", o.get("ready") is True)
     check("ALL 예약어는 capability 아님", o.get("reserved") is True)
+    check("담당 bulk == 단건 반복(sample)",
+          o.get("bulk_caps") == o.get("single_caps"), str(o.get("bulk_caps")))
+    check("이메일 bulk == 단건 반복(sample)",
+          o.get("bulk_emails") == o.get("single_emails"), str(o.get("bulk_emails")))
+    check("빈 사번 목록은 조회하지 않고 빈 dict", o.get("bulk_empty") is True)
+    check("사번 공백·중복·빈값 정규화(요청 사번 키만)",
+          o.get("bulk_norm") == ["1001"], str(o.get("bulk_norm")))
+    test_bulk_chunking()
 
     print()
     if FAIL:

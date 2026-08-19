@@ -186,13 +186,24 @@ def is_sample_mode() -> bool:
 #    렌더에 즉시 보이게 한다(누락 시 stale 표시 — 이 캐시의 최대 위험).
 _READ_TTL = 30
 
+# 기준정보(조직 그룹·부서·조·근무형태) 읽기 TTL. 이 표들은 분 단위로 바뀌지 않고,
+# 앱을 통한 모든 저장·삭제 경로가 위 계약대로 _invalidate_* 로 즉시 무효화하므로
+# TTL 은 "앱 밖에서 바뀐 경우"의 상한일 뿐이다. 그 경우의 화면 탈출구는
+# refresh_reference_data() 다 — 기준정보 화면의 새로고침 액션이 이 함수로 자기 범위를
+# 비운다(그 경로가 없으면 TTL 만료 전까지 화면에서 되돌릴 방법이 없다).
+#
+# 사용자(users)는 여기 포함하지 않는다 — role/is_active 가 로그인 경로의 캐시 읽기
+# (modules/auth.py → find_user_by_emp_no(use_cache=True))에 실리므로 신분·권한 값의
+# staleness 상한을 늘리지 않는다. 인가 판정 경로는 이미 _uncached_users 로 우회한다.
+_REFERENCE_TTL = 300
 
-@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+
+@st.cache_data(ttl=_REFERENCE_TTL, show_spinner=False)
 def _fetch_departments() -> pd.DataFrame:
     return supabase_repository.get_departments()
 
 
-@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+@st.cache_data(ttl=_REFERENCE_TTL, show_spinner=False)
 def _fetch_teams() -> pd.DataFrame:
     return supabase_repository.get_teams()
 
@@ -202,27 +213,27 @@ def _fetch_users() -> pd.DataFrame:
     return supabase_repository.get_users()
 
 
-@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+@st.cache_data(ttl=_REFERENCE_TTL, show_spinner=False)
 def _fetch_work_types() -> pd.DataFrame:
     return supabase_repository.get_work_types()
 
 
-@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+@st.cache_data(ttl=_REFERENCE_TTL, show_spinner=False)
 def _fetch_shift_groups() -> pd.DataFrame:
     return supabase_repository.get_shift_groups()
 
 
-@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+@st.cache_data(ttl=_REFERENCE_TTL, show_spinner=False)
 def _fetch_organization_groups() -> pd.DataFrame:
     return supabase_repository.get_organization_groups()
 
 
-@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+@st.cache_data(ttl=_REFERENCE_TTL, show_spinner=False)
 def _fetch_departments_org() -> pd.DataFrame:
     return supabase_repository.get_departments_org()
 
 
-@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+@st.cache_data(ttl=_REFERENCE_TTL, show_spinner=False)
 def _fetch_teams_org() -> pd.DataFrame:
     return supabase_repository.get_teams_org()
 
@@ -230,6 +241,11 @@ def _fetch_teams_org() -> pd.DataFrame:
 @st.cache_data(ttl=_READ_TTL, show_spinner=False)
 def _fetch_schedules() -> pd.DataFrame:
     return supabase_repository.get_schedules()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_schedule_years() -> list[int]:
+    return supabase_repository.get_schedule_years()
 
 
 @st.cache_data(ttl=_READ_TTL, show_spinner=False)
@@ -316,6 +332,7 @@ def _invalidate_shift_groups() -> None:
 
 def _invalidate_schedules() -> None:
     _fetch_schedules.clear()
+    _fetch_schedule_years.clear()   # 연도 선택지(work_date 경계) 파생
     _fetch_user_schedules.clear()
     _fetch_month_schedules.clear()
     _fetch_day_schedules.clear()
@@ -341,6 +358,40 @@ def _invalidate_all() -> None:
     _invalidate_schedules()
     _invalidate_assignments()
     _invalidate_near_miss()
+
+
+# --- 화면 '새로고침' 액션용 공개 무효화 ---------------------------------------
+# 왜 필요한가: 기준정보 화면의 새로고침은 로더를 다시 부를 뿐이라, 읽기 캐시가 살아
+# 있으면 같은 프레임이 그대로 돌아온다(= 재조회가 아니다). 앱 밖(SQL 콘솔 등)에서 바뀐
+# 값을 화면에서 되돌릴 유일한 경로이므로 화면이 자기 범위를 명시적으로 비운다.
+# 전역 st.cache_data.clear() 는 쓰지 않는다 — 근무·편성·아차사고 캐시까지 날린다.
+REFERENCE_SCOPES = ("users", "organization", "work_types")
+
+
+def refresh_reference_data(scope: str) -> None:
+    """지정한 기준정보 범위의 읽기 캐시를 비운다(다음 조회가 원격을 다시 읽는다).
+
+    범위는 **그 화면이 표시하는 것 전부**로 잡는다(예: 사용자 관리는 부서·조 라벨도
+    같이 보여주므로 함께 비운다) — 일부만 비우면 새로고침 후에도 화면 일부가 옛 값으로
+    남는다. 과다 무효화 비용은 재조회 1회뿐이고 정확성을 해치지 않는다.
+
+    모르는 범위는 조용히 통과시키지 않고 오류로 올린다(아무것도 안 비운 채 '새로고침
+    했는데 옛 값'이 남는 것을 막는다). sample 모드는 세션 스토어가 권위라 할 일이 없다.
+    """
+    if scope not in REFERENCE_SCOPES:
+        raise ValueError(f"알 수 없는 기준정보 범위: {scope}")
+    if is_sample_mode():
+        return
+    if scope == "users":
+        _invalidate_users()
+        _invalidate_departments()
+        _invalidate_teams()
+    elif scope == "organization":
+        _invalidate_groups()
+        _invalidate_departments()
+        _invalidate_teams()
+    else:
+        _invalidate_work_types()
 
 
 def _typed_empty_frame(columns) -> pd.DataFrame:
@@ -1496,6 +1547,25 @@ def get_schedules() -> pd.DataFrame:
             st.session_state[_SCHEDULES_STORE] = _base_schedules()
         return st.session_state[_SCHEDULES_STORE].copy()
     return _fetch_schedules()
+
+
+def get_schedule_years() -> list[int]:
+    """근무 기록이 있는 연도 목록(오름차순) — 화면 연도 선택지 전용.
+
+    값 계약은 ``get_schedules()`` 전 행에서 연도를 모으던 것과 같다(기록 없는 연도
+    제외). supabase 모드는 경계 조회만 하므로 전 행을 받지 않는다. sample 모드는
+    세션 스토어에서 같은 집합을 만든다(동등성 계약).
+    """
+    if is_sample_mode():
+        frame = get_schedules()
+        if frame.empty:
+            return []
+        return sorted({
+            int(str(value)[:4])
+            for value in frame["duty_date"]
+            if str(value)[:4].isdigit()
+        })
+    return _fetch_schedule_years()
 
 
 def save_schedules(df: pd.DataFrame) -> None:
@@ -3583,6 +3653,36 @@ def get_user_capabilities(emp_no: str) -> list[str]:
     return supabase_repository.get_user_capabilities(emp)
 
 
+def _emp_no_list(emp_nos) -> list[str]:
+    """사번 iterable → 공백 제거·중복 제거·순서 보존 목록(bulk 파사드 공통 입력 정규화)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in (emp_nos if emp_nos is not None else []):
+        emp = str(value).strip()
+        if emp and emp not in seen:
+            seen.add(emp)
+            out.append(emp)
+    return out
+
+
+def get_user_capabilities_bulk(emp_nos) -> dict[str, list[str]]:
+    """사번 목록 → {사번: 담당 코드 목록}. 값 계약은 단건 get_user_capabilities 와 동일.
+
+    supabase 모드에서 사번당 2회 왕복(N+1)을 없애기 위한 목록 조회다. sample 모드는
+    세션 스토어라 원래 N+1 이 아니며, 여기서도 단건과 **같은 값**을 만든다(동등성 계약).
+
+    **현재 호출부 없음** — 상세 편집(선택 1명)은 단건 ``get_user_capabilities`` 를 쓴다.
+    죽은 코드로 오해해 지우지 말 것(이메일 bulk 의 짝, 계약 테스트로 잠겨 있다).
+    """
+    emps = _emp_no_list(emp_nos)
+    if is_sample_mode():
+        store = st.session_state.get(_CAPS_STORE, {})
+        return {emp: sorted(store.get(emp, set())) for emp in emps}
+    if not emps:
+        return {}
+    return supabase_repository.get_user_capabilities_bulk(emps)
+
+
 def set_user_capabilities(emp_no: str, caps: list[str], *, actor_emp_no: str = "") -> None:
     emp = str(emp_no).strip()
     wanted = {str(c).strip() for c in caps if str(c).strip()}
@@ -3606,6 +3706,22 @@ def get_user_emails(emp_no: str) -> list[dict]:
     if is_sample_mode():
         return [dict(r) for r in st.session_state.get(_EMAILS_STORE, {}).get(emp, [])]
     return supabase_repository.get_user_emails(emp)
+
+
+def get_user_emails_bulk(emp_nos) -> dict[str, list[dict]]:
+    """사번 목록 → {사번: [{email, scope}]}. 값 계약은 단건 get_user_emails 와 동일.
+
+    supabase 모드에서 사번당 2회 왕복(N+1)을 없애기 위한 목록 조회다. sample 모드는
+    세션 스토어를 그대로 복사해 단건과 **같은 값·같은 순서**를 낸다(동등성 계약).
+    단건과 마찬가지로 결과를 캐시하지 않는다 — 저장 직후 재조회가 항상 최신이다.
+    """
+    emps = _emp_no_list(emp_nos)
+    if is_sample_mode():
+        store = st.session_state.get(_EMAILS_STORE, {})
+        return {emp: [dict(r) for r in store.get(emp, [])] for emp in emps}
+    if not emps:
+        return {}
+    return supabase_repository.get_user_emails_bulk(emps)
 
 
 def set_user_emails(emp_no: str, rows: list[dict], *, actor_emp_no: str = "") -> None:
