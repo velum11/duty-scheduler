@@ -1,15 +1,18 @@
-"""역할별 홈 대시보드.
+"""홈 대시보드 — 선택한 일자의 근무 현황과 부서별 근무자.
 
-ADMIN/MANAGER 는 선택한 일자의 근무 현황(지표)과 부서 → 조직 계층별 근무자 명단을,
-USER 는 본인 근무 현황을 표시한다. 데이터는 db 파사드를 통해 조회한다(샘플/Supabase
+세 역할이 **같은 골격**을 쓰고 데이터 범위만 갈린다(DESIGN.md §2 DASHBOARD: "역할에
+따라 다른 화면을 만들지 않는다"). ADMIN 은 근태 대상 전 부서, MANAGER 는 담당 부서,
+USER 는 같은 목록을 보되 **자기 부서의 대분류가 기본 선택**된다(2026-08-19 사용자
+확정 규칙 · :func:`_default_major`). 데이터는 db 파사드를 통해 조회한다(샘플/Supabase
 공통). 대시보드는 조회 전용이며 저장 계약과 무관하다.
 
 화면 골격(사용자 재구성 지시서 · DESIGN.md §2~§4 토큰)::
 
     ① 제목/설명            상단 52px 헤더 우측에 선택 일자 스탬프
-    ② 조회 행              [‹ | 일자 | ›] 세그먼트 · [오늘] ······ 우측 끝: 부서 필터 칩
-    ③ 지표 스트립          당일 근무 / 주간 / 야간 / 휴무
-    ④ 부서별 근무자        부서(대분류) → 조직(중분류) → 주간·야간·휴무 3열 명단
+    ② 조회 행              [‹ | 일자 | ›] 세그먼트 · [오늘] · 부서 필터 칩(같은 그룹)
+    ③ 내 근무(USER 전용)   오늘 근무 · 다음 근무 · 이번 달 집계
+    ④ 지표 스트립          당일 근무 / 주간 / 야간 / 휴무
+    ⑤ 부서별 근무자        부서(대분류) → 조직(중분류) → 버킷 열 명단(블록 자동 배치)
 
 계층 용어: 화면의 "부서"는 조직 관리에서 사람이 입력하는 대분류(major_category),
 "조직"은 중분류(minor_category)다(migration 009). 인원은 **중분류 단위로 합산**하므로
@@ -78,23 +81,23 @@ _TAIL_ORDER = 10 ** 6
 # 이 화면의 박스 폭은 "남는 폭을 균등 flex 로 나눠 갖기"가 아니라 **실제로 들어갈 문자열의
 # 최대 폭**에서 나온다. 남는 폭은 남긴다.
 #
-# 글자폭 계수 실측(2026-08-18, 이 화면 실렌더 · Chromium · IBM Plex 로드 확인):
-# 대상 요소의 computed style 을 그대로 복사한 hidden span 에 같은 글자를 **100자** 넣고
-# 폭/100 으로 얻었다(1자 측정의 반올림 오차 제거).
-#   IBM Plex Sans KR — 한글 0.892em (12px=10.704 · 14px=12.488 · 20px=17.84)
-#                      숫자 0.600em (12px=7.2 · 14px=8.4) · 공백 0.236em (12px=2.832)
-#   IBM Plex Mono    — 숫자 0.600em (12px=7.2 · 14px=8.4 · 20px=12.0)
-# 주의(실측에서 발견): 한글에 ``font-weight:500`` 을 주면 IBM Plex Sans KR 에 그 굵기가
-# 없어 Malgun Gothic 으로 폴백해 1.0em 이 된다(12px=12.0). 계수가 깨지므로 이 화면의
-# 한글 텍스트는 400/600 만 쓴다.
-_ADV_KO = 0.892       # 한글 1자 / font-size
-_ADV_ASCII = 0.600    # 숫자·영문 1자 / font-size (sans·mono 동일 실측)
-_ADV_SPACE = 0.236    # 공백 1자 / font-size
+# 글자폭 계수 실측(2026-08-19 재측정 · Pretendard 단일화 이후 · 이 화면 실렌더 ·
+# Chromium · ``document.fonts.ready`` + 명시 load 확인): hidden span 에 같은 글자를
+# **100자** 넣고 폭/100 으로 얻었다(1자 측정의 반올림 오차 제거). 12·14·20px 에서
+# 계수가 동일했다(선형).
+#   Pretendard — 한글 0.8643em (400·600 동일) · 숫자 0.6143em(400) / 0.6416em(600)
+#                공백 0.251em(400) / 0.2373em(600) · 가운뎃점 0.2539em(400)
+# 종전 값은 폐지된 IBM Plex 기준(한글 0.892 · ASCII 0.600)이었다. 한글은 과대(안전),
+# **숫자는 과소** 추정이라 숫자 위주 문자열에서 폭이 모자랄 수 있었다. 아래 값은 두
+# 굵기 중 넓은 쪽을 올림해 쓴다 — 과대 추정은 잘림을 만들지 않는 방향이다.
+_ADV_KO = 0.865       # 한글 1자 / font-size
+_ADV_ASCII = 0.642    # 숫자·영문 1자 / font-size (600 기준 = 넓은 쪽)
+_ADV_SPACE = 0.252    # 공백 1자 / font-size (400 기준 = 넓은 쪽)
 #: 이름 열 폭 상한. 이상치 이름 하나가 3열 합을 데스크톱 본문 폭 밖으로 밀지 않게 한다
 #: (240×3 + 간격 48 = 768 ≤ 1024 본문). 넘는 이름은 ``overflow-wrap`` 으로 접힌다.
 _COL_MAX_PX = 240
-#: 일자 입력 폭 — 모노 14px 숫자 0.6em × 10자("2026-08-18") = 84px + BaseWeb 내부 여백
-#: 4px(실측: wrapper 92 - input 88) + 반올림 여유 4px.
+#: 일자 입력 폭 — 14px/600 숫자 0.642em × 10자("2026-08-19") ≒ 90px 상한(하이픈은 더
+#: 좁다) + BaseWeb 내부 여백 4px(실측: wrapper 92 - input 88). 실측 렌더 폭으로 검증한다.
 _DATE_W_PX = 92
 
 
@@ -170,11 +173,9 @@ def _attendance_scope() -> set[str] | None:
 
 def render(user: dict) -> None:
     role = _clean(user.get("role")).upper()
-    if role == "USER":
-        _render_user(user)
-        return
 
     # ① 제목 — §1-F 헤더 중립 프레임(아이콘 밴드 없음: 표준 아이콘 8종은 상단 52px 헤더 소유).
+    # 역할과 무관하게 같은 프레임·같은 블록을 쓴다(§2 DASHBOARD).
     erp.screen_frame(
         SCREEN_ARCHETYPE,
         title="대시보드",
@@ -183,22 +184,32 @@ def render(user: dict) -> None:
     )
     _inject_style()
 
-    # 범위 결정(fail-closed): ADMIN=전체, MANAGER=자기 부서, 부서 미확정 MANAGER=차단.
-    scope, manager_dept = _scope_for(user)
-    if scope == "blocked":
-        ui.empty_state(
-            "소속 부서가 지정되지 않아 근무 현황을 표시할 수 없습니다. "
-            "관리자에게 부서 지정을 요청하세요.",
-            head="당일 근무 현황",
-        )
-        return
+    # 범위 결정. ADMIN=전체, MANAGER=자기 부서, 부서 미확정 MANAGER=차단(fail-closed).
+    # USER 는 같은 목록을 보되 **분류가 있는 부서만**(미분류 제외) 담고 자기 부서의
+    # 대분류를 기본 선택으로 연다 — 범위를 잠그지는 않는다(사용자 확정 규칙).
+    if role == "USER":
+        manager_dept, classified_only = None, True
+    else:
+        scope, manager_dept = _scope_for(user)
+        classified_only = False
+        if scope == "blocked":
+            ui.empty_state(
+                "소속 부서가 지정되지 않아 근무 현황을 표시할 수 없습니다. "
+                "관리자에게 부서 지정을 요청하세요.",
+                head="당일 근무 현황",
+            )
+            return
 
     the_date = _resolve_date()
     # 조직 조회(부서 기준정보·근태 대상 지정·편성 스냅샷)도 오류 처리 범위에 포함한다 —
     # 근무 조회만 감싸면 계층 구성 중 데이터소스 오류가 화면 전체 예외가 된다.
     try:
         tracked = _attendance_scope()
-        tree, majors = _duty_board(the_date, manager_dept=manager_dept, tracked=tracked)
+        depts = db.get_org_departments()
+        tree, majors = _duty_board(
+            the_date, manager_dept=manager_dept, tracked=tracked, depts=depts,
+            classified_only=classified_only,
+        )
     except db.DATA_SOURCE_ERRORS as exc:
         st.error(f"근무 데이터를 불러오지 못했습니다. 데이터 연결 상태를 확인하세요. ({exc})")
         return
@@ -206,8 +217,9 @@ def render(user: dict) -> None:
         st.error("근무 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
-    # ② 조회 행 — 일자 세그먼트 + [오늘] + 우측 끝 부서 칩(같은 행).
-    picked = _query_row(the_date, majors)
+    # ② 조회 행 — 일자 세그먼트 + [오늘] + 부서 칩(한 행·같은 그룹).
+    default_major = _default_major(user, depts) if role == "USER" else _ALL_MAJORS
+    picked = _query_row(the_date, majors, default=default_major)
     shown = tree if picked == _ALL_MAJORS else [m for m in tree if m["name"] == picked]
     totals, columns = _summarize(shown)
 
@@ -217,17 +229,55 @@ def render(user: dict) -> None:
         f"{_scope_label(picked, manager_dept, tracked)}"
     )
 
-    # ③ 지표 스트립(제목·조회 행 아래 첫 블록, §0-4). 값은 ④ 명단과 같은 집계에서
-    #    파생하므로 필터 선택과 항상 일치한다.
+    # ③ 내 근무(USER 전용) — 본인 근무가 USER 의 첫 관심사라 근무 인원보다 앞에 둔다.
+    #    §2 의 "개인 맥락은 화면을 가르지 않는다"는 범위에서 **블록 하나**로만 둔다.
+    if role == "USER":
+        _my_duty_block(user)
+
+    # ④ 지표 스트립. 값은 ⑤ 명단과 같은 집계에서 파생하므로 필터 선택과 항상 일치한다.
+    st.markdown(_section_label("근무 인원"), unsafe_allow_html=True)
     st.markdown(_kpi_strip_html(totals), unsafe_allow_html=True)
 
-    # ④ 부서별 근무자.
+    # ⑤ 부서별 근무자.
     if not shown:
         ui.empty_state(
-            _empty_message(the_date, tracked, manager_dept), head="부서별 근무자"
+            _empty_message(the_date, tracked, manager_dept, classified_only),
+            head="부서별 근무자",
         )
         return
     st.markdown(_people_html(shown, columns), unsafe_allow_html=True)
+
+
+def _section_label(text: str) -> str:
+    """구획 제목 — §1.2 ``label-strong``(12/600 ink-2). 화면이 크기를 새로 만들지 않는다."""
+    return f"<div class='dash-slabel'>{escape(text)}</div>"
+
+
+def _default_major(user: dict, depts=None) -> str:
+    """USER 의 부서 칩 **기본 선택**(대분류). 잠금이 아니라 첫 진입 기본값이다.
+
+    2026-08-19 사용자 확정 규칙:
+
+    - 소속 부서에 대분류·중분류가 **둘 다** 있으면 그 **대분류**를 기본 선택으로 연다.
+      칩은 대분류 단위이므로(:func:`_query_row`) 중분류가 아니라 대분류를 고른다.
+    - 소속 부서에 대분류나 중분류가 없으면(사무직 등 교대 조직 밖) 기본 선택을 두지
+      않고 '전체'로 연다. 이때의 '전체'는 :func:`_duty_board` 의 ``classified_only``
+      로 **분류가 있는 부서만** 담는다(미분류 제외).
+    - 소속 부서가 아예 없는 USER 도 같은 '전체' 경로로 떨어진다.
+    """
+    dept = _clean(user.get("dept_code"))
+    if not dept:
+        return _ALL_MAJORS
+    depts = db.get_org_departments() if depts is None else depts
+    if depts is None or depts.empty:
+        return _ALL_MAJORS
+    for _, row in depts.iterrows():
+        if _clean(row.get("dept_code")) != dept:
+            continue
+        major = _clean(row.get("major_category"))
+        minor = _clean(row.get("minor_category"))
+        return major if major and minor else _ALL_MAJORS
+    return _ALL_MAJORS
 
 
 def _scope_label(picked: str, manager_dept: str | None,
@@ -247,12 +297,18 @@ def _scope_label(picked: str, manager_dept: str | None,
 
 
 def _empty_message(the_date: date, tracked: set | None,
-                   manager_dept: str | None) -> str:
+                   manager_dept: str | None, classified_only: bool = False) -> str:
     """명단이 비었을 때의 한 줄 안내 — '근무가 없다'와 '대상 부서가 아니다'는 다르다.
 
     지정이 하나도 없거나 담당 부서가 대상이 아니면 조회 결과가 아니라 조직 관리에서
     할 일이 남은 상태이므로, 다음 행동을 가리키는 문구를 쓴다(§6 카피: 한 줄·실무체).
+
+    ``classified_only``(USER 경로)에서는 "근무가 없다"로 단정하지 않는다 — 대분류·중분류가
+    아직 지정되지 않은 배포에서는 근무행이 있어도 이 경로가 전부 걸러내기 때문이다.
     """
+    if classified_only:
+        return (f"{the_date.isoformat()}({ui.weekday_kr(the_date)}) 표시할 근무 인원이 "
+                "없습니다. 조직 관리에서 부서의 대분류·중분류 지정을 확인하세요.")
     if tracked is not None:
         if not tracked:
             return "조직 관리에서 근태 등록 대상 부서를 지정하면 근무 현황이 표시됩니다."
@@ -296,8 +352,16 @@ def _goto_today() -> None:
     _set_date(date.today())
 
 
-def _query_row(the_date: date, majors: list) -> str:
+def _query_row(the_date: date, majors: list, default: str = _ALL_MAJORS) -> str:
     """일자 세그먼트 + [오늘] + 부서 필터 칩을 **한 행**에 렌더하고 선택 대분류를 반환한다.
+
+    세 컨트롤은 모두 "무엇을 조회할지"를 정하므로 **한 그룹으로 왼쪽에 모은다**. 종전에는
+    칩만 ``margin-left:auto`` 로 우측 끝에 보내 1440 에서 세그먼트 끝(315px)과 칩
+    시작(1166px) 사이가 851px 비었다(실측) — 같은 조회 조건을 눈으로 잇기 어려웠다.
+    남는 폭은 흡수하지 않고 남긴다(이 화면의 폭 원칙과 같다).
+
+    ``default`` 는 **첫 진입 기본 선택**이다(USER 는 자기 부서의 대분류). 세션에 값이
+    없을 때만 쓰이고, 이후에는 사용자가 고른 값이 이긴다 — 범위를 잠그지 않는다.
 
     칩은 대분류 데이터에서 만든다('전체' + 근무자가 있는 대분류) — 대분류명을 코드에
     박지 않으므로 조직 개편이 그대로 반영되고, 근무자가 없는 대분류는 칩도 생기지
@@ -310,6 +374,9 @@ def _query_row(the_date: date, majors: list) -> str:
     """
     options = [_ALL_MAJORS] + list(majors)
     stored = st.session_state.get(_DASHBOARD_MAJOR)
+    if stored is None and default in options:
+        stored = default  # 첫 진입 기본 선택(USER: 자기 부서 대분류)
+        st.session_state[_DASHBOARD_MAJOR] = stored
     if stored not in options:  # 조직 개편·일자 이동으로 사라진 선택은 전체로 되돌린다
         stored = _ALL_MAJORS
         st.session_state[_DASHBOARD_MAJOR] = stored
@@ -410,7 +477,7 @@ def _dept_index(depts) -> tuple[dict, set]:
     return index, excluded
 
 
-def _duty_board(the_date, *, manager_dept=None, tracked=None,
+def _duty_board(the_date, *, manager_dept=None, tracked=None, classified_only=False,
                 depts=None, users=None, day_rows=None):
     """선택 일자의 근무행을 부서(대분류) → 조직(중분류) → 버킷별 명단으로 모은다.
 
@@ -423,6 +490,10 @@ def _duty_board(the_date, *, manager_dept=None, tracked=None,
     - ``tracked`` 가 부서코드 집합이면 그 부서(근태 등록 대상)만 집계한다. ``None``
       (기본)이면 제한이 없다 — 화면은 :func:`_attendance_scope` 로 값을 만들어 넘긴다.
       **지표·칩·명단이 모두 이 한 트리에서 파생**하므로 모집단이 갈릴 수 없다.
+    - ``classified_only`` 가 True 면 **대분류·중분류가 둘 다 있는 부서만** 담는다
+      (USER 경로 — 사용자 확정 규칙). 미분류는 조직 관리의 입력 누락을 관리자가
+      발견하기 위한 노출이라 USER 화면에서는 빼고, 대신 지표와 명단이 같은 트리에서
+      나오는 성질은 그대로 유지한다.
     - tracked/depts/users/day_rows 는 화면(및 테스트)이 주입한다.
 
     반환: ``(tree, majors)``
@@ -457,6 +528,8 @@ def _duty_board(the_date, *, manager_dept=None, tracked=None,
         major, minor, order, dept_name = index.get(
             dept, ("", "", _TAIL_ORDER, db.dept_name(dept) or dept)
         )
+        if classified_only and not (major and minor):
+            continue  # 분류가 없는 부서(교대 조직 밖)는 USER 경로에서 제외
         major_key = major or _UNCLASSIFIED_LABEL
         org_key = minor or dept_name or _UNASSIGNED_LABEL
         node = majors.setdefault(major_key, {
@@ -495,43 +568,53 @@ def _summarize(tree: list) -> tuple[dict, list]:
 
 
 # ---------- ③ 지표 · ④ 명단 HTML ----------
-def _kpi_strip_html(totals: dict) -> str:
-    """지표 스트립 — 좌측 2px 보더 + 모노 값(카드 없음). 당일 근무만 액센트.
+def _tiles_html(items: list, css_class: str) -> str:
+    """지표 타일 스트립 — 좌측 2px 보더 + 20/600 값(카드 없음). 첫 타일만 액센트.
+
+    ``items`` 는 ``(라벨, 값, 단위, 액센트여부)`` 목록이다. 근무 인원 지표와 USER 의
+    '내 근무'가 **같은 타일**을 쓴다 — 한 화면에 지표를 두 가지 모양으로 그리면
+    (종전: 카드형 ``sum-card`` + 보더형 ``dash-kpi``) 같은 계층이 다른 말을 한다.
 
     **타일 폭은 내용에서 역산한다.** 종전에는 ``flex:1 1 168px`` 로 남는 폭을 4등분해
     한 자리 숫자가 311px(1440 실측)을 차지했다. 지금은 이번 run 에 실제로 그릴 라벨과
-    값의 최대 폭으로 폭을 정하고 **남는 폭은 남긴다**. 네 타일은 같은 값을 공유하므로
-    세로 눈금이 어긋나지 않는다.
+    값의 최대 폭으로 폭을 정하고 **남는 폭은 남긴다**. 한 스트립의 타일은 같은 값을
+    공유하므로 세로 눈금이 어긋나지 않는다.
     """
-    on_duty = totals.get("주간", 0) + totals.get("야간", 0)
-    metrics = [
-        ("당일 근무", on_duty, True),
-        ("주간", totals.get("주간", 0), False),
-        ("야간", totals.get("야간", 0), False),
-        ("휴무", totals.get("휴무", 0), False),
-    ]
-    # 라벨(12px sans)과 값 줄(20px mono 숫자 + 4px gap + 12px "명") 중 넓은 쪽 + 좌우
-    # padding 16×2(§1.1) + 좌측 액센트 보더 2px. box-sizing:border-box 기준.
+    # 라벨(12px)과 값 줄(20px 값 + 4px gap + 12px 단위) 중 넓은 쪽 + 좌우 padding
+    # 16×2(§1.1) + 좌측 액센트 보더 2px. box-sizing:border-box 기준.
     content = max(
-        max(_text_px(label, 12) for label, _v, _a in metrics),
-        max(_text_px(str(value), 20) + 4 + _text_px("명", 12) for _l, value, _a in metrics),
+        max(_text_px(label, 12) for label, _v, _u, _a in items),
+        max(_text_px(str(value), 20) + (4 + _text_px(unit, 12) if unit else 0)
+            for _l, value, unit, _a in items),
     )
     tile_px = ceil(2 + 16 * 2 + content)
     cells = []
-    for label, value, accent in metrics:
+    for label, value, unit, accent in items:
         border = "#c2410c" if accent else "#cfc8bd"
         vcolor = "#b4451a" if accent else "#1c1a17"
+        unit_html = f"<span class='dash-kunit'>{escape(unit)}</span>" if unit else ""
         cells.append(
             f"<div class='dash-kpi' style='border-left:2px solid {border};'>"
             f"<span class='dash-klabel'>{escape(label)}</span>"
             f"<div class='dash-kval-row'>"
-            f"<span class='dash-kval' style='color:{vcolor};'>{value}</span>"
-            f"<span class='dash-kunit'>명</span></div></div>"
+            f"<span class='dash-kval' style='color:{vcolor};'>{escape(str(value))}</span>"
+            f"{unit_html}</div></div>"
         )
     # 폭은 <style> 로 넘긴다 — Streamlit 이 인라인 style 의 일부 속성을 제거하므로
     # (같은 사유로 font-family 도 CSS 규칙으로 강제한다) 인라인 width 에 의존하지 않는다.
-    return (f"<style>.dash-kpi{{width:{tile_px}px}}</style>"
-            f"<div class='dash-kpis'>{''.join(cells)}</div>")
+    return (f"<style>.{css_class} .dash-kpi{{width:{tile_px}px}}</style>"
+            f"<div class='dash-kpis {css_class}'>{''.join(cells)}</div>")
+
+
+def _kpi_strip_html(totals: dict) -> str:
+    """근무 인원 지표(당일 근무 / 주간 / 야간 / 휴무) — 값은 명단의 합이다."""
+    on_duty = totals.get("주간", 0) + totals.get("야간", 0)
+    return _tiles_html([
+        ("당일 근무", on_duty, "명", True),
+        ("주간", totals.get("주간", 0), "명", False),
+        ("야간", totals.get("야간", 0), "명", False),
+        ("휴무", totals.get("휴무", 0), "명", False),
+    ], "dash-kpis-duty")
 
 
 def _org_col_px(tree: list, columns: list) -> int:
@@ -546,6 +629,10 @@ def _org_col_px(tree: list, columns: list) -> int:
     화면 전체가 **한 값**을 공유한다 — 열마다 제 폭을 갖게 하면 조직끼리 세로로 맞춰
     읽히지 않는다(같은 버킷이 다른 x 좌표에 놓인다). 종전 ``flex:1 1 190px`` 은 남는
     폭을 열 수로 나눠 1440 에서 408px 짜리 열을 만들었다.
+
+    조직 블록이 한 줄에 여러 개 놓이게 된 뒤에도 이 계약은 그대로다: 블록 폭 =
+    ``열폭 × 열수 + 간격 × (열수-1)`` 로 모든 블록이 같고 블록 간격도 고정이라, 같은
+    버킷 열의 x 좌표가 화면 전체에서 규칙적인 격자에 놓인다(:func:`_people_html`).
     """
     need = 0.0
     for major in tree:
@@ -561,24 +648,29 @@ def _org_col_px(tree: list, columns: list) -> int:
 
 
 def _people_html(tree: list, columns: list) -> str:
-    """부서 → 조직 → 주간·야간·휴무 3열 명단(이름은 열 아래로 세로로 쌓인다).
+    """부서 → 조직 → 버킷 열 명단(이름은 열 아래로 세로로 쌓인다).
 
     이름마다 위젯을 만들지 않고 한 번의 HTML 로 렌더한다(리렌더 비용·간격 붕괴 방지).
-    열 폭은 :func:`_org_col_px` 가 내용에서 역산하며, 남는 폭은 남긴다. 폭이 모자라면
-    flex-wrap 으로 접히고, 폰 폭(<599)에서는 3열이 항상 한 줄에 남도록 상한만 건다.
+    열 폭은 :func:`_org_col_px` 가 내용에서 역산하며, 남는 폭은 남긴다.
+
+    **조직 블록은 한 부서 안에서 줄바꿈 배치한다**(``.dorg-grid``). 종전에는 블록이
+    본문 폭 전체를 차지하는 행이라, 이름 3자(열 53px)짜리 명단이 1440 에서 284px 만
+    쓰고 오른쪽 1121px(79.8%)이 통째로 비었다(실측). 블록 폭은 내용에서 나온 값
+    그대로 두고 **블록을 옆으로 채운다** — 열 폭을 억지로 늘리지 않으므로 열 정렬
+    계약(:func:`_org_col_px`)도 유지된다.
+
+    조직 줄에는 합계 요약을 쓰지 않는다. 같은 숫자를 열 머리글이 각 열 위에서 이미
+    말하고 있어(주간 6 / 야간 5 …) 요약은 **같은 말의 반복**이었다. 남긴 쪽은 열
+    머리글이다 — 숫자가 세는 대상 바로 위에 붙어 있어 스캔에 쓰이지만, 요약은 이름
+    열에서 최대 200px 떨어진 자리에서 같은 네 숫자를 다시 읽게 했다.
     """
     blocks = []
     for major in tree:
-        # 부서 헤더 우측은 비운다(합계는 조직 줄이 말한다 — 같은 말을 두 번 하지 않는다).
+        # 부서 헤더 우측은 비운다(합계는 열 머리글이 말한다 — 같은 말을 두 번 하지 않는다).
         blocks.append(f"<div class='dorg-major'>{escape(major['name'])}</div>")
+        orgs_html = []
         for org in major["orgs"]:
             counts = {b: len(org["people"].get(b, [])) for b in columns}
-            # 요약은 기본 3버킷을 항상(0 이어도) 쓰고, 휴가·기타는 그 조직에 실제로
-            # 있을 때만 덧붙인다 — 열은 목록 전체에서 같은 순서·같은 개수로 유지해
-            # 조직끼리 세로로 맞춰 읽히게 두되, 요약 문구에 0 을 늘어놓지 않는다.
-            summary = " · ".join(
-                f"{b} {counts[b]}" for b in columns if b in _CORE_BUCKETS or counts[b]
-            )
             cols_html = []
             for bucket in columns:
                 names = "".join(
@@ -592,18 +684,21 @@ def _people_html(tree: list, columns: list) -> str:
                     f"<span class='dorg-cnum'>{counts[bucket]}</span></div>"
                     f"<div class='dorg-names'>{names}</div></div>"
                 )
-            blocks.append(
+            orgs_html.append(
                 "<div class='dorg-org'><div class='dorg-ohead'>"
-                f"<span class='dorg-oname'>{escape(org['name'])}</span>"
-                f"<span class='dorg-osum'>{escape(summary)}</span></div>"
+                f"<span class='dorg-oname'>{escape(org['name'])}</span></div>"
                 f"<div class='dorg-cols'>{''.join(cols_html)}</div></div>"
             )
-    return (f"<style>.dorg-col{{width:{_org_col_px(tree, columns)}px}}</style>"
+        blocks.append(f"<div class='dorg-grid'>{''.join(orgs_html)}</div>")
+    # 열 폭·열 수만 넘기고 블록 폭은 CSS 가 두 값에서 계산한다(계산식은 _inject_style).
+    return (f"<style>.dorg{{--dorg-colw:{_org_col_px(tree, columns)}px;"
+            f"--dorg-n:{len(columns)}}}</style>"
             f"<div class='dorg'>{''.join(blocks)}</div>")
 
 
 def _inject_style() -> None:
-    # §1.3 팔레트 · §1.2 타이포(28/20/16/14/12 다섯 단계만) · §1.1 간격(4·8·12·16·24·32·40).
+    # §1.3 팔레트 · §1.2 타이포(24/20/14/12 네 단계 · 굵기 400·600 · Pretendard 하나) ·
+    # §1.1 간격(4·8·12·16·24·32·40).
     # 카드(테두리+radius+그림자) 없음 — 구획은 헤어라인과 여백뿐.
     # 밀도는 §1.4 **cozy(히트영역 44px 이상)** 다. §3.4 가 이 화면을 "모바일 우선"으로
     # 이름 지어 지목하기 때문이다. 종전 주석은 근거로 "히트영역 하한 32px(§0.6·§4)"를
@@ -611,10 +706,7 @@ def _inject_style() -> None:
     # 죽은 절 인용이었고 값도 cozy 하한을 12px 밑돌았다(2026-08-18 정정).
     # 폭은 CSS 가 정하지 않는다 — _text_px 실측 계수로 내용에서 역산해 <style> 로 넘긴다
     # (_kpi_strip_html · _org_col_px). 남는 폭은 흡수하지 않고 남긴다.
-    # 한글에 font-weight:500 을 쓰지 않는다(실측: IBM Plex Sans KR 에 없는 굵기라
-    # Malgun Gothic 으로 폴백해 글자폭이 0.892em → 1.0em 으로 바뀐다).
-    # 모노(값·건수)는 전역 stMarkdownContainer 폰트 규칙(특이도 0,2,0)을 0,3,0 규칙으로
-    # 덮어 강제한다(Streamlit 이 인라인 font-family 를 제거하므로 CSS 로).
+    # 굵기는 400·600 만 쓴다(§1.2). 자릿수 정렬은 모노가 아니라 tabular-nums 다.
     st.markdown(
         """
 <style>
@@ -623,9 +715,8 @@ def _inject_style() -> None:
   gap:12px !important; border-bottom:1px solid #e0dbd2; padding-bottom:12px;
   margin-bottom:16px; }
 .st-key-dash_qrow > div { flex:0 0 auto !important; }
-/* 마지막 항목(부서 칩)만 우측 끝으로 — 키 컨테이너는 레이아웃 래퍼로 감싸이므로
-   래퍼(직계 자식)에 걸어야 margin-left:auto 가 먹는다. */
-.st-key-dash_qrow > div:last-child { margin-left:auto !important; }
+/* 조회 컨트롤 3종은 한 그룹으로 좌측에 모은다(종전 칩 margin-left:auto → 1440 에서
+   세그먼트 끝과 칩 사이 851px 공백, 실측). 남는 폭은 흡수하지 않고 남긴다. */
 /* 전일 | 일자 | 익일 = 한 덩어리(외곽 1px, 내부 구분선만).
    조회 행 컨트롤의 바깥 높이는 46px = 히트영역 44(§1.4 cozy) + 상하 1px 헤어라인이다.
    세그먼트에는 height 를 주지 않는다 — box-sizing:border-box 라 height:44 를 주면 내부
@@ -640,7 +731,8 @@ def _inject_style() -> None:
 .st-key-dash_seg button {
   height:44px !important; min-height:44px !important; min-width:44px; padding:0 12px;
   border:0 !important; border-radius:0 !important; background:transparent !important;
-  box-shadow:none !important; color:#4a453d !important; font-size:16px; line-height:1; }
+  box-shadow:none !important; color:#4a453d !important; font-size:14px !important;
+  line-height:1; }
 .st-key-dash_seg button:hover { background:#f1eee8 !important; color:#1c1a17 !important; }
 .st-key-dash_seg button:focus-visible { outline:2px solid #c2410c; outline-offset:-2px; }
 .st-key-dash_seg div.stButton, .st-key-dash_seg div[data-testid="stTooltipHoverTarget"] {
@@ -652,15 +744,23 @@ def _inject_style() -> None:
 .st-key-dash_segval div[data-baseweb="input"] { border:0 !important; background:transparent !important;
   box-shadow:none !important; height:44px; padding-right:4px !important; }
 .st-key-dash_segval div[data-baseweb="input"] div { padding-right:0 !important; }
+/* 굵기는 400·600 둘뿐이다(§1.2) — 종전 500 은 스케일 밖이었다. */
 .st-key-dash_segval input { padding:0 !important; height:44px; color:#1c1a17 !important;
   font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif !important; font-size:14px !important;
-  font-weight:500 !important; font-variant-numeric:tabular-nums; cursor:pointer; }
+  font-weight:600 !important; font-variant-numeric:tabular-nums; cursor:pointer; }
 .st-key-dash_segval div[data-testid="stDateInput"] svg { width:16px; height:16px; color:#8b857c; }
 .dash-dow { font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:14px;
   font-weight:600; white-space:nowrap; }
-/* 화살표 라벨도 button 이 아니라 내부 <p> 가 그린다 — 앱 전역 버튼 규칙(.875rem=12.25px)이
-   button 선언을 이겨 실측 12.25px 였다([오늘] 과 같은 함정). */
-.st-key-dash_seg button p { font-size:16px !important; line-height:1; }
+/* 버튼 라벨의 실제 글자 크기는 button 이 아니라 그 안의 마크다운 컨테이너가 정한다.
+   modules/ui.py 가 `button p{font-size:inherit}` 를 넣었지만, Streamlit 은 p 의 부모인
+   [data-testid=stMarkdownContainer] 에 .875rem(12.25px)을 걸어 두어 p 가 button 이
+   아니라 그 컨테이너를 상속한다(실측: [오늘] 라벨 12.25px). 공용 규칙은 수정 범위 밖이라
+   이 화면 안에서만 컨테이너를 함께 잡는다 — 공용 보정 필요 사항으로 보고한다. */
+.st-key-dash_seg button p, .st-key-dash_today button p,
+.st-key-dash_seg button [data-testid="stMarkdownContainer"],
+.st-key-dash_today button [data-testid="stMarkdownContainer"] {
+  font-size:14px !important; line-height:1.2; }
+.st-key-dash_seg button p { line-height:1; }
 /* Streamlit·BaseWeb 기본 간격 정리 — 아래 값들은 자식이 하나거나 서로 상쇄돼 렌더 결과에
    영향이 없지만 §1.1 스케일 밖(7 · 9.1 · 3.5 · ±14px)이라 이 화면 범위에서만 토큰 값으로
    덮어 둔다. 공용 계층(modules/ui.py·views/common/erp)은 수정 범위 밖이라 손대지 않는다. */
@@ -677,10 +777,6 @@ def _inject_style() -> None:
   height:46px !important; min-height:46px !important; padding:0 16px;
   border:1px solid #e2ddd4 !important; border-radius:8px; background:#fff !important;
   color:#4a453d !important; font-size:14px; }
-/* 라벨 글자는 button 이 아니라 내부 <p> 가 그린다 — 앱 전역 버튼 규칙(.85rem=11.9px)이
-   button 선언을 이기므로 실측 11.9px 였다(2026-08-14 재검수). 옆 칩·일자(14px)와
-   한 줄에서 어긋나 보이던 원인이라 <p> 에 직접 지정한다. */
-.st-key-dash_today button p { font-size:14px !important; }
 .st-key-dash_today button:hover { background:#f1eee8 !important; color:#1c1a17 !important; }
 /* 부서 필터 칩(st.pills = stButtonGroup) — 선택은 오렌지 틴트 pill, 비선택은 중립 테두리.
    높이 46 = 히트영역 44(§1.4 cozy) + 테두리 2. 종전 32px 는 §1.4 의 어느 단계에도
@@ -713,22 +809,30 @@ def _inject_style() -> None:
   gap:4px; padding:0 16px; }
 .dash-klabel { font-size:12px; color:#6b665d; white-space:nowrap; }
 .dash-kval-row { display:flex; align-items:baseline; gap:4px; }
-.dash-kval { font-size:20px; font-weight:600; line-height:1.2; }
+.dash-kval { font-size:20px; font-weight:600; line-height:1.2; overflow-wrap:anywhere; }
 .dash-kunit { font-size:12px; color:#6b665d; }
-/* ===== ④ 부서별 근무자 — 부서 → 조직 → 주간·야간·휴무 3열 ===== */
-.dorg-major { font-size:16px; font-weight:600; color:#1c1a17; padding-bottom:8px;
+/* 구획 제목 — §1.2 label-strong(12/600 ink-2). 지표 스트립·내 근무·부서 헤더가 서로
+   다른 계층임을 크기로 구분한다(구획 12/600 < 조직명 14/600 < 부서 20/600). */
+.dash-slabel { font-size:12px; font-weight:600; color:#4a453d; margin:0 0 8px; }
+/* ===== ⑤ 부서별 근무자 — 부서 → 조직 블록(줄바꿈 배치) → 버킷 열 ===== */
+/* 부서(대분류)는 구획을 나누는 제목이라 §1.2 section(20/600). 종전 16px 은 §1.2 의
+   네 단계(24/20/14/12) 밖이었다. */
+.dorg-major { font-size:20px; font-weight:600; color:#1c1a17; padding-bottom:8px;
   border-bottom:1px solid #cfc8bd; margin-top:24px; }
-.dorg { margin-top:0; }
-.dorg-org { padding:16px 0; border-bottom:1px solid #e6e2da; }
+.dorg { margin-top:0; --dorg-gap:24px; }
+/* 조직 블록 줄바꿈 배치 — 블록 폭은 내용에서 나온 열 폭×열 수 그대로이고, 한 줄에
+   들어가는 만큼 옆으로 채운다. 블록 사이 32 > 블록 안 열 사이 24 라 어느 열이 어느
+   조직 것인지 근접성으로 읽힌다(§1.1 스케일). */
+.dorg-grid { display:flex; flex-wrap:wrap; gap:0 32px; align-items:stretch; }
+.dorg-org { box-sizing:border-box; flex:0 0 auto; min-width:0; max-width:100%;
+  width:calc(var(--dorg-colw) * var(--dorg-n) + var(--dorg-gap) * (var(--dorg-n) - 1));
+  padding:16px 0; border-bottom:1px solid #e6e2da; }
 .dorg-ohead { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
 .dorg-oname { font-size:14px; font-weight:600; color:#1c1a17; overflow-wrap:anywhere; }
-/* 요약은 조직명 바로 옆에 둔다 — margin-left:auto 로 우측 끝에 보내면 1440 에서 아래
-   명단 열과 1000px 떨어진 자리에 떠서 어느 조직의 합계인지 눈으로 잇기 어렵다. */
-.dorg-osum { font-size:12px; color:#6b665d; white-space:nowrap; }
-.dorg-cols { display:flex; flex-wrap:wrap; gap:12px 24px; margin-top:12px; }
+.dorg-cols { display:flex; flex-wrap:wrap; gap:12px var(--dorg-gap); margin-top:12px; }
 /* 폭은 _org_col_px 가 내용에서 역산해 <style> 로 넘긴다(종전 flex:1 1 190px 은 3열이
    남는 폭을 나눠 가져 1440 에서 408px 짜리 열이 됐다). */
-.dorg-col { box-sizing:border-box; flex:0 0 auto; min-width:0; }
+.dorg-col { box-sizing:border-box; flex:0 0 auto; min-width:0; width:var(--dorg-colw); }
 .dorg-chead { display:flex; align-items:center; gap:8px; padding-bottom:8px;
   border-bottom:1px solid #e0dbd2; }
 .dorg-dot { width:8px; height:8px; border-radius:2px; flex:0 0 auto; }
@@ -736,27 +840,23 @@ def _inject_style() -> None:
 .dorg-cnum { margin-left:auto; font-size:12px; color:#6b665d; }
 .dorg-name { font-size:14px; color:#1c1a17; padding:8px 0; overflow-wrap:anywhere;
   border-bottom:1px solid #efece6; }
-/* 모노 강제(값·건수) — 인라인 font-family 는 Streamlit 이 제거하므로 0,3,0 규칙으로 */
+/* 숫자 자릿수 정렬(§1.2: 모노 폐지, tabular-nums) — 인라인 font-family 는 Streamlit 이
+   제거하므로 0,3,0 규칙으로 확정한다. */
 .stApp [data-testid="stMarkdownContainer"] .dash-kval,
 .stApp [data-testid="stMarkdownContainer"] .dash-dow,
-.stApp [data-testid="stMarkdownContainer"] .dorg-osum,
 .stApp [data-testid="stMarkdownContainer"] .dorg-cnum {
   font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-variant-numeric:tabular-nums;
 }
 /* §3.4 브레이크포인트 — <599 / 599–1023 / >1023. 종전 768/640 은 §3.4 값이 아니었다. */
-@media (max-width:1023px) {
-  /* 줄바꿈되면 칩을 우측으로 밀지 않는다(다음 줄 좌측 정렬) */
-  .st-key-dash_qrow > div:last-child { margin-left:0 !important; }
-  .dorg-cols { gap:12px 16px; }
-}
 @media (max-width:598px) {
   /* 지표는 §3.4 대로 2열. 폭은 여전히 내용값이다 — grid track 을 max-content 로 두면
      타일이 남는 폭을 흡수하지 않고 제 폭만 쓴다. */
   .dash-kpis { display:grid; grid-template-columns:repeat(2,max-content); }
-  /* 주간·야간·휴무 3열이 항상 한 줄에 남도록 **상한만** 건다(2026-08-13 사용자 신고
-     "폰에서 주간·야간·휴무 줄바꿈" 재발 방지). 내용 폭이 상한보다 좁으면 내용 폭 그대로다
-     — 상한이 폭을 정하는 것이 아니라 최악의 경우만 막는다. 32 = 열 간격 16 × 2. */
-  .dorg-col { max-width:calc((100% - 32px) / 3); }
+  /* 폰에서는 조직 블록이 1열(본문 폭)이고, 버킷 열은 항상 한 줄에 남는다(2026-08-13
+     사용자 신고 "폰에서 주간·야간·휴무 줄바꿈" 재발 방지). 상한이 폭을 정하는 것이
+     아니라 최악의 경우만 막는다 — 내용 폭이 상한보다 좁으면 내용 폭 그대로다. */
+  .dorg-org { width:100%; }
+  .dorg-col { max-width:calc((100% - var(--dorg-gap) * (var(--dorg-n) - 1)) / var(--dorg-n)); }
 }
 </style>
 """.replace("__DATEW__", str(_DATE_W_PX)),
@@ -764,9 +864,16 @@ def _inject_style() -> None:
     )
 
 
-def _render_user(user: dict) -> None:
-    """현재 저장 데이터로 계산 가능한 USER 개인 근무 요약."""
-    ui.page_title("대시보드", "내 근무 현황을 확인합니다.")
+def _my_duty_block(user: dict) -> None:
+    """USER 의 '내 근무' 블록 — 근무 인원 위에 **한 블록**으로 둔다.
+
+    종전에는 이 요약이 USER 화면 전체였고(역할별 다른 화면), 카드 5장이 근무 인원
+    지표와 다른 모양이었다. 지금은 같은 지표 타일(:func:`_tiles_html`)을 써서 한
+    화면 안에서 같은 계층이 같은 말투를 쓰게 한다. 값은 오늘 기준이며(라벨이 '오늘'·
+    '이번 달'이라 조회 일자와 혼동되지 않는다) 조회 일자는 아래 근무 인원이 따른다.
+
+    이 블록의 오류는 화면 전체를 접지 않는다 — 아래 근무 인원은 별개 조회다.
+    """
     today = date.today()
     emp_no = str(user.get("emp_no", "")).strip()
 
@@ -779,7 +886,7 @@ def _render_user(user: dict) -> None:
         }
         rows["date"] = pd.to_datetime(rows["duty_date"], errors="coerce").dt.date
     except Exception:
-        st.error("근무 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
+        st.error("내 근무 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
     today_rows = rows[rows["date"] == today] if not rows.empty else rows
@@ -801,31 +908,11 @@ def _render_user(user: dict) -> None:
             counts[group] += int(count)
 
     items = [
-        ("오늘 내 근무", today_code),
-        (next_label, next_value),
-        ("이번 달 주간", f"{counts['주간']}회"),
-        ("이번 달 야간", f"{counts['야간']}회"),
-        ("이번 달 OFF", f"{counts['OFF']}회"),
+        ("오늘 내 근무", today_code, "", True),
+        (next_label, next_value, "", False),
+        ("이번 달 주간", counts["주간"], "회", False),
+        ("이번 달 야간", counts["야간"], "회", False),
+        ("이번 달 OFF", counts["OFF"], "회", False),
     ]
-    cards = "".join(
-        f"<div class='sum-card'><div class='sum-value'>{escape(value)}</div>"
-        f"<div class='sum-label'>{escape(label)}</div></div>"
-        for label, value in items
-    )
-    st.markdown(
-        """
-<style>
-/* 크기·간격은 §1.1/§1.2 값만 쓴다(종전 .6rem/.45rem/1.18rem/1.05rem 은 스케일 밖이었고
-   root font-size 에 따라 값이 흔들렸다). 이 분기 자체는 §2 DASHBOARD "역할 통합" 미결
-   과제(역할별 다른 화면 폐기)라 구조는 손대지 않는다 — 이번 범위는 크기·간격·타이포다. */
-.user-dashboard-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; }
-.user-dashboard-grid .sum-value { font-size:20px; overflow-wrap:anywhere; }
-@media (max-width:768px) {
-  .user-dashboard-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
-  .user-dashboard-grid .sum-card:first-child { grid-column:span 1; }
-  .user-dashboard-grid .sum-value { font-size:16px; }
-}
-</style>
-""" + f"<div class='user-dashboard-grid'>{cards}</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown(_section_label("내 근무"), unsafe_allow_html=True)
+    st.markdown(_tiles_html(items, "dash-kpis-my"), unsafe_allow_html=True)

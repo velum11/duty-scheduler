@@ -799,6 +799,80 @@ def test_retired_employee_month_display() -> None:
     st.session_state.pop(db._ASSIGNMENTS_STORE, None)
 
 
+def test_dashboard_user_default_scope() -> None:
+    print("views.dashboard USER 기본 범위(자기 부서 대분류 기본선택 · 미분류 제외)")
+    from datetime import date as _date
+    from views import dashboard as dash
+
+    st.session_state.pop(db._SCHEDULES_STORE, None)
+    st.session_state.pop(db._ASSIGNMENTS_STORE, None)
+    st.session_state.pop(db._ORG_GROUPS_STORE, None)
+
+    day_date = _date(2026, 7, 1)
+    day = db.get_day_schedules(day_date)
+    depts = db.get_org_departments().copy()
+    depts.loc[depts["dept_code"] == "PET1", ["major_category", "minor_category"]] =         ["PET생산부", "PET생산팀"]
+    depts.loc[depts["dept_code"] == "PET2", ["major_category", "minor_category"]] = ["", ""]
+
+    # (a) 기본 선택 = 소속 부서의 **대분류**(칩이 대분류 단위이므로 중분류가 아니다).
+    check("분류 있는 부서 USER → 대분류가 기본 선택",
+          dash._default_major({"role": "USER", "dept_code": "PET1"}, depts) == "PET생산부")
+    check("분류 없는 부서 USER → 기본 선택 없음(전체)",
+          dash._default_major({"role": "USER", "dept_code": "PET2"}, depts) == dash._ALL_MAJORS)
+    check("부서 미지정 USER → 전체",
+          dash._default_major({"role": "USER", "dept_code": ""}, depts) == dash._ALL_MAJORS)
+    check("기준정보에 없는 부서코드 → 전체",
+          dash._default_major({"role": "USER", "dept_code": "NOPE"}, depts) == dash._ALL_MAJORS)
+
+    # (b) USER 의 '전체'는 분류가 있는 부서만 담는다(미분류 제외). 관리자 경로는 종전대로 포함.
+    tree_admin, majors_admin = dash._duty_board(day_date, depts=depts)
+    tree_user, majors_user = dash._duty_board(day_date, depts=depts, classified_only=True)
+    check("관리자 경로는 미분류를 계속 노출(입력 누락 발견)",
+          dash._UNCLASSIFIED_LABEL in majors_admin)
+    check("USER 경로 '전체'에 미분류 없음", dash._UNCLASSIFIED_LABEL not in majors_user)
+    user_rows = len(_board_names(tree_user))
+    pet2_rows = int(day.merge(db.get_users(), on="emp_no", how="left")["dept_code"]
+                    .astype(str).eq("PET2").sum())
+    check("USER 경로는 분류 없는 부서 인원만큼만 줄어든다",
+          user_rows == len(_board_names(tree_admin)) - pet2_rows)
+    totals_user, _cols = dash._summarize(tree_user)
+    check("USER 경로도 지표 = 명단(같은 트리에서 파생)",
+          sum(totals_user.values()) == user_rows)
+
+    # (c) 같은 숫자를 두 번 말하지 않는다 — 조직 줄 요약 폐지, 건수는 열 머리글만.
+    totals_a, columns_a = dash._summarize(tree_admin)
+    html = dash._people_html(tree_admin, columns_a)
+    check("조직 줄 합계 요약 제거(중복 표기 없음)", "dorg-osum" not in html)
+    first_org = tree_admin[0]["orgs"][0]
+    bucket0 = columns_a[0]
+    count0 = len(first_org["people"].get(bucket0, []))
+    check("건수는 열 머리글이 한 번만 말한다",
+          html.count(f"<span class='dorg-clabel'>{bucket0}</span>"
+                     f"<span class='dorg-cnum'>{count0}</span>") >= 1)
+
+    # (d) USER render 는 근무 인원 보드를 실제로 구성한다(종전에는 개인 요약만).
+    calls = {"n": 0, "kw": None}
+    orig = dash._duty_board
+
+    def _spy(*a, **k):
+        calls["n"] += 1
+        calls["kw"] = k
+        return ([], [])
+
+    st.session_state["dashboard_date"] = day_date
+    st.session_state["dash_date_input"] = day_date
+    dash._duty_board = _spy
+    try:
+        dash.render({"role": "USER", "dept_code": "PET1", "emp_no": "1003", "name": "직원"})
+        check("USER render → _duty_board 호출(근무 인원 표시)", calls["n"] >= 1)
+        check("USER 는 부서 한정이 아니라 분류 한정으로 연다",
+              (calls["kw"] or {}).get("manager_dept") is None
+              and (calls["kw"] or {}).get("classified_only") is True)
+    finally:
+        dash._duty_board = orig
+    st.session_state.pop(db._ORG_GROUPS_STORE, None)
+
+
 def test_dashboard_render_scope_gate() -> None:
     print("views.dashboard.render scope 게이트 회귀(blocked → _duty_board 미호출)")
     from datetime import date as _date
@@ -1961,6 +2035,7 @@ def main() -> int:
         test_day_schedules,
         test_dashboard_board_contracts,
         test_dashboard_scope_and_safety,
+        test_dashboard_user_default_scope,
         test_dashboard_render_scope_gate,
         test_dashboard_attendance_target_scope,
         test_month_grid_snapshot,
