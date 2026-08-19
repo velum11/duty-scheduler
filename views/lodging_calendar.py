@@ -1,8 +1,10 @@
-"""숙소 예약 캘린더 — 조회형(DESIGN.md §1-E / §0 READ_VIEW).
+"""숙소 예약 캘린더 — READ_VIEW(DESIGN.md §2, 2026-08-18 신판 골격).
 
-영역 순서(§0.3): 제목 → 조회 조건(§1-E 필터 줄) → 지표 스트립 → 월 캘린더 → 범례.
-캘린더가 화면의 전부다(2026-08-07 사용자 결정 — 하단 예약 목록·상세 제거). 상태 변경은
-승인 관리, 본인 수정·취소는 내 숙소 예약 소관 — 여기는 순수 조회다.
+골격: 제목 → 조회 조건(연·월·숙소·상태 + 월 이동 한 줄) → 월 캘린더 → 범례.
+종전의 지표 스트립(월 예약·가동률 등)은 §4-1(목록을 바꾸지 않는 읽기 전용 타일 금지)에
+따라 제거했다 — 점유 현황은 캘린더 자체가 말한다. 캘린더가 화면의 전부다(2026-08-07
+사용자 결정 — 하단 예약 목록·상세 제거). 상태 변경은 승인 관리, 본인 수정·취소는
+내 숙소 예약 소관 — 여기는 순수 조회다.
 
 캘린더는 **구글 캘린더식 월 뷰**다: 한 예약은 기간 전체가 이어진 하나의 막대로 그려지고,
 주(week) 경계를 넘는 예약은 모서리를 끊어(radius 0) 다음 주로 이어짐을 표현한다.
@@ -15,8 +17,10 @@
 무관하다. 종전에는 필터 결과 순서로 색을 배정해 '태안만 보기'를 걸면 태안이 대관령 색
 (녹색)으로 바뀌는 결함이 있었다(실측 재현). lane(세로 위치)만 보이는 숙소 수만큼 압축한다.
 """
-# DESIGN.md §0 화면 유형 규약 — 조회형.
+# DESIGN.md §0 — 이 화면이 내리는 결정.
 SCREEN_ARCHETYPE = "READ_VIEW"
+SCREEN_DECISION = "원하는 기간에 빈 숙소가 있는가"
+SCREEN_EVIDENCE = ("월별 점유 막대(기간 연속)", "숙소별 고정 lane·색", "상태 표기(승인대기 점선)")
 
 from datetime import date
 from html import escape
@@ -61,19 +65,13 @@ def render(user: dict) -> None:
         banner("danger", str(exc))
         return
 
-    # §0-4·§4 영역 순서: 지표는 제목 바로 아래 첫 블록이다. 값은 조회 조건 확정 후에야
-    # 계산되므로 슬롯을 먼저 잡고(필터 위) 결과 준비 뒤 채운다(near_miss_view 와 동일 패턴).
-    metric_slot = st.container()
-
+    # §2 READ_VIEW: 제목 → 조회 조건 → 캘린더. 지표 스트립은 §4-1 에 따라 두지 않는다.
     cond = _conditions(lodgings)
     days = ld.month_days(cond["year"], cond["month"])
     # 색 배정은 조회 조건이 아니라 기준정보 전체 순서로 1회 산출한다(D4 — 필터 불변).
     tint_of = _tint_map(lodgings)
     visible_codes = _visible_codes(lodgings, cond["lodging"])
     rows = _month_rows(reservations, days, visible_codes, cond["status"])
-
-    with metric_slot:
-        erp.metric_strip(_metrics(rows, visible_codes, days, reservations))
 
     if not rows:
         erp.detail_empty(
@@ -192,26 +190,6 @@ def _month_rows(reservations, days, codes, status) -> list[dict]:
             out.append(row)
     return sorted(out, key=lambda r: (ld.clean(r.get("check_in")),
                                       ld.clean(r.get("lodging_code"))))
-
-
-def _metrics(rows, codes, days, all_reservations) -> list[tuple]:
-    counts = {}
-    for row in rows:
-        code = ld.clean(row.get("status"))
-        counts[code] = counts.get(code, 0) + 1
-    rate = ld.occupancy_rate(rows, codes, days)
-    today = date.today()
-    staying = sum(1 for r in all_reservations
-                  if ld.clean(r.get("status")) in (ld.APPROVED, ld.COMPLETED)
-                  and today in ld.day_span(r))
-    return [
-        ("월 예약", len(rows), "건", "TOTAL", len(rows) > 0),
-        ("승인 대기", counts.get(ld.REQUESTED, 0), "건", "REQUESTED",
-         counts.get(ld.REQUESTED, 0) > 0),
-        ("승인 확정", counts.get(ld.APPROVED, 0), "건", "APPROVED", False),
-        ("가동률", rate, "%", "RATE", False),
-        ("오늘 재실", staying, "건", "TODAY", False),
-    ]
 
 
 # ===========================================================================

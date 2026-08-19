@@ -1,16 +1,16 @@
-"""내 숙소 예약 — 테이블 선택형(DESIGN.md §0 MASTER_DETAIL) + 신청 상태 수정 · 취소.
+"""내 숙소 예약 — READ_VIEW(DESIGN.md §2, 2026-08-18 신판 골격) + 신청 상태 수정 · 취소.
 
-    제목/설명 → [지표 스트립] → [기간·상태 조건] → [예약 테이블(행 클릭 = 선택)]
-    → [선택 건 전체폭 상세: 진행 단계 · 메타 · 처리 의견 · 액션]
+    제목/설명 → [기간·상태 조회 조건] → [목록 카드: 헤더 + 표]
+    → [상세 카드: 헤더(번호·배지·액션) + 속성 스택]
 
-2026-08-07 재검수 결정(D1): 목록형 아코디언 대신 **테이블 + 전체폭 상세**로 전환했다 —
-예약이 쌓이면 아코디언은 기간·상태를 세로로만 훑게 해 비교가 어렵고, 펼침 상태에 따라
-행 위치가 흔들린다. 승인 관리와 같은 목록 어휘(``erp.select_grid``)를 쓰되 이 화면은
-USER 소관이라 행 피치 44px(터치 variant)이고, 상세 열기는 **행 클릭**이다(체크박스 마커
-없음 — §0-1).
+§2 READ_VIEW 골격(제목 → 조회 조건 → 표)을 따른다. 종전의 지표 스트립은 §4-1
+(읽기 전용 지표 타일 금지 — 목록을 바꾸지 않는 수치는 자리값을 못 한다)에 따라
+제거했다(2026-08-18 신판 정합). 테이블 + 전체폭 상세는 내 아차사고(READ_VIEW)와
+같은 관용구이며, 행 피치는 USER 소관 화면이라 44px(§1.4 cozy — 터치 조작 대상).
 
-- 좌우 분할·"예약을 선택하세요" 빈 패널 없음(§0 금지 1·2 — 진입 시 첫 행 자동 선택).
-  카드 금지(§0-5).
+- 진입 시 첫 행 자동 선택(빈 상세 패널을 만들지 않는다 — §3.5 빈 상태 회피).
+- 상태는 배지 낱말로만 읽는다 — 표의 상태 색과 진행 단계 pill 은 소음이라 제거했다
+  (2026-08-19 사용자 결정). 수정 불가 사유는 상세 하단 한 줄이 소유한다(§3.2).
 - 목록 범위는 위젯이 아니라 **인증 세션 사번**으로 고정한다(타인 건 열람 방지).
 - 수정(신청 상태만)·취소 게이트는 화면이 아니라 ``lodging_data.update_reservation`` /
   ``action_blocker`` 가 서버측에서 재확인한다. 수정 시 겹치는 예약이 있으면
@@ -18,10 +18,13 @@ USER 소관이라 행 피치 44px(터치 variant)이고, 상세 열기는 **행 
 - 취소는 되돌릴 수 없으므로 실행 전에 확인 팝업을 거친다(D2) — 팝업은 표시 계층의
   오조작 방지이고, 권한·상태 판정은 여전히 ``run_action`` 이 소유한다.
 """
-# DESIGN.md §0 MASTER_DETAIL — 목록(테이블 선택) + 전체폭 상세/워크플로.
+# DESIGN.md §0 — 이 화면이 내리는 결정.
 SCREEN_ARCHETYPE = "READ_VIEW"
+SCREEN_DECISION = "내 예약이 어느 단계에 있고, 일정 수정이나 취소가 필요한가"
+SCREEN_EVIDENCE = ("내 예약 목록(기간·상태)", "진행 단계·처리 의견", "허용 액션과 불가 사유")
 
 from datetime import date
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -44,16 +47,6 @@ _BADGE_CODE = {
     ld.COMPLETED: proto.BADGE_CLOSED,
     ld.REJECTED: proto.BADGE_REJECTED,
     ld.CANCELLED: proto.BADGE_CLOSED,
-}
-_STEP_ORDER = ((ld.REQUESTED, "신청"), (ld.APPROVED, "승인"), (ld.COMPLETED, "사용완료"))
-_BRANCH_LABEL = {ld.REJECTED: "반려", ld.CANCELLED: "취소"}
-# 상태 색은 승인 관리와 **같은 값**을 쓴다(같은 상태가 화면마다 다른 색이면 안 된다).
-_STATUS_COLORS = {
-    ld.STATUS_LABELS[ld.REQUESTED]: "#8a6212",
-    ld.STATUS_LABELS[ld.APPROVED]: "#2f6b45",
-    ld.STATUS_LABELS[ld.COMPLETED]: "#5c564d",
-    ld.STATUS_LABELS[ld.REJECTED]: "#9c3232",
-    ld.STATUS_LABELS[ld.CANCELLED]: "#5c564d",
 }
 
 
@@ -83,9 +76,8 @@ def render(user: dict) -> None:
                          "'숙소 예약 신청'에서 대관령·태안 숙소 사용을 신청할 수 있습니다.")
         return
 
-    # §0-4·§4 영역 순서: 지표는 제목 바로 아래 첫 블록(필터보다 위). 값은 전체 내 예약
-    # 기준이므로 필터와 무관하지만, 슬롯을 먼저 잡아 렌더 순서를 규약에 맞춘다.
-    metric_slot = st.container()
+    # §2 READ_VIEW: 제목 → 조회 조건 → 표. 지표 스트립은 §4-1(목록을 바꾸지 않는
+    # 읽기 전용 타일 금지)에 따라 두지 않는다 — 상태별로 보고 싶으면 상태 조건이 있다.
     filters = _filters()
     date_from, date_to = filters["date_from"], filters["date_to"]
     if date_from and date_to and date_from > date_to:
@@ -96,11 +88,6 @@ def render(user: dict) -> None:
         statuses=None if filters["status"] == _ALL else (filters["status"],),
         date_from=date_from, date_to=date_to,
     )
-    with metric_slot:
-        erp.metric_strip(_metrics(rows))
-        # 지표는 아래 조건과 무관하다는 사실을 말로 고정한다(LMY-4) — 숫자가 표 건수와
-        # 달라 보이는 이유를 사용자가 추측하지 않게.
-        proto.caption_line("지표는 조회 조건과 무관하게 내 예약 전체 기준입니다.")
 
     if not shown:
         erp.detail_empty("조건에 해당하는 예약이 없습니다", "기간·상태 조건을 조정해 보세요.")
@@ -114,7 +101,8 @@ def render(user: dict) -> None:
     if remembered not in numbers:
         remembered = numbers[0]      # 빈 상세 패널 금지(§0) — 진입 시 첫 행 자동 선택.
 
-    picked = _render_table(ordered, remembered)
+    with st.container(key="prcard_list"):
+        picked = _render_table(ordered, remembered)
     selected = picked or remembered
     st.session_state[_SEL_KEY] = selected
     # 다른 건으로 옮기면 열려 있던 취소 확인은 대상이 바뀌므로 폐기한다(오확인 방지).
@@ -141,70 +129,60 @@ def _filters() -> dict:
     )
 
 
-def _metrics(rows: list[dict]) -> list[tuple]:
-    today = date.today()
-    waiting = sum(1 for r in rows if ld.clean(r.get("status")) == ld.REQUESTED)
-    approved = sum(1 for r in rows if ld.clean(r.get("status")) == ld.APPROVED)
-    upcoming = sum(1 for r in rows
-                   if ld.clean(r.get("status")) == ld.APPROVED
-                   and (ld.to_date(r.get("check_in")) or date.min) >= today)
-    closed = sum(1 for r in rows if ld.clean(r.get("status")) in ld.TERMINAL_STATUSES)
-    return [
-        ("내 예약", len(rows), "건", "MINE", len(rows) > 0),
-        ("승인 대기", waiting, "건", "REQUESTED", waiting > 0),
-        ("승인 확정", approved, "건", "APPROVED", False),
-        ("다가오는 숙박", upcoming, "건", "UPCOMING", False),
-        ("종결", closed, "건", "CLOSED", False),
-    ]
-
-
 # ===========================================================================
 # 목록(테이블 선택)
 # ===========================================================================
 def _render_table(rows: list[dict], selected: str) -> str | None:
-    """내 예약 테이블 — 행 클릭이 곧 선택이자 상세 열기(체크박스 마커 없음, §0-1).
+    """내 예약 목록 — 카드 패널 + 표(승인 관리와 같은 어휘).
 
-    행 피치는 USER·터치 variant 44px(``erp.select_grid`` 계약)다 — 승인 관리(32px 큐
-    밀도)와 달리 이 화면은 하루에 몇 번 보는 개인 목록이라 잘못 눌러 다른 건을 여는
-    비용이 더 크다.
+    행 클릭이 곧 선택이자 상세 열기이며, 행 피치는 USER·터치 variant 44px(§1.4 cozy).
+    상태는 색을 쓰지 않는다(2026-08-19 사용자 결정 — 낱말만으로 읽힌다).
     """
     lodgings = ld.lodging_map()
+    st.markdown(
+        f"<div class='pr-panelhd'><span class='t'>내 예약</span>"
+        f"<span class='r'>체크인 최근 순 · {len(rows)}건</span></div>",
+        unsafe_allow_html=True,
+    )
     frame = pd.DataFrame([
         {
             _KEY_FIELD: ld.clean(r.get("request_no")),
-            "신청번호": ld.clean(r.get("request_no")),
-            "숙소": ld.lodging_label(lodgings.get(ld.clean(r.get("lodging_code")))),
-            "체크인": ld.clean(r.get("check_in")),
-            "체크아웃": ld.clean(r.get("check_out")),
-            "박": str(ld.nights(r.get("check_in"), r.get("check_out"))),
+            "접수번호": ld.clean(r.get("request_no")),
+            "신청일자": ld.clean(r.get("created_at"))[:10],
+            "장소": ld.lodging_label(lodgings.get(ld.clean(r.get("lodging_code")))),
+            "기간": _period_cell(r),
             "상태": ld.STATUS_LABELS.get(ld.clean(r.get("status")), ld.clean(r.get("status"))),
-            "신청일시": ld.clean(r.get("created_at")),
         }
         for r in rows
     ])
     col_config = {
-        "신청번호": {"width": 150, "cellStyle": {"fontFamily": "'IBM Plex Mono', monospace"}},
-        "숙소": {"width": 100},
-        "체크인": {"width": 104},
-        "체크아웃": {"width": 104},
-        "박": {"width": 56},
-        "상태": {"width": 88},
-        "신청일시": {"flex": 1, "minWidth": 140},
+        "접수번호": {"width": 152, "cellStyle": {"fontFamily": proto.MONO}},
+        "신청일자": {"width": 108},
+        "장소": {"width": 96},
+        "기간": {"flex": 1, "minWidth": 210},
+        "상태": {"width": 84, "cellStyle": {"justifyContent": "flex-end"}},
     }
+    height = 44 + min(len(rows), 10) * 44 + 20
     return erp.select_grid(
         frame, key=f"{_PAGE_ID}_grid", key_field=_KEY_FIELD,
-        columns=["신청번호", "숙소", "체크인", "체크아웃", "박", "상태", "신청일시"],
-        selected_key=selected,
-        color_rules={"상태": _STATUS_COLORS}, col_config=col_config,
-        row_height=44, checkbox_marker=False,
+        columns=["접수번호", "신청일자", "장소", "기간", "상태"],
+        selected_key=selected, col_config=col_config,
+        height=height, row_height=44, checkbox_marker=False,
     )
+
+
+def _period_cell(row: dict) -> str:
+    """목록용 기간 표기 — 같은 달이면 종료일의 연·월을 생략한다(승인 관리와 동일 형식)."""
+    ci, co = ld.clean(row.get("check_in")), ld.clean(row.get("check_out"))
+    tail = co[5:] if len(ci) >= 7 and len(co) >= 7 and ci[:7] == co[:7] else co
+    return f"{ci} ~ {tail} ({ld.nights(row.get('check_in'), row.get('check_out'))}박)"
 
 
 # ===========================================================================
 # 전체폭 상세 + 일정 수정 + 액션
 # ===========================================================================
 def _detail(user: dict, rows: list[dict], request_no: str) -> None:
-    """선택 건 상세: 진행 단계 pill → 메타 → 처리 의견 → 액션."""
+    """선택 건 상세 — 카드 패널: 헤더(번호·배지·액션) → 속성 스택 → 안내(승인 관리 어휘)."""
     row = next((r for r in rows if ld.clean(r.get("request_no")) == request_no), None)
     if row is None:
         st.session_state.pop(_SEL_KEY, None)
@@ -214,69 +192,65 @@ def _detail(user: dict, rows: list[dict], request_no: str) -> None:
 
     status = ld.clean(row.get("status"))
     lodging = ld.lodging_map().get(ld.clean(row.get("lodging_code")))
-    proto.hairline(top="10px", bottom="4px")
-    # 상세 앵커 한 줄: 신청번호 + 상태 배지 — 어떤 건을 보고 있는지만 고정한다(숙소·기간은
-    # 바로 아래 메타 셀이 소유하므로 여기서 되풀이하지 않는다).
-    st.markdown(
-        "<div style='display:flex;flex-wrap:wrap;align-items:center;gap:10px;"
-        "margin:2px 0 0;'>"
-        f"<span style='font-family:{proto.MONO};font-size:16px;font-weight:600;"
-        f"color:{proto.INK};'>{ld.clean(row.get('request_no'))}</span>"
-        f"{proto.badge(_BADGE_CODE.get(status, proto.BADGE_CLOSED), ld.STATUS_LABELS.get(status, status))}"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    branch = (status, _BRANCH_LABEL[status]) if status in _BRANCH_LABEL else None
-    st.markdown(proto.steps_html(list(_STEP_ORDER), status, branch=branch),
-                unsafe_allow_html=True)
-
     comment = ld.clean(row.get("decision_comment"))
-    if status == ld.REJECTED and comment:
-        banner("warn", f"반려 사유: {comment}")
+    with st.container(key="prcard_detail"):
+        with st.container(key="prhead_my", horizontal=True, gap="small",
+                          vertical_alignment="center"):
+            st.markdown(
+                "<div class='pr-panelhd' style='margin:0;'>"
+                f"<span style='font-family:{proto.MONO};font-size:16px;font-weight:600;"
+                f"color:{proto.INK};'>{ld.clean(row.get('request_no'))}</span>"
+                f"{proto.badge(_BADGE_CODE.get(status, proto.BADGE_CLOSED), ld.STATUS_LABELS.get(status, status))}"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            _render_actions(user, row, status)
 
-    st.markdown(proto.meta_cells([
-        ("숙소", ld.lodging_label(lodging)),
-        ("기간", ld.period_label(row)),
-        ("신청일시", ld.clean(row.get("created_at"))),
-        ("처리자", ld.clean(row.get("decided_by")) or "-"),
-        ("처리일시", ld.clean(row.get("decided_at")) or "-"),
-    ]), unsafe_allow_html=True)
-    if comment and status != ld.REJECTED:
-        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-        st.markdown(proto.body_blocks([
-            ("DECISION", "처리 의견", comment, True),
-        ]), unsafe_allow_html=True)
+        if status == ld.REJECTED and comment:
+            banner("warn", f"반려 사유: {comment}")
 
-    proto.hairline(top="10px", bottom="4px")
-    _render_actions(user, row, status)
+        nights = ld.nights(row.get("check_in"), row.get("check_out"))
+        cells = [
+            ("장소 · 기간",
+             f"{ld.lodging_label(lodging)} · {_period_cell(row)[:-1]} {nights + 1}일)"),
+            ("신청일시", ld.clean(row.get("created_at"))),
+        ]
+        if ld.clean(row.get("decided_by")):
+            cells.append(("처리", f"{ld.clean(row.get('decided_by'))} · "
+                                f"{ld.clean(row.get('decided_at')) or '-'}"))
+        if comment and status != ld.REJECTED:
+            cells.append(("처리 의견", comment))
+        body = "".join(
+            f"<div><p class='k'>{escape(k)}</p><div class='v'>{escape(v)}</div></div>"
+            for k, v in cells
+        )
+        st.markdown(f"<div class='pr-stack row'>{body}</div>", unsafe_allow_html=True)
+
+        # 비활성 사유는 항상 화면에 쓴다(§3.2) — 승인 전에만 수정 가능하다는 계약.
+        if status != ld.REQUESTED:
+            proto.note_line("승인 전(신청 상태)에만 일정을 수정할 수 있습니다.")
+        if st.session_state.get(_CONFIRM_KEY) == ld.clean(row.get("request_no")):
+            _cancel_dialog(row, user)
+        if status == ld.REQUESTED and st.session_state.get(
+                f"{_EDIT_KEY}{ld.clean(row.get('request_no'))}"):
+            _render_edit_form(user, row)
 
 
 def _render_actions(user: dict, row: dict, status: str) -> None:
-    """본인 액션 — 신청 상태의 [일정 수정], 체크인 전의 [예약 취소]."""
+    """헤더 우측 액션 — 신청 상태의 [일정 수정], 체크인 전의 [예약 취소]."""
     no = ld.clean(row.get("request_no"))
-    can_edit = status == ld.REQUESTED
     cancel_block = ld.action_blocker(row, ld.ACT_CANCEL, user)
 
-    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
-        if can_edit:
-            if st.button("일정 수정", key=f"pract_edit_{no}", type="secondary",
-                         width="content"):
-                edit_key = f"{_EDIT_KEY}{no}"
-                st.session_state[edit_key] = not bool(st.session_state.get(edit_key, False))
-                st.rerun()
-        if st.button("예약 취소", key=f"pract_cancel_{no}", type="secondary",
-                     width="content", disabled=bool(cancel_block), help=cancel_block):
-            st.session_state[_CONFIRM_KEY] = no
+    if status == ld.REQUESTED:
+        if st.button("일정 수정", key=f"pract_edit_{no}", type="secondary",
+                     width="content"):
+            edit_key = f"{_EDIT_KEY}{no}"
+            st.session_state[edit_key] = not bool(st.session_state.get(edit_key, False))
             st.rerun()
-    # 수정 불가 사유는 취소 가능 여부와 무관하게 항상 알린다(LMY-3 — 종전에는 취소까지
-    # 막힌 건에서만 떠서, 승인된 건에서 안내가 침묵했다).
-    if not can_edit:
-        proto.note_line("승인 전(신청 상태)에만 일정을 수정할 수 있고, 취소는 체크인 전까지 가능합니다.")
-
-    if st.session_state.get(_CONFIRM_KEY) == no:
-        _cancel_dialog(row, user)
-    if can_edit and st.session_state.get(f"{_EDIT_KEY}{no}"):
-        _render_edit_form(user, row)
+    if st.button("예약 취소", key=f"prneg_cancel_{no}", type="secondary",
+                 width="content", disabled=bool(cancel_block), help=cancel_block):
+        st.session_state[_CONFIRM_KEY] = no
+        st.rerun()
 
 
 @st.dialog("예약 취소 확인", width="large")
