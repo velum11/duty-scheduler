@@ -178,9 +178,12 @@ def _section_block(pdf: FPDF, tag: str, label: str, value: str, w: float) -> Non
         pdf.add_page()
     top = pdf.get_y()
     inset = 4.0
-    pdf.set_x(_MARGIN + inset)
-    pdf._f(8); pdf.set_text_color(*_MUT)
-    pdf.cell(0, 4.5, tag, new_x="LMARGIN", new_y="NEXT")
+    # 태그(오버라인)가 라벨과 같은 낱말이면 생략한다 — '작업명/작업명'처럼 같은 말이
+    # 두 줄로 반복되던 출력 중복 제거(태그는 WHAT/TASK 처럼 라벨과 다를 때만 정보다).
+    if str(tag).strip() and str(tag).strip() != str(label).strip():
+        pdf.set_x(_MARGIN + inset)
+        pdf._f(8); pdf.set_text_color(*_MUT)
+        pdf.cell(0, 4.5, tag, new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(_MARGIN + inset)
     pdf._f(10.5); pdf.set_text_color(*_INK2)
     pdf.cell(0, 5, label, new_x="LMARGIN", new_y="NEXT")
