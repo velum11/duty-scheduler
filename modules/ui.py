@@ -179,7 +179,9 @@ section[data-testid="stMain"] div[data-testid="stNumberInput"] label {
 section[data-testid="stMain"] div[data-baseweb="select"] > div,
 section[data-testid="stMain"] div[data-testid="stTextInput"] input,
 section[data-testid="stMain"] div[data-testid="stNumberInput"] input {
-  min-height: 2.15rem; border-radius: 6px; border-color: var(--cd-line-strong);
+  /* §1.4 compact 하한 34px — 종전 2.15rem(=30.1px@root14)은 미달이었고 화면들이
+     개별 우회(32~34px)를 하며 한 화면 안 버튼 높이가 갈렸다(BACKLOG 2026-08-15). */
+  min-height: 34px; border-radius: 6px; border-color: var(--cd-line-strong);
   background: var(--cd-surface); font-size: 14px;
 }
 section[data-testid="stMain"] div[data-baseweb="select"] div[data-baseweb="select"] { font-size: 14px; }
@@ -194,7 +196,7 @@ section[data-testid="stMain"] div[data-testid="stNumberInput"] input:focus {
 section[data-testid="stMain"] .stButton > button,
 section[data-testid="stMain"] .stDownloadButton > button,
 section[data-testid="stMain"] .stFormSubmitButton > button {
-  min-height: 2.15rem; font-size: 14px; font-weight: 600; border-radius: 6px;
+  min-height: 34px; font-size: 14px; font-weight: 600; border-radius: 6px;
 }
 section[data-testid="stMain"] .stButton > button[kind="primary"],
 section[data-testid="stMain"] .stFormSubmitButton > button[kind="primary"] {

@@ -163,7 +163,7 @@ _KIT_CSS = f"""
 /* help(툴팁) 래퍼가 씌워진 버튼도 앱 기본 버튼 크기를 따르게 — modules/ui.py 의 직계자식
    선택자(.stButton > button)가 툴팁 DOM 체인을 못 잡아 생기는 높이 불일치 보정(detail_actions
    처럼 help 유무가 섞인 버튼을 한 행에 둘 때 가시화). 크기만 맞추는 저위험 규칙. */
-.stTooltipHoverTarget > button {{ min-height: 2.15rem; font-size: 14px; }}
+.stTooltipHoverTarget > button {{ min-height: 34px; font-size: 14px; }}
 </style>
 """
 

@@ -158,11 +158,9 @@ _MU_CSS = """
 .mu-crow .sel { font-weight:600; color:#4a453d; }
 .mu-crow .hint { color:#6b665d; }
 .mu-crow .sep { color:#cfc8bd; }
-/* ADMIN 전용 expander 안의 실행 버튼(비밀번호 초기화·담당/이메일 저장)은 앱 전역 버튼
-   높이(2.15rem=30.1px 실측)를 그대로 받아 히트영역 하한 32px(§0.6·§4)을 밑돌았다.
-   두 버튼 모두 되돌리기 어려운 쓰기 액션이라 하한을 지킨다(모양·색 규칙은 불변). */
-.st-key-master_users__pwreset_run button,
-.st-key-master_users__cap_save button { min-height:32px !important; }
+/* (2026-08-19) 비밀번호 초기화·담당/이메일 저장 버튼의 32px 개별 우회를 제거했다 —
+   공용 버튼 하한이 34px(§1.4 compact, modules/ui.py)로 올라 우회가 오히려 낮추는
+   쪽이 됐기 때문. 이제 앱 전역 규칙 하나를 그대로 받는다. */
 </style>
 """
 
