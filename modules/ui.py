@@ -517,6 +517,14 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
   margin: 0 -1.25rem 0.6rem; padding: 0 1.25rem;
   display: flex; flex-direction: column; justify-content: center;
 }
+/* 2026-08-20 사용자 요구 — 상단바 고정. sticky 는 **부모 박스 안에서만** 붙는데 헤더의
+   직계 부모(stLayoutWrapper)는 제 키(60px)뿐이라 헤더에 걸면 무효다(실측). 래퍼에
+   걸면 부모가 본문 전체 블록이 되어 스크롤 내내 상단에 붙는다 — 긴 편집 그리드에서도
+   저장·행 추가 아이콘이 항상 보인다. 래퍼 배경은 캔버스색으로 채워 헤더 아래 여백
+   틈으로 본문이 비치지 않게 한다(헤더 자체 배경은 --headbar-bg 그대로). */
+div[data-testid="stLayoutWrapper"]:has(> .st-key-app_header) {
+  position: sticky; top: 0; z-index: 60; background: var(--cd-canvas, #f4f2ee);
+}
 .st-key-app_header div[data-testid="stHorizontalBlock"] { align-items: center; flex-wrap: nowrap; }
 .st-key-app_header div[data-testid="stColumn"] { min-width: 0 !important; }
 /* MODULE / SCREEN 모노 브레드크럼 (11.5px) */

@@ -947,7 +947,7 @@ def render(user: dict) -> None:
             # 편집기·직접 타이핑을 복원한다. 숫자키·방향키·Ctrl+V 는 그대로 유지.
             # enableBrowserTooltips: '조' 열 headerTooltip 을 AG Grid 자체 tooltip 컴포넌트
             # (별도 모듈 등록 필요)가 아니라 브라우저 기본 title 로 렌더해 항상 뜨게 한다.
-            extra_grid_options={"rowHeight": 30, "enableBrowserTooltips": True},
+            extra_grid_options=_grid_extra_options(feed),
             # 행 앞 핸들 드래그로 순서 변경(2026-08-11 사용자 요구 — 근태표 등록 순서 유지).
             # 확정된 순서는 저장 시 users.display_order 로 영속화된다(_persist_row_order).
             row_drag=True,
@@ -1060,10 +1060,40 @@ def _next_rid() -> str:
     return f"n:{n}"
 
 
-def _remount() -> None:
-    """그리드를 권위 상태(se_rows) 기준으로 재마운트한다."""
+def _remount(scroll_rid=None, focus_col: str | None = None) -> None:
+    """그리드를 권위 상태(se_rows) 기준으로 재마운트한다.
+
+    재마운트는 AgGrid iframe 을 새로 만들어 **내부 스크롤·포커스가 맨 위로 초기화**된다
+    — 행 추가·사번 자동 조회처럼 아래쪽 행을 만지던 중이면 사용자는 매번 다시 아래로
+    내려가야 했다(2026-08-20 "한 줄 추가하면 화면 초기화" 신고의 실체. 저장이 아니라
+    재마운트다). ``scroll_rid`` 를 주면 다음 마운트에서 그 행을 다시 보이게 하고
+    (onFirstDataRendered → ensureIndexVisible), ``focus_col`` 까지 주면 그 셀에
+    포커스를 되돌린다 — 작업 지점이 보존된다."""
     st.session_state["se_feed"] = st.session_state["se_rows"].copy()
     st.session_state["se_nonce"] = st.session_state.get("se_nonce", 0) + 1
+    if scroll_rid is not None:
+        st.session_state["se_scroll"] = {"rid": str(scroll_rid), "col": focus_col}
+
+
+def _grid_extra_options(feed: pd.DataFrame) -> dict:
+    """재마운트 1회분 스크롤·포커스 복원 옵션(_remount 가 남긴 se_scroll 소비).
+
+    onFirstDataRendered 는 마운트당 1회만 발화하므로 이후 편집 rerun 에는 영향이
+    없다. 대상 행이 피드에 없으면(삭제 직후 등) 조용히 건너뛴다."""
+    extra = {"rowHeight": 30, "enableBrowserTooltips": True}
+    scroll = st.session_state.pop("se_scroll", None)
+    if scroll and feed is not None and not feed.empty and "_row_id" in feed.columns:
+        ids = [str(v) for v in feed["_row_id"]]
+        rid = str(scroll.get("rid"))
+        if rid in ids:
+            idx = ids.index(rid)
+            col = scroll.get("col")
+            js = "function(params){params.api.ensureIndexVisible(%d, 'middle');" % idx
+            if col:
+                js += "params.api.setFocusedCell(%d, '%s');" % (idx, col)
+            js += "}"
+            extra["onFirstDataRendered"] = JsCode(js)
+    return extra
 
 
 def _blank_row(day_cols: list) -> dict:
@@ -1183,6 +1213,14 @@ def _sync_rows(grid_df: pd.DataFrame, row_cols: list) -> bool:
         if "_removed" in grid_df.columns else pd.Series(False, index=grid_df.index)
     live = grid_df[~removed].copy()
     changed = bool(removed.any())
+    # 재마운트 후 되돌아갈 작업 지점(행 id) — 아래 각 변경 지점이 갱신한다. 없으면
+    # 종전처럼 맨 위 마운트다(_remount docstring 참조).
+    anchor = None
+    if changed and not live.empty:
+        # − 제거: 제거된 자리 부근의 남은 행을 계속 보이게 한다.
+        first_removed = int(removed.to_numpy().argmax())
+        kept_pos = min(max(first_removed - 1, 0), len(live) - 1)
+        anchor = str(live.iloc[kept_pos]["_row_id"])
 
     users = _users_by_emp()
     catalog = _dept_catalog()
@@ -1218,6 +1256,7 @@ def _sync_rows(grid_df: pd.DataFrame, row_cols: list) -> bool:
         if str(row.get("성명") or "") != target_name:
             live.at[idx, "성명"] = target_name
             changed = True
+            anchor = str(live.at[idx, "_row_id"])  # 방금 사번을 입력한 그 행으로 복귀
         if master is not None:
             if not str(row.get("부서") or "").strip():
                 live.at[idx, "부서"] = db.dept_name(master["dept_code"])
@@ -1239,21 +1278,30 @@ def _sync_rows(grid_df: pd.DataFrame, row_cols: list) -> bool:
         cur_ids = [str(v) for v in live["_row_id"]]
         if prev_ids != cur_ids and sorted(prev_ids) == sorted(cur_ids):
             changed = True
+            # 첫 어긋남 위치의 현재 행 = 드래그 목적지 부근 — 그 행으로 복귀한다.
+            diff_at = next(i for i, (a, b) in enumerate(zip(prev_ids, cur_ids)) if a != b)
+            anchor = cur_ids[diff_at]
 
     # 값 편집도 매 rerun 권위 상태에 반영한다 (구조 변경이 없으면 remount 는 하지 않음
     # — 그리드가 이미 최신 값을 보여주고 있고, feed 재전송은 클릭 rerun 을 삼킬 수 있다).
     st.session_state["se_rows"] = live[row_cols].reset_index(drop=True)
     if changed:
-        _remount()
+        _remount(scroll_rid=anchor)
     return changed
 
 
 def _add_row(live: pd.DataFrame, row_cols: list, day_cols: list) -> None:
     base = live[row_cols].copy() if not live.empty else pd.DataFrame(columns=row_cols)
+    new_row = _blank_row(day_cols)
     st.session_state["se_rows"] = pd.concat(
-        [base, pd.DataFrame([_blank_row(day_cols)])], ignore_index=True,
+        [base, pd.DataFrame([new_row])], ignore_index=True,
     )[row_cols]
-    _remount()
+    # 새 행은 맨 아래(저장 시 부서그룹 마지막 슬롯 계약과 일치) — 대신 그리드가 거기로
+    # 따라가 사번 셀에 포커스를 준다. 안내로 "저장된 것 아님"을 못박는다(자동 저장 오해).
+    _remount(scroll_rid=new_row["_row_id"], focus_col="사번")
+    set_flash("schedule_edit", "info",
+              "빈 행을 맨 아래에 추가하고 그 위치로 이동했습니다 — 사번을 입력하세요. "
+              "[저장]을 누르기 전에는 아무것도 저장되지 않습니다.")
     st.rerun()
 
 
@@ -1267,7 +1315,15 @@ def _mark_delete(live: pd.DataFrame, row_cols: list) -> None:
     deleted.extend(r.to_dict() for _, r in sel[row_cols].iterrows())
     remaining = live[~live.index.isin(sel.index)].assign(_sel=False)
     st.session_state["se_rows"] = remaining[row_cols].reset_index(drop=True)
-    _remount()
+    # 첫 삭제 행 직전(없으면 첫) 남은 행으로 복귀 — 삭제 후 맨 위로 튀지 않는다.
+    anchor = None
+    if not remaining.empty:
+        live_ids = [str(v) for v in live["_row_id"]]
+        del_ids = {str(v) for v in sel["_row_id"]}
+        kept_ids = [i for i in live_ids if i not in del_ids]
+        first_del = next(i for i, v in enumerate(live_ids) if v in del_ids)
+        anchor = kept_ids[min(max(first_del - 1, 0), len(kept_ids) - 1)]
+    _remount(scroll_rid=anchor)
     st.rerun()
 
 
