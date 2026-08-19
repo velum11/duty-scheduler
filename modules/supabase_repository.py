@@ -2174,8 +2174,53 @@ def create_near_miss_report(payload: dict) -> dict:
     )
 
 
+# 미해소 보완요청은 **SUBMITTED 에서만** 존재한다(views/common/near_miss.status_label 이
+# 파생하는 규칙과 같은 문장). 그래서 상태가 SUBMITTED 를 떠나는 쓰기는 3필드를 같은
+# UPDATE 에서 비우고(clear_revision), 보고서 쓰기는 **읽은 시점의 보완요청 상태**를
+# WHERE 에 고정한다(_pin_revision). 고정하지 않으면 status 만으로는 "보완요청 걸린
+# SUBMITTED" 와 "재제출된 SUBMITTED" 가 구분되지 않아 못 본 변경을 덮어쓴다.
+_REVISION_NULLS = {
+    "revision_request_reason": None,
+    "revision_requested_by_user_id": None,
+    "revision_requested_at": None,
+}
+
+# expected_revision_at 의 '인자 없음'(고정하지 않음)과 '그때 요청이 없었음'(NULL 고정)을
+# 구분하는 sentinel. None 은 후자다.
+_UNPINNED = object()
+
+
+def _pin_revision(query, expected_at):
+    """읽은 시점의 보완요청 상태를 UPDATE 조건에 고정한다(007 적용 환경에서만).
+
+    ``expected_at`` 은 호출부가 읽은 ``revision_requested_at`` 이다. None 이면 '그때
+    보완요청이 없었다'는 뜻이라 지금도 NULL 이어야 하고, 값이 있으면 **그 요청 그대로**
+    여야 한다. 그 사이 다른 평가자가 새 보완요청을 걸었거나 보고자가 재제출했으면 0행이
+    되어 stale 오류가 난다 — 보지 못한 변경을 덮어쓰지 않는다(fail-closed).
+
+    007 미적용(NOT_READY)이면 컬럼 자체가 없어 조건을 걸 수 없다. 그 환경에서는
+    보완요청이 애초에 만들어지지 않으므로 고정할 상태도 없다(대상 부재). 단 **probe
+    실패(PROBE_ERROR)는 미적용과 다르다** — 007 적용 환경의 일시 장애에서 조건을
+    생략하면 CAS 없는 UPDATE 가 그대로 나가는 fail-open 이 된다(Codex r2 P1-2).
+    준비 상태를 모르면 쓰지 않는다(fail-closed)."""
+    if expected_at is _UNPINNED:
+        return query
+    probe = near_miss_improvement_extensions_probe()
+    if probe == READINESS_PROBE_ERROR:
+        raise SupabaseDataError(
+            "보완요청 스키마(007) 상태를 확인하지 못해 저장을 중단합니다. "
+            "잠시 후 다시 시도하세요."
+        )
+    if probe == READINESS_NOT_READY:
+        return query
+    if expected_at is None:
+        return query.is_("revision_requested_at", "null")
+    return query.eq("revision_requested_at", str(expected_at).strip())
+
+
 def update_near_miss_report(
     report_id, payload: dict, *, reporter_emp_no: str, updated_by=None,
+    expected_revision_at=_UNPINNED,
 ) -> dict | None:
     """보고자 본인이 SUBMITTED 상태의 본문을 수정한다(원자적 조건부 UPDATE).
 
@@ -2200,6 +2245,10 @@ def update_near_miss_report(
         .eq("reporter_user_id", user_by_emp[reporter])
         .eq("status", "SUBMITTED")
     )
+    # 화면이 렌더한 시점의 보완요청 상태를 고정한다 — 수정 폼을 열어 둔 사이 평가자가
+    # 보완요청을 걸었으면 0행(stale)이 되어, 보고자가 사유를 못 본 채 본문만 저장하는
+    # 일이 없다(Codex r2 P1-1).
+    query = _pin_revision(query, expected_revision_at)
     response = _execute(query, "수정", NEAR_MISS_TABLE)
     saved = (response.data or [None])[0]
     if saved is None:
@@ -2388,41 +2437,6 @@ def set_near_miss_photo_paths(
     if saved is None:
         raise SupabaseDataError(_NM_STALE_MESSAGE)
     return _near_miss_natural([saved])[0]
-
-
-# 미해소 보완요청은 **SUBMITTED 에서만** 존재한다(views/common/near_miss.status_label 이
-# 파생하는 규칙과 같은 문장). 그래서 상태가 SUBMITTED 를 떠나는 쓰기는 3필드를 같은
-# UPDATE 에서 비우고(clear_revision), 보고서 쓰기는 **읽은 시점의 보완요청 상태**를
-# WHERE 에 고정한다(_pin_revision). 고정하지 않으면 status 만으로는 "보완요청 걸린
-# SUBMITTED" 와 "재제출된 SUBMITTED" 가 구분되지 않아 못 본 변경을 덮어쓴다.
-_REVISION_NULLS = {
-    "revision_request_reason": None,
-    "revision_requested_by_user_id": None,
-    "revision_requested_at": None,
-}
-
-# expected_revision_at 의 '인자 없음'(고정하지 않음)과 '그때 요청이 없었음'(NULL 고정)을
-# 구분하는 sentinel. None 은 후자다.
-_UNPINNED = object()
-
-
-def _pin_revision(query, expected_at):
-    """읽은 시점의 보완요청 상태를 UPDATE 조건에 고정한다(007 적용 환경에서만).
-
-    ``expected_at`` 은 호출부가 읽은 ``revision_requested_at`` 이다. None 이면 '그때
-    보완요청이 없었다'는 뜻이라 지금도 NULL 이어야 하고, 값이 있으면 **그 요청 그대로**
-    여야 한다. 그 사이 다른 평가자가 새 보완요청을 걸었거나 보고자가 재제출했으면 0행이
-    되어 stale 오류가 난다 — 보지 못한 변경을 덮어쓰지 않는다(fail-closed).
-
-    007 미적용이면 컬럼 자체가 없어 조건을 걸 수 없다. 그 환경에서는 보완요청이 애초에
-    만들어지지 않으므로 고정할 상태도 없다(무조건 통과가 아니라 대상 부재)."""
-    if expected_at is _UNPINNED:
-        return query
-    if not near_miss_improvement_extensions_ready():
-        return query
-    if expected_at is None:
-        return query.is_("revision_requested_at", "null")
-    return query.eq("revision_requested_at", str(expected_at).strip())
 
 
 def update_near_miss_status(

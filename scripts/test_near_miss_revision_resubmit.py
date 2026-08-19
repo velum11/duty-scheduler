@@ -756,6 +756,25 @@ def test_revision_state_is_pinned() -> None:
     check("최신 요청을 본 재제출은 성공",
           not nmc.has_revision_request(db.get_near_miss_report(rid)))
 
+    # 본문 수정 경로(Codex r2 P1-1): 수정 폼을 열어 둔 사이 평가자가 보완요청을 걸면
+    # 렌더 시점 값(None)을 조건으로 넘긴 저장은 stale 로 멈춘다 — 보고자가 사유를
+    # 못 본 채 본문만 저장하는 일이 없다. 최신 값을 본 저장은 성공한다.
+    rid2 = db.create_near_miss_report(_payload(), current_user=reporter)["id"]
+    stale_view_at = db._near_miss_revision_at(db.get_near_miss_report(rid2))  # None
+    db.request_near_miss_revision(rid2, "위치를 구체적으로", current_user=evaluator)
+    check("수정 CAS — 낡은 렌더(요청 없음)를 조건으로 넘긴 저장은 차단",
+          raises(lambda: db.update_near_miss_report(
+              rid2, _payload(work_name="수정본"), current_user=reporter,
+              expected_revision_at=stale_view_at), ValueError) is not None)
+    check("차단됐으므로 본문은 그대로",
+          str(db.get_near_miss_report(rid2)["work_name"]) != "수정본")
+    fresh_at = db._near_miss_revision_at(db.get_near_miss_report(rid2))
+    db.update_near_miss_report(rid2, _payload(work_name="수정본"),
+                               current_user=reporter, expected_revision_at=fresh_at)
+    check("최신 요청을 본 수정은 성공(요청은 유지)",
+          str(db.get_near_miss_report(rid2)["work_name"]) == "수정본"
+          and nmc.has_revision_request(db.get_near_miss_report(rid2)))
+
     # 리포지토리 쓰기 4종이 모두 고정 조건을 건다 — 하나만 빠져도 그 경로로 샌다.
     for fn in (sr.evaluate_near_miss, sr.update_near_miss_status,
                sr.request_near_miss_revision, sr.clear_near_miss_revision_request):
@@ -775,9 +794,9 @@ def test_revision_state_is_pinned() -> None:
             self.calls.append(("eq", col, val))
             return self
 
-    orig_ready = sr.near_miss_improvement_extensions_ready
+    orig_probe = sr.near_miss_improvement_extensions_probe
     try:
-        sr.near_miss_improvement_extensions_ready = lambda: True
+        sr.near_miss_improvement_extensions_probe = lambda **k: sr.READINESS_READY
         q = _Q()
         sr._pin_revision(q, None)
         check("요청이 없던 상태는 NULL 로 고정",
@@ -789,12 +808,19 @@ def test_revision_state_is_pinned() -> None:
         q = _Q()
         sr._pin_revision(q, sr._UNPINNED)
         check("인자 미전달이면 조건을 걸지 않는다", q.calls == [])
-        sr.near_miss_improvement_extensions_ready = lambda: False
+        sr.near_miss_improvement_extensions_probe = lambda **k: sr.READINESS_NOT_READY
         q = _Q()
         sr._pin_revision(q, None)
-        check("007 미적용이면 없는 컬럼에 조건을 걸지 않는다", q.calls == [])
+        check("007 미적용(NOT_READY)이면 없는 컬럼에 조건을 걸지 않는다", q.calls == [])
+        # probe 실패(PROBE_ERROR)는 미적용과 다르다 — 조건을 생략하면 007 적용 환경의
+        # 일시 장애에서 CAS 없는 UPDATE 가 나가는 fail-open 이 된다(Codex r2 P1-2).
+        sr.near_miss_improvement_extensions_probe = lambda **k: sr.READINESS_PROBE_ERROR
+        q = _Q()
+        check("probe 불명(PROBE_ERROR)이면 쓰기 차단(fail-closed)",
+              raises(lambda: sr._pin_revision(q, None), sr.SupabaseDataError) is not None
+              and q.calls == [])
     finally:
-        sr.near_miss_improvement_extensions_ready = orig_ready
+        sr.near_miss_improvement_extensions_probe = orig_probe
 
 
 def main() -> None:

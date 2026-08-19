@@ -2276,7 +2276,9 @@ _NEAR_MISS_NOT_EDITABLE_MESSAGE = (
 )
 
 
-def update_near_miss_report(report_id, payload: dict, *, current_user) -> dict | None:
+def update_near_miss_report(
+    report_id, payload: dict, *, current_user, expected_revision_at=_UNPINNED,
+) -> dict | None:
     """보고자 본인이 SUBMITTED 상태의 아차사고 본문을 수정한다.
 
     수정 행위자 신원은 payload/위젯이 아니라 인증된 ``current_user``(세션 사용자,
@@ -2309,11 +2311,17 @@ def update_near_miss_report(report_id, payload: dict, *, current_user) -> dict |
         raise ValueError(_NEAR_MISS_NOT_EDITABLE_MESSAGE)
     # server-owned 필드를 제거한다 — 상태/신원/평가/부서/감사는 payload 로 못 쓴다.
     safe = {k: v for k, v in dict(payload or {}).items() if k not in _NEAR_MISS_SERVER_FIELDS}
+    # 보완요청 CAS(Codex r2 P1-1): 화면이 넘긴 렌더 시점 값이 있으면 그것을,
+    # 없으면 방금 재조회한 값을 고정한다 — 후자는 UPDATE 직전의 좁은 경합 창만
+    # 막지만, 조건 없는 쓰기보다는 낫다(호출부가 값을 넘기는 것이 정식 경로).
+    if expected_revision_at is _UNPINNED:
+        expected_revision_at = _near_miss_revision_at(current)
     if is_sample_mode():
         fields = _near_miss_editable_fields(safe)  # create 와 같은 검증
         ok = _sample_update_near_miss(
             report_id, expected_status=_NEAR_MISS_EDITABLE_STATUS,
-            owner_emp_no=actor["emp_no"], allow_null={"proposed_grade"}, **fields,
+            owner_emp_no=actor["emp_no"], expected_revision_at=expected_revision_at,
+            allow_null={"proposed_grade"}, **fields,
         )
         if not ok:
             raise ValueError(_NEAR_MISS_STALE_MESSAGE)
@@ -2321,6 +2329,7 @@ def update_near_miss_report(report_id, payload: dict, *, current_user) -> dict |
     try:
         return supabase_repository.update_near_miss_report(
             report_id, safe, reporter_emp_no=actor["emp_no"], updated_by=actor["emp_no"],
+            expected_revision_at=expected_revision_at,
         )
     finally:
         _invalidate_near_miss()

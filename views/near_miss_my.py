@@ -828,16 +828,22 @@ def _render_edit_form(user: dict, report: dict) -> None:
         # 함께 보내면 두 경로가 사진 배열을 이중 소유하게 된다. 파사드도 본문 수정에서
         # photo_paths 를 무시하도록 정합되므로 view 도 아예 보내지 않는다.
     }
-    _save_edit(rid, payload)
+    # 렌더 시점의 보완요청 시각을 저장 조건으로 넘긴다(CAS) — 폼을 열어 둔 사이
+    # 평가자가 보완요청을 걸면 저장이 stale 로 멈추고, 사유를 본 뒤 다시 저장한다.
+    _save_edit(rid, payload, revision_at=report.get("revision_requested_at"))
 
 
-def _save_edit(report_id, payload: dict) -> None:
+def _save_edit(report_id, payload: dict, *, revision_at=None) -> None:
     """세션 사용자로 본문 수정을 시도한다(파사드가 소유자·SUBMITTED 를 서버측 재확인).
 
     도메인 검증 오류(ValueError)는 사용자 안전 문구이므로 그대로 노출하고, 그 외 예외는
     원문(raw)을 감춰 일반 안내로 접는다."""
     try:
-        db.update_near_miss_report(report_id, payload, current_user=auth.get_current_user())
+        cleaned = str(revision_at or "").strip()
+        db.update_near_miss_report(
+            report_id, payload, current_user=auth.get_current_user(),
+            expected_revision_at=cleaned if cleaned not in ("", "NaT", "nan", "None") else None,
+        )
     except ValueError as exc:
         banner("danger", f"수정하지 못했습니다 — {exc}")
         return
