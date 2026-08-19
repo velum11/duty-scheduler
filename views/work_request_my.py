@@ -36,6 +36,29 @@ _BADGE_CODE = {
     wr.REJECTED: proto.BADGE_REJECTED,
 }
 
+# §1.2(2026-08-19) — 버튼 라벨 글자는 내부 <p> 가 소유하고 Streamlit 기본값 12.25px/500
+# 으로 남는다(실측: 목록 행 4 · '내용 수정' 1 = 5곳, 네 단계·두 굵기 밖). 전역
+# `.stApp [data-testid="stMarkdownContainer"] p` 와 특이도가 맞물리므로 같은 앵커를
+# 선택자에 넣어 (0,3,2)로 올린다.
+#   - 목록 행: 한 줄에 번호·제목·유형·우선순위·희망일·상태를 모두 싣는 요약이라 §1.2
+#     `table`(12/400)을 쓴다. 14px 로 올리면 390px 폭에서 줄바꿈이 생겨 §4-5(행 높이
+#     불변)를 깬다.
+#   - '내용 수정': 결정 액션이라 `body-strong`(14/600).
+_WRM_CSS = """
+<style>
+.stApp [class*="st-key-prrow_"] button [data-testid="stMarkdownContainer"] p {
+  font-size:12px !important; font-weight:400 !important; }
+.stApp [class*="st-key-pract_"] button [data-testid="stMarkdownContainer"] p {
+  font-size:14px !important; font-weight:600 !important; }
+.stApp [class*="st-key-wrm_"] label [data-testid="stMarkdownContainer"] p {
+  font-size:12px !important; font-weight:600 !important; }
+/* 히트영역 §1.4 compact(34~38) — 조건 select 가 실측 33px 로 1px 미달이었다. */
+[class*="st-key-work_request_my_"] div[data-baseweb="select"] > div,
+[class*="st-key-work_request_my_"] input,
+[class*="st-key-wrm_"] input { min-height:34px !important; }
+</style>
+"""
+
 
 def render(user: dict) -> None:
     erp.screen_frame(
@@ -46,6 +69,7 @@ def render(user: dict) -> None:
         badges=scaffold.mode_badge(),
     )
     proto.inject()
+    st.markdown(_WRM_CSS, unsafe_allow_html=True)
     show_flash(_STATE)
 
     emp_no = wr.clean(user.get("emp_no"))
@@ -165,7 +189,8 @@ def _render_detail(user: dict, row: dict, status: str) -> None:
             ("등록일시", wr.clean(row.get("created_at"))),
             ("최근 갱신", wr.clean(row.get("updated_at"))),
         ]), unsafe_allow_html=True)
-        st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+        # §1.1 간격 스케일 — 14px 은 스케일 밖이었다(2026-08-19 §1.2 개정 정합화).
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
         st.markdown(proto.body_blocks([
             ("REQUEST", "요청 내용", wr.clean(row.get("content")), True),
             ("REF", "참고 사항", wr.clean(row.get("reference")), False),

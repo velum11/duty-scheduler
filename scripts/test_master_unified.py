@@ -278,16 +278,18 @@ for state_cls in ("ms-row-new", "ms-row-delete", "ms-row-error"):
 # 셀 오류/드롭다운도 비색 신호(테두리/▾)를 동반.
 check("셀 오류는 테두리(inset) 동반", "box-shadow" in gcss.get(".ms-cell-error", {}))
 check("드롭다운 셀은 ▾ 표식 동반", ".ms-cell-select::after" in gcss)
-# H1: 공용 편집 그리드 타이포 — 본문 14.5px(§8-6), 헤더 12.5px 유지, 편집기·팝업 14.5px 정렬.
-check("H1 본문 셀 14.5px(.ag-cell)", gcss.get(".ag-cell", {}).get("font-size") == "14.5px")
-check("H1 헤더 라벨 12.5px 유지(.ag-header-cell-label)",
-      gcss.get(".ag-header-cell-label", {}).get("font-size") == "12.5px")
-check("H1 텍스트 편집 input 14.5px(.ag-text-field-input)",
-      gcss.get(".ag-text-field-input", {}).get("font-size") == "14.5px")
-check("H1 select 표시값 14.5px(.ag-picker-field-display)",
-      gcss.get(".ag-picker-field-display", {}).get("font-size") == "14.5px")
-check("H1 select 팝업 항목 14.5px(.ag-select-list-item)",
-      gcss.get(".ag-select-list-item", {}).get("font-size") == "14.5px")
+# H1: 공용 편집 그리드 타이포 — 2026-08-19 DESIGN §1.2 개정으로 표는 `table` 역할이다.
+# 셀·헤더·편집 위젯이 전부 12px 이고 헤더는 굵기(600)로만 갈린다. 종전 14.5/12.5 는
+# 네 단계(24·20·14·12) 밖이라 폐지했다.
+check("H1 본문 셀 12px(.ag-cell)", gcss.get(".ag-cell", {}).get("font-size") == "12px")
+check("H1 헤더 라벨 12px(.ag-header-cell-label)",
+      gcss.get(".ag-header-cell-label", {}).get("font-size") == "12px")
+check("H1 텍스트 편집 input 12px(.ag-text-field-input)",
+      gcss.get(".ag-text-field-input", {}).get("font-size") == "12px")
+check("H1 select 표시값 12px(.ag-picker-field-display)",
+      gcss.get(".ag-picker-field-display", {}).get("font-size") == "12px")
+check("H1 select 팝업 항목 12px(.ag-select-list-item)",
+      gcss.get(".ag-select-list-item", {}).get("font-size") == "12px")
 # 세 화면 렌더가 실제로 이 공통 GRID_CSS/rowClassRules 경로를 통과함을 정적 확인.
 for label, src in _SRC.items():
     check(f"{label}: 공통 render_master_grid 경유(상태 시각 단일기준)", "render_master_grid" in src)

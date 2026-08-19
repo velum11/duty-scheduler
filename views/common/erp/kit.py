@@ -40,7 +40,7 @@ _READ_MAX_PX = 460
 _CARD_RADIUS = "8px"
 
 _NO_ROWS = (
-    "<span style='color:%s;font-size:.82rem;'>표시할 데이터가 없습니다</span>"
+    "<span style='color:%s;font-size:12px;'>표시할 데이터가 없습니다</span>"
     % TOKENS["ink-3"]
 )
 
@@ -53,8 +53,8 @@ _KIT_CSS = f"""
 /* §1-E 필터 라벨 — 상단 정렬 12.5/500(dc isUsers). 입력은 아래(_render_widget).
    라벨-입력 겹침 방지: 라벨 블록 높이 확보 + 하단 여백. */
 .erp-lbl {{
-  display: block; text-align: left; color: {TOKENS['ink-2']}; font-size: 12.5px;
-  font-weight: 500; line-height: 1.3; height: 17px; margin: 0 0 5px; white-space: nowrap;
+  display: block; text-align: left; color: {TOKENS['ink-2']}; font-size: 12px;
+  font-weight: 400; line-height: 1.3; height: 17px; margin: 0 0 5px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }}
 /* 라벨 markdown 컨테이너가 접혀 위젯과 겹치지 않게 여백 확보(전역 margin-bottom:0 보정). */
@@ -74,11 +74,11 @@ _KIT_CSS = f"""
 }}
 .erp-strip-i:first-child {{ border-left: 0; }}
 .erp-strip-v {{
-  font-size: 18px; font-weight: 700; color: {TOKENS['ink']};
+  font-size: 20px; font-weight: 600; color: {TOKENS['ink']};
   font-variant-numeric: tabular-nums; line-height: 1.15;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }}
-.erp-strip-l {{ font-size: 11.5px; color: {TOKENS['ink-2']}; line-height: 1.2;
+.erp-strip-l {{ font-size: 12px; color: {TOKENS['ink-2']}; line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
 /* 상세 메타 스트립(§3.2 handoff): 라벨(작게·ink-2) 위 / 값(진하게·ink) 아래 —
    4개 상세 상단을 일관된 읽기 메타 스트립으로 통일. 카드·그림자 없이 hairline 1개.
@@ -94,15 +94,15 @@ _KIT_CSS = f"""
   border-left: 1px solid {TOKENS['line']};
 }}
 .erp-meta-i:first-child {{ border-left: 0; }}
-.erp-meta-l {{ font-size: 11.5px; color: {TOKENS['ink-2']}; line-height: 1.2;
+.erp-meta-l {{ font-size: 12px; color: {TOKENS['ink-2']}; line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.erp-meta-v {{ font-size: 13px; font-weight: 600; color: {TOKENS['ink']}; line-height: 1.3;
+.erp-meta-v {{ font-size: 14px; font-weight: 600; color: {TOKENS['ink']}; line-height: 1.3;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
 /* 등급 마크(§3.1 handoff): 셰브런(방향/개수) + 색 텍스트, 배경 없음 — 색 + 방향
    이중부호화(색약 안전). pill 아님(한 행 pill 형식 ≤1축 강제). */
 .erp-grade {{ display: inline-flex; align-items: center; gap: 4px; font-weight: 600;
-  font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.2; }}
-.erp-grade .gm {{ font-size: 10px; letter-spacing: -1.5px; }}
+  font-size: 14px; font-variant-numeric: tabular-nums; line-height: 1.2; }}
+.erp-grade .gm {{ font-size: 12px; letter-spacing: -1.5px; }}
 /* 예외 큐 스트립(§3.5 handoff): 지금 처리할 예외(미평가·검토중·기한초과 CAPA). 옅은
    danger-bg 틴트(값>0)로 예외 현황만 표시한다(순수 표시 스트립 — 클릭/이동 어포던스 없음;
    이동은 각 화면 메뉴로 충분, 과배선 금지·거짓 어포던스 방지, V1 QA Medium#1). 각 항목 ≤72px. */
@@ -113,10 +113,10 @@ _KIT_CSS = f"""
 .erp-attn-i:first-child {{ border-left: 0; }}
 .erp-attn-i.on {{ background: {TOKENS['danger-bg']}; }}
 .erp-attn-tx {{ display: flex; flex-direction: column; gap: 1px; min-width: 0; }}
-.erp-attn-v {{ font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums;
+.erp-attn-v {{ font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums;
   line-height: 1.15; color: {TOKENS['ink-2']}; }}
 .erp-attn-i.on .erp-attn-v {{ color: {TOKENS['danger']}; }}
-.erp-attn-l {{ font-size: 11.5px; color: {TOKENS['ink-2']}; line-height: 1.2;
+.erp-attn-l {{ font-size: 12px; color: {TOKENS['ink-2']}; line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
 /* 빈 상태 = 한 줄 안내(§0.6 강제): 대형 점선 placeholder 금지, 높이 ≤72px. */
 .erp-empty {{
@@ -125,7 +125,7 @@ _KIT_CSS = f"""
   border: 1px solid {TOKENS['line']}; border-radius: {_CARD_RADIUS};
   background: {TOKENS['surface-2']};
 }}
-.erp-empty-t {{ font-size: 13px; font-weight: 600; color: {TOKENS['ink-2']}; }}
+.erp-empty-t {{ font-size: 14px; font-weight: 600; color: {TOKENS['ink-2']}; }}
 .erp-empty-b {{ font-size: 12px; color: {TOKENS['ink-2']}; line-height: 1.4; }}
 /* §1-F/§1-A 지표 타일 스트립(요약 수치가 있는 화면 공통 어휘, 카드 박스 없음 2줄).
    2026-08-19 정합: ① 값 26px·단위 11.5px 가 §1.2 다섯 단계(28/20/16/14/12) 밖이었다
@@ -143,7 +143,7 @@ _KIT_CSS = f"""
 .erp-metric-unit {{ font-size: 12px; color: #6b665d; }}
 /* 모노 강제(값) — Streamlit 이 인라인 font-family 를 제거하므로 0,3,0 규칙으로. */
 .stApp [data-testid="stMarkdownContainer"] .erp-metric-val {{
-  font-family: 'IBM Plex Mono','Consolas','Menlo',monospace; font-variant-numeric: tabular-nums;
+  font-family: "Pretendard","Malgun Gothic",-apple-system,sans-serif; font-variant-numeric: tabular-nums;
 }}
 /* §1-E 필터 줄(§0-5 카드 금지): 카드 박스 없이 헤어라인+여백만. 하단 헤어라인으로 표와 구획. */
 [class*="st-key-erpcond_"] {{
@@ -158,12 +158,12 @@ _KIT_CSS = f"""
 [class*="st-key-erpcond_"] [data-testid="stHorizontalBlock"] {{ gap: .6rem !important; }}
 /* §1-E 입력 14.5 (dc): 필터 입력 폰트 통일 */
 [class*="st-key-erpcond_"] input, [class*="st-key-erpcond_"] [data-baseweb="select"] div {{
-  font-size: 14.5px;
+  font-size: 14px;
 }}
 /* help(툴팁) 래퍼가 씌워진 버튼도 앱 기본 버튼 크기를 따르게 — modules/ui.py 의 직계자식
    선택자(.stButton > button)가 툴팁 DOM 체인을 못 잡아 생기는 높이 불일치 보정(detail_actions
    처럼 help 유무가 섞인 버튼을 한 행에 둘 때 가시화). 크기만 맞추는 저위험 규칙. */
-.stTooltipHoverTarget > button {{ min-height: 2.15rem; font-size: 0.83rem; }}
+.stTooltipHoverTarget > button {{ min-height: 2.15rem; font-size: 14px; }}
 </style>
 """
 
@@ -429,17 +429,25 @@ def grid_shell(key: str, *, nrows: int, ncols: int, fingerprint, render,
 # ============================================================ read_grid / select_grid
 # §1-E 표형: 헤더 무배경 + 하단 1px 헤어라인, 행 구분 헤어라인, 본문 14.5px(DESIGN §3).
 _READ_BASE_CSS = {
+    # AG Grid 는 컴포넌트 iframe 안에서 그려지고 글꼴을 `--ag-font-family` 로 흘린다.
+    # 이 선언이 없으면 부모의 웹폰트를 상속받지 못해 표만 시스템 sans 로 폴백한다
+    # (§1.2 "표는 iframe 에도 글꼴을 로드해야 한다"). 폰트 파일 자체는 setup_page 의
+    # 브리지가 iframe 에 <link> 로 넣는다 — 선언과 로드는 별개다.
+    ".ag-root-wrapper": {"--ag-font-family": '"Pretendard","Malgun Gothic",-apple-system,sans-serif',
+                         "font-family": '"Pretendard","Malgun Gothic",-apple-system,sans-serif'},
+    # AG 테마가 .ag-header-cell-text 에 700 을 준다 — §1.2 는 400·600 뿐이라 되돌린다.
+    ".ag-header-cell-text": {"font-weight": "600"},
     ".ag-header": {"background-color": "transparent",
                    "border-bottom": "1px solid " + TOKENS["line-strong"]},
     # color 를 명시하지 않으면 AG 테마 기본 rgba(28,26,23,0.6) 이 캔버스 #f4f2ee 위에
     # 4.39:1 로 합성돼 §5 하한(4.5)에 미달한다(2026-08-18 실측). ink-2 로 고정 → 8.50:1.
-    ".ag-header-cell": {"font-weight": "600", "font-size": "12.5px",
+    ".ag-header-cell": {"font-weight": "600", "font-size": "12px",
                         "color": TOKENS["ink-2"]},
     # overflow:hidden 은 아래 말줄임 규칙이 성립하기 위한 전제다.
     # (셀 좌우 패딩은 7px 로 헤더 8px 와 1px 어긋나 있으나, AG 테마의 `.ag-ltr .ag-cell` 이
     #  더 높은 특이도라 여기서 덮이지 않는다 — 실측으로 무효 확인 후 죽은 선언을 두지 않았다.
     #  정합은 테마 오버라이드가 필요해 BACKLOG 로 넘긴다.)
-    ".ag-cell": {"font-size": "14.5px", "display": "flex", "align-items": "center",
+    ".ag-cell": {"font-size": "12px", "display": "flex", "align-items": "center",
                  "overflow": "hidden"},
     # 긴 값이 이웃 셀 위로 넘치지 않고 **말줄임(…)** 되게 한다. flex 자식은 기본
     # min-width:auto 라 내용 폭 아래로 줄지 않아 text-overflow 가 발동하지 않는다 —
@@ -596,6 +604,12 @@ def _build_read_gridoptions(coldefs: list[dict]) -> dict:
         "defaultColDef": {"resizable": True, "sortable": False, "filter": False},
         "rowHeight": _READ_ROW_PX, "headerHeight": _READ_HEADER_PX,
         "suppressRowClickSelection": True,
+        # 열 폭은 내용에서 역산하지만(§3.1) 그 합이 그리드 폭보다 작으면 표 안에 빈 띠가
+        # 남아 "표가 화면보다 너무 작아" 보인다. AG Grid 의 fitGridWidth 는 남는 폭을
+        # **각 열의 지정 폭에 비례해** 나눠 주므로, 한 열만 커지던 종전 flex 방식과 달리
+        # 열 사이 비율(= 내용에서 나온 비율)이 그대로 유지된다. minWidth 는 존중되므로
+        # 좁은 폭에서는 늘리지 않고 내부 가로 스크롤로 떨어진다(잘림 없음).
+        "autoSizeStrategy": {"type": "fitGridWidth"},
         "suppressDragLeaveHidesColumns": True,
         "overlayNoRowsTemplate": _NO_ROWS,
         # 읽기 표에서도 셀 값을 드래그 선택해 복사할 수 있어야 한다(전 화면 공통).
@@ -754,6 +768,12 @@ def _build_select_gridoptions(df: pd.DataFrame, *, key_field: str,
         "defaultColDef": {"resizable": True, "sortable": False, "filter": False},
         "rowHeight": int(row_height), "headerHeight": _READ_HEADER_PX,
         "suppressDragLeaveHidesColumns": True,
+        # 열 폭은 내용에서 역산하지만(§3.1) 그 합이 그리드 폭보다 작으면 표 안에 빈 띠가
+        # 남아 "표가 화면보다 너무 작아" 보인다. AG Grid 의 fitGridWidth 는 남는 폭을
+        # **각 열의 지정 폭에 비례해** 나눠 주므로, 한 열만 커지던 종전 flex 방식과 달리
+        # 열 사이 비율(= 내용에서 나온 비율)이 그대로 유지된다. minWidth 는 존중되므로
+        # 좁은 폭에서는 늘리지 않고 내부 가로 스크롤로 떨어진다(잘림 없음).
+        "autoSizeStrategy": {"type": "fitGridWidth"},
         "overlayNoRowsTemplate": _NO_ROWS,
         # 네이티브 single-selection(행 클릭으로 선택). 한 번 선택하면 유지(ctrl 해제 억제) —
         # 미선택→선택은 클릭, 선택 해제는 화면 로직(stale/필터 이탈)이 담당한다.
@@ -933,7 +953,7 @@ def status_badge_html(label: str, color: str) -> str:
     # (라이프사이클 5종 정확 팔레트는 style.LIFECYCLE_BADGE — P3 도메인 배선에서 채택).
     return (
         f"<span style='display:inline-flex;align-items:center;padding:3px 11px;"
-        f"border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;color:{text};"
+        f"border-radius:999px;font-size:12px;font-weight:600;line-height:1.4;color:{text};"
         f"border:1px solid {color}55;background:{color}14;white-space:nowrap;'>{escape(label)}</span>"
     )
 
@@ -1008,8 +1028,8 @@ def meta_col_html(pairs: list[tuple[str, str]]) -> str:
     """
     return "".join(
         f"<div style='margin:2px 0;line-height:1.5;'>"
-        f"<span style='color:{TOKENS['ink-2']};font-size:12.5px;'>{escape(label)}</span> "
-        f"<span style='color:{TOKENS['ink']};font-size:13px;font-weight:600;'>"
+        f"<span style='color:{TOKENS['ink-2']};font-size:12px;'>{escape(label)}</span> "
+        f"<span style='color:{TOKENS['ink']};font-size:14px;font-weight:600;'>"
         f"{escape(value or '-')}</span></div>"
         for label, value in pairs
     )
@@ -1025,9 +1045,9 @@ def field_block(label: str, value: str) -> None:
     body = escape(value) if str(value or "").strip() else "-"
     st.markdown(
         f"<div style='margin:6px 0 0;'>"
-        f"<div style='color:{TOKENS['ink-2']};font-size:12.5px;font-weight:600;"
+        f"<div style='color:{TOKENS['ink-2']};font-size:12px;font-weight:600;"
         f"margin-bottom:1px;'>{escape(label)}</div>"
-        f"<div style='color:{TOKENS['ink']};font-size:14.5px;line-height:1.7;"
+        f"<div style='color:{TOKENS['ink']};font-size:14px;line-height:1.7;"
         f"white-space:pre-wrap;'>{body}</div></div>",
         unsafe_allow_html=True,
     )
@@ -1084,7 +1104,7 @@ _SELECT_LIST = partial(
     /* CCv2 컴포넌트의 shadow root 는 앱 폰트를 상속받지 못하고 Arial 로 떨어진다
        (2026-08-19 내 근무표 계측에서 확인 — `font-family:inherit` 이 무효). 스택을
        명시한다. modules/ui.py 의 --cd-sans 와 같은 값이며 두 곳이 갈리면 안 된다. */
-    #erp-select-list {{ font-family:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",-apple-system,sans-serif; }}
+    #erp-select-list {{ font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; }}
     .esl-row {{ display:flex; flex-direction:column; gap:2px; width:100%;
       padding:8px 12px 8px 10px; border:0; border-left:2px solid transparent;
       border-bottom:1px solid {TOKENS['line']}; background:transparent; cursor:pointer;
@@ -1102,7 +1122,8 @@ _SELECT_LIST = partial(
     .esl-r {{ flex:0 0 auto; font-size:12px; color:{TOKENS['ink-3']}; white-space:nowrap; }}
     .esl-m {{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
       font-size:12px; color:{TOKENS['ink-2']}; }}
-    .esl-mono {{ font-family:"IBM Plex Mono", monospace; font-variant-numeric:tabular-nums; }}
+    /* 모노 폐지(§1.2) — 이름은 호출부 호환으로 남기고 자릿수 정렬만 담당한다. */
+    .esl-mono {{ font-variant-numeric:tabular-nums; }}
     .esl-empty {{ padding:16px 12px; font-size:14px; color:{TOKENS['ink-2']}; }}
     """,
     js="""

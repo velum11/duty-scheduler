@@ -166,7 +166,9 @@ def _read_field(label: str, value: str) -> None:
 # 번에 해야 한다(이 두 파일 밖으로 파급 — 등록 완료 배너·DESIGN §1.2 예시). 범위 밖이라
 # 순서만 지시대로 바꾸고 낱말은 보고 항목으로 남긴다.
 _DISPLAY_COLUMNS = [
-    "보고번호", "발생일", "원인", "작업명", "소속", "신고자", "등급", "상태",
+    # 사고내용은 이 표에서 행을 특정하는 유일한 서술 값이다 — 작업명은 "원료 투입"처럼
+    # 짧고 여러 건이 겹친다. 남는 폭을 메우려는 게 아니라 목록을 읽을 수 있게 만든다.
+    "보고번호", "발생일", "원인", "작업명", "사고내용", "소속", "신고자", "등급", "상태",
 ]
 
 # ── 컬럼 폭 — **실제 값의 최대 길이에서 역산한 고정폭**(flex 없음). ─────────────────────
@@ -177,46 +179,43 @@ _DISPLAY_COLUMNS = [
 # 표 우측에 남는 빈 공간은 결함이 아니다(지시).
 #
 # 폭 산식 — width = 4의 배수로 올림( max(값 실폭, 헤더 실폭) + 16 ).
-# +16 은 추정이 아니라 실측이다(2026-08-18): 셀은 `.ag-cell` 패딩 7+7 **에 더해 좌우
-# 1px 보더**가 있어 가용폭 = width − 16 이고, 헤더는 `.ag-header-cell` 패딩 8+8(보더 없음,
-# 라벨 자체 패딩 0)이라 역시 width − 16 이다. 보더 2px 을 빠뜨린 1차 산정(패딩 14만 반영)은
-# 보고번호·소속·원인·상태 4열이 1~2px 씩 말줄임됐다 — 실렌더 재계측으로 확인·정정했다.
+# 열 폭 — 2026-08-19 재역산. §1.2 개정으로 표는 `table` 역할(12px)이고 글꼴이
+# Pretendard 로 바뀌어, 14.5px·맑은고딕 기준이던 종전 값이 전부 과대해졌다.
 #
-# 한글 계수(실측 — 추정치 아님): 조회 표 AG Grid iframe 안에서 셀/헤더의 computed style
-# (font-family·size·weight·letter-spacing)을 그대로 복사한 hidden span 에 문자열을 넣고
-# getBoundingClientRect().width 를 읽었다(Chromium 1440×900, sample, 포트 8512).
-#   · 셀 14.5px sans  — 한글 1자 13.34px / 숫자 1자 8.07px → **한글 = 숫자의 1.65배**
-#                       (한글 폭 ≈ 글자 크기 × 0.92)
-#   · 헤더 12.5px/600 — 한글 1자 11.5px
-#   · 보고번호 셀 모노(IBM Plex Mono 14.5px + letter-spacing 0.145px) — 숫자 1자 8.12px
-# 예측값은 라이브 셀 실폭과 대조 검증했다('PET생산부(원료실)' 예측 117.9 ↔ 실측 118).
+# +16 은 실측이다: 셀은 `.ag-cell` 패딩 7+7 에 더해 좌우 1px 보더가 있어 가용폭 = width−16,
+# 헤더는 `.ag-header-cell` 패딩 8+8(보더 없음)이라 역시 width−16 이다.
 #
-# 열별 근거(값 최대 → 필요폭 → 채택):
-#   보고번호 89.3px('202612-9999' = YYYYMM-NNNN 11자 고정, docs/database.md 자연키 계약)
-#            → 105.3 → **108**. 월순번 5자리(>9999건/월)는 고려하지 않는다.
-#   발생일   74.2px('2026-12-31' ISO 10자, 값 형식 고정) → 90.2 → **92**
-#   원인     53.4px('미끄러짐' 4자 = _CAUSE_LABEL 8종 중 최장, 닫힌 집합) → 69.4 → **72**
-#   작업명  153.6px('3라인 컨베이어 벨트 점검' 14자) → 169.6 → **172**. ★가정 — work_name 은
-#            max_chars=120 자유 입력이라 실DB 최대를 모른다. sample 최장은 5자(57px)뿐이라
-#            근거가 못 되고, 등록 폼 placeholder 의 예시값(near_miss_submit.py:512)을 실무
-#            상한 가정으로 삼았다. 이보다 긴 값은 말줄임되고 전문은 행 클릭 상세에서 본다.
-#   소속    117.9px('PET생산부(원료실)' = sample 부서명 최장) → 133.9 → **136**. ★가정 —
-#            실DB 부서명이 더 길면 말줄임(상세 메타에 전문).
-#   신고자   53.4px(한글 성명 4자) → 69.4 → **72**. ★가정 — sample 은 3자(40px)뿐이다.
-#   등급      9.7px('S' 1자)이라 값이 아니라 **헤더**('등급' 23px)가 폭을 정한다 → 39 → **40**
-#   상태     53.4px('평가완료' 4자 = _STATUS_LABEL 5종 중 최장, 닫힌 집합) → 69.4 → **72**
-# 합계 764px. 1440 뷰포트에서 표 가용폭 1167px → 우측 403px 는 빈 공간으로 남긴다.
+# 12px Pretendard 실측(그리드 iframe 안에서 셀의 computed style 을 복사한 hidden span,
+# Chromium 1440×900, sample): 한글 1자 11.04px · 숫자 1자 7.2px.
+#
+# 값 최대 → 필요폭(+16) → 채택(4의 배수):
+#   보고번호 70.4('202607-0001' 11자 고정) → 86.4 → **88**
+#   발생일   61.6('2026-07-03' ISO 10자)   → 77.6 → **80**
+#   원인     44.2('미끄러짐' = _CAUSE_LABEL 8종 중 최장, 닫힌 집합) → 60.2 → **64**
+#   소속     96.2('PET생산부(원료실)' = sample 부서명 최장) → 112.2 → **116**  ★가정
+#   신고자   33.1(3자) → 4자 여유 → **64**  ★가정
+#   등급      7.9('S' 1자)이라 헤더('등급' 22.1)가 폭을 정한다 → 38.1 → **40**
+#   상태     44.2('평가완료' = _STATUS_LABEL 5종 중 최장, 닫힌 집합) → 60.2 → **64**
+#   작업명  자유 입력(max_chars=120)이라 실DB 최대를 모른다. 12자분(132+16=148)을
+#           기준으로 잡는다 → **144**. ★가정
+#
+# 합계 660px. 이 값들은 **고정폭이 아니라 비율**로 쓰인다 — kit 의 `autoSizeStrategy:
+# fitGridWidth` 가 남는 폭을 각 열의 지정 폭에 비례해 나눠 주므로, 넓은 화면에서는 전 열이
+# 같은 비율로 늘어 표가 폭을 채우고(한 열만 커지지 않는다), 좁은 화면에서는 이 값이 하한이
+# 되어 표 내부 가로 스크롤로 떨어진다. 등급만 maxWidth 로 묶는다 — 값이 한 글자라 아무리
+# 비례해도 넓힐 이유가 없다.
 # 같은 성격 열은 내 아차사고(near_miss_my._COL_CONFIG)와 **같은 값**을 쓴다(기존 계약).
 _COL_CONFIG = {
-    "보고번호": {"width": 108, "cellStyle": {"fontFamily": "'IBM Plex Mono', monospace",
-                                          "letterSpacing": "0.01em"}},
-    "발생일": {"width": 92},
-    "원인": {"width": 72},
-    "작업명": {"width": 172},
-    "소속": {"width": 136},
-    "신고자": {"width": 72},
-    "등급": {"width": 44},
-    "상태": {"width": 72},
+    "보고번호": {"width": 88},
+    "발생일": {"width": 80},
+    "원인": {"width": 64},
+    "작업명": {"width": 144},
+    # 자유 서술이라 상한이 없다. 비중을 가장 크게 주고 넘치면 말줄임(전문은 행 클릭 상세).
+    "사고내용": {"width": 400},
+    "소속": {"width": 116},
+    "신고자": {"width": 64},
+    "등급": {"width": 40, "maxWidth": 64},
+    "상태": {"width": 64},
 }
 
 
@@ -303,17 +302,15 @@ def render(user: dict) -> None:
     # 이중부호화(§4), 선택 자연키(_report_id)를 반환한다. 등급/상태 색은 보조 신호(라벨 유지).
     frame = _select_frame(df, display)
     sheet_head("아차사고 보고서 목록", count=len(frame))
-    status_rules = {label: _STATUS_COLOR[code] for code, label in _STATUS_LABEL.items()}
     picked = erp.select_grid(
         frame, key=f"{_PAGE_ID}_grid", key_field=_KEY_FIELD,
         columns=_DISPLAY_COLUMNS, selected_key=st.session_state.get(_SEL_KEY),
         col_config=_COL_CONFIG,
         checkbox_marker=False,  # §0-1: 행 클릭이 곧 선택(상세 열기용 체크박스 금지)
         scroll_affordance=True,  # 모바일 폭에서 "오른쪽에 열이 더 있음" 신호(상시 스크롤바)
-        color_rules={
-            "등급": _GRADE_COLOR,
-            "상태": status_rules,
-        },
+        # 등급·상태 셀 배경 채움은 걷어냈다(2026-08-19 사용자 판단). 표 안에서 색면이
+        # 두 열을 차지하면 눈이 그쪽으로 끌려 정작 읽어야 할 서술이 밀린다. 두 값 모두
+        # 닫힌 집합의 짧은 라벨이라 글자만으로 구분된다.
     )
     # 선택을 상세 렌더 전에 소비한다 — select_grid 의 selectionChanged rerun 이 이미 일어난
     # run 이므로 세션만 갱신하면 추가 st.rerun 없이 곧바로 상세를 그린다(즉시 상세).
@@ -699,6 +696,7 @@ def _to_display(df: pd.DataFrame) -> pd.DataFrame:
             "발생일": _clean(r.get("incident_date")) or "-",
             "원인": _CAUSE_LABEL.get(_clean(r.get("cause_code")), _clean(r.get("cause_code")) or "-"),
             "작업명": _clean(r.get("work_name")),
+            "사고내용": _clean(r.get("incident_content")) or "-",
             "소속": dept_name_of.get(dept, dept) or "-",
             "신고자": name_of.get(emp, emp) or "-",
             "등급": _clean(r.get("confirmed_grade")) or "-",

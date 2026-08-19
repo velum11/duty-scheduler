@@ -653,10 +653,10 @@ def _inject_style() -> None:
   box-shadow:none !important; height:44px; padding-right:4px !important; }
 .st-key-dash_segval div[data-baseweb="input"] div { padding-right:0 !important; }
 .st-key-dash_segval input { padding:0 !important; height:44px; color:#1c1a17 !important;
-  font-family:'IBM Plex Mono','Consolas','Menlo',monospace !important; font-size:14px !important;
+  font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif !important; font-size:14px !important;
   font-weight:500 !important; font-variant-numeric:tabular-nums; cursor:pointer; }
 .st-key-dash_segval div[data-testid="stDateInput"] svg { width:16px; height:16px; color:#8b857c; }
-.dash-dow { font-family:'IBM Plex Mono','Consolas','Menlo',monospace; font-size:14px;
+.dash-dow { font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:14px;
   font-weight:600; white-space:nowrap; }
 /* 화살표 라벨도 button 이 아니라 내부 <p> 가 그린다 — 앱 전역 버튼 규칙(.875rem=12.25px)이
    button 선언을 이겨 실측 12.25px 였다([오늘] 과 같은 함정). */
@@ -741,7 +741,7 @@ def _inject_style() -> None:
 .stApp [data-testid="stMarkdownContainer"] .dash-dow,
 .stApp [data-testid="stMarkdownContainer"] .dorg-osum,
 .stApp [data-testid="stMarkdownContainer"] .dorg-cnum {
-  font-family:'IBM Plex Mono','Consolas','Menlo',monospace; font-variant-numeric:tabular-nums;
+  font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-variant-numeric:tabular-nums;
 }
 /* §3.4 브레이크포인트 — <599 / 599–1023 / >1023. 종전 768/640 은 §3.4 값이 아니었다. */
 @media (max-width:1023px) {

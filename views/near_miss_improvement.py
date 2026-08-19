@@ -106,10 +106,10 @@ _FAINT = "#6b665d"        # 읽는 텍스트 최저 대비(5.1:1)
 _LINE = "#e6e2da"         # 행 헤어라인
 _LINE_SEC = "#e0dbd2"     # 섹션 헤어라인
 _NEUTRAL = "#5c564d"      # §1.3 종결·중립 배지 텍스트(6.4:1)
-# 인라인 style 속성 안에 그대로 들어가므로 **큰따옴표**로 감싼다(작은따옴표는 금지) —
-# style='font-family:{_MONO};…' 가 첫 내부 따옴표에서 끊겨 style 전체가 소실되는 것을 막는다
-# (2026-08-14 실측). CSS 블록(<style>) 안에서도 동일하게 유효하다.
-_MONO = '"IBM Plex Mono", monospace'
+# §1.2(2026-08-19 개정) — 글꼴은 **Pretendard 하나**다. 모노 서체 지정(_MONO = IBM Plex
+# Mono)은 폐지했고, 세로로 정렬되는 숫자는 ``font-variant-numeric: tabular-nums`` 로만
+# 자릿수를 맞춘다. 화면이 자기 글꼴을 선언하지 않으므로 앱 폰트(--cd-sans)를 그대로 상속한다.
+_NUM = "font-variant-numeric:tabular-nums;"
 
 # 상태 배지 색(§1.3 의미 색 — status_badge_html 이 옅은 배경/테두리를 파생).
 _SUBMIT_COLOR = {"DRAFT": _NEUTRAL, "SUBMITTED": "#2f4d99"}
@@ -193,7 +193,7 @@ _IMPR_CSS = f"""
   .st-key-nm_impr_listbox {{ height:auto !important; max-height:none !important; }}
 }}
 /* 섹션 라벨 — 한글이라 letter-spacing 을 주지 않는다(자간이 벌어진다). */
-.nm-sec {{ font-size:12px; font-weight:600; color:{_INK2}; margin:0 0 6px; }}
+.nm-sec {{ font-size:12px; font-weight:600; color:{_INK2}; margin:0 0 8px; }}
 </style>
 """
 
@@ -579,8 +579,10 @@ def _list_items(ordered: list[str], reports_by_id: dict, improvements: dict) -> 
             "key": rid,
             "line1_left": str(r.get("work_name") or "(제목 없음)"),
             "line1_right": worklist.elapsed_label(r.get("created_at")),
-            # line2_left 는 kit 이 **모노**로 렌더한다(.esl-mono) — IBM Plex Mono 에는 한글
-            # 글리프가 없어 한글을 넣으면 글자마다 폴백돼 자간이 벌어진다. 영숫자 식별자만.
+            # line2_left 는 kit 의 ``.esl-mono`` 클래스로 렌더된다. 이 클래스는 2026-08-19
+            # 현재도 IBM Plex Mono 를 지정하고 있어 §1.2(Pretendard 단일)와 어긋나지만
+            # ``views/common/erp/kit.py`` 소관이라 이 화면에서 고칠 수 없다(보고 대상).
+            # 어느 쪽이든 영숫자 식별자만 넣는다 — 한글은 글자마다 폴백돼 자간이 벌어진다.
             "line2_left": str(r.get("report_no") or rid),
             # 소속·조치 단계는 sans 쪽(line2_right)에 모아 둔다(둘 다 한글이 올 수 있다).
             "line2_right": f"{dept} · {right}" if dept else right,
@@ -684,9 +686,9 @@ def _detail_read_html(report: dict, imp, status: str) -> str:
 
     lbl = f"font-size:12px;color:{_FAINT};"
     head = (
-        "<div style='padding:2px 0 14px;display:flex;flex-direction:column;gap:8px;'>"
+        "<div style='padding:0 0 16px;display:flex;flex-direction:column;gap:8px;'>"
         "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;'>"
-        f"<span style='font-family:{_MONO};font-size:16px;font-weight:600;color:{_INK};'>{report_no}</span>"
+        f"<span style='font-size:14px;font-weight:600;{_NUM}color:{_INK};'>{report_no}</span>"
         f"{status_pill}"
         f"<span style='{lbl}'>제출</span>{submit_badge}"
         f"<span style='{lbl}'>확인</span>{confirm_badge}</div>"
@@ -696,8 +698,8 @@ def _detail_read_html(report: dict, imp, status: str) -> str:
     )
     # 등급은 조회·평가와 같은 등급 마크(셰브런+색 텍스트)로 렌더한다. 라벨은 §3.6 어휘
     # '평가 등급'이며 코드값 confirmed_grade 는 불변이다(폐기한 낱말은 모듈 docstring 참조).
-    # 세 번째 항목(mono)은 **영숫자 전용 문자열에만** 켠다 — IBM Plex Mono 에는 한글
-    # 글리프가 없어 한글에 모노를 걸면 글자마다 폴백 폰트로 떨어져 자간이 벌어진다.
+    # 세 번째 항목(num)은 §1.2 의 tabular-nums 를 켤지다 — 자릿수가 세로로 정렬돼야 하는
+    # 숫자 값(날짜 등)에만 켠다. 모노 서체 지정은 §1.2(2026-08-19)로 폐지했다.
     meta = [
         ("발생일", escape(str(report.get("incident_date") or "-")), True),
         ("접수 경과", escape(worklist.elapsed_label(report.get("created_at"))), False),
@@ -706,12 +708,12 @@ def _detail_read_html(report: dict, imp, status: str) -> str:
         ("평가 등급", _grade_mark(report.get("confirmed_grade"), empty="미정"), False),
     ]
     meta_cells = "".join(
-        f"<div style='display:flex;flex-direction:column;gap:2px;min-width:0;'>"
+        f"<div style='display:flex;flex-direction:column;gap:4px;min-width:0;'>"
         f"<span style='font-size:12px;color:{_FAINT};'>{escape(label)}</span>"
         f"<span style='font-size:14px;color:{_INK};line-height:1.4;"
-        + (f"font-family:{_MONO};font-variant-numeric:tabular-nums;" if mono else "")
+        + (_NUM if num else "")
         + f"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{value}</span></div>"
-        for label, value, mono in meta
+        for label, value, num in meta
     )
     head += (
         f"<div style='display:flex;flex-wrap:wrap;gap:8px 32px;padding-top:4px;"
@@ -849,7 +851,7 @@ def _gate_notes(notes: list[tuple]) -> None:
     if not lines:
         return
     st.markdown(
-        f"<div style='font-size:12px;color:{_INK2};line-height:1.6;margin:6px 0 0;"
+        f"<div style='font-size:12px;color:{_INK2};line-height:1.6;margin:8px 0 0;"
         f"text-wrap:pretty;'>" + "<br>".join(lines) + "</div>",
         unsafe_allow_html=True,
     )

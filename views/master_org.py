@@ -495,20 +495,29 @@ _CODE_READONLY_RULES = {"ms-cell-readonly": "data._row_state !== 'new'"}
 
 
 def _code_name_config() -> dict:
-    """그룹·부서 시트 공통 컬럼 설정(코드=신규만·코드명·순서/비고/사용).
+    """그룹 시트 컬럼 설정(코드=신규만·코드명·순서/비고/사용).
 
-    최소 열폭 합(≈254px)을 낮춰 3시트가 1366·1280px 데스크톱(사이드바 제외)에서
-    가로스크롤·열잘림 없이 맞도록 한다. 넓은 폭에서는 flex(코드명·비고)로 채운다.
+    폭은 12px Pretendard 기준 역산이다(2026-08-19 재산정 — 규칙은 _dept_col_config 주석):
+    필요폭 = max(값 실측 최대 잉크, 헤더 실측 잉크) + 16 → 4의 배수. 지정 폭은 고정폭이
+    아니라 **비율**이고 남는 폭은 fitGridWidth 가 이 비율대로 나눈다. flex 는 남는 폭을 한
+    열에 몰아주므로 쓰지 않는다.
     """
     return {
-        "코드": {"flex": 0, "width": 54, "minWidth": 44, "cellClass": "md-c-left",
+        # 코드 48 = 코드 표본 최대 'PET1' 30.02x1.05 + 16.
+        "코드": {"width": 48, "minWidth": 48, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
-        "코드명": {"flex": 1.4, "minWidth": 44, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED,
-                 "cellStyle": {"fontSize": "14.5px"}},  # §1-E 본문 14.5
-        "순서": {"flex": 0, "width": 40, "minWidth": 34, "maxWidth": 72,
+        # 코드명 120 = 'PET생산부(원료실)' 97.58x1.05 + 16. 행을 특정하는 열이라 상한 없음.
+        "코드명": {"width": 120, "minWidth": 120, "cellClass": "md-c-left",
+                 "editable": _EDIT_UNLESS_PROTECTED},
+        # 순서·사용 40 = 헤더 2글자 22.09x1.05 + 16. 값(정수·체크박스)이 헤더보다 좁아
+        # 넓혀도 담을 것이 없다 → maxWidth 로 묶는다.
+        "순서": {"width": 40, "minWidth": 40, "maxWidth": 40,
                 "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
-        "비고": {"flex": 1.1, "minWidth": 38, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
-        "사용": {"flex": 0, "width": 42, "minWidth": 36, "maxWidth": 64,
+        # 비고 40 = 헤더 하한. sample 에 값이 0건이라 이 화면 안에 역산 재료가 없다
+        # (실데이터가 들어오면 다시 재서 갱신). 남는 폭은 fitGridWidth 가 비례로 얹어 준다.
+        "비고": {"width": 40, "minWidth": 40, "cellClass": "md-c-left",
+                "editable": _EDIT_UNLESS_PROTECTED},
+        "사용": {"width": 40, "minWidth": 40, "maxWidth": 40,
                 "cellClass": "md-c-center", "editable": _EDIT_UNLESS_PROTECTED},
     }
 
@@ -516,94 +525,88 @@ def _code_name_config() -> dict:
 def _dept_col_config(*, attendance_editable: bool = True) -> dict:
     """부서 단일 시트(전폭) 컬럼 설정 — 2026-08-07 단일 시트 전환 후 전용.
 
-    구 3분할 시절 초협폭 설정(_code_name_config, 코드 54px 등)은 1/3 폭 시트용이라
-    전폭에서는 8~9자리 부서코드가 잘리고 비율이 무너진다. 대분류/중분류(009)를
-    포함해 전폭 기준으로 다시 잡는다 — 명칭·분류는 flex, 수치·토글은 고정폭.
+    ``attendance_editable=False`` (근태 대상 지정 스키마 미준비)면 그 열만 읽기전용으로
+    내린다 — 저장이 fail-closed 로 막히는 편집을 눌러보게 두지 않는다(§17 편집 안전).
+    값은 그대로 보여 준다(폴백 = 전 부서 대상).
 
-    ``attendance_editable=False`` (근태 대상 지정 스키마 미준비)면 그 열만 읽기전용
-    으로 내린다 — 저장이 fail-closed 로 막히는 편집을 눌러보게 두지 않는다(§17 편집
-    안전). 값은 그대로 보여 준다(폴백 = 전 부서 대상).
+    ── 열 폭 = 12px Pretendard 기준 역산(2026-08-19 재산정) ──
+    종전 값(코드 108 · 코드명 136 …)은 셀 14.5px·헤더 12.5px 기준이라 DESIGN §1.2 개정
+    (표 = `table` 역할 12px) 뒤에는 전부 과대하다. 규칙:
+
+        필요폭 = max(값 실측 최대 잉크, 헤더 실측 잉크) + 16  → 4의 배수로 올림
+
+    16 = 셀 좌우 패딩 7+7 + 보더 2(헤더는 8+8). 잉크는 그리드 iframe 안에서 셀·헤더의
+    computed style 을 복사한 hidden span 으로 쟀고, 측정값에 5% 여유를 얹었다 — 이 iframe 은
+    지금 Pretendard 를 받지 못해 sans-serif 폴백(한글 10.53px/자)으로 그려지므로, 글꼴이
+    정상화되면(11.04px/자) 폴백 기준 폭은 그대로 잘린다.
+
+    **지정 폭은 고정폭이 아니라 비율이다.** 남는 폭은 fitGridWidth 가 이 비율대로 나눈다.
+    그래서 flex 를 쓰지 않는다 — flex 는 남는 폭을 내용이 아니라 "남은 자리"로 한 열에
+    몰아주고, 값이 한 건도 없는 열이 화면에서 가장 넓어지는 원인이었다(2026-08-18 실측:
+    대분류 162 · 중분류 162 · 비고 180, 세 열 모두 전 행 값 잉크 0).
     """
+        # minWidth = width: fitGridWidth 는 뷰포트가 좁으면 열을 **minWidth 까지 줄여서**
+        # 맞춘다(실측 390px: 코드명 120→96 으로 눌려 값이 잘렸다). 역산한 필요폭이 곧
+        # 하한이므로 둘을 같은 값으로 둔다 — 좁은 폭에서는 줄이지 말고 가로 스크롤한다.
     attendance = {
-        # 헤더 "근태 등록 대상"(12.5px, 6자+공백 ≈ 95px)이 잘리지 않는 최소폭 + 체크박스
-        # 토글이라 flex 로 늘리지 않는다(§0.6 내용 맞춤 폭).
-        "flex": 0, "width": 108, "minWidth": 96, "maxWidth": 132,
+        # 96 = 헤더 '근태 등록 대상' 72.92x1.05 + 16. 값은 체크박스(16px)라 헤더가 폭을
+        # 지배하고, 넓혀도 담을 것이 없으므로 maxWidth 로 묶는다.
+        "width": 96, "minWidth": 96, "maxWidth": 96,
         "cellClass": "md-c-center",
         "editable": _EDIT_UNLESS_PROTECTED if attendance_editable else False,
     }
     if not attendance_editable:
         attendance["cellClass"] = "md-c-center ms-cell-readonly"
     return {
-        # ── 열 폭은 flex 가 아니라 **그 열 값의 실측 잉크폭**에서 역산한다 ──
-        # flex 는 폭을 내용이 아니라 "남은 자리"로 정한다. 그 결과 값이 한 건도 없는
-        # 열이 화면에서 가장 넓어져 있었다(2026-08-18 실렌더 계측 @1440, 사이드바 제외
-        # 그리드 뷰포트 1167px: 대분류 162 · 중분류 162 · 비고 180 — 세 열 모두 전 행
-        # 값 잉크 0. 필터를 "전체"로 바꿔도 같은 3행·같은 빈 값이었다).
-        # 남는 가로 폭은 **어느 열에도 흡수시키지 않고 남긴다** — 표 폭이 화면 폭을
-        # 따라다니면 같은 열이 화면마다 다른 폭이 되고, 스캔 기준선이 매번 달라진다.
-        #
-        # 역산 규칙: 폭 = ceil(max(헤더 잉크 + 헤더 좌우 패딩 16, 값 최대 잉크 + 셀 좌우
-        # 패딩 14, 컨트롤 16 + 14)). 패딩은 실측값이다(.ag-header-cell 8/8 · .ag-cell 7/7).
-        # 잉크폭은 실렌더 computed style(셀 14.5px/400 · 헤더 12.5px/600)을 복사한 hidden
-        # span 으로 쟀고, 한글 계수는 같은 span 에 100자를 넣어 100 으로 나눠(반올림 오차
-        # 제거) 실측했다 — 셀 13.34px/자 · 헤더 11.50px/자.
-        # minWidth 는 "헤더가 잘리지 않는 하한"(헤더 잉크+16)이다. flex 가 없으므로 자동
-        # 축소에는 관여하지 않고, 사용자가 열을 직접 좁힐 때의 바닥으로만 쓰인다.
-        #
-        # 값이 0건인 열(대분류·중분류·비고)은 이 화면 안에 역산 재료가 없다. 헤더 하한만
-        # 쓰면 첫 글자를 넣는 순간 잘리므로, **저장소 안에 실재하는 같은 값의 표본**을
-        # 근거로 잡고 그 출처를 남긴다. 실제 값이 생기면 그때 다시 재서 갱신한다.
-        #
-        # 대분류/중분류 84 = "PVC생산부"/"PVC생산팀" 잉크 69.84 + 14.
-        #   표본 출처: scripts/test_schedule_contracts.py:659·695-697 의 계층 값. 헤더
-        #   하한(34.5+16=50.5)보다 이쪽이 크다. migration 009 가 대분류를 그룹명으로
-        #   백필하므로(docs/database.md:140) 더 긴 값이 들어올 수 있고, 그때는 셀이
-        #   말줄임되며 열은 사용자가 직접 넓힐 수 있다(resizable).
-        "대분류": {"flex": 0, "width": 84, "minWidth": 52, "cellClass": "md-c-left",
+        # 대분류·중분류 52 = 헤더 33.13x1.05 + 16. 두 열 모두 sample 값이 0건이라 이 화면
+        # 안에 역산 재료가 없어 **헤더 하한**만 쓴다(종전에는 저장소 표본으로 84 를 잡았지만
+        # 그 근거는 14.5px 기준이었고, 값 0건인 열을 미리 넓히는 것이 이번에 지적된 문제다).
+        # migration 009 가 대분류를 그룹명으로 백필하면 그때 다시 재서 갱신한다 — 그 전까지
+        # 남는 폭은 fitGridWidth 가 비례로 얹어 주고, 열은 resizable 이다.
+        "대분류": {"width": 52, "minWidth": 52, "cellClass": "md-c-left",
                  "editable": _EDIT_UNLESS_PROTECTED},
-        "중분류": {"flex": 0, "width": 84, "minWidth": 52, "cellClass": "md-c-left",
+        "중분류": {"width": 52, "minWidth": 52, "cellClass": "md-c-left",
                  "editable": _EDIT_UNLESS_PROTECTED},
-        # 코드·순서·사용 폭은 기준정보 3화면 공통 규격(2026-08-14 재검수):
-        # 코드/식별 108 · 순서 74 · 사용 여부 토글 72.
-        "코드": {"flex": 0, "width": 108, "minWidth": 96, "cellClass": "md-c-left",
+        # 코드 48 = 값 실측 최대 'PET1' 30.02x1.05 + 16. 8~9자리 부서코드가 실제로 들어오면
+        # 이 표본으로는 모자라므로(9자리 = 67.5+16) 그때 재측정한다. 자연키라 저장행 편집 불가.
+        "코드": {"width": 48, "minWidth": 48, "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
-        # 코드명 136 = 이 열 값의 실측 최대 "PET생산부(원료실)" 잉크 117.91 + 셀 패딩 14
-        # = 131.91 에, **값이 폭을 구속하는 유일한 열**이라 §1.1 한 칸(4px)을 서체 폴백
-        # 여유로 더했다 — 그리드 iframe 은 부모의 IBM Plex 를 상속하지 않고 시스템 기본
-        # sans-serif 로 그려서(실측) 배포 PC 마다 잉크폭이 달라질 수 있다(DESIGN §7.2-23).
-        # 그보다 길어지면 말줄임이고, 열은 사용자가 직접 넓힐 수 있다(resizable).
-        # (구 flex 1.3 은 같은 화면에서 235px 로 그려져 103px 이 빈 자리였다.)
-        "코드명": {"flex": 0, "width": 136, "minWidth": 52, "cellClass": "md-c-left",
+        # 코드명 120 = 값 실측 최대 'PET생산부(원료실)' 97.58x1.05 + 16. 행을 특정하는 열이라
+        # 상한을 두지 않고 남는 폭을 비례로 흡수하게 둔다.
+        "코드명": {"width": 120, "minWidth": 120, "cellClass": "md-c-left",
                  "editable": _EDIT_UNLESS_PROTECTED},
         _ATTENDANCE_COL: attendance,
-        "순서": {"flex": 0, "width": 74, "minWidth": 68, "maxWidth": 110,
+        # 순서·사용 40 = 헤더 2글자 22.09x1.05 + 16. 정수·체크박스라 상한 고정.
+        "순서": {"width": 40, "minWidth": 40, "maxWidth": 40,
                 "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
-        # 비고 116 = 값 0건이고 이 열의 표본도 저장소에 없어, 같은 역할(기준정보 자유
-        # 서술)의 실데이터 최대인 data/sample/work_types.csv 의 description
-        # "야간 근무(6시간)"(10자) 잉크 101.8 + 14 에서 역산했다.
-        "비고": {"flex": 0, "width": 116, "minWidth": 40, "cellClass": "md-c-left",
+        # 비고 40 = 헤더 하한(값 0건). 실데이터가 생기면 다시 잰다.
+        "비고": {"width": 40, "minWidth": 40, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED},
-        "사용": {"flex": 0, "width": 72, "minWidth": 66, "maxWidth": 90,
+        "사용": {"width": 40, "minWidth": 40, "maxWidth": 40,
                 "cellClass": "md-c-center", "editable": _EDIT_UNLESS_PROTECTED},
     }
 
 
-# 조 시트는 유형 컬럼이 하나 더 있어 6열이다 — 최소 열폭을 더 조여 1280px에서도 맞춘다.
+# 조 시트(6열) — 폭 규칙은 _dept_col_config 주석과 동일(12px 기준 역산 · 비율).
+# 유형 열의 색 채움(ms-unit-shift / ms-unit-general)은 걷어냈다: 교대/일반은 오류·경고가
+# 아니라 값이고, 표 안에서 색면이 열을 차지하면 읽어야 할 값보다 먼저 눈을 끈다(2026-08-19
+# 사용자 판단). 구분은 '교대'/'일반' 텍스트가 그대로 담당한다.
 _UNIT_COL_CONFIG = {
-    "코드": {"flex": 0, "width": 46, "minWidth": 40, "cellClass": "md-c-left",
+    # 코드 48 / 코드명 120 — 부서·그룹 시트와 같은 값(같은 성격 열이 화면마다 다른 폭으로 서지 않게).
+    "코드": {"width": 48, "minWidth": 48, "cellClass": "md-c-left",
             "editable": _EDIT_NEW_ONLY, "cellClassRules": dict(_CODE_READONLY_RULES)},
-    "명칭": {"headerName": "코드명", "flex": 1.4, "minWidth": 42, "cellClass": "md-c-left",
-           "editable": _EDIT_UNLESS_PROTECTED, "cellStyle": {"fontSize": "14.5px"}},  # §1-E 본문 14.5
+    "명칭": {"headerName": "코드명", "width": 120, "minWidth": 120, "cellClass": "md-c-left",
+           "editable": _EDIT_UNLESS_PROTECTED},
+    # 유형 40 = '교대'/'일반' 2글자 22.09x1.05 + 16. 어휘가 둘로 고정이라 maxWidth.
     "유형": {
-        "headerName": "유형", "flex": 0, "width": 50, "minWidth": 44, "maxWidth": 96,
+        "headerName": "유형", "width": 40, "minWidth": 40, "maxWidth": 40,
         "cellClass": "md-c-center", "cellEditor": "agSelectCellEditor",
         "cellEditorParams": {"values": ["교대", "일반"]},
-        "cellClassRules": {"ms-unit-shift": "value == '교대'", "ms-unit-general": "value == '일반'"},
     },
-    "표시순서": {"headerName": "순서", "flex": 0, "width": 40, "minWidth": 34, "maxWidth": 72,
+    "표시순서": {"headerName": "순서", "width": 40, "minWidth": 40, "maxWidth": 40,
              "cellClass": "md-c-center ms-num", "editable": _EDIT_UNLESS_PROTECTED},
-    "비고": {"flex": 1.1, "minWidth": 34, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
-    "사용": {"flex": 0, "width": 40, "minWidth": 36, "maxWidth": 64, "cellClass": "md-c-center",
+    "비고": {"width": 40, "minWidth": 40, "cellClass": "md-c-left", "editable": _EDIT_UNLESS_PROTECTED},
+    "사용": {"width": 40, "minWidth": 40, "maxWidth": 40, "cellClass": "md-c-center",
            "editable": _EDIT_UNLESS_PROTECTED},
 }
 
@@ -820,7 +823,12 @@ def _render_group_sheet(params: dict, readiness: ReadinessState, sel_group: str)
     spec = MasterGridSpec(
         page_id=_GRP.page_id, columns=_GROUP_GRID_COLUMNS, order=_GROUP_COLS,
         col_config=_code_name_config(), select_all=True, include_linked_rows=True,
-        grid_options={"onCellClicked": _DRILL_CLICK},  # 행 클릭 → 그룹 드릴다운 선택
+        # autoSizeStrategy: 지정 폭을 **비율**로 삼아 남는 가로 폭을 비례 분배한다. 없으면
+        # flex 를 뺀 순간 표가 뷰포트보다 좁게 서서 "화면보다 작은 표"가 된다. 공용
+        # views/master/grid.py 에 두는 것이 옳지만 그 파일은 이번 범위 밖이라 화면별
+        # grid_options 로 얹는다(3화면 동일 — 보고 대상).
+        grid_options={"onCellClicked": _DRILL_CLICK,  # 행 클릭 = 그룹 드릴다운 선택
+                      "autoSizeStrategy": {"type": "fitGridWidth"}},
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
     grid_df = render_master_grid(spec, _group_display(rows, sel_group), key=_GRP.grid_key())
@@ -1098,6 +1106,11 @@ def _render_dept_sheet(params: dict, readiness: ReadinessState, group_code: str 
         page_id=_OD.page_id, columns=_DEPT_GRID_COLUMNS, order=_DEPT_COLS,
         col_config=_dept_col_config(attendance_editable=attendance_editable),
         select_all=True, include_linked_rows=True,
+        # autoSizeStrategy: 지정 폭을 **비율**로 삼아 남는 가로 폭을 비례 분배한다. 없으면
+        # flex 를 뺀 순간 표가 뷰포트보다 좁게 서서 "화면보다 작은 표"가 된다. 공용
+        # views/master/grid.py 에 두는 것이 옳지만 그 파일은 이번 범위 밖이라 화면별
+        # grid_options 로 얹는다(3화면 동일 — 보고 대상).
+        grid_options={"autoSizeStrategy": {"type": "fitGridWidth"}},
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
     grid_df = render_master_grid(spec, _dept_display(rows, sel_dept), key=_OD.grid_key(suffix=group_code))
@@ -1419,6 +1432,11 @@ def _render_unit_sheet(params: dict, readiness: ReadinessState, dept_code: str, 
     spec = MasterGridSpec(
         page_id=_OU.page_id, columns=_UNIT_GRID_COLUMNS, order=_UNIT_COLS,
         col_config=_UNIT_COL_CONFIG, select_all=True,
+        # autoSizeStrategy: 지정 폭을 **비율**로 삼아 남는 가로 폭을 비례 분배한다. 없으면
+        # flex 를 뺀 순간 표가 뷰포트보다 좁게 서서 "화면보다 작은 표"가 된다. 공용
+        # views/master/grid.py 에 두는 것이 옳지만 그 파일은 이번 범위 밖이라 화면별
+        # grid_options 로 얹는다(3화면 동일 — 보고 대상).
+        grid_options={"autoSizeStrategy": {"type": "fitGridWidth"}},
         height=master_grid_height(len(rows) if rows is not None else 0),
     )
     grid_df = render_master_grid(spec, _unit_display(rows), key=_OU.grid_key(suffix=dept_code))

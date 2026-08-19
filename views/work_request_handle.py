@@ -1,4 +1,4 @@
-"""업무요청 처리 — 큐 처리형(DESIGN.md §1-A / §0 MASTER_DETAIL).
+"""업무요청 처리 — 큐 칩 + 전체폭 상세(프로토타입, app.py 미라우팅).
 
     제목/설명 → [지표 스트립] → 헤어라인 → [조회 조건] → [큐 칩 스트립] → 헤어라인
     → [선택 건 전체폭 상세] → 헤어라인 → [액션 바: 담당자 | 처리 의견 | 반려 착수 완료]
@@ -10,7 +10,9 @@
 권한: 처리자(프로토타입 가정 ``role ∈ {ADMIN, MANAGER}``)만 진입한다. 액션 비활성 사유는
 ``work_request_data.action_blocker`` 단일 출처를 그대로 툴팁에 쓴다.
 """
-# DESIGN.md §1-A 큐 처리형 — 읽기 큐(칩) + 전체폭 상세/워크플로.
+# 현재 구현은 칩 스트립 + 전체폭 상세이며 DESIGN.md §2 WORKLIST 골격(상태 탭 + 2열
+# 33/67 + 지표 타일 없음)과 아직 다르다. §7.1 이관 목록의 "승인 큐 4화면"에 이 화면이
+# 들어 있고 골격 이관은 별도 범위다 — 여기서는 §1.1·§1.2 토큰만 정합화했다(2026-08-19).
 SCREEN_ARCHETYPE = "WORKLIST"
 
 from html import escape
@@ -38,6 +40,36 @@ _BADGE_CODE = {
 }
 _PRIORITY_COLOR = {"긴급": "#9c3232", "보통": "#4a453d", "낮음": "#6b665d"}
 
+# §1.2(2026-08-19) — 버튼·위젯 라벨 글자는 내부 <p>/<label> 이 소유한다. 공용 CSS 가
+# button 에만 font-size 를 걸면 <p> 는 Streamlit 기본 12.25px 로 남는다(실측: 칩 4 ·
+# ‹› 2 · 액션 3 · 위젯 라벨 2 = 11곳). 네 단계(24/20/14/12) 밖 값이므로 이 화면의
+# st-key 선택자로 되돌린다. 개선조치 관리(:168)가 같은 이유로 쓰는 규칙과 같은 형태다.
+_WRH_CSS = """
+<style>
+/* 선택자 특이도 주의 — 앱 전역에 `.stApp [data-testid="stMarkdownContainer"] p`(0,2,1)
+   규칙이 있어 `[class*=…] button p`(0,1,2) 로는 지지 않는 쪽이 생긴다(실측: 액션·나브는
+   먹고 칩만 12.25px 로 남았다). 같은 앵커를 선택자에 넣어 (0,3,2)로 올린다. */
+/* 큐 칩 라벨 — 공용 proto 가 button 에 건 12/600 을 <p> 에도 적용한다. */
+.stApp [class*="st-key-prq_"] button [data-testid="stMarkdownContainer"] p {
+  font-size:12px !important; font-weight:600 !important; }
+/* 큐 순회 ‹ › — 공용이 button 에 건 14px 을 <p> 에도 적용한다. */
+.stApp .st-key-pr_prev button [data-testid="stMarkdownContainer"] p,
+.stApp .st-key-pr_next button [data-testid="stMarkdownContainer"] p { font-size:14px !important; }
+/* 결정 액션(반려·처리 착수·처리 완료) — body-strong(14/600). */
+.stApp [class*="st-key-pract_"] button [data-testid="stMarkdownContainer"] p {
+  font-size:14px !important; font-weight:600 !important; }
+/* 액션 바 위젯 라벨 — §1.2 label-strong(12/600). 조건 패널 라벨과 같은 계층이다. */
+.stApp [class*="st-key-wrh_"] label [data-testid="stMarkdownContainer"] p {
+  font-size:12px !important; font-weight:600 !important; }
+/* 히트영역 §1.4 compact(34~38) — 조건 select·검색창·액션 바 select/text 가 실측 33px 로
+   1px 미달이었다. 개선조치 관리(:186)가 자기 위젯 key 에 거는 규칙과 같은 형태다. */
+[class*="st-key-work_request_handle_"] div[data-baseweb="select"] > div,
+[class*="st-key-work_request_handle_"] input,
+[class*="st-key-wrh_"] div[data-baseweb="select"] > div,
+[class*="st-key-wrh_"] input { min-height:34px !important; }
+</style>
+"""
+
 
 def render(user: dict) -> None:
     erp.screen_frame(
@@ -48,6 +80,7 @@ def render(user: dict) -> None:
         badges=scaffold.mode_badge(),
     )
     proto.inject()
+    st.markdown(_WRH_CSS, unsafe_allow_html=True)
     if not wr.can_handle(user):
         empty_state("업무요청 처리 권한이 없습니다",
                     "관리자·매니저만 업무요청을 처리할 수 있습니다.")
@@ -178,16 +211,20 @@ def _detail(user: dict, rows: list[dict], request_no: str) -> None:
     priority = wr.clean(row.get("priority"))
     overdue = wr.is_overdue(row)
     left = wr.days_left(row)
+    # §1.2(2026-08-19) — 글꼴은 Pretendard 하나이고 크기는 24/20/14/12 뿐이다.
+    # 식별자는 body-strong(14/600) + tabular-nums(모노 폐지), 대상 제목은 section(20/600).
+    # 간격은 §1.1 스케일(8/16)만 쓴다.
     st.markdown(
-        "<div style='display:flex;flex-wrap:wrap;align-items:center;gap:10px;"
-        "margin:2px 0 10px;'>"
-        f"<span style='font-family:{proto.MONO};font-size:18px;font-weight:600;"
-        f"color:{proto.INK};'>{wr.clean(row.get('request_no'))}</span>"
+        "<div style='display:flex;flex-wrap:wrap;align-items:center;gap:8px;"
+        "margin:0 0 8px;'>"
+        "<span style='font-size:14px;font-weight:600;"
+        f"font-variant-numeric:tabular-nums;color:{proto.INK};'>"
+        f"{wr.clean(row.get('request_no'))}</span>"
         f"{proto.badge(_BADGE_CODE.get(status, proto.BADGE_CLOSED), wr.STATUS_LABELS.get(status, status))}"
-        f"<span style='font-size:12.5px;font-weight:600;"
+        f"<span style='font-size:12px;font-weight:600;"
         f"color:{_PRIORITY_COLOR.get(priority, proto.INK2)};'>{priority}</span></div>"
-        f"<div style='font-size:17px;font-weight:600;color:{proto.INK};"
-        f"letter-spacing:-0.02em;margin:0 0 14px;'>{_esc(row.get('title'))}</div>",
+        f"<div style='font-size:20px;font-weight:600;color:{proto.INK};"
+        f"margin:0 0 16px;'>{_esc(row.get('title'))}</div>",
         unsafe_allow_html=True,
     )
     # 기한 초과는 색(danger)+문구로 이중부호화한다 — 색만으로 알리지 않는다.

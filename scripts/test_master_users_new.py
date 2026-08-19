@@ -324,11 +324,22 @@ def test_editable_gate():
     check("성명 읽기전용 규칙(보호행)", "ms-cell-readonly" in cc["성명"]["cellClassRules"]
           and "_protected" in cc["성명"]["cellClassRules"]["ms-cell-readonly"])
     check("재직 읽기전용 규칙(보호행)", "ms-cell-readonly" in cc["재직"]["cellClassRules"])
-    # §1-E: 재직은 pill 렌더러(재직/퇴직, §2 팔레트) — 편집은 불리언 체크박스(더블클릭). 값·저장
-    # 경로 불변(pill display-only). 권한도 pill 렌더러 + select 편집.
-    check("재직 §1-E pill 렌더러 지정(편집 계약 보존)", "cellRenderer" in cc["재직"])
-    check("권한 §1-E pill 렌더러 + select 편집 유지",
-          "cellRenderer" in cc["권한"] and cc["권한"].get("cellEditor") == "agSelectCellEditor")
+    # 2026-08-19 폐기: "재직/권한 §1-E pill 렌더러 지정".
+    # 표 안 장식성 색 채움 폐지(사용자 판단) — 권한 3색 pill·재직 녹색 pill 은 값을 읽어야
+    # 하는 열에서 색면이 먼저 눈을 끌었고, 12.5px 라 DESIGN §1.2 네 단계 밖이기도 했다.
+    # 상태 이중부호화는 성명 열 배지(_NAME_STATUS_RENDERER)와 행 상태 배경이 유지한다.
+    # 편집 계약(재직=bool 체크박스 / 권한=select)은 그대로여야 한다.
+    check("재직은 공용 native 체크박스(pill 렌더러 없음)", "cellRenderer" not in cc["재직"])
+    check("권한은 평문 + select 편집 유지(pill 렌더러 없음)",
+          "cellRenderer" not in cc["권한"] and cc["권한"].get("cellEditor") == "agSelectCellEditor"
+          and "ms-cell-select" in cc["권한"]["cellClass"])
+    check("pill 렌더러 정의 제거", not hasattr(mu, "_ROLE_PILL_RENDERER")
+          and not hasattr(mu, "_ACTIVE_PILL_RENDERER"))
+    # 열 폭은 12px 기준 역산 비율이고 남는 폭은 fitGridWidth 가 비례 분배한다 — flex 잔존 0.
+    check("사용자 시트 flex 잔존 0", all(float(c.get("flex", 0)) == 0 for c in cc.values()))
+    check("고정 서식·체크박스 열만 maxWidth", all("maxWidth" in cc[c] for c in
+          ("입사일", "퇴사일", "표시순서", "재직"))
+          and not any("maxWidth" in cc[c] for c in ("사번", "성명", "부서", "직급", "권한")))
 
     # 셀 오류/변경 마커는 읽기전용과 병존한다(약화 금지).
     check("사번 오류·변경 마커 병존", "ms-cell-error" in cc["사번"]["cellClassRules"]

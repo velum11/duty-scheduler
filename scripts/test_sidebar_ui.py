@@ -203,7 +203,9 @@ check("테마 준비 토큰 주석", "이 토큰 블록만 오버라이드" in s
 # 활성 리프 = 밝은 텍스트 + 굵게 + 선택 배경 강조
 check("활성 리프 밝은텍스트+굵게+선택배경",
       'div[class*="st-key-sbi_"] div.stButton > button[kind="primary"] {' in shell_css
-      and "color: var(--sb-sel-text) !important; font-weight: 700; background: var(--sb-sel-bg)" in shell_css)
+      # 2026-08-19 DESIGN §1.2 개정: 굵기는 400·600 둘뿐이다. 선택 강조는 색(밝은 텍스트
+      # + 선택 배경)이 이미 담당하므로 700 을 600 으로 내려도 위계가 유지된다.
+      and "color: var(--sb-sel-text) !important; font-weight: 600; background: var(--sb-sel-bg)" in shell_css)
 # DESIGN §4·§7: 폴더 아이콘 제거 → 모듈 6px 사각 마크 + 캐럿, 리프 5px 점(가이드선 제거)
 check("폴더 아이콘 제거(§7) — 폴더 SVG 경로 없음", "M3 7a2 2 0 0 1 2-2" not in shell_css)
 check("모듈 6px 사각 마크(::before)",
@@ -287,12 +289,12 @@ mstyle = _master.style._PAGE_CSS
 check("헤더 계약 클래스 유지(ms-head/ms-title)",
       "ms-head" in head_src and "ms-title" in head_src)
 check("파랑 밴드 토큰(#0F6FCB) 제거", "#0F6FCB" not in mstyle)
-check("제목 28px/600(-0.02em) 다크 잉크 — DESIGN.md §1.2 page",
-      "font-size:28px; font-weight:600" in mstyle and "color:var(--ms-ink)" in mstyle
+check("제목 24px/600(-0.02em) 다크 잉크 — DESIGN.md §1.2 page",
+      "font-size:24px; font-weight:600" in mstyle and "color:var(--ms-ink)" in mstyle
       and "letter-spacing:-.02em" in mstyle)
 check("설명 12px 크롬 — DESIGN.md §1.2 label", "font-size:12px" in mstyle)
 # 스케일 밖 구값 재유입 방지(§1.2: 28·20·16·14·12 만).
-check("타이틀 크롬에 구값(25px/13.5px) 부재",
+check("타이틀 크롬에 구값(25px/13.5px/28px) 부재",
       "font-size:25px" not in mstyle and "font-size:13.5px" not in mstyle)
 # 2026-08-18: views/workspace.py 에 .ms-title{1.18rem/700}·.ms-desc{0.82rem} 사본이 남아
 # 있었다(주입 함수 호출부 0건이라 런타임 영향은 없었으나 구값 재유입 경로였다). 실렌더

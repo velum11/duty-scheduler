@@ -67,7 +67,10 @@ REPORTS = pd.DataFrame([
 
 # ===== 1) 컬럼 구성 — 조회 8열 − (신고자·소속) =====
 print("컬럼 구성(조회 참조)")
-check("표시 6열", len(nmy._DISPLAY_COLUMNS) == 6)
+# 2026-08-19 사고내용 추가 → 7열(조회 9열 − 소속·신고자).
+check("표시 7열", len(nmy._DISPLAY_COLUMNS) == 7)
+check("사고내용 열 존재(작업명 바로 뒤)",
+      nmy._DISPLAY_COLUMNS.index("사고내용") == nmy._DISPLAY_COLUMNS.index("작업명") + 1)
 check("제안등급 열 폐기(§7.2-1b — 되돌림 방지)",
       "제안등급" not in nmy._DISPLAY_COLUMNS and "제안등급" not in nmy._COL_CONFIG)
 check("등급 열은 §3.6 축약형 '등급' 하나만",
@@ -85,8 +88,10 @@ check("모든 표시 열이 조회 화면 열의 부분집합",
       set(nmy._DISPLAY_COLUMNS) <= set(nmv._DISPLAY_COLUMNS))
 check("모든 표시 열에 폭 지정(_COL_CONFIG)",
       all(c in nmy._COL_CONFIG for c in nmy._DISPLAY_COLUMNS))
-check("보고번호는 모노(조회와 동일 서식)",
-      "Mono" in str(nmy._COL_CONFIG["보고번호"].get("cellStyle", {})))
+# §1.2(2026-08-19): 모노 서체 폐지 — 글꼴은 Pretendard 하나이고 자릿수 정렬은
+# tabular-nums 가 담당한다. 보고번호에 별도 서식을 두지 않는다(조회와 동일).
+check("보고번호에 모노 서식 없음(§1.2 모노 폐지)",
+      "Mono" not in str(nmy._COL_CONFIG["보고번호"].get("cellStyle", {})))
 # "남는 가로 폭을 flex 로 아무 열에나 흡수시키지 마라. 남으면 남긴다."(2026-08-18 확정)
 check("잔여 폭 흡수(flex) 열 없음 — 전부 고정폭",
       not any("flex" in cfg for cfg in nmy._COL_CONFIG.values()))
@@ -159,8 +164,9 @@ check("선택 자연키 pre-select(위치 비의존, NM-2 → index 1)",
 # (§5 "표는 overflow-x:auto"). 페이지 가로 스크롤은 실측(Playwright)이 담당.
 min_total = sum(cfg["width"] for cfg in nmy._COL_CONFIG.values())
 check("표 최소 폭 > 390(좁은 폭에서 표 내부 가로 스크롤)", min_total > 390)
-# 2026-08-18 내용 역산 고정폭: 108+92+72+172+44+72 = 560.
-check("표 폭 합계 = 560(내용 역산 고정폭 합)", min_total == 560)
+# 2026-08-19 §1.2 재역산(표 12px · Pretendard) + 사고내용 400: 88+80+64+144+400+40+64 = 880.
+# 고정폭이 아니라 비율이다 — fitGridWidth 가 이 비율로 남는 폭을 나눈다.
+check("폭 비율 합 = 880", min_total == 880)
 # 같은 성격 열은 두 화면이 **같은 값**(기존 계약 유지).
 for _c in nmy._DISPLAY_COLUMNS:
     check(f"{_c} 열 폭이 조회 화면과 동일",
@@ -248,9 +254,11 @@ check("한글 등급 라벨에 모노 미적용", "monospace" not in _meta_head)
 check("한글 등급 라벨에 letter-spacing 미적용", "letter-spacing" not in _meta_head)
 check("라벨 크기·색 불변(10.5px / #6b665d)",
       "font-size:10.5px" in _meta_head and nmy._MUT in _meta_head)
-check("영문 태그(WHAT/CAUSE/ACTION)는 모노 유지", "monospace" in _meta_html)
-check("보고번호(영숫자) 앵커는 모노 유지",
-      "monospace" in nmy._detail_anchor_html(REPORTS.iloc[1].to_dict(), "EVALUATED"))
+# §1.2(2026-08-19): 모노 서체 폐지 — 글꼴은 Pretendard 하나이고 자릿수 정렬은
+# tabular-nums 가 담당한다. 영숫자라도 별도 서체를 쓰지 않는다.
+check("영문 태그에 모노 없음(§1.2 모노 폐지)", "monospace" not in _meta_html)
+check("보고번호 앵커에 모노 없음(§1.2 모노 폐지)",
+      "monospace" not in nmy._detail_anchor_html(REPORTS.iloc[1].to_dict(), "EVALUATED"))
 # 결측(NaN) 등급은 'NAN' 이 아니라 빈 값 라벨('미정')로 렌더된다(2026-08-18 실렌더 버그).
 _nan_grade = REPORTS.iloc[0].to_dict()["confirmed_grade"]
 check("None 등급 → '미정'", "미정" in nmy._grade_mark(_nan_grade, empty="미정"))

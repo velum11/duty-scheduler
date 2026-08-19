@@ -98,7 +98,7 @@ _ACCENT_TINT = "#fdf3ec"
 # style='font-family:{_MONO};…' 가 첫 내부 따옴표에서 끊겨 style 전체가 소실되는 것을 막는다
 # (2026-08-14 실측: 상세 보고번호 16px/600 모노와 사진 오버라인 11px 이 무효화돼 14px sans 로
 # 렌더되고, 그 결과 사진 오버라인이 본문 블록과 5px 겹쳤다).
-_MONO = '"IBM Plex Mono", monospace'
+_MONO = '"Pretendard","Malgun Gothic",-apple-system,sans-serif'
 # 상태 색 — 상세 진행 단계 pill·상태 배지·표 상태 열 색 규칙 공용. 조회 화면
 # (near_miss_view)과 **같은 토큰**을 쓴다: 같은 상태가 화면마다 다른 색이면 안 된다.
 # 2026-08-14: DESIGN §2 상태 배지(= views/master/style.py::LIFECYCLE_BADGE, 평가·개선조치가
@@ -144,7 +144,8 @@ _DISPLAY_COLUMNS = [
     # (같은 값을 쓰기로 되어 있다)"로 명시됐다. 상태는 조회와 같이 행 끝을 닫는다.
     # 헤더 낱말은 '보고번호' 유지 — 낱말 교체(문서번호)는 §3.6 어휘 단일화로 한 번에 한다
     # (등록 완료 배너의 '접수번호' 등 이 화면 밖 파급이 있어 이번 범위에서 제외).
-    "보고번호", "발생일", "원인", "작업명", "등급", "상태",
+    # 사고내용 추가(2026-08-19) — 행을 특정하는 서술 값이다. 조회와 같은 기준.
+    "보고번호", "발생일", "원인", "작업명", "사고내용", "등급", "상태",
 ]
 # 컬럼 폭 — 전부 **실제 값의 최대 길이에서 역산한 고정폭**이며, 같은 성격 열은 조회 화면
 # (near_miss_view._COL_CONFIG)과 같은 값이다. 폭 산식·한글 계수 실측 방법·열별 근거(가정
@@ -155,13 +156,17 @@ _DISPLAY_COLUMNS = [
 # 고정폭 합(556)이 컨테이너보다 넓으면 AgGrid 가 **표 안에서** 가로 스크롤한다(§5) —
 # 페이지 가로 스크롤은 발생하지 않는다(390px 실측 0).
 _COL_CONFIG = {
-    "보고번호": {"width": 108, "cellStyle": {"fontFamily": "'IBM Plex Mono', monospace",
-                                          "letterSpacing": "0.01em"}},
-    "발생일": {"width": 92},
-    "원인": {"width": 72},
-    "작업명": {"width": 172},
-    "등급": {"width": 44},
-    "상태": {"width": 72},
+    # 조회(near_miss_view._COL_CONFIG)와 **같은 값**을 쓴다(기존 계약). 근거·역산 방법은
+    # 그쪽 주석이 정본이다 — 2026-08-19 §1.2 개정(표 12px · Pretendard)으로 재역산했다.
+    # 고정폭이 아니라 비율이다: kit 의 autoSizeStrategy fitGridWidth 가 남는 폭을 이 값에
+    # 비례해 나눈다.
+    "보고번호": {"width": 88},
+    "발생일": {"width": 80},
+    "원인": {"width": 64},
+    "작업명": {"width": 144},
+    "사고내용": {"width": 400},
+    "등급": {"width": 40, "maxWidth": 64},
+    "상태": {"width": 64},
 }
 
 _MINE_CSS = """
@@ -319,6 +324,7 @@ def _to_display(reports: pd.DataFrame) -> pd.DataFrame:
             "발생일": _clean(r.get("incident_date")) or "-",
             "원인": _CAUSE_LABEL.get(cause, cause) or "-",
             "작업명": _clean(r.get("work_name")) or "(제목 없음)",
+            "사고내용": _clean(r.get("incident_content")) or "-",
             "등급": _clean(r.get("confirmed_grade")) or "-",
             "상태": _STATUS_LABEL.get(status, status) or "-",
         })
@@ -354,10 +360,7 @@ def _render_list(user: dict, reports: pd.DataFrame) -> None:
         # (38)을 써 행 클릭(=상세 열기) 히트영역을 최대한 남긴다. 조회 화면은 34.
         row_height=38,
         scroll_affordance=True,     # 모바일 폭에서 "오른쪽에 열이 더 있음" 신호(상시 스크롤바)
-        color_rules={
-            "등급": _GRADE_COLOR,
-            "상태": {label: _STATUS_COLOR[code] for code, label in _STATUS_LABEL.items()},
-        },
+        # 등급·상태 셀 배경 채움 제거(2026-08-19 사용자 판단 — 조회와 같은 기준).
     )
     # 선택을 상세 렌더 **전에** 소비한다 — select_grid 의 selectionChanged rerun 이 이미 일어난
     # run 이므로 세션만 갱신하면 추가 st.rerun 없이 곧바로 상세를 그린다(선택 즉시 상세).

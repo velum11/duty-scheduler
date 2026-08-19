@@ -278,14 +278,25 @@ def test_unified_redesign_features() -> None:
 
     cfg = m._col_config()
     check("약칭 열에 셀 렌더러 주입(라이브 중복칩)", "cellRenderer" in cfg["약칭"])
-    check("분류 열에 셀 렌더러 주입(칩)", "cellRenderer" in cfg["분류"])
+    # 2026-08-19 폐기: "분류 열에 셀 렌더러 주입(칩)".
+    # `.ms-chip mute` 회색 칩은 표 안 장식성 색 채움이라 걷어냈다(사용자 판단 — 분류는
+    # 오류·경고가 아니라 값이고, 색면이 열을 차지하면 읽어야 할 값보다 먼저 눈을 끈다).
+    # 대체 계약: 분류는 평문으로 그린다(렌더러 없음).
+    check("분류 열은 평문(장식 칩 렌더러 없음)", "cellRenderer" not in cfg["분류"])
 
     # 약칭 중복칩은 공통 `.ms-chip warn` 어휘 + 활성 기준(저장 검증과 동일 규칙)을 사용.
     short_src = str(m._SHORT_LABEL_RENDERER.js_code)
     check("약칭 렌더러가 공통 warn 칩 사용", "ms-chip warn" in short_src and "약칭 중복" in short_src)
     check("약칭 중복 판정은 활성 행 기준(사용/제거 반영)", "_active" in short_src and "_removed" in short_src)
-    cat_src = str(m._CATEGORY_RENDERER.js_code)
-    check("분류 렌더러가 공통 mute 칩 사용", "ms-chip mute" in cat_src)
+    # 2026-08-19 폐기: "분류 렌더러가 공통 mute 칩 사용"(_CATEGORY_RENDERER 자체를 제거).
+    check("분류 칩 렌더러 정의 제거", not hasattr(m, "_CATEGORY_RENDERER"))
+    # 불리언 3열(실근무·특근수당·사용)은 공용 native 체크박스 하나로 통일한다 —
+    # 종전 사용=녹색 / 실근무=파란색 pill 렌더러는 같은 성격 열을 서로 다른 모양으로
+    # 만들고 표 오른쪽을 색면으로 채웠다(2026-08-19 장식성 색 채움 폐지).
+    check("불리언 열 pill 렌더러 제거(native 체크박스로 통일)",
+          not hasattr(m, "_USE_PILL_RENDERER") and not hasattr(m, "_WORK_PILL_RENDERER")
+          and "cellRenderer" not in cfg["사용"] and "cellRenderer" not in cfg["실근무"]
+          and "cellRenderer" not in cfg["특근수당"])
 
     # 다른 행 약칭/사용 편집에 반응하도록 onCellValueChanged 로 약칭 열을 refresh.
     render_src = inspect.getsource(m.render)

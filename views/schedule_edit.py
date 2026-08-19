@@ -113,7 +113,6 @@ _LINE_HDR = "#cfc8bd"
 _LINE_SEC = "#e0dbd2"
 _ACCENT = "#c2410c"
 _ACCENT_TEXT = "#b4451a"
-_MONO = "'IBM Plex Mono', monospace"
 
 # §1-C 그리드 컨테이너 리스킨 — AG Grid iframe 바깥 래퍼에 흰 배경·헤어라인·radius 를 입힌다
 # (내부 헤더/셀 헤어라인은 공용 _MASTER_GRID_CSS 의 #CFC8BB 계열이 §2 와 정합). 셀 색은
@@ -127,19 +126,21 @@ _ROSTER_CSS = f"""
 .se-hint .lab {{ font-size:12px; color:{_INK2}; margin-right:2px; }}
 .se-key {{ display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:7px;
   border:1px solid {_LINE}; background:#ffffff; font-size:12px; color:{_INK}; white-space:nowrap; }}
-.se-key .n {{ font-family:{_MONO}; font-weight:600; color:{_ACCENT_TEXT}; }}
+/* 모노 서체 폐지(DESIGN.md §1.2) — 세로로 겹쳐 읽는 수치는 tabular-nums 로 자릿수를
+   맞춘다. 크기도 네 단계(24·20·14·12) 안으로 내렸다(종전 12.5px). */
+.se-key .n {{ font-variant-numeric:tabular-nums; font-weight:600; color:{_ACCENT_TEXT}; }}
 .se-key .sw {{ width:9px; height:9px; border-radius:2px; flex:0 0 auto; }}
 .se-ctx {{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; margin:6px 0 10px;
-  font-size:12.5px; color:{_INK2}; }}
+  font-size:12px; color:{_INK2}; }}
 .se-ctx .loc {{ font-weight:600; color:{_INK}; }}
-.se-ctx .num {{ font-family:{_MONO}; font-weight:600; color:{_INK}; }}
+.se-ctx .num {{ font-variant-numeric:tabular-nums; font-weight:600; color:{_INK}; }}
 .se-ctx .op {{ color:{_WEAK}; }}
 /* 범위 안내 1줄(알림 슬롯 전용) — 근태 비대상 부서 편성을 목록에서 뺐다는 사실과 건수.
    경고가 아니라 사실 고지라 중립 잉크로 두고 숫자만 모노로 세운다(§0.6 한 줄). */
-.se-note {{ font-size:12.5px; color:{_INK2}; margin:2px 0 6px; }}
-.se-note .num {{ font-family:{_MONO}; font-weight:600; color:{_INK}; }}
+.se-note {{ font-size:12px; color:{_INK2}; margin:2px 0 6px; }}
+.se-note .num {{ font-variant-numeric:tabular-nums; font-weight:600; color:{_INK}; }}
 /* 모바일 세로 한 줄 안내(가로 전환 제안) — 월간 근무표 .sv-rotate 와 같은 문구·크기·색. */
-.se-rotate {{ font-size:12.5px; color:{_WEAK}; margin:8px 0 6px; line-height:1.35; }}
+.se-rotate {{ font-size:12px; color:{_WEAK}; margin:8px 0 6px; line-height:1.35; }}
 /* (근무형태 범례는 3화면 공통 views.workspace.duty_legend_html 이 마크업·CSS 를 소유한다 —
    종전 .se-legend/.se-leg 는 월간 근무표의 색 pill 범례와 시각 언어가 갈렸다.) */
 /* 뷰포트 프로브(views.workspace.mount_viewport_probe) — 값만 읽는 0크기 요소라 흐름에서
@@ -147,7 +148,7 @@ _ROSTER_CSS = f"""
 .st-key-sv_vp {{ position:absolute; width:0; height:0; overflow:hidden; }}
 /* 미저장 변경 표시 — 0건은 '알릴 것 없음'이라 중립(ink-2·normal), 1건 이상일 때만
    액센트+굵게로 주의를 끈다. 종전엔 0건도 오렌지 굵게라 상시 경고처럼 읽혔다. */
-.se-dirty {{ text-align:right; color:{_INK2}; font-size:12.5px; font-weight:400; margin-top:6px; }}
+.se-dirty {{ text-align:right; color:{_INK2}; font-size:12px; font-weight:400; margin-top:6px; }}
 .se-dirty.on {{ color:{_ACCENT_TEXT}; font-weight:600; }}
 </style>
 """
@@ -494,12 +495,15 @@ def _day_header_component(day_col: str) -> JsCode:
     wd = day_col.split("(")[1].rstrip(")") if "(" in day_col else ""
     num_j = json.dumps(num)
     wd_j = json.dumps(wd)
+    # 두 줄 모두 12px Pretendard (DESIGN.md §1.2 네 단계 안 · 모노 폐지). 숫자 줄은
+    # label-strong(600/ink) + tabular-nums 로 날짜가 세로로 정렬되고, 요일 줄은 label
+    # (400/ink-3)이다. 종전 12.5px 모노 + 10px 는 둘 다 스케일 밖이었다(2026-08-19).
     return JsCode(
         "class{init(p){this.eGui=document.createElement('div');"
-        "this.eGui.style.cssText='line-height:1.12;text-align:center';"
-        f"this.eGui.innerHTML=\"<div style='font-family:IBM Plex Mono,monospace;font-weight:600;"
-        f"font-size:12.5px;color:{_INK}'>\"+{num_j}+\"</div><div style='font-size:10px;color:{_INK2}'>\""
-        f"+{wd_j}+\"</div>\";}}getGui(){{return this.eGui;}}}}"
+        "this.eGui.style.cssText='line-height:1.15;text-align:center';"
+        f"this.eGui.innerHTML=\"<div style='font-weight:600;font-variant-numeric:tabular-nums;"
+        f"font-size:12px;color:{_INK}'>\"+{num_j}+\"</div><div style='font-size:12px;font-weight:400;"
+        f"color:{_WEAK}'>\"+{wd_j}+\"</div>\";}}getGui(){{return this.eGui;}}}}"
     )
 
 
@@ -513,19 +517,33 @@ def _day_header_component(day_col: str) -> JsCode:
 _DAY_W_MIN, _DAY_W_MAX = DAY_COL_MIN_PX, DAY_COL_MAX_PX
 
 
+#: 표 셀 12px Pretendard 의 실측 자폭(px/자) — 한글, 그 외(숫자·ASCII).
+#: 폭 역산의 단일 출처이며 파이썬(_label_px)과 JsCode(day_style) 양쪽이 같은 값을 쓴다.
+_CH_KO_PX, _CH_ASCII_PX = 11.04, 7.2
+#: 셀 좌우 패딩 합(px) — 필요폭 = max(값, 헤더) + 이 값 → 4의 배수 올림.
+_CELL_PAD_PX = 16
+
+
 def _label_px(text: str) -> float:
-    """표시값의 대략 렌더 폭(px, 본문 14.5px 기준) — 한글·기호는 1em, ASCII 는 약 0.55em."""
-    return sum(14.5 if ord(ch) > 0x1100 else 8.0 for ch in str(text))
+    """표시값의 대략 렌더 폭(px, 표 셀 12px Pretendard 기준) — 실측 자폭 계수로 합산.
+
+    종전 계수(14.5/8.0)는 폐지된 IBM Plex 14.5px 기준이라 12px 표에서 폭을 20% 과대
+    계산했다(DESIGN.md §1.2 — 글꼴 Pretendard 하나, 표 셀·헤더 12px).
+    """
+    return sum(_CH_KO_PX if ord(ch) > 0x1100 else _CH_ASCII_PX for ch in str(text))
 
 
 def _day_width(labels) -> int:
     """일자 열 폭 — 실제 표시값(도메인 파생)에서 유도하되 §밀도 상한을 지킨다 (순수).
 
     하드코딩한 고정 폭이 아니라 활성 근무형태의 표시값에서 계산한다: 약칭처럼 짧은
-    값만 쓰는 환경에서는 종전 44px 그대로이고, 명칭이 길어진 만큼만 넓어진다.
+    값만 쓰는 환경에서는 하한 그대로이고, 명칭이 길어진 만큼만 넓어진다. 산식은 신원 열과
+    같다 — ``max(값 최대 렌더폭, 헤더) + 16`` 을 4의 배수로 올린 뒤 [하한, 상한] 으로 자른다.
+    일자 헤더는 숫자 2자(14.4)라 값이 언제나 헤더보다 넓다.
     """
     longest = max((_label_px(label) for label in labels if str(label).strip()), default=0.0)
-    return int(max(_DAY_W_MIN, min(_DAY_W_MAX, longest + 14)))
+    need = -(-int(longest + _CELL_PAD_PX + 0.999) // 4) * 4  # 4의 배수 올림
+    return int(max(_DAY_W_MIN, min(_DAY_W_MAX, need)))
 
 
 def _hint_html(number_labels: list[str], colors: dict) -> str:
@@ -843,8 +861,17 @@ def render(user: dict) -> None:
         "editable": False, "hide": _MINOR in hidden_meta,
         "headerTooltip": "조직관리 중분류 — 부서 기준정보에서 관리합니다(여기서는 편집 불가)",
     })
+    # '부서'는 **항상 숨긴다**(2026-08-19 사용자 요구). 대분류·중분류가 이미 같은 조직을
+    # 말하고 있어 화면에서 사라져도 정보 손실이 없고, 31일 매트릭스에서 116px 은 곧 날짜
+    # 두 칸이다. 열을 **제거하지 않고 숨기는** 이유는 저장이 이 열을 원천으로 쓰기 때문이다:
+    # _save_rows → _dept_code_of_text(row.get("부서"), catalog) 가 셀 텍스트로 부서코드를
+    # 해소하고(중분류는 부서와 1:1 이 아니라 역산 불가), _refresh_org_labels 도 같은 값을
+    # 읽는다. AG Grid 의 hide 는 표시만 끄고 rowData 는 그대로 왕복하므로(_FIXED 에 남아
+    # order·columns 에 실리고 data_return_mode=AS_INPUT 이 그대로 돌려준다) 저장 payload·
+    # 붙여넣기·행 추가 경로는 전부 불변이다. 좁은 폭 숨김(hidden_meta)과 결과가 같아져
+    # 조건이 흡수됐다.
     col_config["부서"].update({
-        "hide": "부서" in hidden_meta,
+        "hide": True,
         "headerTooltip": "이 달 편성 부서 — 부서명 또는 부서코드로 입력하면 대분류·중분류가 따라옵니다",
     })
     # '조'(근무조)는 기준정보 조회가 아니라 자유 입력이며 한 글자만 치면 저장 시
@@ -858,19 +885,24 @@ def render(user: dict) -> None:
     # 열보다 긴 값('경조(자녀결혼)' 등)은 좌측이다. 가운데 정렬로 넘치면 브라우저가
     # 양쪽을 잘라 '간 4시' 처럼 앞뒤가 다 사라지고 말줄임 '…' 도 뜨지 않는다(실측).
     # 좌측 정렬이면 뒤쪽만 잘리고 ellipsis 가 살아나며 전문은 tooltipField 가 보증한다.
-    # 폭 추정은 파이썬 _label_px 와 같은 규칙(한글 1em·ASCII 0.55em)이다.
+    # 폭 추정은 파이썬 _label_px 와 **같은 계수**(_CH_KO_PX/_CH_ASCII_PX)를 쓴다.
+    # 셀 배경의 근무형태 색은 장식이 아니라 이 화면의 핵심 정보다 — 편성표는 색 패턴으로
+    # 교대 주기·연속 야간·휴무 몰림을 읽는 화면이라 남긴다(DESIGN.md §1.3 도메인 색).
+    # 구분은 색이 아니라 약칭이 담당하므로 텍스트는 그대로 두고 배경은 26(≈15%) 틴트다.
     day_style = JsCode(
         "function(p) {"
         f"  const colors = {json.dumps(st.session_state.get('se_colors', {}), ensure_ascii=False)};"
-        f"  const room = {json.dumps(max(int(_day_width(cycle_labels)) - 6, 24))};"
+        # md-c-center 셀은 좌우 패딩 0 이라 여백은 테두리 몫만 뺀다(정렬 판정용 실폭).
+        f"  const room = {json.dumps(max(int(_day_width(cycle_labels)) - 4, 24))};"
+        f"  const KO = {_CH_KO_PX}, AS = {_CH_ASCII_PX};"
         "  const v = String(p.value == null ? '' : p.value).trim();"
         "  let w = 0;"
-        "  for (let i = 0; i < v.length; i++) { w += v.charCodeAt(i) > 0x1100 ? 14.5 : 8.0; }"
+        "  for (let i = 0; i < v.length; i++) { w += v.charCodeAt(i) > 0x1100 ? KO : AS; }"
         "  const align = w <= room ? 'center' : 'left';"
         "  const c = colors[v];"
-        # Codex P2(§8-6 우선): 근무 셀 본문 14.5px(목업 픽셀보다 §8-6). 30px 행 높이 유지.
-        "  if (!c) { return { textAlign: align, fontSize: '14.5px' }; }"
-        "  return { backgroundColor: c + '26', color: '#1c1a17', fontWeight: 600, textAlign: align, fontSize: '14.5px' };"
+        # 표 셀 12px (DESIGN.md §1.2 `table`). 30px 행 높이 유지.
+        "  if (!c) { return { textAlign: align, fontSize: '12px' }; }"
+        "  return { backgroundColor: c + '26', color: '#1c1a17', fontWeight: 600, textAlign: align, fontSize: '12px' };"
         "}"
     )
     # 셀 클릭=근무 순환(빈값 포함) + 숫자키 1..N/0 = 근무형태/지움(도메인 파생). 값은

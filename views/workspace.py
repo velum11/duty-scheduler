@@ -29,15 +29,15 @@ ALL = "(전체)"
 # 없는) 부서코드도 행을 감추지 않고 여기로 접어 **항상 마지막**에 둔다.
 UNCLASSIFIED_LABEL = "무분류"
 
-# §1-C 읽기 변형(월간 근무표) 전용 CSS — 조건 줄 헤어라인·컨텍스트 라인(모노 수치)·
+# §1-C 읽기 변형(월간 근무표) 전용 CSS — 조건 줄 헤어라인·컨텍스트 라인(tabular-nums 수치)·
 # 표 흰 컨테이너(1px #cfc8bd·radius 8·내부 스크롤). 작은 의미 텍스트 ≥#6b665d(A-2), §2 팔레트.
 _SV_CSS = """
 <style>
 .sv-hr { border-top:1px solid #e0dbd2; margin:2px 0 10px; }
 .sv-ctx { display:flex; flex-wrap:wrap; align-items:center; gap:4px 14px; margin:2px 0 10px;
-  font-size:12.5px; color:#4a453d; }
+  font-size:12px; color:#4a453d; }
 .sv-ctx .loc { font-weight:600; color:#1c1a17; }
-.sv-ctx .num { font-family:'IBM Plex Mono',monospace; font-weight:600; color:#1c1a17; }
+.sv-ctx .num { font-variant-numeric:tabular-nums; font-weight:600; color:#1c1a17; }
 .sv-ctx .sep { color:#a09a90; margin:0 2px; }
 /* 컨텍스트 줄 + [엑셀 다운로드] 한 줄 — 버튼은 내용 맞춤(줄바꿈 금지), 컨텍스트만 신축.
    좁은 폭에서 컨텍스트가 먼저 wrap 되고 버튼 라벨은 온전히 남는다(겹침·2줄 방지). */
@@ -59,7 +59,7 @@ _SV_CSS = """
 /* 모바일 세로 한 줄 안내(가로 전환 제안) — 장식·아이콘 없이 보조 텍스트 1줄(§A-2 #6b665d).
    margin-top 8px 은 장식이 아니라 겹침 차단이다: 좁은 폭에서 컨텍스트 줄이 4줄로 접히면
    이 안내 줄의 요소 컨테이너가 컨텍스트 마지막 줄 위로 1.9px 올라탔다(390·430 실측). */
-.sv-rotate { font-size:12.5px; color:#6b665d; margin:8px 0 6px; line-height:1.35; }
+.sv-rotate { font-size:12px; color:#6b665d; margin:8px 0 6px; line-height:1.35; }
 /* 모바일 가로(낮은 뷰포트): 표가 화면을 최대로 쓰도록 상하 여백을 압축한다.
    폰트·색·컨트롤 크기(히트영역)는 그대로다(§3 타이포·§4 44px 불변) — 줄이는 것은
    여백과 '한 줄 설명'뿐이다(제목·조건·표·범례는 모두 남는다). 이 화면이 렌더되는
@@ -151,23 +151,40 @@ _RETIRED_ROW_CSS = "background-color:#F1EEE7; color:#5F5C55"
 # "같은 성격 열은 화면 간 같은 폭·정렬"이 이 블록의 존재 이유다. 종전에는 근무표 편성과
 # 월간 근무표가 같은 열(사번·성명·대분류·중분류·조)을 **서로 다른 폭**으로 그렸다
 # (실측 1440: 사번 96/84 · 성명 88/100 · 대분류 88/104 · 중분류 92/140 · 조 80/60).
-# 폭은 실렌더 폰트(IBM Plex Sans KR / Mono 14.5px)로 canvas measureText 한 값 + 좌우
-# 패딩 8px×2 에서 잡았다:
-#   사번 mono 10자리 87.0 · 성명 '황봉준(퇴직)' 74.4 · 대분류 5자 64.7 ·
-#   중분류 'PET생산팀' 64.3 · 부서 'PET생산부(원료실)' 112.9 · 조 '원료실' 38.8
+# 폭은 표 글꼴(Pretendard 12px — DESIGN.md §1.2 "표 셀·헤더 12px")의 실측 자폭
+# **한글 11.04px/자 · 숫자 7.2px/자** 로 역산했다(2026-08-19 재역산 — 종전 값은 폐지된
+# IBM Plex 14.5px 기준이라 전부 과대였다). 산식은 한 줄이다:
+#
+#     필요폭 = max(값 최대 렌더폭, 헤더 렌더폭) + 좌우 패딩 16 → 4의 배수 올림
+#
+#   사번 숫자 10자리 72.0 → 88 · 성명 '황봉준(퇴직)' 64.0 → 80 · 대분류 5자 55.2 → 72 ·
+#   중분류 'PET생산팀' 55.6 → 72 · 부서 'PET생산부(원료실)' 97.5 → 116 · 조 '원료실' 33.1 → 52
+#
+# **이 값은 고정폭이 아니라 비율이다.** 읽기 표(read_grid)는 autoSizeStrategy=fitGridWidth
+# 라 남는 폭을 각 열의 지정 폭에 **비례해** 나눈다 — 그래서 width 와 minWidth 를 같은 값으로
+# 둔다: 넓으면 이 비율대로 함께 늘고, 좁으면 이 값에서 멈추고 표 내부 가로 스크롤로 떨어진다
+# (한 열만 커지던 flex 방식을 폐기한 이유 — 2026-08-19).
 # 상한을 넘는 값(예: 4자 이름 + 퇴직 접미)은 말줄임 + tooltip 으로 보증한다(폭을 최댓값에
 # 맞추면 31일 매트릭스가 화면 밖으로 밀린다).
 IDENTITY_CELL_PAD_PX = 8
+#: 표 셀·헤더 글꼴 크기(px) — DESIGN.md §1.2 네 단계(24·20·14·12) 중 표 단계.
+TABLE_FONT_PX = 12
 IDENTITY_COL_PX: dict[str, tuple[int, int]] = {
-    "사번": (104, 96),
-    "성명": (96, 88),
-    "대분류": (96, 88),
-    "중분류": (112, 96),
-    "부서": (132, 104),
-    "조": (72, 64),
+    "사번": (88, 88),
+    "성명": (80, 80),
+    "대분류": (72, 72),
+    "중분류": (72, 72),
+    "부서": (116, 116),
+    "조": (52, 52),
 }
-# 일자 열 밀도(§1-C "셀 min-width 34px") — 편성·월간 공통 하한/상한. 편성은 표시 축이
-# 명칭이라 값이 길지만 상한을 넘는 값은 어차피 말줄임되므로, 두 화면이 같은 범위를 쓴다.
+#: 폭을 넓힐 이유가 없는 열의 상한 — 값이 **고정 서식**(숫자 사번)이거나 한두 글자
+#: (조: 'A조')라 남는 폭을 받아도 빈 칸만 늘어난다. 가변 길이 텍스트 열(성명·대분류·
+#: 중분류·부서)에는 상한을 두지 않는다 — 그 열이 남는 폭을 흡수해야 말줄임이 줄어든다.
+IDENTITY_COL_MAX_PX: dict[str, int] = {"사번": 88, "조": 52}
+# 일자 열 밀도 — 편성·월간 공통 하한/상한. 같은 12px 산식이다:
+#   하한 40 = 한글 2자(22.08) + 16 → 4배수  ('주간'·'야간'·'연차'가 잘리지 않는 최소)
+#   상한 52 = 한글 3자(33.12) + 16 → 4배수  (밀도 보호선 — 31일을 한 화면에 두기 위한 상한)
+# 상한을 넘는 값('특근(주간)' 등)은 셀에서 말줄임되고 전문은 tooltipField 가 보증한다.
 DAY_COL_MIN_PX = 40
 DAY_COL_MAX_PX = 52
 
@@ -189,8 +206,14 @@ def identity_col_config(columns, *, pinned: bool = True,
         cfg: dict = {
             "width": width, "minWidth": min_width,
             "cellClass": "md-c-left", "headerClass": "md-h-left",
-            "cellStyle": {"fontSize": "14.5px", "paddingLeft": pad, "paddingRight": pad},
+            # tabular-nums: 모노 서체 폐지(DESIGN §1.2)의 대체 — 사번처럼 세로로 정렬되는
+            # 숫자의 자릿수를 Pretendard 안에서 맞춘다.
+            "cellStyle": {"fontSize": f"{TABLE_FONT_PX}px", "fontVariantNumeric": "tabular-nums",
+                          "paddingLeft": pad, "paddingRight": pad},
         }
+        max_width = IDENTITY_COL_MAX_PX.get(name)
+        if max_width is not None:
+            cfg["maxWidth"] = max_width
         if pinned:
             cfg["pinned"] = "left"
         if tooltip:
@@ -223,8 +246,9 @@ def compact_hidden_meta(meta_cols, *, compact: bool, keep=()) -> tuple[str, ...]
 DUTY_LEGEND_CSS = """
 <style>
 .duty-legend2 { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0 2px; }
-.duty-legend2 .lab { font-size:11px; letter-spacing:.1em; color:#6b665d;
-  font-family:'IBM Plex Mono',monospace; margin-right:4px; }
+/* 라벨은 §1.2 `label` (12/400/ink-3). 종전 11px + IBM Plex Mono 오버라인은 네 단계 밖
+   크기 + 폐지된 모노 서체였다(2026-08-19 정합화). */
+.duty-legend2 .lab { font-size:12px; color:#6b665d; margin-right:4px; }
 .duty-legend2 .item { display:inline-flex; align-items:center; gap:6px; font-size:12px;
   color:#1c1a17; min-width:0; }
 .duty-legend2 .sw { width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
@@ -718,18 +742,34 @@ _ACTION_SUPPRESS_KEYBOARD = JsCode(
 
 # 그리드 내부(iframe) 스타일 — 헤더/셀 가운데 정렬, 문자 셀 좌측 여백,
 # 가로·세로 얇은 구분선, − 버튼/체크박스 정렬. 사이드바 계열 색만 사용(네이비 없음).
+#: 표 글꼴 스택 — modules/ui.py 의 `--cd-sans` 와 **같은 값**(DESIGN.md §1.2 "글꼴은
+#: Pretendard 하나"). AG Grid 는 컴포넌트 iframe 안에서 그려지고 글꼴은 문서 경계를
+#:넘어 상속되지 않으므로(§1.2 실측 주석), 부모 CSS 만으로는 조용히 폴백한다 —
+#: 실제로 2026-08-19 계측에서 편성 그리드 셀의 computed font-family 가 `sans-serif`
+#: (AG 테마 기본)로 나왔다. @font-face 는 필요 없다: Pretendard 는 로컬 설치 글꼴 이름으로
+#: 참조하고 미설치 환경은 Malgun Gothic 으로 떨어지는 스택이라 부모와 결과가 같다.
+_TABLE_FONT_STACK = ('"Pretendard","Pretendard Variable","Malgun Gothic",'
+                     '"Apple SD Gothic Neo",-apple-system,sans-serif')
+
 _MASTER_GRID_CSS = {
-    ".ag-root-wrapper": {"border": "1px solid #CFC8BB"},
+    # AG Grid 34 테마는 글꼴을 `--ag-font-family` 변수로 흘리므로 그 변수를 덮어써야 한다
+    # (font-family 선언만으로는 테마 규칙에 밀려 계측값이 `sans-serif` 로 남았다 — 실측).
+    ":root, .ag-root-wrapper": {"--ag-font-family": _TABLE_FONT_STACK},
+    ".ag-root-wrapper": {"border": "1px solid #CFC8BB",
+                         "font-family": _TABLE_FONT_STACK},
+    # (헤더·셀 개별 font-family 는 아래 기존 규칙에 합쳐 둔다 — dict 키가 겹치면 뒤 정의가
+    #  앞을 통째로 덮어써 min-width:0 같은 필수 속성이 조용히 사라진다.)
     ".ag-header": {"border-bottom": "1px solid #CFC8BB"},
-    ".ag-header-cell": {"border-right": "1px solid rgba(30, 30, 30, 0.12)"},
-    # Codex P2(§3·§8-6): 표 헤더 12.5px — AG 테마 기본(12px)이 .ag-header-cell-text 에
-    # 걸려 있어 라벨·텍스트 둘 다 12.5px 로 못박는다(신원 헤더가 셀 14.5 와 정합).
-    # 굵기도 못박는다 — AG 테마 기본은 700 이라 읽기 표(키트 _READ_BASE_CSS: 600)와
-    # 헤더 굵기가 화면마다 달라 보였다(2026-08-14 실측 편성 700 / 월간 600). DESIGN §3
-    # "표 헤더 12.5/600" 이 두 화면 공통 기준이다.
-    ".ag-header-cell-label": {"justify-content": "center", "font-size": "12.5px",
+    ".ag-header-cell": {"border-right": "1px solid rgba(30, 30, 30, 0.12)",
+                        "font-family": _TABLE_FONT_STACK},
+    # 표 헤더 12px/600 (DESIGN.md §1.2 `label-strong` — 표 헤더). AG 테마 기본 굵기는
+    # 700 이라 읽기 표(키트 _READ_BASE_CSS: 600)와 화면마다 달라 보였으므로 못박는다
+    # (2026-08-14 실측 편성 700 / 월간 600). 종전 12.5px 는 네 단계(24·20·14·12) 밖이라
+    # 2026-08-19 에 12 로 정합화했다.
+    ".ag-header-cell-label": {"justify-content": "center", "font-size": "12px",
                               "font-weight": "600"},
-    ".ag-header-cell-text": {"font-size": "12.5px", "font-weight": "600"},
+    ".ag-header-cell-text": {"font-size": "12px", "font-weight": "600",
+                             "font-family": _TABLE_FONT_STACK},
     # 헤더 라벨 정렬은 셀 정렬을 따른다 — 좌측 정렬 셀(신원 열) 위에 가운데 헤더가 오면
     # 열 경계가 눈으로 안 맞는다. 읽기 표(월간 근무표)의 좌측 정렬 헤더와도 정합.
     ".md-h-left .ag-header-cell-label": {"justify-content": "flex-start"},
@@ -738,6 +778,8 @@ _MASTER_GRID_CSS = {
         "display": "flex",
         "align-items": "center",
         "line-height": "normal",
+        # 표 셀 기본 12px (DESIGN.md §1.2) — 열별 cellStyle 이 없는 셀도 같은 단계를 쓴다.
+        "font-size": "12px",
         # 셀 밖으로 새는 텍스트 차단(아래 min-width:0 과 한 쌍) — AG Grid 기본은
         # overflow:visible 이라 값이 열보다 길면 **이웃 셀 글자 위로 그대로 겹쳐** 보였다.
         "overflow": "hidden",
@@ -750,7 +792,7 @@ _MASTER_GRID_CSS = {
     # 셀**에 래퍼가 생기고(아래 _action 규칙 주석 참조), 실제 flex item 은 값 span 이 아니라
     # 그 래퍼다. 래퍼가 안 줄면 안쪽 span 도 못 줄어 말줄임이 걸리지 않는다(실측: 52px 열
     # 안에서 값 span clientWidth 65px).
-    ".ag-cell-value": {"min-width": "0"},
+    ".ag-cell-value": {"min-width": "0", "font-family": _TABLE_FONT_STACK},
     ".ag-cell-wrapper": {"min-width": "0", "overflow": "hidden"},
     ".ag-row": {"border-bottom": "1px solid rgba(30, 30, 30, 0.08)"},
     ".md-c-left": {"justify-content": "flex-start", "padding-left": "10px"},
@@ -767,21 +809,11 @@ _MASTER_GRID_CSS = {
         "font-size": "15px", "font-weight": "700",
     },
     ".md-act-rm:hover": {"background": "#F7EFEC", "border-color": "#C77B6B"},
-    # 조직 관리 — 가상 그룹 부모 행(배경·굵게)과 부서 자식 들여쓰기.
-    ".ms-group-row": {
-        "background": "#EFECE4 !important", "font-weight": "700",
-        "box-shadow": "inset 3px 0 #C9A26B",
-    },
-    ".ms-group-row .ag-cell": {"color": "#3D3A34"},
-    ".ms-indent": {"padding-left": "26px !important"},
-    ".ms-unit-shift": {
-        "background": "rgba(30, 58, 110, 0.10) !important", "color": "#1E3A6E",
-        "font-weight": "700", "border-radius": "4px", "justify-content": "center",
-    },
-    ".ms-unit-general": {
-        "background": "rgba(61, 58, 52, 0.08) !important", "color": "#3D3A34",
-        "font-weight": "700", "border-radius": "4px", "justify-content": "center",
-    },
+    # (조직 관리용 장식 셀 배경 .ms-group-row/.ms-unit-shift/.ms-unit-general/.ms-indent 는
+    #  2026-08-19 제거했다. 이 CSS 를 쓰는 그리드는 selectable_master_grid 하나이고 그
+    #  유일한 호출부는 근무표 편성이라 규칙이 아무 셀에도 걸리지 않는 죽은 장식이었으며,
+    #  값(#C9A26B 금색·#1E3A6E 남색)도 DESIGN.md §1.3 팔레트 밖이었다. 조직 관리 화면이
+    #  쓰는 동명 규칙은 views/master/style.py 가 따로 소유한다 — 그쪽은 건드리지 않았다.)
     # 행 드래그 핸들 — AG Grid 는 rowDrag 를 켠 열의 .ag-cell-wrapper 안에 드래그 핸들 →
     # 셀 값 순으로 넣는다. 래퍼(.ag-cell-wrapper) 자체는 enableCellTextSelection 때문에
     # **모든 셀**에 생기므로(실측), 반드시 _action 열로 한정해야 한다 — 전역으로 걸면
@@ -869,10 +901,12 @@ def selectable_master_grid(
         # 신원 블록에서 놀고 있었다. 매트릭스 화면은 그 폭이 곧 보이는 날짜 수다.
         action_col.update({"width": 72, "minWidth": 64, "maxWidth": 88})
     column_defs = [action_col]
-    # 폭/정렬 기본값 — 문자 열은 flex 로 남는 폭 배분, 숫자/불리언은 좁은 고정
+    # 폭/정렬 기본값 — 전 열이 12px 산식(값·헤더 렌더폭 + 패딩 16 → 4배수)에서 나온 지정
+    # 폭이다. flex 는 쓰지 않는다: 남는 폭을 지정 열 하나에 몰아주면 그 열만 비정상적으로
+    # 벌어지고 나머지는 그대로라 열 사이 비율이 내용과 무관해진다(2026-08-19 폐지).
     widths = {
-        "부서코드": {"flex": 1, "minWidth": 120, "cellClass": "md-c-left"},
-        "부서명": {"flex": 2, "minWidth": 200, "cellClass": "md-c-left"},
+        "부서코드": {"width": 64, "minWidth": 64, "cellClass": "md-c-left"},
+        "부서명": {"width": 116, "minWidth": 116, "cellClass": "md-c-left"},
         "표시순서": {"width": 108, "minWidth": 92, "maxWidth": 140, "cellClass": "md-c-center"},
         "사용": {"width": 82, "minWidth": 72, "maxWidth": 108, "cellClass": "md-c-center"},
     }
@@ -1571,16 +1605,21 @@ def schedule_screen(user: dict, page_id: str, band=None) -> None:
             name: {**cfg, "cellStyle": {**cfg["cellStyle"], "overflow": "hidden"}}
             for name, cfg in identity_col_config(meta_cols).items()
         }
-        # 일자 열: 고정 폭이 아니라 flex + 상·하한 — 좁은 화면에서는 하한(밀도)을 지키고,
-        # 넓은 화면에서는 남는 폭을 균등 배분하되 상한을 넘겨 벌어지지 않게 한다.
+        # 일자 열: 12px 산식에서 나온 지정 폭 + 상한. flex 는 쓰지 않는다 — 남는 폭 배분은
+        # 키트의 autoSizeStrategy(fitGridWidth)가 **각 열 지정 폭에 비례해** 처리하고,
+        # 여기 상한(52)이 일자 열이 그 이상 벌어지는 것을 막는다(밀도 보호선). 좁은 화면에서는
+        # minWidth 에서 멈추고 표 내부 가로 스크롤로 떨어진다(2026-08-19 flex 폐지).
         # 헤더는 2줄(숫자/요일)로 접어 좁은 폭에서도 잘리지 않게 한다(§1-C 편성표의 2줄
         # 일자 헤더와 같은 표현). **표시 라벨만** 바꾸므로 field(=CSV 열 이름 "1(수)")는
         # 그대로다 — 엑셀 다운로드 스키마 불변.
         day_col_config = {
-            c: {"flex": 1, "minWidth": DAY_COL_MIN_PX, "maxWidth": DAY_COL_MAX_PX,
+            c: {"width": DAY_COL_MIN_PX, "minWidth": DAY_COL_MIN_PX,
+                "maxWidth": DAY_COL_MAX_PX,
                 "headerName": c.replace("(", " ").replace(")", ""),
                 "wrapHeaderText": True, "autoHeaderHeight": True,
-                "cellStyle": {"paddingLeft": "2px", "paddingRight": "2px",
+                "cellStyle": {"fontSize": f"{TABLE_FONT_PX}px",
+                              "fontVariantNumeric": "tabular-nums",
+                              "paddingLeft": "2px", "paddingRight": "2px",
                               "justifyContent": "center", "overflow": "hidden"}}
             for c in day_cols
         }

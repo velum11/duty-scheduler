@@ -364,14 +364,29 @@ check("최소 열폭 축소(1366·1280px 3열 가로스크롤·잘림 방지) �
 _dept_cfg = master_org._dept_col_config()
 check("부서 시트 전 열이 고정폭 — flex 잔존 0 (남는 가로 폭은 어느 열도 흡수하지 않는다)",
       all(float(c.get("flex", 0)) == 0 for c in _dept_cfg.values()))
-check("값이 폭을 구속하는 열(코드명)은 실측 최대 잉크 + 셀 패딩 이상",
-      _dept_cfg["코드명"].get("width", 0) >= 132)
+# 2026-08-19 갱신: 하한 132 는 셀 14.5px 기준 잉크(117.91+14)였다. DESIGN §1.2 개정으로
+# 표 셀이 12px 이 되어 같은 값의 실측 잉크가 97.58 로 줄었고, 132 를 그대로 두면 잉크의
+# 1.35배를 강제하게 된다(오늘 지적된 "종전 폭은 전부 과대"). 새 하한 = 97.58x1.05(폴백
+# sans-serif -> Pretendard 여유) + 16 = 118.4 -> 4의 배수 120.
+check("값이 폭을 구속하는 열(코드명)은 12px 실측 최대 잉크 + 셀 패딩 이상",
+      _dept_cfg["코드명"].get("width", 0) >= 120)
 check("값 0건 열(대분류·중분류·비고)은 구 flex 렌더폭(162/162/180)보다 좁다",
       _dept_cfg["대분류"]["width"] < 162 and _dept_cfg["중분류"]["width"] < 162
       and _dept_cfg["비고"]["width"] < 180)
+# 헤더 잉크도 12px 기준으로 다시 쟀다(3글자 33.13 · 2글자 22.09). 하한 = 잉크x1.05+16.
 check("minWidth 는 헤더가 잘리지 않는 하한(헤더 잉크+16) 이상",
-      _dept_cfg["대분류"]["minWidth"] >= 51 and _dept_cfg["중분류"]["minWidth"] >= 51
-      and _dept_cfg["코드명"]["minWidth"] >= 51 and _dept_cfg["비고"]["minWidth"] >= 39)
+      _dept_cfg["대분류"]["minWidth"] >= 52 and _dept_cfg["중분류"]["minWidth"] >= 52
+      and _dept_cfg["코드명"]["minWidth"] >= 52 and _dept_cfg["비고"]["minWidth"] >= 40)
+# 넓혀도 담을 것이 없는 열(체크박스·순서)에만 maxWidth 를 건다 — 나머지 열이 남는 폭을
+# fitGridWidth 로 비례 흡수한다(2026-08-19).
+check("체크박스·순서 열만 maxWidth 로 상한 고정",
+      all("maxWidth" in _dept_cfg[c] for c in ("순서", "사용", "근태 등록 대상"))
+      and not any("maxWidth" in _dept_cfg[c] for c in ("대분류", "중분류", "코드", "코드명", "비고")))
+check("남는 가로 폭은 fitGridWidth 가 지정 폭 비율대로 분배",
+      '"autoSizeStrategy": {"type": "fitGridWidth"}' in src)
+# 조 시트 유형 열의 장식성 색 채움(교대=네이비 / 일반=회색)은 폐지 — 값이지 상태가 아니다.
+check("조 시트 유형 열 색 채움 제거(ms-unit-*)",
+      "cellClassRules" not in master_org._UNIT_COL_CONFIG["유형"])
 check("액션바 keyed __bar 컨테이너는 미라우팅 보존 시트에만(부서는 액션바 없음)",
       src.count(".page_id}__bar\")") == 2)
 check("표준 배너 순서 — 확인/폐기 배너를 표 위 슬롯 뒤 banner_slot 으로(3시트)",
@@ -757,8 +772,12 @@ check("bool 열로 선언(native 체크박스 — JsCode 렌더러 미사용)",
       master_org._DEPT_GRID_COLUMNS.get(_ATT) == "bool" and "_BOOL_RENDERER" not in src)
 check("행 컬럼 계약에도 반영(_DEPT_ROW_COLS)", _ATT in master_org._DEPT_ROW_COLS)
 _att_cfg = master_org._dept_col_config()[_ATT]
-check("헤더 잘림 방지 폭 + 내용 맞춤(체크박스라 flex 확장 없음)",
-      _att_cfg.get("flex") == 0 and _att_cfg.get("minWidth", 0) >= 96)
+# 2026-08-19: flex 키 자체를 없앴다(flex=0 명시가 아니라 미지정). 체크박스 열은 넓혀도
+# 담을 것이 없으므로 maxWidth 로 상한을 고정한다 — fitGridWidth 분배에서 제외되는 근거.
+# 하한 96 = 헤더 '근태 등록 대상' 12px 실측 72.92x1.05 + 16.
+check("헤더 잘림 방지 폭 + 내용 맞춤(체크박스라 확장 없음)",
+      "flex" not in _att_cfg and _att_cfg.get("minWidth", 0) >= 96
+      and _att_cfg.get("maxWidth") == _att_cfg.get("width"))
 check("체크박스 열 가운데 정렬(사용 열과 같은 어휘)", "md-c-center" in _att_cfg.get("cellClass", ""))
 check("보호 행(ADMIN)은 지정도 편집 불가(사용 열과 같은 규칙)",
       _att_cfg.get("editable") is master_org._EDIT_UNLESS_PROTECTED)

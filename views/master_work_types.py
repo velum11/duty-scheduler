@@ -193,7 +193,7 @@ _SHORT_LABEL_RENDERER = JsCode(
         if (val && valid) {
           t.style.background = hex; t.style.color = this._textOn(hex);
           t.style.padding = '1px 9px'; t.style.borderRadius = '999px';
-          t.style.fontSize = '12.5px'; t.style.fontWeight = '600'; t.style.letterSpacing = '.01em';
+          t.style.fontSize = '12px'; t.style.fontWeight = '600'; t.style.letterSpacing = '.01em';
         } else if (!val) { t.style.color = '#908C83'; }
         g.appendChild(t);
         if (val && this._active(d) && p.api) {
@@ -217,29 +217,10 @@ _SHORT_LABEL_RENDERER = JsCode(
     """
 )
 
-# 분류 셀 — 공통 `.ms-chip mute` 로 표시(편집은 더블클릭 시 기본 텍스트 에디터).
-_CATEGORY_RENDERER = JsCode(
-    """
-    (class {
-      init(p) { this.eGui = document.createElement('div'); this._render(p); }
-      _render(p) {
-        const g = this.eGui; g.innerHTML = '';
-        g.style.display = 'flex'; g.style.alignItems = 'center'; g.style.height = '100%'; g.style.paddingLeft = '2px';
-        const val = String(p.value == null ? '' : p.value).trim();
-        if (val) {
-          const chip = document.createElement('span');
-          chip.className = 'ms-chip mute'; chip.textContent = val;
-          g.appendChild(chip);
-        } else {
-          const t = document.createElement('span'); t.textContent = '—'; t.style.color = '#908C83';
-          g.appendChild(t);
-        }
-      }
-      getGui() { return this.eGui; }
-      refresh(p) { this._render(p); return true; }
-    })
-    """
-)
+# 분류 셀 — 값 그대로(평문). 종전 `.ms-chip mute` 칩은 회색 색면이 열을 차지해
+# 표에서 읽어야 할 값(코드·명칭)보다 먼저 눈을 끌었다(2026-08-19 사용자 판단: 표 안
+# 장식성 색 채움 폐지). 분류는 상태가 아니라 값이라 색으로 부호화할 대상이 아니다 —
+# 오류·경고 등 **기능 신호**(ms-cell-error / ms-row-error / 약칭 중복칩)만 남긴다.
 
 # 약칭 중복칩은 다른 행의 약칭/사용 변경에 반응해야 한다 — 해당 셀 변경 시 약칭 열만
 # 강제 refresh 한다(paste 는 onGridReady/onCellEditingStopped 를 쓰므로 충돌 없음).
@@ -263,28 +244,12 @@ _EDIT_NEW_ONLY = JsCode("function(p){ return !!(p.data && p.data._row_state === 
 _CODE_READONLY_RULES = {"ms-cell-readonly": "data._row_state !== 'new'"}
 
 
-# §1-E 불리언 pill 렌더러(사용·실근무) — §2 배지 팔레트. 편집은 불리언 체크박스(더블클릭)로
-# 보존한다(값·저장 경로 불변, pill 은 display-only). 6단계 재직 pill 과 동일 패턴.
-def _bool_pill(on_label: str, off_label: str, on_pal: list[str]) -> JsCode:
-    off = ["#f2f0ec", "#5c564d", "#e4e0d8"]  # 중립(§2 종결 배지)
-    import json as _json
-    on_j, off_j = _json.dumps(on_pal), _json.dumps(off)
-    on_l, off_l = _json.dumps(on_label), _json.dumps(off_label)
-    return JsCode(
-        "(class { init(p){"
-        "  var on=(p.value===true||p.value===1||p.value==='1'||p.value==='true'||p.value==='Y');"
-        f" var c=on?{on_j}:{off_j}; var lbl=on?{on_l}:{off_l};"
-        "  var e=document.createElement('span');"
-        "  e.style.cssText='display:inline-flex;align-items:center;padding:2px 10px;'"
-        "    +'border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;'"
-        "    +'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';white-space:nowrap';"
-        "  e.textContent=lbl; this.eGui=e;"
-        "} getGui(){return this.eGui;} refresh(){return false;} })"
-    )
-
-
-_USE_PILL_RENDERER = _bool_pill("사용", "미사용", ["#eef5f0", "#2f6b45", "#d8e6dd"])    # 사용=success
-_WORK_PILL_RENDERER = _bool_pill("근무", "비근무", ["#eef2fb", "#2f4d99", "#dbe3f4"])   # 실근무=info
+# 불리언 열(실근무·특근수당·사용)은 공용 native 체크박스(cellDataType='boolean')만 쓴다.
+# 종전에는 사용=녹색·실근무=파란색 pill 렌더러를 덮어써 같은 성격의 세 열이 서로 다른
+# 모양이었고(특근수당만 체크박스), 색면 두 개가 표 오른쪽을 채워 값보다 먼저 눈에 띄었다.
+# 2026-08-19 사용자 판단(표 안 장식성 색 채움 폐지)에 따라 pill 을 걷고 세 열을 같은
+# 체크박스로 통일한다. 값·저장 경로(is_work/is_active)는 pill 이 display-only 였으므로 불변.
+# pill 이 쓰던 12.5px 도 DESIGN §1.2 네 단계(24·20·14·12) 밖이었다.
 
 # §1-E 건수 행 CSS(좌: 근무형태 제목 + 건수 pill + 사용/미사용 · 우: 편집 상태 칩). §2 리터럴.
 # `.edit` 는 종전 인페이지 액션 버튼이 있던 우측 자리를 그대로 쓴다(margin-left:auto).
@@ -296,7 +261,7 @@ _WT_CROW_CSS = """
 .wt-crow .t { font-size:14px; font-weight:600; color:#1c1a17; white-space:nowrap; }
 .wt-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
-.wt-crow .dist { font-size:12.5px; color:#6b665d; white-space:nowrap;
+.wt-crow .dist { font-size:12px; color:#6b665d; white-space:nowrap;
   font-variant-numeric:tabular-nums; }
 .wt-crow .edit { margin-left:auto; display:inline-flex; align-items:center; gap:6px; }
 /* 색·모양은 공용 .ms-chip 토큰 그대로 쓰고 **크기만** 사용처에서 올린다 — 공용 정의는
@@ -310,31 +275,56 @@ _WT_CROW_CSS = """
 """
 
 
-# ---- 컬럼 폭·정렬(디자인 계약 §4·mockup) ----
-# 기준정보 3화면 공통 규격(2026-08-14 재검수): 코드/식별 108(좌측 고정) · 명칭 114 ·
-# 순서 74 · 사용 여부 토글 72. 같은 성격 열이 화면마다 다른 폭(108/110/112, 74/72/92,
-# 72/72/84)으로 서 있던 것을 한 값으로 모은다.
+# ---- 컬럼 폭 = 12px Pretendard 기준 역산(2026-08-19 재산정) ----
+# 종전 값은 셀 14.5px·헤더 12.5px(맑은고딕 폴백) 기준이라 표 전체가 과대했다. DESIGN §1.2
+# 개정으로 표 셀·헤더가 모두 12px 이 되어 같은 값이 그대로 남으면 열마다 20~40px 씩 빈다.
+#
+# 역산 규칙(실렌더 계측 2026-08-19, 1440px sample):
+#   필요폭 = max(값 실측 최대 잉크, 헤더 실측 잉크) + 16  → 4의 배수로 올림
+#   16 = 셀 좌우 패딩 7+7 + 보더 2 (헤더는 8+8). 잉크는 iframe 안 hidden span 으로 쟀다.
+#   측정값에 5% 여유를 얹는다 — 그리드 iframe 이 지금은 Pretendard 를 못 받아 sans-serif
+#   폴백으로 그려지는데(실측 .ag-cell font-family = sans-serif), 폴백 한글 10.53px/자 <
+#   Pretendard 11.04px/자 라 폴백 기준으로만 잡으면 글꼴이 정상화되는 순간 잘린다.
+#
+# **이 값은 고정폭이 아니라 비율이다.** 아래 grid_options 의 autoSizeStrategy=fitGridWidth 가
+# 남는 폭을 각 열의 지정 폭에 비례해 나눈다. 그래서 flex 를 쓰지 않는다 — flex 는 남는 폭을
+# 특정 열 하나에 몰아주고(종전 설명 열이 313px, 값 최대 잉크는 101.8px), 값이 없는 열이
+# 화면에서 가장 넓어지는 원인이었다.
+#
+# maxWidth 는 **넓혀도 담을 것이 없는 열**에만 건다(체크박스·고정 서식·상한 있는 코드값).
+# 그 외 자유 텍스트 열(코드·명칭·분류·설명)이 남는 폭을 비례로 흡수한다.
 _COL_WIDTHS = {
-    "코드": {"width": 108, "minWidth": 88, "pinned": "left", "cellClass": "md-c-left",
+    # minWidth = width: fitGridWidth 는 뷰포트가 좁으면 열을 **minWidth 까지 줄여서**
+    # 맞춘다(실측 390px: 코드명 120→96 으로 눌려 값이 잘렸다). 역산한 필요폭이 곧
+    # 하한이므로 둘을 같은 값으로 둔다 — 좁은 폭에서는 줄이지 말고 가로 스크롤한다.
+    # 코드 64 = '출산휴가' 44.17×1.05 + 16. 자연키라 좌측 고정(좁은 폭에서 신원 유지).
+    "코드": {"width": 64, "minWidth": 64, "pinned": "left", "cellClass": "md-c-left",
             "editable": _EDIT_NEW_ONLY},
-    "명칭": {"width": 114, "minWidth": 96, "cellClass": "md-c-left",
-            "cellStyle": {"fontSize": "14.5px"}},  # §1-E 본문 14.5
-    "분류": {"width": 96, "minWidth": 76, "cellClass": "md-c-left", "cellRenderer": _CATEGORY_RENDERER},
-    # 약칭 chip(≤4자)·색상 스와치+HEX·근무 pill 은 실제 콘텐츠보다 넉넉했다 — 13열 합이
-    # 1440(사이드바 제외 1169)에서 151px 넘쳐 표시순서·사용이 가로 스크롤 뒤로 밀렸다.
-    # 콘텐츠 최소폭(약칭 chip 86 · 색상 편집기 131 · 근무 pill 66)을 지키는 선에서 줄인다.
-    "약칭": {"width": 112, "minWidth": 96, "cellClass": "md-c-left", "cellRenderer": _SHORT_LABEL_RENDERER},
-    "시작": {"width": 80, "minWidth": 66, "cellClass": "md-c-center ms-num"},
-    "종료": {"width": 80, "minWidth": 66, "cellClass": "md-c-center ms-num"},
-    "색상": {"width": 140, "minWidth": 132, "cellClass": "md-c-left",
+    # 명칭 112 = '경조(자녀결혼)' 89.7×1.05 + 16. 행을 특정하는 열이라 상한을 두지 않는다.
+    "명칭": {"width": 112, "minWidth": 112, "cellClass": "md-c-left"},
+    # 분류 52 = '경조사' 33.13×1.05 + 16 (칩 패딩 18 제거분 반영).
+    "분류": {"width": 52, "minWidth": 52, "cellClass": "md-c-left"},
+    # 약칭 64 = 색 chip('OFF' 43.38)×1.05 + 16. 약칭은 근무표 셀에 들어가는 4자 이내 값이라
+    # 더 넓혀도 담을 것이 없다 → maxWidth 로 고정한다.
+    "약칭": {"width": 64, "minWidth": 64, "maxWidth": 64,
+            "cellClass": "md-c-left", "cellRenderer": _SHORT_LABEL_RENDERER},
+    # 시작·종료 48 = 'HH:MM' 30.03×1.05 + 16. 고정 서식 → maxWidth.
+    "시작": {"width": 48, "minWidth": 48, "maxWidth": 48, "cellClass": "md-c-center ms-num"},
+    "종료": {"width": 48, "minWidth": 48, "maxWidth": 48, "cellClass": "md-c-center ms-num"},
+    # 색상 128 = 표시(스와치16+간격8+'#RRGGBB' 53 = 83.06)가 아니라 **편집기 하한**이 지배한다:
+    # 좌패딩6 + 피커26 + 간격8 + hex input 84 + 보더2 = 126 → 128. 셀은 overflow hidden 이라
+    # 이보다 좁으면 편집기가 잘린다(§17 편집 안전). 고정 서식이므로 maxWidth 로 묶는다.
+    "색상": {"width": 128, "minWidth": 128, "maxWidth": 128, "cellClass": "md-c-left",
             "cellRenderer": _COLOR_RENDERER, "cellEditor": _COLOR_EDITOR},
-    # §1-E: 근무 여부(실근무)·사용 = pill 렌더러(§2 팔레트) + 불리언 체크박스 편집(더블클릭).
-    # 값·저장·is_work/is_active 경로 불변(pill display-only). 특근수당은 부가 플래그라 체크박스 유지.
-    "실근무": {"width": 74, "minWidth": 68, "cellClass": "md-c-center", "cellRenderer": _WORK_PILL_RENDERER},
-    "특근수당": {"width": 74, "minWidth": 68, "cellClass": "md-c-center"},
-    "설명": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left", "cellStyle": {"fontSize": "14.5px"}},
-    "표시순서": {"width": 74, "minWidth": 68, "maxWidth": 110, "cellClass": "md-c-center ms-num"},
-    "사용": {"width": 72, "minWidth": 66, "cellClass": "md-c-center", "cellRenderer": _USE_PILL_RENDERER},
+    # 불리언 3열 = 체크박스(16px)라 헤더가 폭을 지배한다. 넓혀도 담을 것이 없어 maxWidth.
+    #   실근무 52 = 헤더 '실근무' 33.13×1.05 + 16 / 특근수당·표시순서 64 = 헤더 44.17×1.05 + 16
+    #   사용 40 = 헤더 '사용' 22.09×1.05 + 16
+    "실근무": {"width": 52, "minWidth": 52, "maxWidth": 52, "cellClass": "md-c-center"},
+    "특근수당": {"width": 64, "minWidth": 64, "maxWidth": 64, "cellClass": "md-c-center"},
+    # 설명 124 = '야간 근무(4시간)' 101.8×1.05 + 16. 종전 flex:1 로 313px 였다(잉크의 3배).
+    "설명": {"width": 124, "minWidth": 124, "cellClass": "md-c-left"},
+    "표시순서": {"width": 64, "minWidth": 64, "maxWidth": 64, "cellClass": "md-c-center ms-num"},
+    "사용": {"width": 40, "minWidth": 40, "maxWidth": 40, "cellClass": "md-c-center"},
 }
 
 
@@ -499,7 +489,13 @@ def render(user: dict) -> None:
         # rowHeight 는 공용 기본값(views/master/grid.py `_GRID_ROW_PX`=40). 화면에서 42 로
         # 덮으면 조직 관리(40)와 행 높이가 어긋나고, 높이 계산(master_grid_height)이 40
         # 기준이라 행마다 2px 씩 모자라 불필요한 내부 스크롤이 생긴다(2026-08-14 재검수).
-        grid_options={"onCellValueChanged": _DUP_REFRESH},
+        # autoSizeStrategy: 지정 폭을 **비율**로 삼아 남는 가로 폭을 비례 분배한다.
+        # 없으면 flex 를 뺀 순간 표가 뷰포트보다 훨씬 좁게 서서 "화면보다 작은 표"가 된다
+        # (실측 1440: 열 폭 합 926 vs 그리드 뷰포트 1403 → 477px 여백). 공용
+        # views/master/grid.py::_build_grid_options 에 두는 것이 옳지만 그 파일은 이번
+        # 작업 범위 밖이라 화면별 grid_options 로 얹는다(3화면 동일 — 보고 대상).
+        grid_options={"onCellValueChanged": _DUP_REFRESH,
+                      "autoSizeStrategy": {"type": "fitGridWidth"}},
     )
     grid_df = render_master_grid(spec, frame, key=state.grid_key())
 

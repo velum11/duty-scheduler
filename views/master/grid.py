@@ -397,6 +397,11 @@ def _build_grid_options(spec: MasterGridSpec) -> dict:
         "suppressDragLeaveHidesColumns": True,
         "rowHeight": _GRID_ROW_PX, "headerHeight": _GRID_HEADER_PX,
         "overlayNoRowsTemplate": _NO_ROWS,
+        # 열 폭은 내용에서 역산하지만(§3.1) 합이 그리드 폭보다 작으면 표 안에 빈 띠가
+        # 남아 "표가 화면보다 작아" 보인다. fitGridWidth 는 남는 폭을 각 열의 지정 폭에
+        # **비례해** 나눠 주므로 한 열만 커지던 flex 방식과 달리 열 사이 비율이 유지된다.
+        # 좁은 폭에서는 minWidth 까지만 줄이고 그 아래로는 표 내부 가로 스크롤로 떨어진다.
+        "autoSizeStrategy": {"type": "fitGridWidth"},
         "onCellClicked": _ROW_ACTION_CLICK,
         "onCellKeyDown": _ROW_ACTION_KEYDOWN,
         "rowClassRules": rules,

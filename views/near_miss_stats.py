@@ -61,7 +61,7 @@ _MUT = "#6b665d"          # 지표 라벨·단위·note·차트 meta·비중 캡
 # 값은 **큰따옴표**로 감싼다: `style='...'` 안에 작은따옴표를 넣으면 속성이 그 지점에서 끊겨
 # style 전체가 사라진다(2026-08-14 실측 — 이 화면은 클래스 규칙이 받쳐줘 증상이 없었지만
 # 같은 패턴을 쓴 평가·개선조치·내 아차사고의 26px 모노 숫자가 14px sans 로 렌더됐다).
-_MONO = 'font-family:"IBM Plex Mono",monospace;'
+_MONO = 'font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif;'
 # 분포 카테고리 단색(§1-F): 등급 오렌지·상태 초록·원인 황토·추이 파랑.
 _C_GRADE = "#c2410c"
 _C_STATUS = "#2f6b45"
@@ -393,7 +393,7 @@ def _inject_style() -> None:
 .nmf-klabel {{ font-size:12px; color:{_MUT}; white-space:nowrap; overflow:hidden;
   text-overflow:ellipsis; }}
 .nmf-kval-row {{ display:flex; align-items:baseline; gap:4px; }}
-.nmf-kval {{ font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:600;
+.nmf-kval {{ font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:26px; font-weight:600;
   letter-spacing:-0.03em; font-variant-numeric:tabular-nums; }}
 .nmf-kunit {{ font-size:11.5px; color:{_MUT}; }}
 
@@ -412,9 +412,9 @@ def _inject_style() -> None:
 .nmf-track {{ height:8px; border-radius:999px; background:{_LINE}; overflow:hidden; }}
 .nmf-fill {{ height:100%; border-radius:999px; }}
 .nmf-rval {{ display:flex; align-items:baseline; gap:5px; justify-content:flex-end; }}
-.nmf-rcount {{ font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
+.nmf-rcount {{ font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:12px; font-weight:600;
   color:{_INK}; font-variant-numeric:tabular-nums; }}
-.nmf-rpct {{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:{_MUT};
+.nmf-rpct {{ font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:10.5px; color:{_MUT};
   font-variant-numeric:tabular-nums; }}
 .nmf-empty {{ font-size:12.5px; color:{_MUT}; padding:4px 0; }}
 /* 모노 강제 — 전역 `.stApp [data-testid=stMarkdownContainer] *`(특이도 0,2,0)를 이기려면
@@ -422,7 +422,7 @@ def _inject_style() -> None:
 .stApp [data-testid="stMarkdownContainer"] .nmf-kval,
 .stApp [data-testid="stMarkdownContainer"] .nmf-rcount,
 .stApp [data-testid="stMarkdownContainer"] .nmf-rpct {{
-  font-family:'IBM Plex Mono','Consolas','Menlo',monospace;
+  font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif;
 }}
 @media (max-width:768px) {{
   .nmf-row {{ grid-template-columns:64px minmax(0,1fr) 48px; }}

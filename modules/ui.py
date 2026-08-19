@@ -34,7 +34,7 @@ _ROLE_LABEL = {"ADMIN": "관리자", "MANAGER": "조장", "USER": "조원"}
 
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.css');
 
 /* ===== Claude Design 전역 토큰 (P1, ADOPTION_SPEC 정본) ===== */
 :root {
@@ -43,9 +43,11 @@ _CSS = """
   --cd-ink-dim:#8b857c; --cd-ink-faint:#a09a90;
   --cd-line:#e6e2da; --cd-line-strong:#cfc8bd; --cd-line-section:#e0dbd2;
   --cd-accent:#c2410c; --cd-accent-hover:#a3350a; --cd-accent-text:#b4451a; --cd-accent-tint:#fdf3ec;
-  --cd-sans:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",-apple-system,
+  --cd-sans:"Pretendard","Pretendard Variable","Malgun Gothic","Apple SD Gothic Neo",-apple-system,
             BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
-  --cd-mono:"IBM Plex Mono","Consolas","Menlo",monospace;
+  /* 모노 폐지(§1.2) — 토큰은 호출부 호환을 위해 남기고 값만 본문 글꼴로 맞춘다.
+     자릿수 정렬은 font-variant-numeric: tabular-nums 가 담당한다. */
+  --cd-mono:"Pretendard","Pretendard Variable","Malgun Gothic","Apple SD Gothic Neo",-apple-system,sans-serif;
 }
 
 /* ===== 기본 ===== */
@@ -69,6 +71,14 @@ html, body, .stApp,
   font-family: 'Material Symbols Rounded' !important;
 }
 html, body, .stApp { font-size: 14px; }
+/* 버튼 라벨을 그리는 것은 button 이 아니라 그 안의 <p> 다. Streamlit 기본값이
+   0.875rem(=12.25px)이라, 화면이 button 에만 font-size 를 걸면 실제 글자는 그대로
+   12.25px 로 남는다 — 대시보드·내 근무표·아차사고 등록이 각각 이 함정에 걸렸다.
+   <p> 가 버튼의 값을 물려받게 해서 이 부류의 결함을 한 번에 없앤다(§1.2). */
+.stApp div.stButton > button p,
+.stApp div.stFormSubmitButton > button p,
+.stApp div[data-testid="stButtonGroup"] button p {
+  font-size: inherit !important; font-weight: inherit !important; }
 .stApp { background: var(--cd-canvas); color: var(--cd-ink); }
 /* 모노: 사번·보고번호·시간·건수·브레드크럼(코드/숫자 계열) */
 .cd-mono, .crumb { font-family: var(--cd-mono); font-feature-settings:"tnum" 1; }
@@ -108,8 +118,8 @@ section[data-testid="stMain"] div[data-testid="stVerticalBlock"] { gap: 0.65rem;
 section[data-testid="stMain"] div[data-testid="stHorizontalBlock"] { gap: 0.6rem; }
 
 /* ===== 페이지 제목 (25px/600, -0.025em; 설명 13.5px) ===== */
-.page-title { font-size: 25px; font-weight: 600; color: var(--cd-ink); margin: 0.1rem 0 0.1rem; letter-spacing: -0.025em; line-height: 1.2; }
-.page-desc { font-size: 13.5px; color: var(--cd-ink-2); margin: 0 0 0.7rem; text-wrap: pretty; }
+.page-title { font-size: 24px; font-weight: 600; color: var(--cd-ink); margin: 0.1rem 0 0.1rem; letter-spacing: -0.025em; line-height: 1.2; }
+.page-desc { font-size: 12px; color: var(--cd-ink-3); margin: 0 0 0.7rem; text-wrap: pretty; }
 
 /* ===== 카드 (조회 조건/콘텐츠) — 흰 표면 + 헤어라인 ===== */
 div[data-testid="stVerticalBlockBorderWrapper"] {
@@ -133,8 +143,8 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div {
   background: var(--cd-surface); border: 1px solid var(--cd-line); border-left: 2px solid var(--cd-accent);
   border-radius: 6px; padding: 0.6rem 0.9rem 0.55rem;
 }
-.sum-value { font-family: var(--cd-mono); font-size: 1.35rem; font-weight: 600; color: var(--cd-ink); line-height: 1.2; }
-.sum-label { font-size: 0.72rem; color: var(--cd-ink-2); margin-top: 0.15rem; letter-spacing: 0.02em; }
+.sum-value { font-size: 20px; font-weight: 600; color: var(--cd-ink); line-height: 1.2; }
+.sum-label { font-size: 12px; color: var(--cd-ink-3); margin-top: 0.15rem; letter-spacing: 0.02em; }
 
 /* 데이터 그리드 영역 빈 상태 — 큰 빈 박스 대신 목록/그리드 프레임으로 표시 */
 .empty-state {
@@ -143,10 +153,10 @@ div[data-testid="stVerticalBlockBorderWrapper"] > div {
 .empty-state .es-head {
   height: 32px; background: var(--cd-canvas); border-bottom: 1px solid var(--cd-line);
   display: flex; align-items: center; padding: 0 0.85rem;
-  font-size: 0.75rem; font-weight: 600; color: var(--cd-ink-2); letter-spacing: 0.03em;
+  font-size: 12px; font-weight: 600; color: var(--cd-ink-2);
 }
 .empty-state .es-body {
-  padding: 2.1rem 1rem; text-align: center; color: var(--cd-ink-2); font-size: 0.85rem;
+  padding: 2.1rem 1rem; text-align: center; color: var(--cd-ink-3); font-size: 14px;
 }
 
 /* ===== 폼 위젯 (Streamlit 기본 느낌 완화) ===== */
@@ -154,16 +164,16 @@ section[data-testid="stMain"] div[data-testid="stSelectbox"] label,
 section[data-testid="stMain"] div[data-testid="stTextInput"] label,
 section[data-testid="stMain"] div[data-testid="stDateInput"] label,
 section[data-testid="stMain"] div[data-testid="stNumberInput"] label {
-  font-size: 13px; font-weight: 500; color: var(--cd-ink-2);
+  font-size: 14px; font-weight: 400; color: var(--cd-ink-2);
   margin-bottom: 0.15rem; padding: 0;
 }
 section[data-testid="stMain"] div[data-baseweb="select"] > div,
 section[data-testid="stMain"] div[data-testid="stTextInput"] input,
 section[data-testid="stMain"] div[data-testid="stNumberInput"] input {
   min-height: 2.15rem; border-radius: 6px; border-color: var(--cd-line-strong);
-  background: var(--cd-surface); font-size: 14.5px;
+  background: var(--cd-surface); font-size: 14px;
 }
-section[data-testid="stMain"] div[data-baseweb="select"] div[data-baseweb="select"] { font-size: 14.5px; }
+section[data-testid="stMain"] div[data-baseweb="select"] div[data-baseweb="select"] { font-size: 14px; }
 /* focus 링 — 오렌지 액센트 (입력 식별 보조, WCAG 1.4.11) */
 section[data-testid="stMain"] div[data-testid="stTextInput"] input:focus,
 section[data-testid="stMain"] div[data-testid="stNumberInput"] input:focus {
@@ -175,7 +185,7 @@ section[data-testid="stMain"] div[data-testid="stNumberInput"] input:focus {
 section[data-testid="stMain"] .stButton > button,
 section[data-testid="stMain"] .stDownloadButton > button,
 section[data-testid="stMain"] .stFormSubmitButton > button {
-  min-height: 2.15rem; font-size: 0.85rem; font-weight: 600; border-radius: 6px;
+  min-height: 2.15rem; font-size: 14px; font-weight: 600; border-radius: 6px;
 }
 section[data-testid="stMain"] .stButton > button[kind="primary"],
 section[data-testid="stMain"] .stFormSubmitButton > button[kind="primary"] {
@@ -200,14 +210,14 @@ div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] { border: no
 .duty-badge {
   display: inline-block; min-width: 34px; text-align: center;
   padding: 2px 10px; border-radius: 999px;
-  color: #fff; font-size: 0.8rem; font-weight: 600; line-height: 1.6;
+  color: #fff; font-size: 12px; font-weight: 600; line-height: 1.6;
 }
-.duty-name { color: var(--cd-ink-2); font-size: 0.85rem; margin-left: 6px; }
+.duty-name { color: var(--cd-ink-2); font-size: 12px; margin-left: 6px; }
 .duty-legend { margin-top: 0.55rem; }
 .duty-legend .duty-badge { margin-right: 6px; margin-bottom: 4px; }
 
 /* 데이터 모드 안내 (하단, 눈에 띄지 않게) */
-.data-mode-note { color: var(--cd-ink-2); font-size: 0.78rem; text-align: right; margin-top: 0.6rem; }
+.data-mode-note { color: var(--cd-ink-3); font-size: 12px; text-align: right; margin-top: 0.6rem; }
 
 /* ── 모바일(≤768px) 표 가로 스크롤 어포던스 ──
    좁은 폭에서 표는 컨테이너 안에서 가로 스크롤한다(DESIGN §5). 그런데 모바일 브라우저의
@@ -265,7 +275,7 @@ _SHELL_CSS = """
   --line-strong: #cfc8bd;    /* 강조 헤어라인 */
   --ink: #1c1a17; --ink-2: #4a453d; --ink-3: #6b665d;
   --accent: #c2410c; --accent-hover: #a3350a; --accent-tint: #fdf3ec;
-  --mono: "IBM Plex Mono","Consolas","Menlo",monospace;
+  --mono: "Pretendard","Pretendard Variable","Malgun Gothic","Apple SD Gothic Neo",-apple-system,sans-serif;
 }
 
 /* 본문 배경 — ADMIN/MANAGER 화면 캔버스 */
@@ -275,7 +285,7 @@ _SHELL_CSS = """
 section[data-testid="stSidebar"] {
   background: var(--sb-col-bg);
   box-shadow: none;
-  font-family: "IBM Plex Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", -apple-system, sans-serif;
+  font-family: "Pretendard","Malgun Gothic",-apple-system,sans-serif, -apple-system, sans-serif;
   transition: width 0.28s ease;
 }
 /* 폭·테두리 고정은 **펼침 상태에서만** 건다(aria-expanded="true").
@@ -355,7 +365,7 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
 }
 .sb-title { display: flex; flex-direction: column; min-width: 0; }
 .sb-title-ko {
-  color: var(--sb-sel-text); font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap;
+  color: var(--sb-sel-text); font-size: 14px; font-weight: 600; line-height: 1.2; white-space: nowrap;
 }
 /* 접기 버튼 — 심플 아이콘 전용. 기본 투명·무테두리, hover 때만 옅은 배경. */
 .st-key-sb_hide div.stButton button {
@@ -369,7 +379,7 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
 .st-key-sb_hide div.stButton button:focus-visible {
   outline: 2px solid var(--sb-focus) !important; outline-offset: 1px;
 }
-.st-key-sb_hide div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
+.st-key-sb_hide div.stButton button [data-testid="stIconMaterial"] { font-size: 20px; }
 /* 아이콘 전용 버튼(접기/로그아웃)은 내부 래퍼도 가운데 정렬 */
 .st-key-sb_hide div.stButton button > div, .st-key-sb_hide div.stButton button > div > span,
 .st-key-sb_user div.stButton button > div, .st-key-sb_user div.stButton button > div > span {
@@ -387,7 +397,7 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
 .st-key-sb_search div[data-testid="stTextInput"] input {
   height: 32px; min-height: 32px; border-radius: var(--sb-radius);
   border: 1px solid var(--sb-border) !important; background: #24221e !important;
-  color: var(--sb-sel-text) !important; font-size: 12.5px; padding: 0 8px 0 28px;
+  color: var(--sb-sel-text) !important; font-size: 12px; padding: 0 8px 0 28px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%238b857c' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") !important;
   background-repeat: no-repeat !important; background-position: 8px center !important;
 }
@@ -426,7 +436,7 @@ div[class*="_grpopen"] div.stButton > button::after { transform: rotate(90deg); 
 /* 활성 경로 그룹(현재 페이지의 부모) = 밝은 텍스트 + 굵게 */
 div[class*="st-key-sbg_"] div.stButton > button[kind="primary"],
 div[class*="st-key-sbs_"] div.stButton > button[kind="primary"] {
-  font-weight: 700; color: var(--sb-sel-text) !important;
+  font-weight: 600; color: var(--sb-sel-text) !important;
 }
 /* 단독 모듈(대시보드) 활성 = 선택 배경까지(직접 이동형 모듈, 캐럿 없음) */
 div[class*="st-key-sbs_"] div.stButton > button[kind="primary"] {
@@ -436,7 +446,7 @@ div[class*="st-key-sbs_"] div.stButton > button[kind="primary"] {
 /* 리프(페이지, sbi_) — 28px·13px, 들여쓰기 + 좌측 5px 점(§4). 가이드선 없음. */
 div[class*="st-key-sbi_"] div.stButton > button {
   height: 28px; min-height: 28px; padding: 0 12px 0 18px;
-  font-size: 13px; font-weight: 400; color: var(--sb-text) !important; gap: 10px;
+  font-size: 14px; font-weight: 400; color: var(--sb-text) !important; gap: 10px;
 }
 div[class*="st-key-sbi_"] div.stButton > button::before {
   content: ""; flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%;
@@ -444,7 +454,7 @@ div[class*="st-key-sbi_"] div.stButton > button::before {
 }
 /* 활성 리프(현재 페이지) = 밝은 텍스트 + 굵게 + 선택 배경 + 오렌지 점 + 좌측 오렌지 바 */
 div[class*="st-key-sbi_"] div.stButton > button[kind="primary"] {
-  color: var(--sb-sel-text) !important; font-weight: 700; background: var(--sb-sel-bg) !important;
+  color: var(--sb-sel-text) !important; font-weight: 600; background: var(--sb-sel-bg) !important;
   box-shadow: inset 2px 0 0 var(--sb-accent);
 }
 div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
@@ -460,14 +470,14 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
 .sb-ava {
   flex: 0 0 auto; width: 28px; height: 28px; border-radius: 5px;
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--sb-accent); color: #FFFFFF; font-size: 12.5px; font-weight: 700;
+  background: var(--sb-accent); color: #FFFFFF; font-size: 12px; font-weight: 600;
 }
 .sb-uinfo { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sb-uname {
-  color: var(--sb-sel-text); font-size: 12.5px; font-weight: 600; line-height: 1.2;
+  color: var(--sb-sel-text); font-size: 12px; font-weight: 600; line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.sb-urole { font-family: var(--mono); color: var(--sb-text-dim); font-size: 11px; letter-spacing: 0.02em; line-height: 1.2; }
+.sb-urole { color: var(--sb-text-dim); font-size: 12px; letter-spacing: 0.02em; line-height: 1.2; }
 /* 로그아웃 — 카드 우측 작은 아이콘 전용. 기본 투명, hover 때만 옅은 배경. */
 .st-key-sb_user div.stButton { display: flex; justify-content: flex-end; }
 .st-key-sb_user div.stButton button {
@@ -481,7 +491,7 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
 .st-key-sb_user div.stButton button:focus-visible {
   outline: 2px solid var(--sb-focus) !important; outline-offset: 1px;
 }
-.st-key-sb_user div.stButton button [data-testid="stIconMaterial"] { font-size: 17px; }
+.st-key-sb_user div.stButton button [data-testid="stIconMaterial"] { font-size: 20px; }
 
 /* ===== 본문 상단 52px 아이콘 헤더 (MODULE / SCREEN 모노 브레드크럼 + 연결 pill + 실기능 아이콘) ===== */
 .st-key-app_header {
@@ -492,7 +502,7 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
 .st-key-app_header div[data-testid="stHorizontalBlock"] { align-items: center; flex-wrap: nowrap; }
 .st-key-app_header div[data-testid="stColumn"] { min-width: 0 !important; }
 /* MODULE / SCREEN 모노 브레드크럼 (11.5px) */
-.crumb { font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--ink-3);
+.crumb { font-size: 12px; font-weight: 400; color: var(--ink-3);
   letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crumb .crumb-mod { color: var(--ink-2); }
 /* 구분자에 선 토큰(--line-strong #cfc8bd)을 쓰면 텍스트 대비 1.59:1 로 §5 하한 미달.
@@ -500,12 +510,12 @@ div[class*="st-key-sbi_"] div.stButton > button[kind="primary"]::before {
 .crumb .crumb-sep { margin: 0 7px; }
 .crumb .crumb-scr { color: var(--ink); font-weight: 600; }
 /* 헤더 우측 날짜/범위 스탬프 (화면이 채우는 슬롯 — 비면 폭 0) */
-.hdr-stamp { font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--ink-2);
+.hdr-stamp { font-size: 12px; font-weight: 400; color: var(--ink-2);
   letter-spacing: 0.02em; white-space: nowrap; }
 /* 연결 상태 pill (Supabase 초록 / 샘플 중립) */
 .cd-conn-wrap { display: flex; justify-content: flex-end; }
 .cd-conn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.22rem 0.6rem;
-  border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
   border: 1px solid var(--line-strong); background: var(--cd-surface, #fff); color: var(--ink-2); }
 .cd-conn .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex: 0 0 auto; }
 .cd-conn.on { background: #eef5f0; border-color: #d8e6dd; color: #2f6b45; }
@@ -533,7 +543,7 @@ div[class*="st-key-hdr_ic_"] div.stButton button {
   background: transparent !important; border: 1px solid transparent !important; border-radius: 6px;
   box-shadow: none !important;
 }
-div[class*="st-key-hdr_ic_"] div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
+div[class*="st-key-hdr_ic_"] div.stButton button [data-testid="stIconMaterial"] { font-size: 20px; }
 /* 활성(실기능) — ink-2, hover 옅은 배경, pointer */
 div[class*="st-key-hdr_ic_on_"] div.stButton button { color: var(--ink-2) !important; cursor: pointer; }
 div[class*="st-key-hdr_ic_on_"] div.stButton button:hover {
@@ -632,7 +642,7 @@ section[data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
 .st-key-sb_expand div.stButton button:focus-visible {
   outline: 2px solid var(--sb-focus) !important; outline-offset: 1px;
 }
-.st-key-sb_expand div.stButton button [data-testid="stIconMaterial"] { font-size: 18px; }
+.st-key-sb_expand div.stButton button [data-testid="stIconMaterial"] { font-size: 20px; }
 /* 레일 모듈 글리프 스택 — 2글자 글리프, 히트영역 44px, 활성=오렌지 */
 .st-key-sb_rail_nav { background: var(--sb-tree-bg); padding: 8px 0; }
 /* help(tooltip) 가 붙은 버튼은 button 이 div.stButton 의 직계가 아니므로(툴팁 래퍼 개입)
@@ -667,7 +677,7 @@ section[data-testid="stSidebar"] div[data-testid="stLayoutWrapper"]:has(> .st-ke
 }
 .sb-rail-ava {
   width: 30px; height: 30px; border-radius: 50%; background: #33302a;
-  color: #ddd6cb; font-size: 12.5px; font-weight: 700;
+  color: #ddd6cb; font-size: 12px; font-weight: 600;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .st-key-sb_rail_user div.stButton button {
@@ -681,7 +691,7 @@ section[data-testid="stSidebar"] div[data-testid="stLayoutWrapper"]:has(> .st-ke
 .st-key-sb_rail_user div.stButton button:focus-visible {
   outline: 2px solid var(--sb-focus) !important; outline-offset: 1px;
 }
-.st-key-sb_rail_user div.stButton button [data-testid="stIconMaterial"] { font-size: 17px; }
+.st-key-sb_rail_user div.stButton button [data-testid="stIconMaterial"] { font-size: 20px; }
 </style>
 """
 
@@ -720,16 +730,16 @@ div[data-testid="stLayoutWrapper"]:has(> .st-key-user_topbar) {
 .ub-title {
   display:flex; align-items:baseline; gap:.4rem; min-width:0; white-space:nowrap;
 }
-.ub-app { flex:0 0 auto; font-size:12.5px; font-weight:700; color:var(--cd-ink-3); letter-spacing:.01em; }
+.ub-app { flex:0 0 auto; font-size:12px; font-weight:600; color:var(--cd-ink-3); letter-spacing:.01em; }
 /* 위와 같은 사유 — 선 토큰이 아니라 ink-3 를 쓴다(§5 대비 하한). */
-.ub-sep { flex:0 0 auto; font-size:12.5px; color:var(--cd-ink-3); }
+.ub-sep { flex:0 0 auto; font-size:12px; color:var(--cd-ink-3); }
 .ub-screen {
-  min-width:0; font-size:15px; font-weight:600; color:var(--cd-ink); letter-spacing:-.01em;
+  min-width:0; font-size:14px; font-weight:600; color:var(--cd-ink); letter-spacing:-.01em;
   overflow:hidden; text-overflow:ellipsis;
 }
 .ub-acct { display:flex; align-items:baseline; gap:.35rem; white-space:nowrap; }
-.ub-acct-name { font-size:12.5px; font-weight:600; color:var(--cd-ink-2); }
-.ub-acct-meta { font-size:12.5px; color:var(--cd-ink-3); }
+.ub-acct-name { font-size:12px; font-weight:600; color:var(--cd-ink-2); }
+.ub-acct-meta { font-size:12px; color:var(--cd-ink-3); }
 .ub-acct-meta:not(:empty)::before { content:"·"; margin-right:.35rem; color:var(--cd-line-strong); }
 /* 햄버거(메뉴 트리거) — 터치 히트영역 44px(§4 USER 터치 기준), 좌측 고정 */
 .st-key-user_menu_pop div[data-testid="stPopover"] { display:flex; }
@@ -737,7 +747,7 @@ div[data-testid="stLayoutWrapper"]:has(> .st-key-user_topbar) {
   min-height:44px; height:44px; padding:0 .6rem; gap:.35rem;
   border:1px solid var(--cd-line-strong) !important; border-radius:6px;
   background:var(--cd-surface); color:var(--cd-ink-2);
-  font-size:13px; font-weight:600; white-space:nowrap; box-shadow:none !important;
+  font-size:12px; font-weight:600; white-space:nowrap; box-shadow:none !important;
 }
 .st-key-user_menu_pop button:hover { background:#f1eee8; color:var(--cd-ink); }
 .st-key-user_menu_pop button:focus-visible { outline:2px solid var(--cd-accent); outline-offset:1px; }
@@ -760,13 +770,13 @@ div[data-testid="stPopoverBody"]:has(.um-sheet) div[data-testid="stMarkdownConta
   padding:.15rem .55rem .45rem; margin-bottom:.35rem;
   border-bottom:1px solid var(--cd-line);
 }
-.um-acct-name { font-size:13.5px; font-weight:600; color:var(--cd-ink); }
+.um-acct-name { font-size:14px; font-weight:600; color:var(--cd-ink); }
 .um-acct-meta { font-size:12px; color:var(--cd-ink-3); }
 /* 메뉴 항목 — 44px 터치 타깃, 좌측 정렬 아이콘 + 라벨. 현재 화면은 오렌지 틴트 + 좌측 바. */
 div[class*="st-key-user_nav_"] div.stButton > button {
   width:100%; min-height:44px; justify-content:flex-start; text-align:left; gap:.55rem;
   padding:0 .55rem; border:1px solid transparent !important; border-radius:6px;
-  background:transparent; color:var(--cd-ink-2); font-size:14.5px; font-weight:500;
+  background:transparent; color:var(--cd-ink-2); font-size:14px; font-weight:400;
   white-space:nowrap; box-shadow:none !important;
 }
 div[class*="st-key-user_nav_"] div.stButton > button > div { flex:1 1 auto; min-width:0; justify-content:flex-start; }
@@ -775,22 +785,22 @@ div[class*="st-key-user_nav_"] div.stButton > button:focus-visible {
   outline:2px solid var(--cd-accent); outline-offset:-2px;
 }
 div[class*="st-key-user_nav_"] div.stButton > button[kind="primary"] {
-  background:var(--cd-accent-tint); color:var(--cd-accent-text); font-weight:700;
+  background:var(--cd-accent-tint); color:var(--cd-accent-text); font-weight:600;
   box-shadow:inset 2px 0 0 var(--cd-accent) !important;
 }
-div[class*="st-key-user_nav_"] div.stButton > button [data-testid="stIconMaterial"] { font-size:19px; }
+div[class*="st-key-user_nav_"] div.stButton > button [data-testid="stIconMaterial"] { font-size:20px; }
 /* 로그아웃 — 시트 맨 아래, 헤어라인으로 구분(파괴적 액션 아님: 중립 표면 버튼) */
 .st-key-btn_logout_user { border-top:1px solid var(--cd-line); margin-top:.35rem; padding-top:.4rem; }
 .st-key-btn_logout_user div.stButton > button {
   width:100%; min-height:40px; justify-content:flex-start; gap:.55rem; padding:0 .55rem;
   border:1px solid var(--cd-line-strong) !important; border-radius:6px;
-  background:var(--cd-surface); color:var(--cd-ink-2); font-size:13.5px; font-weight:600;
+  background:var(--cd-surface); color:var(--cd-ink-2); font-size:14px; font-weight:600;
 }
 .st-key-btn_logout_user div.stButton > button:hover { background:#f1eee8; color:var(--cd-ink); }
 .st-key-btn_logout_user div.stButton > button:focus-visible {
   outline:2px solid var(--cd-accent); outline-offset:-2px;
 }
-.st-key-btn_logout_user div.stButton > button [data-testid="stIconMaterial"] { font-size:18px; }
+.st-key-btn_logout_user div.stButton > button [data-testid="stIconMaterial"] { font-size:20px; }
 
 /* ===== 모바일(≤768px) — 본문 좌우 여백만 좁힌다(하단 고정바 없음 → 하단 패딩 불요) ===== */
 @media (max-width:768px) {
@@ -799,7 +809,7 @@ div[class*="st-key-user_nav_"] div.stButton > button [data-testid="stIconMateria
   /* 좁은 폭에서는 계정 상세(부서·조)를 감추고 이름만 남긴다 — 전체 계정은 메뉴 시트가 보여준다 */
   .ub-acct-meta { display:none; }
   .ub-app { font-size:12px; }
-  .ub-screen { font-size:14.5px; }
+  .ub-screen { font-size:14px; }
 }
 </style>
 """
@@ -820,6 +830,51 @@ def setup_page() -> None:
         initial_sidebar_state="collapsed" if role == "USER" else "auto",
     )
     st.markdown(_CSS, unsafe_allow_html=True)
+    _inject_component_font()
+
+
+# 표(AG Grid)는 컴포넌트 iframe 안에서 그려진다. iframe 은 부모 문서의 웹폰트를
+# 상속받지 못하고 font-family 선언만 남긴 채 조용히 폴백한다(2026-08-19 실측:
+# 같은 문자열이 부모 115.93px / 표 123.76px). Streamlit theme.fontFaces 도,
+# st_aggrid custom_css 의 @font-face 도 iframe 에 닿지 않는 것을 확인했다.
+# 남은 경로는 같은 출처인 iframe 문서에 <link> 를 직접 넣는 것뿐이다.
+# 사이드바 드로어 자동닫힘과 같은 브리지 방식을 쓴다. 렌더러는 st.iframe 이다 —
+# components.v1.html 은 1.59 에서 deprecated(2026-06-01 제거 예정)이고 이 저장소는
+# 이미 그 계약을 테스트로 고정하고 있다(scripts/test_sidebar_ui.py S-04).
+_FONT_HREF = ("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9"
+              "/dist/web/static/pretendard-dynamic-subset.css")
+
+_FONT_BRIDGE = """
+<script>
+(function () {
+  var HREF = "%s";
+  function inject(doc) {
+    if (!doc || doc.getElementById("wo-font")) return;
+    var l = doc.createElement("link");
+    l.id = "wo-font"; l.rel = "stylesheet"; l.href = HREF;
+    (doc.head || doc.documentElement).appendChild(l);
+  }
+  function sweep() {
+    var top = window.parent && window.parent.document;
+    if (!top) return 0;
+    var n = 0;
+    top.querySelectorAll("iframe").forEach(function (f) {
+      try { if (f.contentDocument) { inject(f.contentDocument); n++; } } catch (e) {}
+    });
+    return n;
+  }
+  sweep();
+  // 그리드는 스크립트 실행 뒤에 마운트되므로 잠깐 동안만 반복해서 훑는다.
+  var tries = 0;
+  var t = setInterval(function () { sweep(); if (++tries > 20) clearInterval(t); }, 500);
+})();
+</script>
+""" % _FONT_HREF
+
+
+def _inject_component_font() -> None:
+    """컴포넌트 iframe(표 등)에 본문과 같은 웹폰트를 로드한다."""
+    st.iframe(_FONT_BRIDGE, height=1)
 
 
 # ---------- App Shell ----------

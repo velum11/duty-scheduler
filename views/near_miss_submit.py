@@ -112,7 +112,7 @@ _ACCENT_TEXT = "#b4451a"
 # 폴백 폰트로 떨어지고, 거기에 letter-spacing 이 더해지면 자간이 이중으로 벌어져 "신 원"
 # 처럼 보인다(2026-08-18 병행 세션 발견). 한글이 섞인 라벨은 본문 sans 를 상속시키고
 # 숫자 부분만 별도 span 으로 감싼다(§1.2 — 숫자·ID·코드·날짜는 IBM Plex Mono).
-_MONO = '"IBM Plex Mono", monospace'
+_MONO = '"Pretendard","Malgun Gothic",-apple-system,sans-serif'
 
 # ── §3.1 폭 — **값의 실측 길이에서 역산한다** ──────────────────────────────────
 # 라벨 열 130px 은 평가 관리 상세 `_detail_body_html` 의 라벨 열(`flex:0 0 130px`)과 **같은

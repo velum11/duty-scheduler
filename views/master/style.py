@@ -72,7 +72,7 @@ def lifecycle_badge_html(status_code: str, label: str) -> str:
     pal = LIFECYCLE_BADGE.get(status_code, LIFECYCLE_BADGE["CLOSED"])
     return (
         f"<span style='display:inline-flex;align-items:center;padding:3px 11px;"
-        f"border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;"
+        f"border-radius:999px;font-size:12px;font-weight:600;line-height:1.4;"
         f"color:{pal['text']};background:{pal['bg']};"
         f"border:1px solid {pal['border']};white-space:nowrap;'>{escape(label)}</span>"
     )
@@ -196,7 +196,7 @@ _PAGE_CSS = """
   --ms-navy:#c2410c; --ms-navy-hover:#a3350a; --ms-gold:#8a6212; --ms-gold-soft:#fdf3ec;
   --ms-band:#fbfaf8; --ms-band-hover:#f1eee8; /* 중립 액션 스트립(파랑 밴드 제거, ADOPTION_SPEC §0.4) */
   --ms-accent:#c2410c; --ms-accent-hover:#a3350a; --ms-accent-tint:#fdf3ec;
-  --ms-mono:"IBM Plex Mono","Consolas","Menlo",monospace;
+  --ms-mono:"Pretendard","Malgun Gothic",-apple-system,sans-serif;
   --ms-info:#2f4d99; --ms-info-bg:#eef2fb; --ms-success:#2f6b45; --ms-success-bg:#eef5f0;
   --ms-warn:#8a6212; --ms-warn-bg:#fdf3e3; --ms-danger:#9c3232; --ms-danger-bg:#fbeeee;
 }
@@ -210,7 +210,7 @@ _PAGE_CSS = """
 .ms-band { display:flex; flex-direction:column; gap:.15rem; }
 .ms-band-main { display:flex; align-items:center; gap:.6rem; min-width:0; }
 .ms-band-ico { display:none; }  /* 파랑 밴드 리딩 아이콘 제거 */
-.ms-title { font-size:28px; font-weight:600; color:var(--ms-ink); letter-spacing:-.02em; margin:0;
+.ms-title { font-size:24px; font-weight:600; color:var(--ms-ink); letter-spacing:-.02em; margin:0;
   line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .ms-desc { font-size:12px; color:var(--ms-ink-2); margin:0; line-height:1.4; text-wrap:pretty; }
 /* 밴드 우측 툴바(프로토타입 장식) — 파랑 밴드 제거로 미사용(정적 head 는 아이콘 미렌더). */
@@ -223,7 +223,7 @@ _PAGE_CSS = """
 .ms-tool:hover { background:var(--ms-band-hover); }
 /* 모드 배지 — 데이터 연결 신호 전용(점 색: 연결 success / 오류 danger / 샘플 중립) */
 .ms-mode { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .6rem; border-radius:999px;
-  background:var(--ms-surface-2); border:1px solid var(--ms-line-strong); font-size:.74rem; font-weight:600;
+  background:var(--ms-surface-2); border:1px solid var(--ms-line-strong); font-size:12px; font-weight:600;
   color:var(--ms-ink-2); white-space:nowrap; }
 .ms-mode .dot { width:.5rem; height:.5rem; border-radius:50%; flex:0 0 auto; }
 .ms-mode.on   .dot { background:var(--ms-success); }
@@ -233,7 +233,7 @@ _PAGE_CSS = """
 [class*="__filter"] { background:var(--ms-surface-2); border:1px solid var(--ms-line); border-radius:8px;
   padding:.5rem .65rem; margin:.55rem 0 .1rem; }
 [class*="__filter"] div[data-testid="stHorizontalBlock"] { align-items:flex-end; }
-[class*="__filter"] label { font-size:.72rem !important; color:var(--ms-ink-2) !important; } /* ink-3→ink-2: 대비 (§2, WCAG) */
+[class*="__filter"] label { font-size:12px !important; color:var(--ms-ink-2) !important; } /* ink-3→ink-2: 대비 (§2, WCAG) */
 /* §7 액션바 */
 [class*="__bar"] { margin:.15rem 0 .45rem; }
 [class*="__bar"] div[data-testid="stHorizontalBlock"] { align-items:center; }
@@ -254,11 +254,11 @@ _PAGE_CSS = """
 [class*="__del"]:not([class*="__del_"]) div.stButton button,
 [class*="__add"] div.stButton button,
 [class*="__refresh"] div.stButton button { min-height:2.3rem; height:2.3rem; padding:0 .58rem; border-radius:4px;
-  font-size:.78rem; font-weight:600; white-space:nowrap; gap:.26rem; line-height:1; }
+  font-size:12px; font-weight:600; white-space:nowrap; gap:.26rem; line-height:1; }
 [class*="__save"] div.stButton button [data-testid="stIconMaterial"],
 [class*="__del"]:not([class*="__del_"]) div.stButton button [data-testid="stIconMaterial"],
 [class*="__add"] div.stButton button [data-testid="stIconMaterial"],
-[class*="__refresh"] div.stButton button [data-testid="stIconMaterial"] { font-size:15px; }
+[class*="__refresh"] div.stButton button [data-testid="stIconMaterial"] { font-size:20px; }
 /* §8 주요(저장) — 앱 네이비, 검정 금지 */
 [class*="__save"] button[kind="primary"] { background:var(--ms-navy) !important; border:1px solid var(--ms-navy) !important; color:#FFF !important; }
 [class*="__save"] button[kind="primary"]:hover:not(:disabled) { background:var(--ms-navy-hover) !important; border-color:var(--ms-navy-hover) !important; }
@@ -333,7 +333,7 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
   background:transparent !important; border:none !important; box-shadow:none !important;
   color:var(--ms-ink-2) !important; transition:background-color 120ms ease !important; }
 .st-key-ms_iconbar div.stButton button [data-testid="stIconMaterial"] {
-  font-size:17px !important; color:var(--ms-ink-2) !important;
+  font-size:20px !important; color:var(--ms-ink-2) !important;
   font-variation-settings:'FILL' 0, 'wght' 400 !important; }
 .st-key-ms_iconbar div.stButton button:hover:not(:disabled) {
   background:var(--ms-band-hover) !important; border:none !important; color:var(--ms-ink) !important; }
@@ -358,10 +358,10 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
    매칭돼 높이/라운드를 덮어써, 삭제만 큰 버튼으로 튀는 것을 막는다(밴드 스코프 한정). */
 .st-key-ms_band_live div.stButton button { min-height:1.8rem !important; height:1.8rem !important;
   min-width:0 !important; padding:0 .58rem !important; border-radius:6px !important;
-  font-size:.78rem !important; font-weight:600 !important; white-space:nowrap; gap:.26rem; line-height:1;
+  font-size:12px !important; font-weight:600 !important; white-space:nowrap; gap:.26rem; line-height:1;
   background:var(--ms-surface) !important; border:1px solid var(--ms-line-strong) !important;
   color:var(--ms-ink) !important; }
-.st-key-ms_band_live div.stButton button [data-testid="stIconMaterial"] { font-size:15px !important; }
+.st-key-ms_band_live div.stButton button [data-testid="stIconMaterial"] { font-size:20px !important; }
 .st-key-ms_band_live div.stButton button:hover:not(:disabled) {
   background:var(--ms-band-hover) !important; border-color:var(--ms-accent) !important; }
 /* 저장(primary): 활성 시 오렌지 액센트 배경·흰 글자로 강조(단일 액센트) */
@@ -376,8 +376,8 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 /* 포커스 링(키보드) — 밴드 대비 흰 링 */
 .st-key-ms_band_live button:focus-visible { outline:2px solid var(--ms-accent) !important; outline-offset:1px; }
 /* 조직 좌/우 패널 제목 */
-.ms-panel { font-size:.94rem; font-weight:700; color:var(--ms-ink); margin:.2rem 0 .1rem; }
-.ms-panel small { font-weight:500; color:var(--ms-ink-2); }
+.ms-panel { font-size:14px; font-weight:600; color:var(--ms-ink); margin:.2rem 0 .1rem; }
+.ms-panel small { font-weight:400; color:var(--ms-ink-2); }
 /* §20 상태 스트립(푸터) */
 /* 하단 상태 스트립 — 아래에 이어지는 안내 캡션(st.caption)과 2px 간격으로 붙어 한 덩어리로
    읽혔다(사용자 관리 실측). 아래 여백을 줘 '집계'와 '안내'를 분리한다. */
@@ -388,8 +388,8 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 .ms-count b { color:var(--ms-ink); font-weight:600; }
 /* §21/§22 배너 — 좌측 상태 바 + 아이콘 + 텍스트(색만으로 구분 금지) */
 .ms-banner { display:flex; align-items:flex-start; gap:.5rem; padding:.55rem .7rem; border-radius:8px;
-  border:1px solid var(--ms-line); margin:.35rem 0; font-size:.82rem; line-height:1.4; }
-.ms-banner .glyph { font-weight:700; flex:0 0 auto; }
+  border:1px solid var(--ms-line); margin:.35rem 0; font-size:12px; line-height:1.4; }
+.ms-banner .glyph { font-weight:600; flex:0 0 auto; }
 .ms-banner.info    { background:var(--ms-info-bg);    border-left:3px solid var(--ms-info);    color:var(--ms-ink); }
 .ms-banner.success { background:var(--ms-success-bg); border-left:3px solid var(--ms-success); color:var(--ms-ink); }
 .ms-banner.warn    { background:var(--ms-warn-bg);    border-left:3px solid var(--ms-warn);    color:var(--ms-ink); }
@@ -424,9 +424,9 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 /* 드릴다운 컨텍스트 스트립 — 그룹 › 부서 › 조 */
 .ms-ctx { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; background:var(--ms-surface-2);
   border:1px solid var(--ms-line); border-radius:8px; padding:.42rem .7rem; margin:.2rem 0 .55rem;
-  font-size:.78rem; color:var(--ms-ink-2); }
-.ms-ctx b { color:var(--ms-ink); font-weight:700; }
-.ms-ctx .pin { color:var(--ms-navy); font-weight:700; }
+  font-size:12px; color:var(--ms-ink-2); }
+.ms-ctx b { color:var(--ms-ink); font-weight:600; }
+.ms-ctx .pin { color:var(--ms-navy); font-weight:600; }
 .ms-ctx .arw { color:var(--ms-ink-3); }
 .ms-ctx .none { color:var(--ms-ink-2); font-weight:600; } /* ink-3→ink-2: 대비 (§2, WCAG) */
 /* 시트 카드 — 컨테이너 key(.st-key-*__sheet)에 카드 외형을 입힌다 */
@@ -435,7 +435,7 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 [class*="__sheet"].ms-sheet-locked { background:var(--ms-surface-2); border-style:dashed; }
 /* 시트 헤더(제목 + 건수 + 드릴다운 컨텍스트 칩) */
 .ms-sheet-head { display:flex; align-items:center; gap:.5rem; padding:.55rem .7rem .5rem; }
-.ms-sheet-head .t { font-size:.92rem; font-weight:700; color:var(--ms-ink); }
+.ms-sheet-head .t { font-size:12px; font-weight:600; color:var(--ms-ink); }
 .ms-sheet-head .cnt { font-size:12px; font-weight:600; color:var(--ms-ink-2); background:var(--ms-surface-3);
   border:1px solid var(--ms-line); border-radius:999px; padding:.05rem .5rem; }
 .ms-sheet-head .ctx { margin-left:auto; font-size:12px; font-weight:600; color:var(--ms-navy);
@@ -446,13 +446,13 @@ div[data-testid="stColumn"]:has(> div .ms-band-main) { min-width:0 !important; }
 /* 잠김/빈 상태 — 상위 미선택 시 하위 시트 (§ '그룹을 먼저 선택하세요') */
 .ms-locked { display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:.5rem; text-align:center; padding:2.6rem 1rem; min-height:220px; color:var(--ms-ink-3); }
-.ms-locked .glyph { font-size:1.4rem; line-height:1; color:var(--ms-line-strong); }
-.ms-locked .t { font-size:.82rem; font-weight:700; color:var(--ms-ink-2); }
+.ms-locked .glyph { font-size:20px; line-height:1; color:var(--ms-line-strong); }
+.ms-locked .t { font-size:12px; font-weight:600; color:var(--ms-ink-2); }
 .ms-locked .s { font-size:12px; color:var(--ms-ink-2); line-height:1.45; } /* ink-3→ink-2: 대비 (§2, WCAG) */
 /* 빈 상태(정상 empty, 오류 아님) — 표 본문 자리 */
 .ms-empty { display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:.4rem; text-align:center; padding:2rem 1rem; color:var(--ms-ink-3); }
-.ms-empty .t { font-size:.82rem; font-weight:600; color:var(--ms-ink-2); }
+.ms-empty .t { font-size:12px; font-weight:600; color:var(--ms-ink-2); }
 .ms-empty .s { font-size:12px; color:var(--ms-ink-2); } /* ink-3→ink-2: 콘텐츠 배경 위 대비 2.9→5.76 (§2, WCAG) */
 /* ≤1100px: 3시트 세로 스택(드릴다운 연동 유지). st.columns 를 감싼 horizontal block 대상. */
 @media (max-width:1100px){
@@ -477,24 +477,32 @@ def inject_page_styles() -> None:
 # 배경 우선순위는 master_row_class_rules 의 상호배타 규칙 + 아래 색으로 함께 보장한다.
 # ---------------------------------------------------------------------------
 GRID_CSS: dict[str, dict] = {
-    ".ag-root-wrapper": {"border": "1px solid " + TOKENS["line-strong"], "border-radius": "8px"},
+    # AG Grid 는 컴포넌트 iframe 안에서 그려지고 글꼴을 `--ag-font-family` 로 흘린다.
+    # 이 선언이 없으면 부모의 웹폰트를 상속받지 못해 표만 시스템 sans 로 폴백한다
+    # (§1.2 "표는 iframe 에도 글꼴을 로드해야 한다"). 폰트 파일 자체는 setup_page 의
+    # 브리지가 iframe 에 <link> 로 넣는다.
+    ".ag-root-wrapper": {"border": "1px solid " + TOKENS["line-strong"], "border-radius": "8px",
+                         "--ag-font-family": '"Pretendard","Malgun Gothic",-apple-system,sans-serif',
+                         "font-family": '"Pretendard","Malgun Gothic",-apple-system,sans-serif'},
+    # AG 테마가 .ag-header-cell-text 에 700 을 준다 — §1.2 는 400·600 뿐이라 되돌린다.
+    ".ag-header-cell-text": {"font-weight": "600"},
     # §1-E: 표 헤더 배경 없음 + 하단 1px #cfc8bd(line-strong). 공용(3화면 공유) — 7단계에서
     # 승인된 예외로 surface-2 배경을 제거해 헤더가 흰 표 본문과 자연스레 이어지게 한다.
     ".ag-header": {"background": "transparent", "border-bottom": "1px solid " + TOKENS["line-strong"]},
     ".ag-header-cell": {"border-right": "1px solid rgba(0,0,0,.08)"},
-    ".ag-header-cell-label": {"justify-content": "center", "font-size": "12.5px",
+    ".ag-header-cell-label": {"justify-content": "center", "font-size": "12px",
                               "font-weight": "600", "color": TOKENS["ink-2"]},
     # 기본 셀: 테두리·타이포는 편집 중에도 유지. 레이아웃(flex)만 편집셀에서 제외한다.
-    # 본문 14.5px(§8-6 수용기준·H1) — 헤더(12.5px)는 그대로. 행 높이·수직 패딩은 불변.
+    # 표는 §1.2 `table` 역할 = 12px(2026-08-19 개정). 헤더도 같은 12px 이고 굵기로만 갈린다.
     ".ag-cell": {
         "border-right": "1px solid rgba(0,0,0,.06)",
-        "line-height": "normal", "font-size": "14.5px", "color": TOKENS["ink"],
+        "line-height": "normal", "font-size": "12px", "color": TOKENS["ink"],
     },
-    # 편집기·팝업도 본문과 같은 14.5px 로 맞춘다(H1): 텍스트 편집 input · select 표시값 ·
+    # 편집기·팝업도 셀과 같은 12px 로 맞춘다: 텍스트 편집 input · select 표시값 ·
     # select 드롭다운 항목. 셀 표시값과 편집/선택 타이포가 어긋나 보이지 않게 한다.
-    ".ag-text-field-input": {"font-size": "14.5px"},
-    ".ag-picker-field-display": {"font-size": "14.5px"},
-    ".ag-select-list-item": {"font-size": "14.5px"},
+    ".ag-text-field-input": {"font-size": "12px"},
+    ".ag-picker-field-display": {"font-size": "12px"},
+    ".ag-select-list-item": {"font-size": "12px"},
     # 표시(비편집) 셀만 flex 정렬 — 편집 중(.ag-cell-inline-editing)엔 flex 를 걸지 않아
     # 편집 input 이 클리핑되지 않는다(F1). 정렬 클래스(md-c-*)는 이 flex 위에서 동작한다.
     ".ag-cell:not(.ag-cell-inline-editing)": {"display": "flex", "align-items": "center"},
@@ -513,7 +521,7 @@ GRID_CSS: dict[str, dict] = {
         "width": "20px", "height": "20px", "padding": "0", "line-height": "1",
         "border": "1px solid #E0CFC9", "border-radius": "4px",
         "background": TOKENS["surface"], "color": TOKENS["danger"], "cursor": "pointer",
-        "font-size": "15px", "font-weight": "700",
+        "font-size": "14px", "font-weight": "600",
         "box-shadow": "0 0 0 6px transparent", "outline-offset": "6px",
     },
     ".md-act-rm:hover": {"background": TOKENS["danger-bg"], "border-color": "#C77B6B"},
@@ -559,13 +567,13 @@ GRID_CSS: dict[str, dict] = {
     # 밀리는 레이아웃 붕괴 — 2026-07-25 사용자 관리 화면 실증). ::after 앵커는 이미
     # positioned 인 .ag-cell 에 그대로 걸린다.
     ".ms-cell-select::after": {"content": "'\\25BE'", "position": "absolute", "right": "8px",
-                               "color": TOKENS["ink-3"], "font-size": "10px", "pointer-events": "none"},
+                               "color": TOKENS["ink-3"], "font-size": "12px", "pointer-events": "none"},
     # ---- 그리드 내부 칩(cellRenderer HTML 용) — iframe 은 --ms-* var 를 못 보므로 리터럴 색 ----
     # 페이지 크롬 .ms-chip 과 시각이 일치하도록 동일 팔레트. 색+텍스트 이중부호화(이모지 금지).
     # 그리드 안 칩도 §0-6 하한(11px) 이상이어야 한다 — 10.5px 였다(2026-08-14 실측).
     # iframe 안이라 root 14px 스케일과 무관하게 px 이 그대로 렌더된다.
     ".ms-chip": {"display": "inline-flex", "align-items": "center", "gap": "3px",
-                 "padding": "1px 7px", "border-radius": "5px", "font-size": "11.5px",
+                 "padding": "1px 7px", "border-radius": "5px", "font-size": "12px",
                  "font-weight": "600", "line-height": "1.5", "white-space": "nowrap"},
     ".ms-chip.new": {"background": TOKENS["info-bg"], "color": TOKENS["info"], "border": "1px solid #C9DCEE"},
     ".ms-chip.del": {"background": TOKENS["danger-bg"], "color": TOKENS["danger"], "border": "1px solid #E7CDC7"},
@@ -578,18 +586,18 @@ GRID_CSS: dict[str, dict] = {
     # 배경 transparent 로 행 상태 배경(선택/신규/삭제/오류)을 그대로 상속하고, 색/테두리는
     # 렌더러가 element.style.color 한 번만 지정한다(테두리 currentColor). 색+텍스트 이중부호화.
     ".ms-badge": {"display": "inline-flex", "align-items": "center", "gap": "3px",
-                  "padding": "0 5px", "border-radius": "4px", "font-size": "11px",
+                  "padding": "0 5px", "border-radius": "4px", "font-size": "12px",
                   "font-weight": "600", "line-height": "1.5", "white-space": "nowrap",
                   "background": "transparent", "border": "1px solid currentColor"},
     # ---- 조직 전용(기존 자산 계승) ----
-    ".ms-group-row": {"background": TOKENS["gold-soft"] + " !important", "font-weight": "700",
+    ".ms-group-row": {"background": TOKENS["gold-soft"] + " !important", "font-weight": "600",
                       "box-shadow": "inset 3px 0 " + TOKENS["gold"]},
     ".ms-group-row .ag-cell": {"color": TOKENS["ink"]},
     ".ms-indent": {"padding-left": "26px !important"},
     ".ms-unit-shift": {"background": "rgba(30,58,110,.10) !important", "color": TOKENS["navy"],
-                       "font-weight": "700", "border-radius": "4px", "justify-content": "center"},
+                       "font-weight": "600", "border-radius": "4px", "justify-content": "center"},
     ".ms-unit-general": {"background": "rgba(61,58,52,.08) !important", "color": "#3D3A34",
-                         "font-weight": "700", "border-radius": "4px", "justify-content": "center"},
+                         "font-weight": "600", "border-radius": "4px", "justify-content": "center"},
     # 포커스 링
     ".ag-cell-focus": {"outline": "2px solid " + TOKENS["navy"] + " !important", "outline-offset": "-2px"},
 }

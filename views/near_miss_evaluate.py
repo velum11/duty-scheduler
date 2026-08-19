@@ -152,7 +152,7 @@ _DANGER_LINE = "#f0d9d9"
 # 인라인 style 속성 안에 그대로 들어가므로 **큰따옴표**로 감싼다(작은따옴표는 금지).
 # style='font-family:{_MONO};…' 에 작은따옴표 계열 값을 넣으면 속성이 첫 내부 따옴표에서
 # 끊겨 style 전체가 소실된다(2026-08-14 실측). CSS 블록 안에서도 유효.
-_MONO = '"IBM Plex Mono", monospace'
+_MONO = '"Pretendard","Malgun Gothic",-apple-system,sans-serif'
 
 # 화면 스코프 CSS — §1.2 다섯 단계(28/20/16/14/12)와 §1.4 compact 히트영역(34~38px)만 쓴다.
 _EVAL_CSS = f"""

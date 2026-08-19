@@ -146,12 +146,12 @@ _MU_CSS = """
 .mu-crow .pill { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
   padding:2px 9px; border-radius:999px; background:#f1eee8; color:#4a453d; }
 /* 좌측 분포(재직/퇴직)와 우측 상태 텍스트는 같은 성격의 보조 정보라 같은 크기를 쓴다 —
-   종전 11.5 vs 12.5 혼재를 §3 캡션 12.5 로 통일(2026-08-14 재검수). */
-.mu-crow .dist { font-size:12.5px; color:#6b665d; white-space:nowrap;
+   종전 11.5 vs 12.5 혼재를 12px 로 통일(2026-08-19 DESIGN §1.2 네 단계 밖 값 폐지). */
+.mu-crow .dist { font-size:12px; color:#6b665d; white-space:nowrap;
   font-variant-numeric:tabular-nums; }
 .mu-crow .gap { flex:1 1 auto; min-width:8px; }
 .mu-crow .wip, .mu-crow .calm, .mu-crow .sel, .mu-crow .hint {
-  font-size:12.5px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums; }
 .mu-crow .wip { font-weight:600; color:#b4451a; }
 .mu-crow .wip .sub { font-weight:500; color:#6b665d; margin-left:4px; }
 .mu-crow .calm { color:#6b665d; }
@@ -561,7 +561,7 @@ def _dept_renderer(hint_json: str) -> JsCode:
             var g = H[v];
             if(g){
               var s = document.createElement('span');
-              s.style.color = '#5F5C55'; s.style.fontSize = '11px';
+              s.style.color = '#5F5C55'; s.style.fontSize = '12px';
               s.textContent = '\\u00B7 ' + String(g);
               e.appendChild(s);
             }
@@ -595,7 +595,7 @@ def _email_renderer(extra_json: str) -> JsCode:
             var n = X[(d['사번'] == null) ? '' : String(d['사번'])];
             if(n){
               var s = document.createElement('span');
-              s.style.color = '#5F5C55'; s.style.fontSize = '11px';
+              s.style.color = '#5F5C55'; s.style.fontSize = '12px';
               s.title = '담당별·추가 주소 ' + String(n) + '건 — 아래 담당 권한·알림 이메일에서 편집';
               s.textContent = '+' + String(n);
               e.appendChild(s);
@@ -660,64 +660,14 @@ _NAME_STATUS_RENDERER = JsCode(
 
 
 # ---------------------------------------------------------------------------
-# §1-E pill 셀 렌더러 (권한·재직) — §2 배지 팔레트(bg/text/border, radius 999, 12.5/600).
-# 렌더러는 표시만(편집은 각 컬럼의 cellEditor: 권한=select, 재직=checkbox 더블클릭). 저장값은
-# 그대로 반환되므로 저장/검증/삭제 경로 불변(pill 은 display-only).
-# ---------------------------------------------------------------------------
-_ROLE_PILL_RENDERER = JsCode(
-    """
-    (class {
-      init(p){
-        var pal = {'관리자':['#fdf3ec','#b4451a','#f0dfd0'],
-                   '조장':['#eef2fb','#2f4d99','#dbe3f4'],
-                   '조원':['#f2f0ec','#5c564d','#e4e0d8']};
-        var v = (p.value == null) ? '' : String(p.value).trim();
-        var e = document.createElement('span');
-        if(v && pal[v]){
-          var c = pal[v];
-          e.style.cssText = 'display:inline-flex;align-items:center;padding:3px 11px;'
-            + 'border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;'
-            + 'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';white-space:nowrap';
-          e.textContent = v;
-        } else { e.textContent = v; }
-        this.eGui = e;
-      }
-      getGui(){ return this.eGui; }
-      refresh(){ return false; }
-    })
-    """
-)
-
-_ACTIVE_PILL_RENDERER = JsCode(
-    """
-    (class {
-      init(p){
-        var on = (p.value === true || p.value === 1 || p.value === '1'
-                  || p.value === 'true' || p.value === 'Y' || p.value === '재직');
-        var c = on ? ['#eef5f0','#2f6b45','#d8e6dd'] : ['#f2f0ec','#5c564d','#e4e0d8'];
-        var e = document.createElement('span');
-        e.style.cssText = 'display:inline-flex;align-items:center;padding:3px 11px;'
-          + 'border-radius:999px;font-size:12.5px;font-weight:600;line-height:1.4;'
-          + 'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';white-space:nowrap';
-        e.textContent = on ? '재직' : '퇴직';
-        // Codex P2: 편집 단서 — 보호 계정이 아니면 커서 pointer + tooltip 로 '더블클릭/Enter 변경'을
-        // 안내한다(편집 동작·잠금 로직은 불변, 표시 단서만). 보호 계정은 잠금 사유를 tooltip 로 노출.
-        var d = p.data || {};
-        var prot = (d._protected === '1' || d._protected === 1);
-        if (prot) {
-          e.title = '보호 계정 — 재직 상태를 변경할 수 없습니다';
-          e.style.cursor = 'not-allowed';
-        } else {
-          e.title = '더블클릭 또는 Enter/F2 로 재직·퇴직 변경';
-          e.style.cursor = 'pointer';
-        }
-        this.eGui = e;
-      }
-      getGui(){ return this.eGui; }
-      refresh(){ return false; }
-    })
-    """
-)
+# 권한·재직 열은 값 그대로 보여 준다(권한=평문 + ▾ / 재직=공용 native 체크박스).
+# 종전에는 권한 3색 pill · 재직 녹색 pill 을 덮어써, 값을 읽어야 할 표 안에서 색면 두 개가
+# 먼저 눈을 끌었다(2026-08-19 사용자 판단: 표 안 장식성 색 채움 폐지). 상태의 이중부호화는
+# 성명 열 배지(_NAME_STATUS_RENDERER: 퇴직·퇴직예정·보호·오류)와 행 상태 배경이 이미 담당하고,
+# 저장 실패·검증 실패 신호(ms-row-error/ms-cell-error)는 기능이므로 그대로 둔다.
+# 재직은 bool 열이라 렌더러를 걷으면 공용 native 체크박스로 돌아간다 — 편집 계약(더블클릭/
+# Enter 토글)과 보호행 흐림(.ms-row-protected .ag-checkbox-input-wrapper)은 공용이 유지한다.
+# pill 이 쓰던 12.5px 도 DESIGN §1.2 네 단계(24·20·14·12) 밖이었다.
 
 
 # ---------------------------------------------------------------------------
@@ -1496,61 +1446,78 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str = "", *,
         # 서던 것을 없앤다(근무형태 코드 108 · 조직 코드 108 과 동일).
         # 좁은 폭에서 가로 스크롤될 때 신원(사번)이 사라지지 않도록 좌측 고정한다 —
         # 근무형태 관리 코드 열과 같은 계약(첫 열이라 열 순서는 바뀌지 않는다).
-        "사번": {"width": 108, "minWidth": 96, "pinned": "left", "cellClass": "md-c-left",
+        # ── 열 폭 = 12px Pretendard 기준 역산(2026-08-19 재산정) ──
+        # 종전 값은 셀 14.5px·헤더 12.5px(맑은고딕 폴백) 기준이라 전부 과대했다. DESIGN §1.2
+        # 개정으로 표 셀·헤더가 모두 12px 이 되었다.
+        #   필요폭 = max(값 실측 최대 잉크, 헤더 실측 잉크) + 16 → 4의 배수로 올림
+        #   16 = 셀 좌우 패딩 7+7 + 보더 2(헤더 8+8). 잉크는 iframe 안 hidden span 실측이고,
+        #   측정값에 5% 여유를 얹었다 — 그리드 iframe 이 지금은 Pretendard 를 못 받아
+        #   sans-serif 폴백(한글 10.53px/자)으로 그려지므로, 글꼴이 정상화되면(11.04px/자)
+        #   폴백 기준 폭은 그대로 잘린다.
+        # **지정 폭은 고정폭이 아니라 비율이다** — 아래 grid_options 의 fitGridWidth 가 남는
+        # 폭을 이 비율대로 나눈다. 그래서 flex 를 쓰지 않는다(flex 는 남는 폭을 한 열에 몰아
+        # 준다: 종전 이메일 열은 값이 0건인데 198px 로 표에서 두 번째로 넓었다).
+        # maxWidth 는 넓혀도 담을 것이 없는 열(체크박스·고정 서식 날짜·순서)에만 건다.
+        #
+        # minWidth = width: fitGridWidth 는 뷰포트가 좁으면 열을 **minWidth 까지 줄여서**
+        # 맞춘다(실측 390px: 코드명 120→96 으로 눌려 값이 잘렸다). 역산한 필요폭이 곧
+        # 하한이므로 둘을 같은 값으로 둔다 — 좁은 폭에서는 줄이지 말고 가로 스크롤한다.
+        # 사번 60 — 표본은 4자리('9001' 26.7)지만 이 열은 pinned 라 남는 폭 분배에서 자랄
+        # 여지가 없고, 6자리 사번(43.2)까지는 잘리지 않아야 하므로 43.2+16 으로 잡는다.
+        "사번": {"width": 60, "minWidth": 60, "pinned": "left", "cellClass": "md-c-left",
                 "editable": _EDIT_NEW_ONLY,
                 "cellClassRules": _cell_rules("사번", readonly=_IS_PROTECTED_JS)},
-        # §1-E·H1 본문 14.5px — 공용 GRID_CSS(.ag-cell)가 이미 14.5px 이며, 아래 읽기 컬럼의
-        # cellStyle fontSize 14.5px 는 동일값 명시(중복이나 무해). 사번/표시순서 등 별도 지정이
-        # 없는 열도 공용 GRID_CSS 14.5px 를 그대로 따른다(더는 13px/13.5px 특례 없음).
-        "성명": {"width": 114, "minWidth": 96, "cellClass": "md-c-left",  # 명칭 열 공통 114
+        # 성명 104 = 이름 + 상태 배지 union 실측 최대 80.13×1.05 + 16.
+        "성명": {"width": 104, "minWidth": 104, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED,
-                "cellStyle": {"fontSize": "14.5px"},
                 "cellRenderer": _NAME_STATUS_RENDERER,
                 "cellClassRules": _cell_rules("성명", readonly=_IS_PROTECTED_JS)},
-        "부서": {"flex": 1, "minWidth": 140, "cellClass": "md-c-left ms-cell-select",
+        # 부서 216 = 'PET생산부(원료실)· PET2'(부서명 + 조 보조라벨) 실측 170.14×1.05 + 16
+        # + ▾ 표식 자리 14(.ms-cell-select::after 가 right:8px 에 겹친다). 이 화면에서 가장
+        # 긴 값이고 행을 특정하는 소속 정보라 상한을 두지 않는다.
+        "부서": {"width": 216, "minWidth": 216, "cellClass": "md-c-left ms-cell-select",
                 "editable": _EDIT_UNLESS_PROTECTED,
-                "cellStyle": {"fontSize": "14.5px"},
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": _dept_option_values(state)},
                 "cellRenderer": _dept_renderer(hint_json),
                 "cellClassRules": _cell_rules("부서", readonly=_IS_PROTECTED_JS)},
-        "직급": {"width": 78, "minWidth": 66, "cellClass": "md-c-left",
+        # 직급 60 = '파트장' 40.03×1.05 + 16.
+        "직급": {"width": 60, "minWidth": 60, "cellClass": "md-c-left",
                 "editable": _EDIT_UNLESS_PROTECTED,
-                "cellStyle": {"fontSize": "14.5px"},
                 "cellClassRules": _cell_rules("직급", readonly=_IS_PROTECTED_JS)},
-        # 권한 = §1-E pill 렌더러(관리자/조장/조원, §2 팔레트) + select 편집(더블클릭). 편집 계약 보존.
-        "권한": {"width": 92, "minWidth": 80, "cellClass": "md-c-center ms-cell-select",
+        # 권한 68 = '관리자' 평문 33.13×1.05 + 16 + ▾ 자리 14 (pill 패딩 22 제거분 반영).
+        "권한": {"width": 68, "minWidth": 68, "cellClass": "md-c-center ms-cell-select",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": list(_LABEL_TO_ROLE)},
-                "cellRenderer": _ROLE_PILL_RENDERER,
                 "cellClassRules": _cell_rules("권한", readonly=_IS_PROTECTED_JS)},
-        # 이메일(010 user_emails, scope=ALL 대표 1건) — 부서와 함께 남는 폭을 나눠 갖는다.
-        # 스키마 미준비·조회 실패면 editable=False + 읽기전용 틴트로 내려, 모르는 값을
-        # 빈 값으로 덮어쓰는 저장을 원천 차단한다(저장 경로도 같은 사유로 skip).
-        EMAIL_COL: {"flex": 1.15, "minWidth": 150, "cellClass": "md-c-left",
+        # 이메일(010 user_emails, scope=ALL 대표 1건) — 스키마 미준비·조회 실패면
+        # editable=False + 읽기전용 틴트로 내려, 모르는 값을 빈 값으로 덮어쓰는 저장을 차단한다.
+        # 폭 52 = 헤더 '이메일' 33.13×1.05 + 16. sample 에 값이 0건이라 역산 재료가 이 화면
+        # 안에 없어 **헤더 하한**만 쓴다(종전 flex 1.15 는 값 0건인 열을 198px 로 만들었다).
+        # 남는 폭은 fitGridWidth 가 비례로 얹어 주고, 실데이터가 들어오면 다시 재서 갱신한다.
+        EMAIL_COL: {"width": 52, "minWidth": 52, "cellClass": "md-c-left",
                 "editable": (_EDIT_UNLESS_PROTECTED if email_editable else False),
-                "cellStyle": {"fontSize": "14.5px"},
                 "cellRenderer": _email_renderer(email_extra_json),
                 "cellClassRules": _cell_rules(
                     EMAIL_COL,
                     readonly=(_IS_PROTECTED_JS if email_editable else "true"))},
-        # 입사일/퇴사일(009) — 자유 타이핑(YYYY-MM-DD 등), 저장 시 _clean_date 로 정규화.
-        # 퇴사일이 지나면 로그인 차단 + 편성 명단 숨김(판정은 db.is_resigned).
-        "입사일": {"width": 96, "minWidth": 88, "cellClass": "md-c-center ms-num",
+        # 입사일/퇴사일 84 = 'YYYY-MM-DD' 고정 서식(숫자 8×7.2 + '-' 2 + 16). 서식이 고정이라
+        # 넓혀도 담을 것이 없어 maxWidth 로 묶는다. 값 자체는 자유 타이핑 후 _clean_date 정규화.
+        "입사일": {"width": 84, "minWidth": 84, "maxWidth": 84, "cellClass": "md-c-center ms-num",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellClassRules": _cell_rules("입사일", readonly=_IS_PROTECTED_JS)},
-        "퇴사일": {"width": 96, "minWidth": 88, "cellClass": "md-c-center ms-num",
+        "퇴사일": {"width": 84, "minWidth": 84, "maxWidth": 84, "cellClass": "md-c-center ms-num",
                 "editable": _EDIT_UNLESS_PROTECTED,
                 "cellClassRules": _cell_rules("퇴사일", readonly=_IS_PROTECTED_JS)},
-        "표시순서": {"width": 74, "minWidth": 68, "maxWidth": 110, "cellClass": "md-c-center ms-num",
-                 "editable": _EDIT_UNLESS_PROTECTED,  # 순서 열 공통 74(헤더 46px + 패딩 16)
+        # 표시순서 64 = 헤더 44.17×1.05 + 16(값은 3자리 이하 정수라 헤더가 지배). 상한 고정.
+        "표시순서": {"width": 64, "minWidth": 64, "maxWidth": 64, "cellClass": "md-c-center ms-num",
+                 "editable": _EDIT_UNLESS_PROTECTED,
                  "cellClassRules": _cell_rules("표시순서", readonly=_IS_PROTECTED_JS)},
-        # 재직 = §1-E pill 렌더러(재직/퇴직, §2 팔레트) + 불리언 체크박스 편집(더블클릭). 값은 그대로
-        # 반환되어 is_active 저장·2단계 삭제(퇴직) 경로 불변(pill 은 display-only).
-        "재직": {"width": 72, "minWidth": 66, "cellClass": "md-c-center",  # 사용 여부 토글 공통 72
+        # 재직 40 = 헤더 '재직' 22.09×1.05 + 16(체크박스 16px). bool 열이라 공용 native
+        # 체크박스로 표시·편집하며(특근수당 등과 동일), 상태 텍스트는 성명 열 '퇴직' 배지가 맡는다.
+        "재직": {"width": 40, "minWidth": 40, "maxWidth": 40, "cellClass": "md-c-center",
                 "editable": _EDIT_UNLESS_PROTECTED,
-                "cellRenderer": _ACTIVE_PILL_RENDERER,
                 "cellClassRules": _cell_rules("재직", readonly=_IS_PROTECTED_JS)},
     }
     nrows = len(state.get_rows()) if state.get_rows() is not None else 0
@@ -1559,6 +1526,11 @@ def _grid_spec(state: DraftState, hint_json: str, teams_json: str = "", *,
     return MasterGridSpec(
         page_id=PAGE_ID, columns=_GRID_COLUMNS, order=_USER_COLS, col_config=col_config,
         select_all=True, height=master_grid_height(nrows), row_class_rules=row_rules,
+        # autoSizeStrategy: 지정 폭을 **비율**로 삼아 남는 가로 폭을 비례 분배한다. 없으면
+        # flex 를 뺀 순간 표가 뷰포트보다 좁게 서서 "화면보다 작은 표"가 된다(실측 1440:
+        # 열 폭 합 894 vs 그리드 뷰포트 1167). 공용 views/master/grid.py 에 두는 것이 옳지만
+        # 그 파일은 이번 작업 범위 밖이라 화면별 grid_options 로 얹는다(3화면 동일 — 보고 대상).
+        grid_options={"autoSizeStrategy": {"type": "fitGridWidth"}},
         # rowHeight 는 공용 기본값(views/master/grid.py `_GRID_ROW_PX`=40)을 쓴다. 화면에서
         # 42 로 덮으면 ① 조직 관리(40)와 행 높이가 어긋나고 ② 높이 계산(master_grid_height)이
         # 40 기준이라 행마다 2px 씩 모자라 불필요한 내부 스크롤이 생긴다(2026-08-14 재검수).

@@ -62,7 +62,7 @@ _MONTH_PICKER = partial(
        (§1.1 예외 — 사유: 선택 줄이 컬럼 정중앙에 오려면 여백이 정확히 정수 행이어야
        하고, JS 의 scrollTop 계산도 같은 행 높이를 쓴다). */
     #duty-month-wheel { --wheel-row:44px; min-height:var(--wheel-row); font-size:14px;
-      font-family:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",-apple-system,sans-serif; }
+      font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif,-apple-system,sans-serif; }
     /* 월 이동은 이 화면의 주 내비게이션이라 히트영역 우선순위가 가장 높다 → 세 버튼 모두
        44px 이상. 폭에는 고정 숫자를 주지 않는다: 좌우는 히트영역 하한이, 가운데는 아래
        ghost 라벨(표기 최대 길이)이 정한다. */
@@ -226,7 +226,7 @@ def _styles() -> str:
 .my-total { display:inline-flex; align-items:baseline; gap:4px; white-space:nowrap; }
 .my-total .dot { width:8px; height:8px; border-radius:2px; align-self:center; flex:0 0 auto; }
 .my-total .lab { font-size:12px; color:#6b665d; }
-.my-total .val { font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600;
+.my-total .val { font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:14px; font-weight:600;
   color:#1c1a17; font-variant-numeric:tabular-nums; }
 /* 표시 방식(약칭/명칭) 전환.
    높이 — §3.4 가 이 화면을 "모바일 우선 = 밀도 cozy"로 지목하므로 44px 이상(§1.4).
@@ -296,7 +296,7 @@ def _styles() -> str:
 /* 날짜 숫자 = 모노 수치(컨텍스트 줄 .se-ctx .num / .sv-ctx .num 과 같은 역할) → §1.2
    label 12px/600 모노. 선택자를 .my-day .my-date(0,2,0)로 올린다 — 단일 클래스(0,1,0)로는
    마크다운 컨테이너 본문 글꼴 규칙에 져서 모노가 sans 로 렌더됐다(2026-08-14 실측). */
-.my-day .my-date { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
+.my-day .my-date { font-family:"Pretendard","Malgun Gothic",-apple-system,sans-serif; font-size:12px; font-weight:600;
   color:#6b665d; line-height:1; font-variant-numeric:tabular-nums; }
 .my-day.is-sat .my-date { color:#2f4d99; } .my-day.is-sun .my-date { color:#9c3232; }
 /* 근무형태 표시값 = 표 본문 역할 → §1.2 body 14px(굵기만 600 으로 올려 셀 안에서 값을

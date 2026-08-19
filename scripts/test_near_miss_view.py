@@ -110,7 +110,7 @@ def test_scope_for() -> None:
 
 
 def test_to_display() -> None:
-    print("_to_display (8열 표시 변환)")
+    print("_to_display (9열 표시 변환)")
     orig_get_users = db.get_users
     orig_get_departments = db.get_departments
     db.get_users = lambda *a, **k: _USERS_DF  # type: ignore[assignment]
@@ -158,7 +158,8 @@ def test_to_display() -> None:
         check(
             "출력 열 집합·순서 고정(확정 지시 순서 — 상태가 제일 우측)",
             list(out.columns) == [
-                "보고번호", "발생일", "원인", "작업명", "소속", "신고자", "등급", "상태",
+                "보고번호", "발생일", "원인", "작업명", "사고내용", "소속", "신고자",
+                "등급", "상태",
             ],
         )
         check("상태는 마지막 열", list(out.columns)[-1] == "상태")
@@ -168,32 +169,43 @@ def test_to_display() -> None:
               "제안등급" not in out.columns)
         check("등급 열은 confirmed_grade 만 싣는다(제안 값이 새지 않음)",
               out.iloc[0]["등급"] == "A")
-        check("표시 열 목록도 8열(_DISPLAY_COLUMNS)", nmv._DISPLAY_COLUMNS == list(out.columns))
+        check("표시 열 목록도 9열(_DISPLAY_COLUMNS)", nmv._DISPLAY_COLUMNS == list(out.columns))
+        # 2026-08-19: 사고내용 추가 — 행을 특정하는 서술 값이 없어 목록이 읽히지 않았다.
+        check("사고내용 열 존재(작업명 바로 뒤)",
+              list(out.columns).index("사고내용") == list(out.columns).index("작업명") + 1)
         check("모든 표시 열에 폭 지정(_COL_CONFIG)",
               all(c in nmv._COL_CONFIG for c in nmv._DISPLAY_COLUMNS))
         check("폐기 열의 폭 설정도 제거(빈 자리 없음)",
               "제안등급" not in nmv._COL_CONFIG and "확정등급" not in nmv._COL_CONFIG)
-        # ── 폭 계약(2026-08-18 확정 지시) — 내용 역산 고정폭, flex 금지 ──
-        # "남는 가로 폭을 flex 로 아무 열에나 흡수시키지 마라. 남으면 남긴다."
-        check("잔여 폭 흡수(flex) 열 없음 — 전부 고정폭",
+        # ── 폭 계약 ── 2026-08-18 "flex 로 한 열에 몰아주지 마라"는 유효하다.
+        # 2026-08-19 추가: 지정 폭은 고정폭이 아니라 **비율**이다 — kit 의
+        # autoSizeStrategy fitGridWidth 가 남는 폭을 각 열의 지정 폭에 비례해
+        # 나눠 주므로 열 사이 비중(내용에서 나온 비중)이 유지된다. flex 지정은
+        # 여전히 금지다(한 열만 커지는 원인).
+        check("잔여 폭 흡수(flex) 열 없음",
               not any("flex" in cfg for cfg in nmv._COL_CONFIG.values()))
         check("모든 열이 명시 width 보유",
               all("width" in cfg for cfg in nmv._COL_CONFIG.values()))
-        # 값/헤더 실폭(2026-08-18 실렌더 계측, 셀 14.5px / 헤더 12.5px·600)에 셀 크롬 16px
-        # (패딩 7+7 **및 좌우 1px 보더** — 실측)을 더해 4의 배수로 올린 값.
+        # 값/헤더 실폭(2026-08-19 실렌더 계측, 셀·헤더 12px Pretendard: 한글 11.04 /
+        # 숫자 7.2 px per 자)에 셀 크롬 16px(패딩 7+7 및 좌우 1px 보더)을 더해 4의
+        # 배수로 올린 값. §1.2 개정으로 표가 14.5px→12px 이 되어 전면 재역산했다.
         check("열 폭 = 값 최대 길이 역산값",
               {c: cfg["width"] for c, cfg in nmv._COL_CONFIG.items()} == {
-                  "보고번호": 108,   # 89.3(YYYYMM-NNNN 11자 모노) + 16
-                  "발생일": 92,     # 74.2(ISO 10자) + 16
-                  "원인": 72,       # 53.4('미끄러짐' 4자) + 16
-                  "작업명": 172,    # 153.6('3라인 컨베이어 벨트 점검' 14자·가정) + 16
-                  "소속": 136,      # 117.9('PET생산부(원료실)') + 16
-                  "신고자": 72,     # 53.4(성명 4자·가정) + 16
-                  "등급": 44,       # 값 1자라 헤더('등급' 23) + 16 이 폭을 정한다
-                  "상태": 72,       # 53.4('평가완료' 4자) + 16
+                  "보고번호": 88,    # 70.4(YYYYMM-NNNN 11자) + 16
+                  "발생일": 80,     # 61.6(ISO 10자) + 16
+                  "원인": 64,       # 44.2('미끄러짐' 4자) + 16
+                  "작업명": 144,    # 12자분(132) + 16 · 자유 입력이라 가정
+                  "사고내용": 400,  # 자유 서술 — 비중 최대(2026-08-19 상향), 넘치면 말줄임
+                  "소속": 116,      # 96.2('PET생산부(원료실)') + 16
+                  "신고자": 64,     # 성명 4자 여유
+                  "등급": 40,       # 값 1자라 헤더('등급' 22.1) + 16 이 폭을 정한다
+                  "상태": 64,       # 44.2('평가완료' 4자) + 16
               })
-        check("표 폭 합계 768(1440 뷰포트 표 가용폭 1167 → 우측 399px 는 남긴다)",
-              sum(cfg["width"] for cfg in nmv._COL_CONFIG.values()) == 768)
+        check("폭 비율 합 1060(fitGridWidth 가 이 비율로 남는 폭을 나눈다)",
+              sum(cfg["width"] for cfg in nmv._COL_CONFIG.values()) == 1060)
+        check("등급만 maxWidth 로 묶음(값 1자라 비례 확대 무의미)",
+              nmv._COL_CONFIG["등급"].get("maxWidth") == 64
+              and not any("maxWidth" in c for k, c in nmv._COL_CONFIG.items() if k != "등급"))
         check("4행 유지(입력 행수 보존)", len(out) == 4)
 
         row1 = out.iloc[0]
@@ -283,8 +295,10 @@ def test_vocabulary_and_status_effect() -> None:
     check("사진 오버라인도 모노·자간 제거(한글 '사진')",
           "monospace" not in inspect.getsource(nmv._photo_overline).split('"""')[-1]
           and "letter-spacing" not in inspect.getsource(nmv._photo_overline).split('"""')[-1])
-    check("영숫자 전용 표기(보고번호 셀)는 모노 유지",
-          "Mono" in str(nmv._COL_CONFIG["보고번호"]["cellStyle"]))
+    # §1.2(2026-08-19): 모노 서체 폐지 — 글꼴은 Pretendard 하나다. 자릿수 정렬은
+    # tabular-nums 가 담당하므로 보고번호에 별도 서식을 두지 않는다.
+    check("보고번호 셀에 모노 서식 없음(§1.2 모노 폐지)",
+          "Mono" not in str(nmv._COL_CONFIG["보고번호"].get("cellStyle", {})))
 
     # ── §3.6: 조회 조건 라벨도 정본(폭 140 — 축약 불필요) ──
     cond_src = inspect.getsource(nmv._collect_conditions)
