@@ -2,6 +2,17 @@
 
 이 파일은 다음 작업자가 현재 상태를 빠르게 확인하기 위한 짧은 기록입니다. 미결 추적은 `docs/BACKLOG.md`가 정본입니다.
 
+## 2026-08-19 · 야간 자율 라운드 — 아차사고 5요청 + Codex 교차감사 2회 + 타이포 마감 (커밋 5개 푸시)
+
+- **가장 먼저 알 것**: 오늘 낮 요청 5건 중 아차사고 4건이 `f1f359a` 로 커밋·푸시·배포됐고, 야간에 Codex 교차감사 2회분(F1·F2, r2 P1-1·P1-2)을 반영해 `605507b` 까지 나갔다. 회귀 37/37, 신규 계약 테스트 `test_near_miss_revision_resubmit.py` 150 checks.
+- **보완요청 재제출 흐름**(`f1f359a`): 새 DB 상태값 없이 revision 3필드(007)로 '보완요청' 라벨 파생(`views/common/near_miss.py` 신설), `db.resubmit_near_miss`(본인·SUBMITTED·미해소 요청 서버 게이트), 평가 착수 폐지(SUBMITTED 에서 곧장 보완요청/반려/평가확정), 조회에 개선조치 상태 열(청크 일괄조회).
+- **보완요청 정합 규칙 확립**(Codex 감사 반영, `f1f359a`+`605507b`): ①미해소 보완요청은 SUBMITTED 에서만 존재 — SUBMITTED 를 떠나는 쓰기(평가확정/반려)가 3필드를 같은 UPDATE 에서 해제(재개 시 옛 사유 부활 차단) ②모든 보고서 쓰기(본문 수정 포함)가 읽은 시점의 `revision_requested_at` 을 조건으로 고정(`_pin_revision`/sample CAS 동형) — 경합 lost update 차단 ③007 probe 는 3-state: NOT_READY 만 조건 생략, PROBE_ERROR 는 쓰기 차단(fail-closed).
+- **타이포 마감**(`5c15073`): 정적 스캔 잔존 44건 → 0건(스케일 밖 크기 36·굵기 8·죽은 IBM Plex Mono 선언 4 — @import 폐지 후 시스템 monospace 로 폴백되던 실결함). 옛 10.5px 를 '불변'으로 고정하던 테스트 2건을 §1.2 기준으로 갱신. **병행 세션 소유 `proto.py`·lodging 4종은 제외**(BACKLOG 신규 항목).
+- **AgGrid iframe 폭 박제 해소**(`069d5d6`): Streamlit 이 컴포넌트 iframe 폭을 렌더 시점 값으로 고정해 창 축소·줌·사이드바 펼침 시 우측 열이 스크롤바 없이 잘렸다(실측 1216 vs 1501px). `width:100% !important` 로 컨테이너 추종. `test_sidebar_ui` S-02 를 '그림자 선택자 PC 유출 금지' 의도로 정밀화.
+- **실화면 QA**(8531 sample 프리뷰 러너, 쿼리 파라미터+사이드바 전환으로 세션 유지): 아차사고 6화면·대시보드(ADMIN/USER)·내 근무표·근무표 편성(부서 컬럼 제거 확인)·기준정보 3화면. 보완요청→재제출 흐름을 실클릭으로 통과, 가짜 사번 fail-closed 실확인.
+- **배포**: Cloud 리부트 후 Pretendard 실전송 확인(앱 iframe html 14px·jsDelivr 200/613KB·FontFace 828 등록). 이후 푸시 4회가 자동 재배포.
+- **남은 결정(사용자)**: ⑥-b 평가 행렬(빈도×강도) migration 012 초안(스크래치) 실행 여부, 사원 이메일 98건 적재(+사번 미상 20건), 문서번호 어휘 통일, 재제출 시 본문 변경 강제 여부(F3), `secrets.toml [supabase] test_project` 플래그 정리, 저장소 루트 `govern.txt`/`secgap.txt` 처분.
+
 ## 2026-08-18 · 설계 기준 재수립 — DESIGN.md 전면 재작성 (문서·규약만, **화면 코드 무변경**)
 
 - **가장 먼저 알 것**: 오늘 바뀐 건 **기준과 문서**다. 22개 화면 중 골격이 바뀐 것은 **0개**다. `DESIGN.md` §5는 **측정 게이트만 부분 실행**했다(실렌더 4화면 × 3폭 — 아래 "실렌더 검증" 항목). 기계·사람 게이트는 여전히 미실행이다. 목업은 전부 정적 HTML(OS temp)이라 `.orca/PLAYBOOK.md`의 "실렌더 프로토타입 기본" 규율을 따르지 않았다 — 구현 단계에서 전환해야 한다.
