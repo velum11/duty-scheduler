@@ -164,9 +164,13 @@ _MU_CSS = """
 </style>
 """
 
-# 이메일 열이 조회 전용으로 내려가는 사유(스키마 미준비 / 조회 실패) 안내.
+# 이메일 열이 조회 전용으로 내려가는 사유(저장소 미준비 / 확인 불가 / 조회 실패) 안내.
+# 미준비와 "확인하지 못함"을 구분한다 — 후자는 일시 장애라 재시도로 풀린다.
 _EMAIL_NOT_READY_MSG = (
-    "담당 권한·알림 이메일 스키마가 아직 준비되지 않았습니다"
+    "담당 권한·알림 이메일 저장소가 아직 준비되지 않았습니다"
+)
+_EMAIL_PROBE_ERROR_MSG = (
+    "담당 권한·알림 이메일 저장소 상태를 확인하지 못했습니다(일시 장애). 잠시 후 다시 시도하세요"
 )
 
 
@@ -300,7 +304,10 @@ def _email_map(emp_nos) -> tuple[dict[str, str], dict[str, int], str]:
     emps = [str(e).strip() for e in (emp_nos if emp_nos is not None else []) if str(e).strip()]
     if not emps:
         return primary, extra, ""
-    if not db.capabilities_ready():
+    probe = db.capabilities_probe()
+    if probe == db.READINESS_PROBE_ERROR:
+        return {}, {}, _EMAIL_PROBE_ERROR_MSG
+    if probe != db.READINESS_READY:
         return {}, {}, _EMAIL_NOT_READY_MSG
     try:
         # 목록 1회 조회(사번당 2회 왕복하던 N+1 제거). 값·오류 계약은 단건과 동일하다.
@@ -1320,11 +1327,17 @@ def _render_capability_editor(user: dict, existing: pd.DataFrame) -> None:
         return
     if existing.empty or not config.CAPABILITIES:
         return
-    ready = db.capabilities_ready()
+    probe = db.capabilities_probe()
 
     with st.expander("담당 권한·알림 이메일", expanded=False):
-        if not ready:
-            st.warning("담당 권한 스키마가 아직 준비되지 않아 조회·저장할 수 없습니다.")
+        # 미준비(저장소 없음)와 확인 불가(일시 장애)를 구분해 안내한다 — 후자를 '없음'으로
+        # 덮으면 담당 지정이 사라진 것처럼 보인다(오류 은폐 금지).
+        if probe == db.READINESS_PROBE_ERROR:
+            st.error("담당 권한 저장소 상태를 확인하지 못했습니다(일시 장애). "
+                     "잠시 후 다시 시도하세요.")
+            return
+        if probe != db.READINESS_READY:
+            st.warning("담당 권한 저장소가 아직 준비되지 않아 조회·저장할 수 없습니다.")
             return
         st.caption(
             "업무별 담당(숙소관리·업무요청 등)을 지정하고, 접수·상태·결과 알림을 받을 "
@@ -1338,7 +1351,13 @@ def _render_capability_editor(user: dict, existing: pd.DataFrame) -> None:
         target_emp = str(picked).split(" · ", 1)[0].strip()
 
         cap_labels = {code: label for code, label in config.CAPABILITIES.items()}
-        current_caps = db.get_user_capabilities(target_emp)
+        try:
+            current_caps = db.get_user_capabilities(target_emp)
+            current_emails = db.get_user_emails(target_emp)
+        except db.DATA_SOURCE_ERRORS as exc:
+            # 조회 실패를 '담당 없음'으로 그리지 않는다 — 그 화면에서 저장하면 지정이 지워진다.
+            st.error(f"담당 권한·이메일을 불러오지 못했습니다: {exc}")
+            return
         sel_caps = st.multiselect(
             "담당 권한", options=list(cap_labels),
             default=[c for c in current_caps if c in cap_labels],
@@ -1347,7 +1366,6 @@ def _render_capability_editor(user: dict, existing: pd.DataFrame) -> None:
         )
 
         scope_label = {config.EMAIL_SCOPE_ALL: "전체"} | cap_labels
-        current_emails = db.get_user_emails(target_emp)
         email_frame = pd.DataFrame(
             current_emails or [], columns=["email", "scope"]
         ).rename(columns={"email": "이메일", "scope": "수신 범위"})

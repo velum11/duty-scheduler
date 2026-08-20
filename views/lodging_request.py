@@ -16,8 +16,9 @@
   처리한다(콜백은 렌더 전에 실행되므로 화면에는 항상 정합한 선택만 남는다).
 - 신원(신청자·사번·소속)은 위젯이 아니라 세션 사용자에서 서버측 확정한다(위조 방지).
 
-프로토타입 범위: 저장은 ``modules/lodging_data`` (로컬 파일 영속)이며 라우팅·Supabase 는
-후속 통합 작업 소관이다(§2 — 미라우팅 프로토타입, 검증 대상 제외).
+저장·조회는 ``modules/db`` 파사드가 소유한다(sample/supabase 공통). 검증·중복 판정·
+상태 전이 규칙은 ``modules/lodging_data`` 의 순수 함수가 유일한 출처이며, 파사드가
+쓰기 직전 같은 함수로 서버측에서 다시 판정한다(화면 판정은 표시용 보조일 뿐이다).
 """
 # DESIGN.md §0 — 이 화면이 내리는 결정.
 SCREEN_ARCHETYPE = "FORM_ENTRY"
@@ -29,6 +30,7 @@ from html import escape
 
 import streamlit as st
 
+from modules import db
 from modules import lodging_data as ld
 from modules import mailer
 from views.common import erp, proto, scaffold
@@ -77,9 +79,10 @@ def render(user: dict) -> None:
         return
 
     try:
-        lodgings = ld.load_lodgings(include_inactive=False)
-        reservations = ld.load_reservations()
-    except ValueError as exc:
+        lodgings = db.get_lodgings().to_dict("records")
+        # 점유 표시용 목록 — 신원은 파사드가 담당자·본인 기준으로만 내려준다(서버측 마스킹).
+        reservations = db.get_lodging_reservations(current_user=user).to_dict("records")
+    except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
         banner("danger", str(exc))
         return
 
@@ -363,11 +366,11 @@ def _persist(payload: dict, user: dict) -> None:
     그 외 검증 실패는 기존 배너 패턴 그대로다.
     """
     try:
-        record = ld.create_reservation(payload, current_user=user)
+        record = db.create_lodging_reservation(payload, current_user=user)
     except ld.ReservationConflict as exc:
         _conflict_dialog(str(exc))
         return
-    except ValueError as exc:
+    except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
         ledger_banner(PersistResult.failure(_PAGE_ID, ["예약 신청"], str(exc), retryable=True))
         return
     except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).
@@ -376,14 +379,27 @@ def _persist(payload: dict, user: dict) -> None:
         return
 
     period = ld.period_label(record)
-    lodging = ld.lodging_label(ld.lodging_map().get(ld.clean(record.get("lodging_code"))))
-    # 접수 저장 성공 후 담당자 알림 — 발송 결과가 접수를 되돌리지 않는다(mailer 계약).
-    mail = mailer.notify_lodging_requested(record, lodging_label=lodging, period_label=period)
+    lodging = ld.lodging_label(db.lodging_map().get(ld.clean(record.get("lodging_code"))))
+    # 접수 저장 성공 후 **담당자(LODGING_OFFICER) 이메일**로 알린다 — 고정 수신자 대신
+    # 담당 지정과 같은 축을 쓴다(2026-08-20 결정). 발송 결과가 접수를 되돌리지 않는다.
+    # 수신자를 구하지 못하면(담당 미지정·주소 미등록·조회 실패) 침묵하지 않고 사유를 남겨
+    # 완료 화면이 "알림은 못 갔다"를 분명히 알린다.
+    try:
+        recipients = db.notification_recipients("LODGING_OFFICER")
+        recipients_error = ""
+    except db.DATA_SOURCE_ERRORS as exc:
+        recipients, recipients_error = [], str(exc)
+    mail = None
+    if recipients:
+        mail = mailer.notify_lodging_requested(
+            record, lodging_label=lodging, period_label=period, recipients=recipients,
+        )
     st.session_state[_DONE_KEY] = {
         "request_no": ld.clean(record.get("request_no")),
         "period": period,
         "lodging": lodging,
         "mail": mail,
+        "mail_reason": recipients_error or ("" if recipients else "no_recipients"),
     }
     st.rerun()
 
@@ -395,10 +411,16 @@ def _render_post_submit(done: dict) -> None:
     banner("success",
            f"예약을 신청했습니다. 신청번호 {request_no} · {done.get('lodging')} · "
            f"{done.get('period')} · 상태 신청(REQUESTED)")
+    reason = ld.clean(done.get("mail_reason"))
     if done.get("mail") is True:
-        proto.note_line("승인 담당자에게 접수 알림 메일을 발송했습니다.")
+        proto.note_line("숙소관리 담당자에게 접수 알림 메일을 발송했습니다.")
     elif done.get("mail") is False:
         banner("warn", "신청은 완료됐지만 담당자 알림 메일 발송에 실패했습니다. 담당자에게 별도로 알려주세요.")
+    elif reason == "no_recipients":
+        banner("warn", "신청은 완료됐지만 알림을 받을 숙소관리 담당자 주소가 없어 메일을 보내지 못했습니다. "
+                       "담당자에게 직접 알리고, 관리자에게 담당 지정·알림 이메일 등록을 요청하세요.")
+    elif reason:
+        banner("warn", f"신청은 완료됐지만 담당자 알림 대상을 확인하지 못했습니다 — {reason}")
     proto.note_line("승인 결과 확인과 수정·취소는 '내 숙소 예약'에서 합니다.")
     if st.button("새 예약 신청", key="lr_done_new", icon=":material/add:"):
         for key in _FORM_KEYS:

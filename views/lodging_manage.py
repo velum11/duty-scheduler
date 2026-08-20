@@ -15,11 +15,14 @@
   승인 건 [취소·사용완료], 종결 건 없음. 조건 미충족(의견 필요·체크아웃 전·겹침)은
   비활성 + 사유를 바 아래 줄에 쓴다(툴팁 단독 금지). 부정 액션(취소·반려)은 부정
   의미 색 버튼이다(같은 색 버튼 4개 나열 금지의 색 축 분리).
-- 승인권자 전용(역할 판정은 ``lodging_data.can_approve`` — 확정 시 담당 지정으로 교체).
+- 승인권자 전용 — **숙소관리 담당자만**(``lodging_data.can_approve`` →
+  ``auth.can_approve_lodging``). role 은 판정에 들어가지 않으며, 파사드가 쓰기 직전
+  사번으로 담당을 권위 재조회해 다시 막는다(화면 게이트는 첫 관문일 뿐이다).
 - 처리 실행·사유 필수·겹침 백스톱 판정은 ``run_action``/``action_blocker`` 서버측 소유.
 
-프로토타입 범위: 저장은 ``modules/lodging_data`` (로컬 파일 영속)이며 라우팅·Supabase 는
-후속 통합 작업 소관이다(§2 — 미라우팅 프로토타입, 검증 대상 제외).
+저장·조회는 ``modules/db`` 파사드가 소유한다(sample/supabase 공통). 검증·중복 판정·
+상태 전이 규칙은 ``modules/lodging_data`` 의 순수 함수가 유일한 출처이며, 파사드가
+쓰기 직전 같은 함수로 서버측에서 다시 판정한다(화면 판정은 표시용 보조일 뿐이다).
 """
 # DESIGN.md §0 — 이 화면이 내리는 결정.
 SCREEN_ARCHETYPE = "WORKLIST"
@@ -32,6 +35,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
+from modules import db
 from modules import lodging_data as ld
 from views.common import erp, proto, scaffold
 from views.master import DraftState, banner, empty_state, show_flash
@@ -83,14 +87,26 @@ def render(user: dict) -> None:
     )
     proto.inject()
     if not ld.can_approve(user):
+        # 담당 저장소를 확인하지 못한 상태를 '권한 없음'으로 뭉뚱그리지 않는다 —
+        # 전자는 일시 장애라 재시도로 풀리고, 후자는 담당 지정이 필요하다.
+        if db.capabilities_probe() == db.READINESS_PROBE_ERROR:
+            empty_state("승인 권한을 확인하지 못했습니다",
+                        "담당 권한 저장소 상태를 확인하지 못했습니다(일시 장애). "
+                        "잠시 후 다시 시도하세요.")
+            return
         empty_state("숙소 예약 승인 권한이 없습니다",
-                    "관리자·매니저만 예약을 승인·반려할 수 있습니다. 본인 예약은 '내 숙소 예약'에서 확인하세요.")
+                    "숙소관리 담당자로 지정된 사용자만 예약을 승인·반려할 수 있습니다. "
+                    "본인 예약은 '내 숙소 예약'에서 확인하세요.")
         return
-    show_flash(_STATE)
+    # 조건부 배너는 **상시 존재 컨테이너** 안에서만 그린다 — 최상위 요소 수가 run 마다
+    # 달라지면 Streamlit delta 경로가 밀려 직전 블록이 DOM 에 잔존한다(2026-08-13 편성
+    # 저장 후 공백 버그와 같은 유형, 2026-08-20 승인 직후 재현).
+    with st.container(key="lm_notice"):
+        show_flash(_STATE)
 
     try:
-        reservations = ld.load_reservations()
-    except ValueError as exc:
+        reservations = db.get_lodging_reservations(current_user=user).to_dict("records")
+    except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
         banner("danger", str(exc))
         return
 
@@ -176,7 +192,7 @@ def _render_table(queue: list[dict], scope: str, selected: str) -> str | None:
     선택 건의 근거·승인은 아래 처리 판이 소유한다. 패널 헤더 우측에 정렬 기준과 건수를
     적어 "왜 이 순서인지"를 말한다(§2 목록은 먼저 처리할 건을 고를 근거를 담는다).
     """
-    lodgings = ld.lodging_map()
+    lodgings = db.lodging_map()
     today = date.today()
     order = "신청일 오래된 순" if scope == SCOPE_PENDING else "체크인 최근 순"
     st.markdown(
@@ -232,7 +248,7 @@ def _detail(user: dict, reservations: list[dict], request_no: str) -> None:
                          "다른 사용자가 먼저 처리했을 수 있습니다 — 새로고침한 뒤 다시 선택하세요.")
         return
 
-    lodging = ld.lodging_map().get(ld.clean(row.get("lodging_code")))
+    lodging = db.lodging_map().get(ld.clean(row.get("lodging_code")))
     status = ld.clean(row.get("status"))
     with st.container(key="prcard_detail"):
         _detail_head(user, row, reservations, lodging, status)
@@ -246,8 +262,10 @@ def _detail(user: dict, reservations: list[dict], request_no: str) -> None:
                             unsafe_allow_html=True)
             with act_col:
                 _decision_input(row)
-        _conflict_notice(row, reservations)
-        _blocked_note(user, row, reservations)
+        with st.container(key="lm_conflict"):
+            _conflict_notice(row, reservations)
+        with st.container(key="lm_blocked"):
+            _blocked_note(user, row, reservations)
 
 
 def _detail_head(user: dict, row: dict, reservations: list[dict],
@@ -325,7 +343,7 @@ def _availability_html(row: dict, reservations: list[dict]) -> str:
     기간이 달을 넘기면 걸치는 달을 나란히 낸다(최대 2개 — 30박 상한이라 3개는 없다).
     """
     code = ld.clean(row.get("lodging_code"))
-    lodging = ld.lodging_map().get(code)
+    lodging = db.lodging_map().get(code)
     focus = set(ld.day_span(row))            # 숙박 밤(점유) — 반개구간
     if not focus:
         return "-"
@@ -394,7 +412,7 @@ def _gap_text(row: dict, reservations: list[dict]) -> str:
 
 def _tint_index(code: str) -> int:
     """숙소 코드 → 기준정보 순서 인덱스(색 축 고정 — 캘린더·신청 화면과 같은 배정)."""
-    codes = [ld.clean(l.get("lodging_code")) for l in ld.load_lodgings()]
+    codes = list(db.lodging_map())
     return codes.index(code) if code in codes else len(proto.LODGING_TINTS) - 1
 
 
@@ -411,8 +429,7 @@ def _edit_form(user: dict, row: dict) -> None:
     """신청(REQUESTED) 건의 일정 정정 폼 — 액션 바의 [일정 수정] 토글이 연다
     (``update_reservation`` 이 서버측에서 권한·상태를 재확인한다)."""
     no = ld.clean(row.get("request_no"))
-    lodgings = ld.load_lodgings(include_inactive=False)
-    by_code = {ld.clean(l.get("lodging_code")): l for l in lodgings}
+    by_code = db.lodging_map(include_inactive=False)
     codes = list(by_code)
     current_code = ld.clean(row.get("lodging_code"))
     with st.form(f"lm_edit_{no}", clear_on_submit=False):
@@ -434,12 +451,12 @@ def _edit_form(user: dict, row: dict) -> None:
     if not saved:
         return
     try:
-        ld.update_reservation(no, {"lodging_code": code, "check_in": check_in,
-                                   "check_out": check_out}, current_user=user)
+        db.update_lodging_reservation(no, {"lodging_code": code, "check_in": check_in,
+                                           "check_out": check_out}, current_user=user)
     except ld.ReservationConflict as exc:
         _conflict_dialog(str(exc))
         return
-    except ValueError as exc:
+    except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
         banner("danger", f"수정하지 못했습니다 — {exc}")
         return
     except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).
@@ -510,8 +527,9 @@ def _action_buttons(user: dict, row: dict, reservations: list[dict]) -> None:
         _run(clicked, request_no, user, comment)
     if st.session_state.get(_CONFIRM_KEY) == request_no:
         _cancel_dialog(row, user, comment)
-    if editable and st.session_state.get(edit_key):
-        _edit_form(user, row)
+    with st.container(key="lm_editslot"):
+        if editable and st.session_state.get(edit_key):
+            _edit_form(user, row)
 
 
 def _blocked_note(user: dict, row: dict, reservations: list[dict]) -> None:
@@ -536,7 +554,7 @@ def _cancel_dialog(row: dict, user: dict, comment: str) -> None:
     표시 계층의 오조작 방지일 뿐이며 권한·사유 필수 판정은 ``run_action`` 이 재확인한다.
     """
     request_no = ld.clean(row.get("request_no"))
-    place = ld.lodging_label(ld.lodging_map().get(ld.clean(row.get("lodging_code"))))
+    place = ld.lodging_label(db.lodging_map().get(ld.clean(row.get("lodging_code"))))
     banner("warn", f"예약을 취소하시겠습니까 — {request_no} · {place} · {ld.period_label(row)}.")
     proto.note_line("취소하면 되돌릴 수 없으며 해당 기간은 다른 사람이 예약할 수 있게 됩니다.")
     with st.container(horizontal=True, gap="small", vertical_alignment="center"):
@@ -554,8 +572,8 @@ def _run(action: str, request_no: str, user: dict, comment: str) -> None:
     """처리 실행 — 도메인 오류 문구는 그대로 노출하고, 그 외 예외는 원문을 감춘다."""
     label = ld.ACTION_LABELS.get(action, action)
     try:
-        ld.run_action(request_no, action, current_user=user, comment=comment)
-    except ValueError as exc:
+        db.run_lodging_action(request_no, action, current_user=user, comment=comment)
+    except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
         _STATE.set_flash("error", f"{label} 처리 실패 — {exc}")
         st.rerun()
     except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).

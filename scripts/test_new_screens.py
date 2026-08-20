@@ -42,7 +42,14 @@ FAIL: list[str] = []
 TODAY = date.today()
 D = lambda n: (TODAY + timedelta(days=n)).isoformat()  # noqa: E731
 
-APPROVER = {"emp_no": "2024TEST50", "name": "한매니저", "role": "MANAGER", "dept_code": "MGT"}
+# 승인권자는 **숙소관리 담당자(LODGING_OFFICER)** 뿐이다(2026-08-20 사용자 결정).
+# role 은 판정에 들어가지 않으므로 담당 클레임을 가진 일반 USER 가 승인권자이고,
+# MANAGER·ADMIN 은 담당 지정이 없으면 승인할 수 없다(아래 (c) 절에서 명시 고정).
+APPROVER = {"emp_no": "2024TEST50", "name": "한담당", "role": "USER", "dept_code": "MGT",
+            "capabilities": ["LODGING_OFFICER"]}
+MANAGER = {"emp_no": "2024TEST51", "name": "한매니저", "role": "MANAGER", "dept_code": "MGT"}
+#: 업무요청 처리자는 이번 결정 범위 밖이라 여전히 role 기반(ADMIN·MANAGER)이다.
+HANDLER = MANAGER
 ADMIN = {"emp_no": "2024TEST90", "name": "조관리", "role": "ADMIN", "dept_code": "MGT"}
 OWNER = {"emp_no": "2024TEST01", "name": "김샘플", "role": "USER", "dept_code": "PET1"}
 OTHER = {"emp_no": "2024TEST02", "name": "이가상", "role": "USER", "dept_code": "PET2"}
@@ -200,7 +207,23 @@ check("체크아웃일 도달 후 사용완료 가능",
           APPROVER, today=TODAY))
 for terminal in ld.TERMINAL_STATUSES:
     check(f"종결 상태({terminal})에는 액션이 없다",
-          ld.allowed_actions(reservation(status=terminal), ADMIN, today=TODAY) == ())
+          ld.allowed_actions(reservation(status=terminal), APPROVER, today=TODAY) == ())
+
+# 승인권자 경계 — 담당 권한만이 근거다(role 우회 없음).
+check("담당 권한이 있으면 승인권자", ld.can_approve(APPROVER))
+check("MANAGER 는 담당 지정 없이 승인권자가 아니다", not ld.can_approve(MANAGER))
+check("ADMIN 도 담당 지정 없이 승인권자가 아니다", not ld.can_approve(ADMIN))
+check("담당 코드는 대소문자·공백을 정규화해 본다",
+      ld.can_approve({"emp_no": "X", "role": "USER", "capabilities": [" lodging_officer "]}))
+check("다른 담당(업무요청)으로는 숙소를 승인할 수 없다",
+      not ld.can_approve({"emp_no": "X", "role": "USER",
+                          "capabilities": ["WORK_REQUEST_OFFICER"]}))
+check("MANAGER 는 신청 건에 아무 액션도 없다",
+      ld.allowed_actions(_req, MANAGER, today=TODAY) == ())
+check("ADMIN 은 신청 건에 아무 액션도 없다",
+      ld.allowed_actions(_req, ADMIN, today=TODAY) == ())
+check("담당 아닌 ADMIN 의 승인은 차단 사유가 '승인 권한 없음'",
+      "승인 권한" in (ld.action_blocker(_req, ld.ACT_APPROVE, ADMIN, today=TODAY) or ""))
 
 check("반려는 사유가 없으면 막힌다",
       ld.action_blocker(_req, ld.ACT_REJECT, APPROVER, comment="", today=TODAY) is not None)
@@ -230,12 +253,12 @@ _rejected = ld.apply_action(_req, ld.ACT_REJECT, user=APPROVER, comment="목적 
 check("반려 전이는 사유를 보존한다",
       _rejected["status"] == ld.REJECTED and _rejected["decision_comment"] == "목적 부적합")
 try:
-    ld.apply_action(reservation(status=ld.COMPLETED), ld.ACT_APPROVE, user=ADMIN, today=TODAY)
+    ld.apply_action(reservation(status=ld.COMPLETED), ld.ACT_APPROVE, user=APPROVER, today=TODAY)
     check("종결 건 전이는 ValueError", False)
 except ValueError:
     check("종결 건 전이는 ValueError", True)
 try:
-    ld.apply_action(_req, "nope", user=ADMIN, today=TODAY)
+    ld.apply_action(_req, "nope", user=APPROVER, today=TODAY)
     check("알 수 없는 액션은 ValueError", False)
 except ValueError:
     check("알 수 없는 액션은 ValueError", True)
@@ -286,10 +309,10 @@ print("(e) 업무요청 — 허용 액션·상태 전이")
 # ===========================================================================
 _sub = request()
 check("처리자는 제출됨 건에 착수·반려 가능",
-      set(wr.allowed_actions(_sub, APPROVER)) == {wr.ACT_START, wr.ACT_REJECT})
+      set(wr.allowed_actions(_sub, HANDLER)) == {wr.ACT_START, wr.ACT_REJECT})
 check("요청자는 제출됨 건에 처리 액션이 없다", wr.allowed_actions(_sub, OWNER) == ())
 check("처리중 건은 완료·반려 가능",
-      set(wr.allowed_actions(request(status=wr.IN_PROGRESS), APPROVER))
+      set(wr.allowed_actions(request(status=wr.IN_PROGRESS), HANDLER))
       == {wr.ACT_COMPLETE, wr.ACT_REJECT})
 check("처리완료 건은 요청자만 종결·보완 가능",
       set(wr.allowed_actions(request(status=wr.DONE), OWNER))
@@ -303,20 +326,20 @@ for terminal in wr.TERMINAL_STATUSES:
           wr.allowed_actions(request(status=terminal), ADMIN) == ())
 
 check("착수는 담당자 지정이 없으면 막힌다",
-      wr.action_blocker(_sub, wr.ACT_START, APPROVER, assignee=None) is not None)
+      wr.action_blocker(_sub, wr.ACT_START, HANDLER, assignee=None) is not None)
 check("담당자를 지정하면 착수 가능",
-      wr.action_blocker(_sub, wr.ACT_START, APPROVER, assignee=APPROVER) is None)
+      wr.action_blocker(_sub, wr.ACT_START, HANDLER, assignee=HANDLER) is None)
 check("완료는 처리 결과가 없으면 막힌다",
-      wr.action_blocker(request(status=wr.IN_PROGRESS), wr.ACT_COMPLETE, APPROVER,
+      wr.action_blocker(request(status=wr.IN_PROGRESS), wr.ACT_COMPLETE, HANDLER,
                         comment="") is not None)
 
-_started = wr.apply_action(_sub, wr.ACT_START, user=APPROVER, assignee=APPROVER)
+_started = wr.apply_action(_sub, wr.ACT_START, user=HANDLER, assignee=HANDLER)
 check("착수 전이는 담당자를 기록한다",
       _started["status"] == wr.IN_PROGRESS
-      and _started["assignee_emp_no"] == APPROVER["emp_no"]
-      and _started["assignee_name"] == APPROVER["name"])
+      and _started["assignee_emp_no"] == HANDLER["emp_no"]
+      and _started["assignee_name"] == HANDLER["name"])
 check("전이는 원본 dict 를 변경하지 않는다", _sub["status"] == wr.SUBMITTED)
-_done = wr.apply_action(_started, wr.ACT_COMPLETE, user=APPROVER, comment="교체 완료")
+_done = wr.apply_action(_started, wr.ACT_COMPLETE, user=HANDLER, comment="교체 완료")
 check("완료 전이는 처리 결과를 보존한다",
       _done["status"] == wr.DONE and _done["result_note"] == "교체 완료")
 _closed = wr.apply_action(_done, wr.ACT_CLOSE, user=OWNER)
@@ -341,81 +364,41 @@ check("집계는 총계·대기·기한초과를 함께 낸다",
 # ===========================================================================
 print("(f) 로컬 저장소 — 시드·왕복·초기화(임시 디렉터리 격리)")
 # ===========================================================================
+# 숙소 예약은 db 파사드로 이관되어 proto_store 를 쓰지 않는다(계약은
+# scripts/test_lodging_facade.py 가 소유). 여기 남은 proto_store 계약은 업무요청뿐이다.
 check("테스트 상태 디렉터리가 격리됐다", str(proto_store.state_dir()) == _TMP.name)
-_seed = proto_store.seed_rows(ld.RESERVATIONS)
+_seed = proto_store.seed_rows(wr.REQUESTS)
 check("시드 CSV 를 읽는다", len(_seed) > 0 and "request_no" in _seed[0])
-_loaded = proto_store.load_rows(ld.RESERVATIONS)
+_loaded = proto_store.load_rows(wr.REQUESTS)
 check("상태 파일이 없으면 시드로 최초 생성", len(_loaded) == len(_seed)
-      and proto_store.state_path(ld.RESERVATIONS).exists())
-proto_store.save_rows(ld.RESERVATIONS, _loaded[:1])
-check("저장 후 다시 읽으면 저장한 내용", len(proto_store.load_rows(ld.RESERVATIONS)) == 1)
-proto_store.reset(ld.RESERVATIONS)
-check("초기화하면 시드로 복원", len(proto_store.load_rows(ld.RESERVATIONS)) == len(_seed))
-proto_store.state_path(ld.RESERVATIONS).write_text("{ broken", encoding="utf-8")
+      and proto_store.state_path(wr.REQUESTS).exists())
+proto_store.save_rows(wr.REQUESTS, _loaded[:1])
+check("저장 후 다시 읽으면 저장한 내용", len(proto_store.load_rows(wr.REQUESTS)) == 1)
+proto_store.reset(wr.REQUESTS)
+check("초기화하면 시드로 복원", len(proto_store.load_rows(wr.REQUESTS)) == len(_seed))
+proto_store.state_path(wr.REQUESTS).write_text("{ broken", encoding="utf-8")
 try:
-    proto_store.load_rows(ld.RESERVATIONS)
+    proto_store.load_rows(wr.REQUESTS)
     check("손상된 상태 파일은 조용히 시드로 덮지 않고 오류를 낸다", False)
 except ValueError:
     check("손상된 상태 파일은 조용히 시드로 덮지 않고 오류를 낸다", True)
-proto_store.reset_all([ld.LODGINGS, ld.RESERVATIONS, wr.REQUESTS])
+proto_store.reset_all([wr.REQUESTS])
 
 check("시드 인물은 전부 가상 사번(2024TEST*)",
-      all(str(r.get("applicant_emp_no", "")).startswith("2024TEST")
-          for r in proto_store.seed_rows(ld.RESERVATIONS))
-      and all(str(r.get("requester_emp_no", "")).startswith("2024TEST")
-              for r in proto_store.seed_rows(wr.REQUESTS)))
+      all(str(r.get("requester_emp_no", "")).startswith("2024TEST")
+          for r in proto_store.seed_rows(wr.REQUESTS)))
+check("숙소 프로토타입 시드 CSV 는 폐기됐다(파사드 시드로 대체)",
+      not (ROOT / "data" / "sample" / "lodging_reservations.csv").exists())
+check("숙소 마스터 CSV 는 미사용 컬럼 없이 파사드 계약 열만 가진다",
+      [c.strip() for c in
+       (ROOT / "data" / "sample" / "lodgings.csv").read_text(encoding="utf-8")
+       .splitlines()[0].split(",")]
+      == ["lodging_code", "lodging_name", "location", "sort_order", "is_active"])
 
 
 # ===========================================================================
-print("(g) 엔드투엔드 — 신청/처리가 파일에 영속된다")
+print("(g) 엔드투엔드 — 업무요청 신청/처리가 파일에 영속된다")
 # ===========================================================================
-_before = len(ld.load_reservations())
-_created = ld.create_reservation(
-    {"lodging_code": "TAEAN", "check_in": D(40), "check_out": D(42)},
-    current_user=OWNER,
-)
-check("신청이 저장되고 신원은 세션 사용자로 확정된다",
-      len(ld.load_reservations()) == _before + 1
-      and _created["applicant_emp_no"] == OWNER["emp_no"]
-      and _created["status"] == ld.REQUESTED)
-try:
-    ld.create_reservation(
-        {"lodging_code": "TAEAN", "check_in": D(41), "check_out": D(43)},
-        current_user=OWNER)
-    check("겹치는 기간 신청은 접수 자체가 거부된다(ReservationConflict)", False)
-except ld.ReservationConflict as exc:
-    check("겹치는 기간 신청은 접수 자체가 거부된다(ReservationConflict)",
-          _created["request_no"] in str(exc) and "이미 예약" in str(exc))
-_edited = ld.update_reservation(
-    _created["request_no"], {"check_in": D(40), "check_out": D(43)}, current_user=OWNER)
-check("신청 상태 본인 수정이 파일에 반영된다(자기 자신은 중복 제외)",
-      _edited["check_out"] == D(43)
-      and (ld.get_reservation(_created["request_no"]) or {}).get("check_out") == D(43))
-try:
-    ld.update_reservation(_created["request_no"], {"check_in": D(40), "check_out": D(41)},
-                          current_user=OTHER)
-    check("승인권자가 아닌 타인의 수정은 거부", False)
-except ValueError:
-    check("승인권자가 아닌 타인의 수정은 거부", True)
-_appr_edit = ld.update_reservation(
-    _created["request_no"], {"check_in": D(40), "check_out": D(44)}, current_user=APPROVER)
-check("승인권자는 신청 건 일정을 정정할 수 있다", _appr_edit["check_out"] == D(44))
-_after = ld.run_action(_created["request_no"], ld.ACT_APPROVE, current_user=APPROVER)
-check("승인이 파일에 반영된다",
-      _after["status"] == ld.APPROVED
-      and (ld.get_reservation(_created["request_no"]) or {}).get("status") == ld.APPROVED)
-try:
-    ld.run_action(_created["request_no"], ld.ACT_APPROVE, current_user=APPROVER)
-    check("이미 승인된 건 재승인은 거부", False)
-except ValueError:
-    check("이미 승인된 건 재승인은 거부", True)
-try:
-    ld.update_reservation(_created["request_no"], {"check_in": D(40), "check_out": D(41)},
-                          current_user=OWNER)
-    check("승인된 건 수정은 거부", False)
-except ValueError:
-    check("승인된 건 수정은 거부", True)
-
 _wbefore = len(wr.load_requests())
 _wcreated = wr.create_request(
     {"title": "테스트 요청", "request_type": "기타", "priority": "낮음", "target_dept": "MGT",
@@ -424,12 +407,12 @@ _wcreated = wr.create_request(
 )
 check("업무요청이 저장된다",
       len(wr.load_requests()) == _wbefore + 1 and _wcreated["status"] == wr.SUBMITTED)
-wr.run_action(_wcreated["request_no"], wr.ACT_START, current_user=APPROVER, assignee=APPROVER)
-wr.run_action(_wcreated["request_no"], wr.ACT_COMPLETE, current_user=APPROVER, comment="완료함")
+wr.run_action(_wcreated["request_no"], wr.ACT_START, current_user=HANDLER, assignee=HANDLER)
+wr.run_action(_wcreated["request_no"], wr.ACT_COMPLETE, current_user=HANDLER, comment="완료함")
 _final = wr.get_request(_wcreated["request_no"]) or {}
 check("착수→완료가 파일에 반영된다",
       _final.get("status") == wr.DONE and _final.get("result_note") == "완료함"
-      and _final.get("assignee_emp_no") == APPROVER["emp_no"])
+      and _final.get("assignee_emp_no") == HANDLER["emp_no"])
 try:
     wr.update_request(_wcreated["request_no"], {"title": "수정 시도"}, current_user=OWNER)
     check("처리완료 건 본문 수정은 거부", False)

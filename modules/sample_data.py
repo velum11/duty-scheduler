@@ -80,6 +80,18 @@ def work_types() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def lodgings() -> pd.DataFrame:
+    """숙소 마스터(sample). 예약 단위 = 숙소 1건이라 호실·정원 컬럼을 두지 않는다 —
+    supabase 의 lodgings 테이블과 같은 열 계약이다."""
+    df = _read("lodgings")
+    if df.empty:
+        return df
+    df["is_active"] = _to_bool(df["is_active"])
+    df["sort_order"] = _to_int(df["sort_order"])
+    return df.sort_values("sort_order").reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
 def work_schedules() -> pd.DataFrame:
     df = _read("work_schedules")
     if df.empty:

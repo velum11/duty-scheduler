@@ -29,6 +29,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
+from modules import db
 from modules import lodging_data as ld
 from views.common import erp, proto, scaffold
 from views.master import DraftState, banner, show_flash
@@ -59,15 +60,19 @@ def render(user: dict) -> None:
         badges=scaffold.mode_badge(),
     )
     proto.inject()
-    show_flash(_STATE)
+    # 조건부 배너는 상시 컨테이너 안에서만 — 요소 수 고정(승인 관리와 같은 계약).
+    with st.container(key="lmy_notice"):
+        show_flash(_STATE)
 
     emp_no = ld.clean(user.get("emp_no"))
     if not emp_no:
         banner("warn", "로그인 사번을 확인할 수 없어 내 예약을 표시할 수 없습니다.")
         return
     try:
-        rows = ld.filter_reservations(ld.load_reservations(), applicant_emp_no=emp_no)
-    except ValueError as exc:
+        rows = db.get_lodging_reservations(
+            {"applicant_emp_no": emp_no}, current_user=user,
+        ).to_dict("records")
+    except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
         banner("danger", str(exc))
         return
 
@@ -138,7 +143,7 @@ def _render_table(rows: list[dict], selected: str) -> str | None:
     행 클릭이 곧 선택이자 상세 열기이며, 행 피치는 USER·터치 variant 44px(§1.4 cozy).
     상태는 색을 쓰지 않는다(2026-08-19 사용자 결정 — 낱말만으로 읽힌다).
     """
-    lodgings = ld.lodging_map()
+    lodgings = db.lodging_map()
     st.markdown(
         f"<div class='pr-panelhd'><span class='t'>내 예약</span>"
         f"<span class='r'>체크인 최근 순 · {len(rows)}건</span></div>",
@@ -191,7 +196,7 @@ def _detail(user: dict, rows: list[dict], request_no: str) -> None:
         return
 
     status = ld.clean(row.get("status"))
-    lodging = ld.lodging_map().get(ld.clean(row.get("lodging_code")))
+    lodging = db.lodging_map().get(ld.clean(row.get("lodging_code")))
     comment = ld.clean(row.get("decision_comment"))
     with st.container(key="prcard_detail"):
         with st.container(key="prhead_my", horizontal=True, gap="small",
@@ -231,9 +236,10 @@ def _detail(user: dict, rows: list[dict], request_no: str) -> None:
             proto.note_line("승인 전(신청 상태)에만 일정을 수정할 수 있습니다.")
         if st.session_state.get(_CONFIRM_KEY) == ld.clean(row.get("request_no")):
             _cancel_dialog(row, user)
-        if status == ld.REQUESTED and st.session_state.get(
-                f"{_EDIT_KEY}{ld.clean(row.get('request_no'))}"):
-            _render_edit_form(user, row)
+        with st.container(key="lmy_editslot"):
+            if status == ld.REQUESTED and st.session_state.get(
+                    f"{_EDIT_KEY}{ld.clean(row.get('request_no'))}"):
+                _render_edit_form(user, row)
 
 
 def _render_actions(user: dict, row: dict, status: str) -> None:
@@ -260,7 +266,7 @@ def _cancel_dialog(row: dict, user: dict) -> None:
     표시 계층의 오조작 방지일 뿐이며 권한·상태 판정은 ``run_action`` 이 재확인한다.
     """
     no = ld.clean(row.get("request_no"))
-    place = ld.lodging_label(ld.lodging_map().get(ld.clean(row.get("lodging_code"))))
+    place = ld.lodging_label(db.lodging_map().get(ld.clean(row.get("lodging_code"))))
     banner("warn", f"예약을 취소하시겠습니까 — {no} · {place} · {ld.period_label(row)}.")
     proto.note_line("취소하면 되돌릴 수 없으며 해당 기간은 다른 사람이 예약할 수 있게 됩니다.")
     with st.container(horizontal=True, gap="small", vertical_alignment="center"):
@@ -286,8 +292,7 @@ def _conflict_dialog(message: str) -> None:
 
 def _render_edit_form(user: dict, row: dict) -> None:
     no = ld.clean(row.get("request_no"))
-    lodgings = ld.load_lodgings(include_inactive=False)
-    by_code = {ld.clean(l.get("lodging_code")): l for l in lodgings}
+    by_code = db.lodging_map(include_inactive=False)
     codes = list(by_code)
     current_code = ld.clean(row.get("lodging_code"))
     with st.form(f"lmy_edit_{no}", clear_on_submit=False):
@@ -309,12 +314,12 @@ def _render_edit_form(user: dict, row: dict) -> None:
     if not saved:
         return
     try:
-        ld.update_reservation(no, {"lodging_code": code, "check_in": check_in,
-                                   "check_out": check_out}, current_user=user)
+        db.update_lodging_reservation(no, {"lodging_code": code, "check_in": check_in,
+                                           "check_out": check_out}, current_user=user)
     except ld.ReservationConflict as exc:
         _conflict_dialog(str(exc))
         return
-    except ValueError as exc:
+    except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
         banner("danger", f"수정하지 못했습니다 — {exc}")
         return
     except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).
@@ -327,8 +332,8 @@ def _render_edit_form(user: dict, row: dict) -> None:
 
 def _cancel(request_no: str, user: dict) -> None:
     try:
-        ld.run_action(request_no, ld.ACT_CANCEL, current_user=user)
-    except ValueError as exc:
+        db.run_lodging_action(request_no, ld.ACT_CANCEL, current_user=user)
+    except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
         _STATE.set_flash("error", f"취소 처리 실패 — {exc}")
         st.rerun()
     except Exception:  # noqa: BLE001 — 저장 백엔드 오류(원문 비노출).

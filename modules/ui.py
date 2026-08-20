@@ -957,6 +957,10 @@ def _menu_caps(user: dict) -> set:
         caps.add(nav.CAP_EVALUATE_NEAR_MISS)
     if db.has_near_miss_improvement_access(user):
         caps.add(nav.CAP_ACCESS_NEAR_MISS_IMPROVEMENT)
+    # 숙소 승인 관리 — 담당 권한 게이트(app.py::_caps_for 와 반드시 같은 한 줄).
+    # 한쪽만 추가하면 메뉴에는 보이는데 route guard 가 막는(또는 그 반대) 불일치가 난다.
+    if auth.can_approve_lodging(user):
+        caps.add(nav.CAP_APPROVE_LODGING)
     return caps
 
 

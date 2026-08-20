@@ -1,3 +1,3 @@
-lodging_code,lodging_name,room_no,lodging_type,capacity,location,is_active
-DAEGWALLYEONG,대관령,,사택,4,강원 평창군,true
-TAEAN,태안,,사택,4,충남 태안군,true
+lodging_code,lodging_name,location,sort_order,is_active
+DAEGWALLYEONG,대관령,강원 평창군,1,true
+TAEAN,태안,충남 태안군,2,true

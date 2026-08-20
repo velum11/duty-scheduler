@@ -10,12 +10,16 @@ DataFrame 을 훼손하지 않도록 항상 copy 후 컬럼을 추가한다.
 """
 import hashlib
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
 
 from modules import config, photo_storage, sample_data, supabase_repository, validators
+# 숙소 예약 도메인(순수 함수 전용 — IO 없음). 이 파사드가 검증·중복 판정·전이·채번을
+# 그대로 재사용한다. lodging_data 는 db 를 import 하지 않으므로 순환이 아니다
+# (can_approve 만 함수 안에서 auth 를 지연 import 한다).
+from modules import lodging_data as ld
 
 # 감사/진단 로거. **비밀 금지**: 서명 URL·service key·개인정보를 남기지 않는다. 사진
 # 관련 로그는 보고서 id 와 스토리지 객체 경로(near-miss/{id}/{uuid}.jpg)만 기록한다.
@@ -3595,7 +3599,25 @@ def _uncached_users() -> pd.DataFrame:
     return _empty_contract(df.reset_index(drop=True), USER_COLUMNS)
 
 
-def find_user_by_emp_no(emp_no: str, *, use_cache: bool = True):
+def _capabilities_claim(emp_no) -> list[str]:
+    """세션 사용자 dict 에 실을 담당 권한 코드 목록(메뉴·화면 노출용 클레임).
+
+    조회 실패(저장소 미준비·일시 장애)는 **빈 목록**으로 접는다 — 담당 없음으로 보이면
+    메뉴가 감춰지므로 노출 방향으로는 fail-closed 다. 반대로 인가 판정(쓰기)은 이
+    클레임을 쓰지 않고 파사드가 사번으로 권위 재조회하며, 그 경로는 확인 실패를 삼키지
+    않고 오류로 올린다(_lodging_actor).
+    """
+    emp = str(emp_no or "").strip()
+    if not emp:
+        return []
+    try:
+        return get_user_capabilities(emp)
+    except DATA_SOURCE_ERRORS:
+        return []
+
+
+def find_user_by_emp_no(emp_no: str, *, use_cache: bool = True,
+                        with_capabilities: bool = False):
     """사번으로 사용자 1명을 dict 로 반환. 없으면 None.
 
     사번 조회는 앞뒤 공백을 제거하고 대소문자를 구분하지 않는다
@@ -3606,6 +3628,11 @@ def find_user_by_emp_no(emp_no: str, *, use_cache: bool = True):
     ``use_cache=False`` 는 인가 판정용 권위 읽기로, 30초 읽기 캐시를 우회한다
     (권한 회수/비활성화 즉시 반영 — Codex P2-1). 로그인·화면 조회 등 기본 호출은
     캐시를 사용한다.
+
+    ``with_capabilities=True`` 는 담당 권한 코드 목록을 ``capabilities`` 클레임으로
+    실어준다(로그인·쿠키 자동 로그인 전용). 담당은 users 와 **다른 저장소**라 조회가
+    1회 더 붙으므로 기본값은 False 다 — 화면이 남의 사번을 조회하는 경로(담당자 확인
+    등)에서 왕복이 늘지 않게 한다.
     """
     df = get_users() if use_cache else _uncached_users()
     if df.empty:
@@ -3643,6 +3670,8 @@ def find_user_by_emp_no(emp_no: str, *, use_cache: bool = True):
     record["is_safety_officer"] = _safety_officer_flag(
         record.get("emp_no"), strict=strict_flag
     )
+    if with_capabilities:
+        record["capabilities"] = _capabilities_claim(record.get("emp_no") or emp_no)
     return record
 
 
@@ -3842,17 +3871,43 @@ def purge_expired_sessions() -> None:
 _CAPS_STORE = "_sample_capabilities"   # {emp_no: set[str]}
 _EMAILS_STORE = "_sample_user_emails"  # {emp_no: list[{"email","scope"}]}
 
+#: sample 모드 담당 권한 시드. 승인권자는 **담당자만**이고 role 우회가 없으므로, 시드가
+#: 없으면 sample 모드에서 승인 관리 메뉴가 아무에게도 뜨지 않아 화면 확인이 불가능하다.
+#: 실DB 의 담당 지정과는 무관한 가상 데이터다(1001 = sample ADMIN 김관리).
+_SAMPLE_CAPS_SEED = {"1001": {"LODGING_OFFICER"}}
+
+
+def _sample_caps_store() -> dict:
+    """sample 담당 권한 backing store(세션 유지). 최초 접근 시 시드 주입."""
+    if _CAPS_STORE not in st.session_state:
+        st.session_state[_CAPS_STORE] = {
+            emp: set(codes) for emp, codes in _SAMPLE_CAPS_SEED.items()
+        }
+    return st.session_state[_CAPS_STORE]
+
 
 def capabilities_ready() -> bool:
+    """담당 권한 저장소를 지금 쓸 수 있는지(READY 만 True). sample 은 항상 True."""
     if is_sample_mode():
         return True
     return supabase_repository.capabilities_ready()
 
 
+def capabilities_probe(*, force: bool = False) -> str:
+    """담당 권한 저장소 준비 상태 3-state(READY/NOT_READY/PROBE_ERROR).
+
+    "권한 없음"과 "확인 불가"를 구분해야 하는 화면·인가 경로가 쓴다. 담당 조회·저장은
+    PROBE_ERROR 에서 빈 값을 만들지 않고 오류를 올린다(fail-closed).
+    """
+    if is_sample_mode():
+        return supabase_repository.READINESS_READY
+    return supabase_repository.capabilities_probe(force=force)
+
+
 def get_user_capabilities(emp_no: str) -> list[str]:
     emp = str(emp_no).strip()
     if is_sample_mode():
-        return sorted(st.session_state.get(_CAPS_STORE, {}).get(emp, set()))
+        return sorted(_sample_caps_store().get(emp, set()))
     return supabase_repository.get_user_capabilities(emp)
 
 
@@ -3879,7 +3934,7 @@ def get_user_capabilities_bulk(emp_nos) -> dict[str, list[str]]:
     """
     emps = _emp_no_list(emp_nos)
     if is_sample_mode():
-        store = st.session_state.get(_CAPS_STORE, {})
+        store = _sample_caps_store()
         return {emp: sorted(store.get(emp, set())) for emp in emps}
     if not emps:
         return {}
@@ -3893,7 +3948,7 @@ def set_user_capabilities(emp_no: str, caps: list[str], *, actor_emp_no: str = "
     if unknown:
         raise ValueError("알 수 없는 담당 코드: " + ", ".join(sorted(unknown)))
     if is_sample_mode():
-        store = st.session_state.setdefault(_CAPS_STORE, {})
+        store = _sample_caps_store()
         store[emp] = set(wanted)
         return
     supabase_repository.set_user_capabilities(emp, sorted(wanted), actor_emp_no=actor_emp_no)
@@ -3954,7 +4009,7 @@ def notification_recipients(capability: str) -> list[str]:
     """해당 업무 담당자들의 수신 이메일(중복 제거·정렬). 발송 fallback 은 mailer 소관."""
     cap = str(capability).strip()
     if is_sample_mode():
-        caps_store = st.session_state.get(_CAPS_STORE, {})
+        caps_store = _sample_caps_store()
         emails_store = st.session_state.get(_EMAILS_STORE, {})
         out = set()
         for emp, caps in caps_store.items():
@@ -4344,3 +4399,525 @@ def sample_seed_frames() -> dict[str, pd.DataFrame]:
         "users": _base_users(),
         "work_schedules": _base_schedules(),
     }
+
+
+# =========================================================================
+# 숙소 예약 파사드 (lodgings / lodging_reservations)
+#
+# 계약 요약
+#  - 화면은 자연키(request_no / lodging_code / emp_no / dept_code)만 다룬다.
+#  - 검증·중복 판정·허용 액션·상태 전이·채번 규칙은 modules/lodging_data 의 **순수
+#    함수가 유일한 출처**다. 이 파사드는 그 함수들을 서버측에서 다시 실행할 뿐,
+#    규칙을 두 번 구현하지 않는다.
+#  - 신원(신청자·처리자)과 인가(승인권자 여부)는 세션 dict 가 아니라 사번으로 다시 조회한
+#    권위 레코드에서 도출한다(_lodging_actor). 승인권자는 **숙소관리 담당자만**이다.
+#  - 성명은 저장하지 않는다. 읽기 시 users 프레임으로 붙이되, 담당자·본인이 아닌 읽기에는
+#    신원 필드를 내려보내지 않는다(서버측 마스킹).
+#  - 저장소 미준비면 조회는 빈 결과·쓰기는 차단(fail-closed), 확인 불가(PROBE_ERROR)는
+#    빈 결과로 위장하지 않고 오류를 올린다.
+# =========================================================================
+LODGING_COLUMNS = ["lodging_code", "lodging_name", "location", "sort_order", "is_active"]
+
+#: 화면이 보는 예약 계약 열. ``*_name`` 은 저장 컬럼이 아니라 읽기 시 조인으로 붙는
+#: 파생 값이며, 쓰기 입력에서는 무시된다.
+LODGING_RESERVATION_COLUMNS = [
+    "request_no", "lodging_code", "lodging_name",
+    "applicant_emp_no", "applicant_name", "dept_code",
+    "check_in", "check_out", "status",
+    "decided_by", "decided_by_name", "decided_at", "decision_comment",
+    "created_at", "updated_at",
+]
+
+#: sample 모드 예약 backing store(세션 유지, 실DB 미변경). supabase 모드는 실제 테이블을
+#: 쓰므로 이 스토어를 사용하지 않는다(모드별 경로 분리).
+_LODGING_RESERVATION_STORE = "store_lodging_reservations"
+
+#: 저장 컬럼(성명 제외 — 비정규화 저장 폐지). sample 스토어도 같은 모양을 쓴다.
+_LODGING_RESERVATION_STORED = [
+    "request_no", "lodging_code", "applicant_emp_no", "dept_code",
+    "check_in", "check_out", "status",
+    "decided_by", "decided_at", "decision_comment", "created_at", "updated_at",
+]
+
+_LODGING_NOT_READY_MESSAGE = (
+    "숙소 예약 저장소가 아직 준비되지 않아 저장할 수 없습니다. "
+    "저장소를 준비한 뒤 다시 시도하세요."
+)
+_LODGING_STALE_MESSAGE = (
+    "다른 사용자가 먼저 처리했거나 예약 상태가 바뀌었습니다. "
+    "목록을 새로고침한 뒤 다시 시도하세요."
+)
+_LODGING_NUMBER_EXHAUSTED_MESSAGE = (
+    "예약번호가 반복 충돌하여 채번에 실패했습니다. 목록을 재조회한 뒤 다시 시도하세요."
+)
+
+
+def lodging_schema_probe(*, force: bool = False) -> str:
+    """숙소 예약 저장소 준비 상태 3-state(READY/NOT_READY/PROBE_ERROR). sample 은 항상 READY."""
+    if is_sample_mode():
+        return supabase_repository.READINESS_READY
+    return supabase_repository.lodging_extensions_probe(force=force)
+
+
+def lodging_schema_ready() -> bool:
+    """숙소 예약 저장소를 지금 쓸 수 있는지(READY 만 True)."""
+    return lodging_schema_probe() == READINESS_READY
+
+
+@st.cache_data(ttl=_REFERENCE_TTL, show_spinner=False)
+def _fetch_lodgings() -> list[dict]:
+    """숙소 마스터 원격 조회(기준정보 TTL). 2행짜리 표라 분 단위로 바뀌지 않는다."""
+    return supabase_repository.get_lodgings()
+
+
+@st.cache_data(ttl=_READ_TTL, show_spinner=False)
+def _fetch_lodging_reservations() -> list[dict]:
+    """예약 전량 원격 조회(트랜잭션성 TTL 30초). 필터는 파사드가 프레임에서 적용한다.
+
+    예약은 사용자가 수시로 만들고 승인하는 **트랜잭션성 업무 데이터**라 기준정보 TTL 을
+    쓰지 않는다(같은 판단을 받은 _fetch_near_miss 와 같은 급). 쓰기 뒤에는
+    _invalidate_lodging_reservations() 로 즉시 비운다. **충돌 판정의 근거는 이 캐시가
+    아니라 _live_reservation_records() 의 캐시 우회 조회다.**
+    """
+    return supabase_repository.get_lodging_reservations()
+
+
+def _invalidate_lodgings() -> None:
+    _fetch_lodgings.clear()
+    supabase_repository._lodging_maps.clear()
+
+
+def _invalidate_lodging_reservations() -> None:
+    _fetch_lodging_reservations.clear()
+
+
+def _lodging_frame(rows) -> pd.DataFrame:
+    return _empty_contract(pd.DataFrame(list(rows or [])), LODGING_COLUMNS)
+
+
+def _lodging_reservation_frame(rows) -> pd.DataFrame:
+    return _empty_contract(pd.DataFrame(list(rows or [])), LODGING_RESERVATION_COLUMNS)
+
+
+def get_lodgings(*, include_inactive: bool = False) -> pd.DataFrame:
+    """숙소 마스터(LODGING_COLUMNS). 기본은 **활성만**(신규 신청 대상 기준)."""
+    if is_sample_mode():
+        rows = sample_data.lodgings().to_dict("records")
+    else:
+        rows = list(_fetch_lodgings())
+    if not include_inactive:
+        rows = [r for r in rows if bool(r.get("is_active"))]
+    frame = _lodging_frame(rows)
+    if frame.empty:
+        return frame
+    return frame.sort_values(["sort_order", "lodging_code"]).reset_index(drop=True)
+
+
+def lodging_map(*, include_inactive: bool = True) -> dict[str, dict]:
+    """``{숙소코드: 숙소 dict}`` — 화면이 라벨을 붙일 때 쓰는 조회용 매핑."""
+    frame = get_lodgings(include_inactive=include_inactive)
+    return {
+        str(row.get("lodging_code") or ""): dict(row)
+        for row in frame.to_dict("records")
+    }
+
+
+def _sample_reservation_seed() -> list[dict]:
+    """sample 모드 예약 시드 — 실제 sample 사용자(1001~)·부서(PET1/PET2) 기준.
+
+    날짜는 **오늘 기준 상대값**이다. 승인 대기·예정 숙박·지난 사용완료가 항상 한 건씩
+    있어야 캘린더·승인 큐·내 예약 화면이 빈 화면으로 보이지 않는다(고정 날짜 시드는
+    시간이 지나면 전부 과거가 되어 화면 확인용으로 쓸모가 없어진다).
+    """
+    today = date.today()
+
+    def day(offset: int) -> str:
+        return (today + timedelta(days=offset)).isoformat()
+
+    def stamp(offset: int) -> str:
+        return (today + timedelta(days=offset)).strftime("%Y-%m-%d %H:%M")
+
+    rows = [
+        {"lodging_code": "DAEGWALLYEONG", "applicant_emp_no": "1005", "dept_code": "PET2",
+         "check_in": day(-30), "check_out": day(-27), "status": "COMPLETED",
+         "decided_by": "1001", "decided_at": stamp(-34), "decision_comment": "",
+         "created_at": stamp(-40), "updated_at": stamp(-26)},
+        {"lodging_code": "TAEAN", "applicant_emp_no": "1003", "dept_code": "PET1",
+         "check_in": day(5), "check_out": day(8), "status": "APPROVED",
+         "decided_by": "1001", "decided_at": stamp(-4), "decision_comment": "",
+         "created_at": stamp(-5), "updated_at": stamp(-4)},
+        {"lodging_code": "DAEGWALLYEONG", "applicant_emp_no": "1004", "dept_code": "PET1",
+         "check_in": day(12), "check_out": day(14), "status": "REQUESTED",
+         "decided_by": "", "decided_at": "", "decision_comment": "",
+         "created_at": stamp(-1), "updated_at": stamp(-1)},
+    ]
+    # 채번은 순수 함수(ld.next_request_no)로 — 시드도 실제 채번 규칙을 따른다.
+    numbered: list[dict] = []
+    for row in rows:
+        created = date.fromisoformat(str(row["created_at"])[:10])
+        row = dict(row)
+        row["request_no"] = ld.next_request_no(numbered, today=created)
+        numbered.append(row)
+    return numbered
+
+
+def _lodging_reservation_store() -> pd.DataFrame:
+    """sample 모드 예약 backing store(세션 유지). 최초 접근 시 시드 주입."""
+    if _LODGING_RESERVATION_STORE not in st.session_state:
+        st.session_state[_LODGING_RESERVATION_STORE] = _empty_contract(
+            pd.DataFrame(_sample_reservation_seed()), _LODGING_RESERVATION_STORED
+        )
+    return st.session_state[_LODGING_RESERVATION_STORE]
+
+
+def _display_time(value) -> str:
+    """저장 시각을 표시용 'YYYY-MM-DD HH:MM' 로 정규화한다(sample/live 동일 표기).
+
+    supabase 는 timestamptz(ISO, UTC)로 돌려주고 sample 스토어는 로컬 표기 문자열을
+    쓴다. 화면이 모드에 따라 다른 모양을 보지 않도록 읽기 경계에서 한 번 접는다.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text.replace("T", " ")[:16]
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone()
+    return parsed.strftime("%Y-%m-%d %H:%M")
+
+
+def _reservation_records(*, live: bool = False) -> list[dict]:
+    """저장된 예약 레코드(자연키, **마스킹 없음** — 내부 검증·전이용).
+
+    ``live=True`` 는 읽기 캐시를 우회한 권위 조회다. 중복(겹침) 재검사·상태 CAS 처럼
+    **쓰기 판단의 근거**는 30초 캐시를 믿지 않는다.
+    """
+    if is_sample_mode():
+        return _lodging_reservation_store().to_dict("records")
+    if live:
+        return supabase_repository.get_lodging_reservations()
+    return list(_fetch_lodging_reservations())
+
+
+def _reservation_raw(request_no) -> dict | None:
+    """단일 예약의 권위 레코드(마스킹 없음, 캐시 우회). 없으면 None."""
+    target = ld.clean(request_no)
+    if not target:
+        return None
+    if is_sample_mode():
+        store = _lodging_reservation_store()
+        match = store[store["request_no"].astype(str) == target]
+        return match.iloc[0].to_dict() if not match.empty else None
+    return supabase_repository.get_lodging_reservation(target)
+
+
+def _user_name_map() -> dict[str, str]:
+    """{사번: 성명} — 성명 비정규화 저장을 폐지했으므로 읽기 시 여기서 붙인다."""
+    users = get_users()
+    if users.empty:
+        return {}
+    return {
+        str(row.get("emp_no") or "").strip(): str(row.get("name") or "")
+        for row in users.to_dict("records")
+    }
+
+
+def _lodging_view_rows(records, *, current_user) -> list[dict]:
+    """저장 레코드 → 화면 계약 행(성명 조인 + 서버측 신원 마스킹).
+
+    신원(신청자 사번·성명·소속·처리자·처리 의견)은 **숙소관리 담당자와 본인에게만**
+    보인다. 그 밖의 읽기(예: 전사 캘린더)에는 애초에 내려보내지 않는다 — 화면이 가리는
+    것이 아니라 파사드가 주지 않는다. ``current_user=None`` 은 가장 좁은 범위로 본다
+    (fail-closed).
+    """
+    names = _user_name_map()
+    lodgings = lodging_map()
+    viewer_emp = ld.clean((current_user or {}).get("emp_no"))
+    approver = ld.can_approve(current_user) if current_user else False
+    rows: list[dict] = []
+    for record in records or []:
+        applicant = ld.clean(record.get("applicant_emp_no"))
+        decided_by = ld.clean(record.get("decided_by"))
+        visible = approver or (bool(viewer_emp) and ld.emp_eq(applicant, viewer_emp))
+        lodging_code = ld.clean(record.get("lodging_code"))
+        rows.append({
+            "request_no": ld.clean(record.get("request_no")),
+            "lodging_code": lodging_code,
+            "lodging_name": ld.clean(lodgings.get(lodging_code, {}).get("lodging_name"))
+                            or lodging_code,
+            "applicant_emp_no": applicant if visible else "",
+            "applicant_name": names.get(applicant, "") if visible else "",
+            "dept_code": ld.clean(record.get("dept_code")) if visible else "",
+            "check_in": ld.clean(record.get("check_in"))[:10],
+            "check_out": ld.clean(record.get("check_out"))[:10],
+            "status": ld.clean(record.get("status")),
+            "decided_by": decided_by if visible else "",
+            "decided_by_name": names.get(decided_by, "") if visible else "",
+            "decided_at": _display_time(record.get("decided_at")) if visible else "",
+            "decision_comment": ld.clean(record.get("decision_comment")) if visible else "",
+            "created_at": _display_time(record.get("created_at")),
+            "updated_at": _display_time(record.get("updated_at")),
+        })
+    return rows
+
+
+def get_lodging_reservations(filters: dict | None = None, *, current_user=None) -> pd.DataFrame:
+    """예약 목록(LODGING_RESERVATION_COLUMNS).
+
+    filters(선택): statuses/status, lodging_code, applicant_emp_no, date_from/date_to
+    (숙박 기간과 조회 구간의 겹침 — 판정은 순수 함수 ld.filter_reservations 가 한다).
+    ``current_user`` 는 신원 가시 범위를 정한다(서버측 마스킹 — _lodging_view_rows).
+    """
+    filters = dict(filters or {})
+    records = _reservation_records()
+    statuses = filters.get("statuses")
+    if statuses is None and filters.get("status"):
+        statuses = (str(filters["status"]).strip(),)
+    records = ld.filter_reservations(
+        records,
+        statuses=tuple(statuses) if statuses else None,
+        lodging_code=filters.get("lodging_code"),
+        applicant_emp_no=filters.get("applicant_emp_no"),
+        date_from=filters.get("date_from"),
+        date_to=filters.get("date_to"),
+    )
+    rows = _lodging_view_rows(records, current_user=current_user)
+    rows.sort(key=lambda r: (r.get("check_in") or "", r.get("request_no") or ""), reverse=True)
+    return _lodging_reservation_frame(rows)
+
+
+def get_lodging_reservation(request_no, *, current_user=None) -> dict | None:
+    """단일 예약(화면 계약 dict) 또는 None. 신원 마스킹은 목록과 같은 규칙이다."""
+    record = _reservation_raw(request_no)
+    if record is None:
+        return None
+    rows = _lodging_view_rows([record], current_user=current_user)
+    return rows[0] if rows else None
+
+
+def _lodging_actor(current_user, *, action: str) -> dict:
+    """세션 사용자에서 행위자 신원·인가 근거를 서버측으로 확정한다(위조 방지).
+
+    화면은 반드시 인증된 현재 사용자를 넘겨야 하며 위젯 값이 아니다. **사번만** 신뢰하고
+    부서·역할·담당 권한은 그 사번으로 다시 조회한 권위 값에서 도출한다. 비활성 사용자는
+    행위할 수 없다.
+
+    담당 권한 조회 실패는 **삼키지 않는다**. 승인권자는 담당자뿐이고 role 우회가 없으므로
+    (2026-08-20 결정), 담당을 확인하지 못한 상태에서 진행하면 인가 없이 쓰는 셈이 된다 —
+    확인 불가는 그대로 오류로 올려 차단한다(fail-closed).
+    """
+    if not isinstance(current_user, dict):
+        raise ValueError(f"{action}에는 인증된 현재 사용자 정보가 필요합니다.")
+    emp_no = ld.clean(current_user.get("emp_no"))
+    record = find_user_by_emp_no(emp_no, use_cache=False) if emp_no else None
+    if not emp_no or record is None:
+        raise ValueError(f"{action} 행위자 사번을 확인할 수 없습니다: {emp_no!r}")
+    from modules import auth
+
+    if not auth._as_bool(record.get("is_active", True)):
+        raise ValueError(f"{action} 권한이 없습니다: 비활성 사용자입니다({emp_no}).")
+    authoritative_emp = ld.clean(record.get("emp_no")) or emp_no
+    return {
+        "emp_no": authoritative_emp,
+        "dept_code": ld.clean(record.get("dept_code")),
+        "role": ld.clean(record.get("role")).upper(),
+        "capabilities": get_user_capabilities(authoritative_emp),
+    }
+
+
+def _require_lodging_write(action: str) -> None:
+    """쓰기 전 저장소 준비 확인. 미준비·확인 불가 모두 차단(fail-closed)."""
+    probe = lodging_schema_probe()
+    if probe == READINESS_READY:
+        return
+    if probe == READINESS_PROBE_ERROR:
+        raise ValueError(
+            f"{action}: 숙소 예약 저장소 상태를 확인하지 못했습니다(일시 장애). "
+            "잠시 후 다시 시도하세요."
+        )
+    raise ValueError(f"{action}: {_LODGING_NOT_READY_MESSAGE}")
+
+
+def _validated_reservation_body(payload: dict, *, exclude_no: str | None = None) -> dict:
+    """신청/수정 입력을 검증하고 저장할 본문(숙소·기간)을 만든다.
+
+    검증(필수·기간·활성 숙소·과거 금지·최대 숙박)과 겹침 판정은 순수 함수가 하고,
+    겹침 재검사는 **캐시를 우회한 권위 목록**으로 한다(30초 stale 승인 방지).
+    """
+    lodging_code = ld.clean(payload.get("lodging_code"))
+    lodging = lodging_map().get(lodging_code)
+    body = {
+        "lodging_code": lodging_code,
+        "check_in": payload.get("check_in"),
+        "check_out": payload.get("check_out"),
+    }
+    errors = ld.validate_reservation(body, lodging=lodging)
+    if errors:
+        raise ValueError(" / ".join(errors))
+    hits = ld.occupied_conflicts(
+        _reservation_records(live=True), lodging_code,
+        body["check_in"], body["check_out"], exclude_no=exclude_no,
+    )
+    if hits:
+        raise ld.ReservationConflict(ld.conflict_message(hits))
+    return {
+        "lodging_code": lodging_code,
+        "check_in": ld.to_date(body["check_in"]).isoformat(),
+        "check_out": ld.to_date(body["check_out"]).isoformat(),
+    }
+
+
+def _sample_store_replace(request_no: str, changes: dict, *, expected_status: str) -> dict:
+    """sample 스토어의 조건부 갱신 — supabase 의 CAS UPDATE 와 같은 실패 계약."""
+    store = _lodging_reservation_store()
+    target = ld.clean(request_no)
+    mask = (store["request_no"].astype(str) == target) & (
+        store["status"].astype(str) == str(expected_status)
+    )
+    if not mask.any():
+        raise ValueError(_LODGING_STALE_MESSAGE)
+    index = store.index[mask][0]
+    for key, value in changes.items():
+        store.loc[index, key] = value
+    store.loc[index, "updated_at"] = _lodging_now_text()
+    st.session_state[_LODGING_RESERVATION_STORE] = store
+    return store.loc[index].to_dict()
+
+
+def _lodging_now_text() -> str:
+    """저장용 현재 시각. sample 은 표시용 로컬 표기, supabase 는 저장소가 ISO 를 쓴다."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def create_lodging_reservation(payload: dict, *, current_user) -> dict:
+    """예약 신청을 저장한다(status=REQUESTED). 저장된 화면 계약 dict 반환.
+
+    신청자 사번·소속·상태·예약번호·시각은 payload 가 아니라 **서버측에서 확정**한다
+    (payload 의 신원/상태 필드는 무시). 검증 실패는 ValueError, 기간 겹침은
+    ``lodging_data.ReservationConflict`` 로 올린다 — 화면이 팝업으로 구분해 안내한다.
+    """
+    action = "숙소 예약 신청"
+    actor = _lodging_actor(current_user, action=action)
+    _require_lodging_write(action)
+    body = _validated_reservation_body(payload)
+    record = {
+        **body,
+        "applicant_emp_no": actor["emp_no"],
+        "dept_code": actor["dept_code"],
+    }
+    if is_sample_mode():
+        store = _lodging_reservation_store()
+        request_no = ld.next_request_no(store.to_dict("records"))
+        now = _lodging_now_text()
+        saved = {
+            **record, "request_no": request_no, "status": ld.REQUESTED,
+            "decided_by": "", "decided_at": "", "decision_comment": "",
+            "created_at": now, "updated_at": now,
+        }
+        st.session_state[_LODGING_RESERVATION_STORE] = pd.concat(
+            [store, _empty_contract(pd.DataFrame([saved]), _LODGING_RESERVATION_STORED)],
+            ignore_index=True,
+        )
+        return _lodging_view_rows([saved], current_user=current_user)[0]
+
+    prefix = ld.request_no_prefix()
+    for _ in range(supabase_repository.LODGING_CREATE_RETRIES):
+        numbers = supabase_repository.lodging_request_numbers(prefix)
+        request_no = ld.next_request_no([{"request_no": n} for n in numbers])
+        try:
+            saved = supabase_repository.create_lodging_reservation(
+                record, request_no=request_no
+            )
+        except supabase_repository.ReservationOverlapError as exc:
+            # DB 배타 제약이 잡은 겹침 — 재시도 대상이 아니라 사용자에게 알릴 도메인 거부다.
+            _invalidate_lodging_reservations()
+            raise ld.ReservationConflict(
+                "해당 일자는 이미 예약되어 있습니다. 다른 일정을 선택해 주세요."
+            ) from exc
+        except supabase_repository.SupabaseDataError as exc:
+            if supabase_repository.is_unique_violation(exc):
+                continue  # 예약번호 충돌(DB 거부=미저장) — 재채번 후 재시도(안전)
+            raise
+        else:
+            _invalidate_lodging_reservations()
+            return _lodging_view_rows([saved], current_user=current_user)[0]
+    raise ValueError(_LODGING_NUMBER_EXHAUSTED_MESSAGE)
+
+
+def update_lodging_reservation(request_no, payload: dict, *, current_user) -> dict:
+    """신청(REQUESTED) 상태 예약의 숙소·기간을 수정한다.
+
+    주체는 신청자 본인 또는 숙소관리 담당자다. 소유·상태 판정은 세션 dict 가 아니라
+    권위 레코드로 하고, 저장은 ``status='REQUESTED'`` 를 조건에 고정한 CAS 로 한다 —
+    읽은 뒤 상태가 바뀌었으면 덮어쓰지 않고 stale 오류를 낸다.
+    """
+    action = "숙소 예약 수정"
+    actor = _lodging_actor(current_user, action=action)
+    _require_lodging_write(action)
+    current = _reservation_raw(request_no)
+    if current is None:
+        raise ValueError("예약을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도하세요.")
+    if not (ld.is_owner(current, actor) or ld.can_approve(actor)):
+        raise ValueError("본인 신청 또는 숙소관리 담당자만 수정할 수 있습니다.")
+    if ld.clean(current.get("status")) != ld.REQUESTED:
+        raise ValueError("신청(REQUESTED) 상태에서만 수정할 수 있습니다.")
+    target = ld.clean(request_no)
+    body = _validated_reservation_body({**current, **(payload or {})}, exclude_no=target)
+
+    if is_sample_mode():
+        saved = _sample_store_replace(target, body, expected_status=ld.REQUESTED)
+        return _lodging_view_rows([saved], current_user=current_user)[0]
+    try:
+        saved = supabase_repository.update_lodging_reservation(
+            target, body, expected_status=ld.REQUESTED, actor_emp_no=actor["emp_no"]
+        )
+    except supabase_repository.ReservationOverlapError as exc:
+        _invalidate_lodging_reservations()
+        raise ld.ReservationConflict(
+            "해당 일자는 이미 예약되어 있습니다. 다른 일정을 선택해 주세요."
+        ) from exc
+    _invalidate_lodging_reservations()
+    if saved is None:
+        raise ValueError(_LODGING_STALE_MESSAGE)
+    return _lodging_view_rows([saved], current_user=current_user)[0]
+
+
+def run_lodging_action(request_no, action: str, *, current_user, comment: str = "") -> dict:
+    """예약 상태 전이를 적용한다(승인·반려·취소·사용완료).
+
+    전이 가능 여부·사유 필수·확정 예약 겹침 백스톱은 전부 순수 함수
+    ``lodging_data.apply_action`` 이 판정하며(화면 버튼 비활성 사유와 같은 규칙),
+    저장은 읽은 상태를 조건에 고정한 CAS 로 한다.
+    """
+    label = "숙소 예약 처리"
+    actor = _lodging_actor(current_user, action=label)
+    _require_lodging_write(label)
+    current = _reservation_raw(request_no)
+    if current is None:
+        raise ValueError("예약을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도하세요.")
+    expected_status = ld.clean(current.get("status"))
+    updated = ld.apply_action(
+        current, action, user=actor, comment=comment,
+        reservations=_reservation_records(live=True),
+    )
+    target = ld.clean(request_no)
+    changes = {
+        "status": updated["status"],
+        "decided_by": actor["emp_no"],
+        "decided_at": _lodging_now_text(),
+        "decision_comment": ld.clean(comment),
+    }
+    if is_sample_mode():
+        saved = _sample_store_replace(target, changes, expected_status=expected_status)
+        return _lodging_view_rows([saved], current_user=current_user)[0]
+    saved = supabase_repository.transition_lodging_reservation(
+        target, status=changes["status"], decided_by_emp_no=actor["emp_no"],
+        decided_at="", decision_comment=changes["decision_comment"],
+        expected_status=expected_status,
+    )
+    _invalidate_lodging_reservations()
+    if saved is None:
+        raise ValueError(_LODGING_STALE_MESSAGE)
+    return _lodging_view_rows([saved], current_user=current_user)[0]

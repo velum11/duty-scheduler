@@ -27,6 +27,7 @@ from html import escape
 
 import streamlit as st
 
+from modules import db
 from modules import lodging_data as ld
 from views.common import erp, proto, scaffold
 from views.master import banner
@@ -59,9 +60,11 @@ def render(user: dict) -> None:
     proto.inject()
 
     try:
-        lodgings = ld.load_lodgings()
-        reservations = ld.load_reservations()
-    except ValueError as exc:
+        # 캘린더는 전사 현황을 보여주되 **신원은 파사드가 담당자·본인에게만** 내려준다
+        # (서버측 마스킹 — 화면의 익명 표기는 이중 방어다).
+        lodgings = db.get_lodgings(include_inactive=True).to_dict("records")
+        reservations = db.get_lodging_reservations(current_user=user).to_dict("records")
+    except (ValueError, *db.DATA_SOURCE_ERRORS) as exc:
         banner("danger", str(exc))
         return
 
@@ -213,7 +216,7 @@ def _render_month(days: list[date], rows: list[dict], codes: list[str],
     """
     if not days:
         return
-    lodgings = ld.lodging_map()
+    lodgings = db.lodging_map()
     lane_of = {code: i for i, code in enumerate(codes)}
     n_lanes = max(len(codes), 1)
     approver = ld.can_approve(user)

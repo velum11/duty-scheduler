@@ -41,7 +41,18 @@ from views import (  # noqa: E402
 )
 
 # ── 가상 사용자(전부 허구 — 실직원 정보 없음) ──────────────────────────────
+# 숙소 예약 4화면은 이제 db 파사드(sample 모드 세션 스토어)를 쓰므로 **실재하는 sample
+# 사용자**여야 신청·처리가 끝까지 돈다(파사드가 사번으로 권위 조회한다). 업무요청
+# 프로토타입은 여전히 proto_store 라 가상 사번(2024TEST*) 항목을 함께 남긴다.
 DEMO_USERS = {
+    "숙소담당 · 김관리(1001)": {
+        "emp_no": "1001", "name": "김관리", "role": "ADMIN", "dept_code": "PET1",
+        # 로그인 경로가 실어주는 담당 권한 클레임과 같은 모양(메뉴·화면 노출용).
+        "capabilities": ["LODGING_OFFICER"],
+    },
+    "USER · 박근무(1003)": {
+        "emp_no": "1003", "name": "박근무", "role": "USER", "dept_code": "PET1",
+    },
     "USER · 김샘플(2024TEST01)": {
         "emp_no": "2024TEST01", "name": "김샘플", "role": "USER", "dept_code": "PET1",
     },
@@ -63,7 +74,11 @@ SCREENS = {
     "업무요청 · 업무요청 처리": work_request_handle,
 }
 
-DATASETS = ["lodgings", "lodging_reservations", "work_requests"]
+# proto_store 로 남은 것은 업무요청뿐이다 — 숙소 예약은 db 파사드로 이관했고
+# 런타임 JSON 시드(lodgings/lodging_reservations)는 폐기했다.
+DATASETS = ["work_requests"]
+#: 숙소 sample 스토어(세션) 초기화 키 — 파사드가 다음 접근에서 시드를 다시 넣는다.
+_LODGING_SESSION_KEYS = ("store_lodging_reservations",)
 
 # 사용자·화면 전환 시 지워야 하는 화면 상태 접두사(선택·펼침·의견 입력 등).
 _VOLATILE_PREFIXES = (
@@ -123,6 +138,8 @@ def _sidebar() -> tuple[dict, object]:
         st.divider()
         if st.button("샘플 데이터로 초기화", width="stretch", icon=":material/restart_alt:"):
             proto_store.reset_all(DATASETS)
+            for key in _LODGING_SESSION_KEYS:
+                st.session_state.pop(key, None)
             _reset_screen_state()
             st.rerun()
         st.caption(f"런타임 상태: `{proto_store.state_dir()}`")

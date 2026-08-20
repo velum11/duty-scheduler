@@ -127,7 +127,9 @@ def _validate_token(token: str):
             _revoke_token(token)
             return None
         emp_no = rec["emp_no"]
-    user = db.find_user_by_emp_no(emp_no)
+    # 담당 권한 클레임을 세션 사용자에 싣는다(메뉴·화면 노출용). 쿠키 자동 로그인도
+    # 로그인과 같은 클레임을 받아야 메뉴가 경로에 따라 달라지지 않는다.
+    user = db.find_user_by_emp_no(emp_no, with_capabilities=True)
     if user is None or not user.get("is_active", False):
         return None
     # 퇴사일이 지나면 이미 발급된 세션도 즉시 끊는다 — 로그인만 막으면 재직 중 받아둔
@@ -249,7 +251,7 @@ def login(emp_no: str, password: str = ""):
 
     # 사번 조회는 trim + 대소문자 무시(find_user_by_emp_no). 세션/토큰에는
     # 입력값이 아니라 DB 의 정규 emp_no 를 저장해 대소문자 표기 흔들림을 막는다.
-    user = db.find_user_by_emp_no(emp_no)
+    user = db.find_user_by_emp_no(emp_no, with_capabilities=True)
     if user is None or not user.get("is_active", False):
         return None, _BAD_CREDENTIALS
     # 퇴사자 차단은 고정 비밀번호 예외보다 **앞**이다. 예외는 "스키마 미적용 환경에서도
@@ -486,6 +488,39 @@ def can_evaluate_near_miss(user) -> bool:
         return False
     role = str(user.get("role", "")).strip().upper()
     return role in ("ADMIN", "MANAGER") or is_safety_officer(user)
+
+
+# --- 능력(권한) 헬퍼 — 숙소 예약 승인 (담당 권한 LODGING_OFFICER) ---
+#: 숙소 예약 승인 담당 코드. 저장은 담당 권한 테이블(user↔capability)이고 코드 목록은
+#: modules/config.py::CAPABILITIES 가 소유한다 — 승인권자를 위해 users 컬럼을 만들지 않는다.
+LODGING_OFFICER_CAPABILITY = "LODGING_OFFICER"
+
+
+def user_capability_codes(user) -> set[str]:
+    """세션 사용자 dict 에 실린 담당 권한 코드 집합(공백 제거·대문자).
+
+    클레임은 로그인·쿠키 자동 로그인 경로에서 ``db.find_user_by_emp_no(...,
+    with_capabilities=True)`` 가 실어준다. 클레임이 없으면 빈 집합이다 — 능력을 확인할
+    수 없으면 없는 것으로 본다(fail-closed). 세션 캐시 주의: 담당을 부여·회수하면
+    재로그인해야 메뉴 노출이 바뀐다(get_current_user 가 세션 사용자를 우선 반환).
+    메뉴는 권한경계가 아니며, 쓰기 경로는 파사드가 사번으로 담당을 권위 재조회한다.
+    """
+    if not user:
+        return set()
+    raw = user.get("capabilities")
+    if isinstance(raw, str):
+        raw = [raw]
+    return {str(code).strip().upper() for code in (raw or []) if str(code).strip()}
+
+
+def can_approve_lodging(user) -> bool:
+    """숙소 예약 승인 능력: **숙소관리 담당자만**(2026-08-20 사용자 결정).
+
+    role 은 판정에 들어가지 않는다 — ADMIN 도 MANAGER 도 담당 지정 없이는 승인할 수
+    없다. 아차사고 평가(can_evaluate_near_miss = role 또는 담당)와 의도적으로 다른
+    계약이므로 두 함수를 서로 참조해 합치지 않는다.
+    """
+    return LODGING_OFFICER_CAPABILITY in user_capability_codes(user)
 
 
 def is_admin(user) -> bool:

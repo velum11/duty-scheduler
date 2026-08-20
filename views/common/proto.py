@@ -261,16 +261,19 @@ PROTO_CSS = f"""
   width:100% !important; min-height:42px !important; height:42px !important;
   padding:0 !important; border-radius:7px !important; box-shadow:none !important;
   font-family:{MONO} !important; font-size:12px !important; font-weight:600 !important;
-  background:#ffffff !important; border:1px solid {LINE} !important; color:{INK2} !important; }}
+  background:transparent !important; border:1px solid transparent !important;
+  color:{INK2} !important; }}
 /* 클릭 피드백 — 틴트·선택색과 충돌하지 않는 밝기 변화 + 빈 날짜엔 액센트 테두리. */
 [class*="st-key-lrqd_"] button:hover:not(:disabled) {{ filter:brightness(.96); }}
 [class*="st-key-lrqd_day_"] button:hover:not(:disabled),
 [class*="st-key-lrqd_tdy_"] button:hover:not(:disabled) {{ filter:none;
-  border-color:{ACCENT} !important; color:{ACCENT_TEXT} !important; }}
+  background:{ACCENT_TINT} !important; color:{ACCENT_TEXT} !important; }}
 [class*="st-key-lrqd_"] button:focus-visible {{ outline:2px solid {ACCENT} !important;
   outline-offset:1px; }}
 [class*="st-key-lrqd_tdy_"] button {{ border-color:{ACCENT} !important;
   color:{ACCENT_TEXT} !important; }}
+/* 주(week) 사이는 선이 아니라 여백으로 나눈다(선을 더 긋지 않는다). */
+.st-key-lrq_cal [data-testid="stHorizontalBlock"] {{ margin-bottom:2px; }}
 [class*="st-key-lrqd_occ0_"] button {{ background:#eef5f0 !important; color:#2f6b45 !important;
   border-color:#eef5f0 !important; }}
 [class*="st-key-lrqd_occ1_"] button {{ background:#fdf3e3 !important; color:#8a6212 !important;
@@ -289,10 +292,9 @@ PROTO_CSS = f"""
   border-top-right-radius:0 !important; border-bottom-right-radius:0 !important;
   margin-right:-5px !important; }}
 /* 지난 날짜·바깥 달 — :disabled 가 상태 틴트보다 특이도·순서 모두에서 이긴다. */
-[class*="st-key-lrqd_"] button:disabled {{ background:{SURFACE_2} !important;
-  color:#c3bdb3 !important; border-color:{LINE} !important; }}
-[class*="st-key-lrqd_out_"] button:disabled {{ background:transparent !important;
-  border-color:transparent !important; color:#d6d1c8 !important; }}
+[class*="st-key-lrqd_"] button:disabled {{ background:transparent !important;
+  color:#c3bdb3 !important; border-color:transparent !important; }}
+[class*="st-key-lrqd_out_"] button:disabled {{ color:#d6d1c8 !important; }}
 /* FORM_ENTRY 라벨 열(130px 고정) + 값 열(DESIGN §2·§3.1) — 라벨은 좌측 고정 열,
    컨트롤은 값 열에서 제 폭만 쓴다. 읽기 화면과 같은 라벨 폭 계약. */
 [class*="st-key-lrq_f_"] {{ gap:16px !important; }}
@@ -380,11 +382,14 @@ PROTO_CSS = f"""
 .pr-stack .ok {{ color:#2f6b45; }}
 .pr-stack .bad {{ color:#9c3232; }}
 /* 처리 판 3열 구획 — 2·3열 좌측 헤어라인(§4 구획은 선과 여백으로) */
-[class*="st-key-prcols_"] [data-testid="stColumn"]:not(:first-child) {{
+/* 판 사이 세로 구획선은 **직계 열에만** 건다 — 자손 선택자로 두면 달력처럼 안쪽에서
+   st.columns 를 다시 쓰는 블록의 날짜 열까지 선이 그어진다(2026-08-20 실측 결함). */
+[class*="st-key-prcols_"] > div[data-testid="stHorizontalBlock"]
+  > div[data-testid="stColumn"]:not(:first-child) {{
   border-left:1px solid {LINE}; padding-left:24px; }}
 @media (max-width:900px) {{
-  [class*="st-key-prcols_"] [data-testid="stColumn"] {{ border-left:0 !important;
-    padding-left:0 !important; }}
+  [class*="st-key-prcols_"] > div[data-testid="stHorizontalBlock"]
+    > div[data-testid="stColumn"] {{ border-left:0 !important; padding-left:0 !important; }}
 }}
 /* 달력 옆 세로 칸 — 요약 한 줄과 범례를 달력 오른쪽에 세워 세로 길이를 줄인다.
    값 열 **안쪽** 배치라 §3.1 의 "값 열은 하나" 계약은 그대로다. */

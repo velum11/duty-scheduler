@@ -1,9 +1,9 @@
-"""숙소 예약 도메인(프로토타입) — 상태 전이·검증·중복 판정 + 로컬 파일 영속.
+"""숙소 예약 도메인 — 상태 전이·검증·중복 판정(순수 함수 전용).
 
-라우팅·Supabase 연결 전 단계의 **로컬 sample 전용** 모듈이다. 저장은
-``modules/proto_store`` (시드 ``data/sample/lodgings.csv`` ·
-``data/sample/lodging_reservations.csv`` → 런타임 JSON)로만 하고, ``modules/db.py``
-파사드나 원격 저장소를 호출하지 않는다.
+이 모듈에는 **IO 가 없다**. 저장·조회는 ``modules/db.py`` 파사드가 소유하며
+(``get_lodgings`` · ``get_lodging_reservations`` · ``create_lodging_reservation`` ·
+``update_lodging_reservation`` · ``run_lodging_action``), 파사드가 쓰기 직전 검증·
+중복 판정·전이에 여기 함수들을 그대로 재사용한다 — 규칙을 두 곳에 구현하지 않는다.
 
 설계 원칙(기존 계약 계승)
 -------------------------
@@ -26,11 +26,6 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import pandas as pd
-
-from modules import proto_store
-
-LODGINGS = "lodgings"
-RESERVATIONS = "lodging_reservations"
 
 # ── 상태(라이프사이클) ───────────────────────────────────────────────────────
 REQUESTED = "REQUESTED"
@@ -69,22 +64,11 @@ ACTION_LABELS = {
 #: 의견(사유) 입력이 필수인 액션.
 COMMENT_REQUIRED = (ACT_REJECT,)
 
-APPROVER_ROLES = ("ADMIN", "MANAGER")
 MAX_NIGHTS = 30
 
 
 class ReservationConflict(ValueError):
     """같은 숙소·겹치는 기간에 이미 살아있는 예약이 있어 신청/수정이 거부됨."""
-
-RESERVATION_COLUMNS = [
-    "request_no", "lodging_code", "applicant_emp_no", "applicant_name", "dept_code",
-    "check_in", "check_out", "status",
-    "decided_by", "decided_at", "decision_comment", "created_at",
-]
-LODGING_COLUMNS = [
-    "lodging_code", "lodging_name", "room_no", "lodging_type", "capacity",
-    "location", "is_active",
-]
 
 
 # ===========================================================================
@@ -250,8 +234,20 @@ def conflict_message(hits: list[dict]) -> str:
 # 권한·허용 액션 — 순수
 # ===========================================================================
 def can_approve(user: dict | None) -> bool:
-    """승인권자 여부(프로토타입 가정: ADMIN·MANAGER). 확정 시 총무 담당 지정으로 대체 가능."""
-    return clean((user or {}).get("role")).upper() in APPROVER_ROLES
+    """승인권자 여부 — 판정은 ``auth.can_approve_lodging`` 이 소유한다(단일 SoT).
+
+    2026-08-20 사용자 결정으로 승인권자는 **숙소관리 담당자만**이다(role 무관 — ADMIN·
+    MANAGER 도 담당 지정 없이는 승인할 수 없다). 시그니처는 유지하므로
+    :func:`allowed_actions` · :func:`action_blocker` · :func:`apply_action` 과 화면
+    호출부는 그대로다. 여전히 **user dict 만 보는 순수 판정**이다(IO 없음).
+
+    지연 import 이유: 파사드(``db``)가 이 모듈의 순수 함수를 쓰므로 모듈 최상위에서
+    ``auth`` 를 import 하면 lodging_data → auth → db → lodging_data 순환이 된다
+    (``db._near_miss_actor`` 가 같은 이유로 함수 안에서 import 한다).
+    """
+    from modules import auth
+
+    return auth.can_approve_lodging(user)
 
 
 def is_owner(reservation: dict, user: dict | None) -> bool:
@@ -352,10 +348,21 @@ def apply_action(reservation: dict, action: str, *, user: dict | None,
     return updated
 
 
+#: 예약번호 접두. 형식 지식은 이 모듈 한 곳에만 둔다 — 파사드·저장소가 문자열을 다시
+#: 조립하면 채번 규칙이 두 벌이 된다.
+REQUEST_NO_PREFIX = "LDG-"
+
+
+def request_no_prefix(today: date | None = None) -> str:
+    """해당 연월의 예약번호 접두(``LDG-YYYYMM-``). 조회 필터도 이 값을 쓴다."""
+    today = today or date.today()
+    return f"{REQUEST_NO_PREFIX}{today:%Y%m}-"
+
+
 def next_request_no(existing, *, today: date | None = None) -> str:
     """``LDG-YYYYMM-NNN`` 채번. 같은 연월의 최대 일련번호 + 1."""
     today = today or date.today()
-    prefix = f"LDG-{today:%Y%m}-"
+    prefix = request_no_prefix(today)
     top = 0
     for row in existing or []:
         no = clean(row.get("request_no") if isinstance(row, dict) else row)
@@ -369,31 +376,11 @@ def _now_text() -> str:
 
 
 # ===========================================================================
-# 저장소 접근(IO)
+# 목록 필터 — 순수
 # ===========================================================================
-def load_lodgings(*, include_inactive: bool = True) -> list[dict]:
-    rows = proto_store.load_rows(LODGINGS)
-    if include_inactive:
-        return rows
-    return [r for r in rows if to_bool(r.get("is_active"))]
-
-
-def lodging_map() -> dict[str, dict]:
-    return {clean(r.get("lodging_code")): r for r in load_lodgings()}
-
-
-def load_reservations() -> list[dict]:
-    return proto_store.load_rows(RESERVATIONS)
-
-
-def get_reservation(request_no) -> dict | None:
-    target = clean(request_no)
-    for row in load_reservations():
-        if clean(row.get("request_no")) == target:
-            return row
-    return None
-
-
+# 저장·조회(IO)는 이 모듈에 없다. ``modules/db.py`` 파사드가 소유하며, 화면은
+# ``db.get_lodging_reservations(...).to_dict("records")`` 로 받은 자연키 레코드를
+# 아래 순수 함수들에 넘긴다.
 def filter_reservations(rows, *, statuses=None, lodging_code=None,
                         applicant_emp_no=None, date_from=None, date_to=None) -> list[dict]:
     """순수 필터 — 상태·숙소·신청자·기간 겹침(반개구간)으로 좁힌다."""
@@ -414,106 +401,6 @@ def filter_reservations(rows, *, statuses=None, lodging_code=None,
                 continue
         out.append(row)
     return out
-
-
-def reservations_frame(rows=None) -> pd.DataFrame:
-    return proto_store.to_frame(rows if rows is not None else load_reservations(),
-                                RESERVATION_COLUMNS)
-
-
-def lodgings_frame(rows=None) -> pd.DataFrame:
-    return proto_store.to_frame(rows if rows is not None else load_lodgings(),
-                                LODGING_COLUMNS)
-
-
-def create_reservation(payload: dict, *, current_user: dict) -> dict:
-    """신청을 저장한다. 신원(신청자 사번·성명·소속)은 세션 사용자에서 서버측 확정한다.
-
-    검증 실패는 :class:`ValueError`(첫 문구 + 전체 목록)로 올린다 — 화면이 원문을 그대로
-    보여줄 수 있는 사용자 안전 문구다.
-    """
-    rows = load_reservations()
-    lodging = lodging_map().get(clean(payload.get("lodging_code")))
-    errors = validate_reservation(payload, lodging=lodging)
-    if errors:
-        raise ValueError(" / ".join(errors))
-
-    emp_no = clean((current_user or {}).get("emp_no"))
-    if not emp_no:
-        raise ValueError("로그인 사번을 확인할 수 없어 신청할 수 없습니다.")
-    hits = occupied_conflicts(rows, payload.get("lodging_code"),
-                              payload.get("check_in"), payload.get("check_out"))
-    if hits:
-        raise ReservationConflict(conflict_message(hits))
-
-    record = {
-        "request_no": next_request_no(rows),
-        "lodging_code": clean(payload.get("lodging_code")),
-        "applicant_emp_no": emp_no,
-        "applicant_name": clean((current_user or {}).get("name")),
-        "dept_code": clean((current_user or {}).get("dept_code")),
-        "check_in": to_date(payload.get("check_in")).isoformat(),
-        "check_out": to_date(payload.get("check_out")).isoformat(),
-        "status": REQUESTED,
-        "decided_by": "", "decided_at": "", "decision_comment": "",
-        "created_at": _now_text(),
-    }
-    rows.append(record)
-    proto_store.save_rows(RESERVATIONS, rows)
-    return record
-
-
-def update_reservation(request_no, payload: dict, *, current_user: dict) -> dict:
-    """신청(REQUESTED) 상태 예약의 숙소·기간을 수정한다.
-
-    주체는 **신청자 본인 또는 승인권자**(2026-08-07 결정 — 승인 관리에서 일정 정정 가능).
-    업무요청 `update_request` 자기수정과 같은 계약으로, 서버측에서 권한·상태를 재확인한다.
-    """
-    rows = load_reservations()
-    target = clean(request_no)
-    index = next((i for i, r in enumerate(rows)
-                  if clean(r.get("request_no")) == target), None)
-    if index is None:
-        raise ValueError("예약을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도하세요.")
-    current = rows[index]
-    if not (is_owner(current, current_user) or can_approve(current_user)):
-        raise ValueError("본인 신청 또는 승인 담당자만 수정할 수 있습니다.")
-    if clean(current.get("status")) != REQUESTED:
-        raise ValueError("신청(REQUESTED) 상태에서만 수정할 수 있습니다.")
-
-    merged = {**current, **payload}
-    lodging = lodging_map().get(clean(merged.get("lodging_code")))
-    errors = validate_reservation(merged, lodging=lodging)
-    if errors:
-        raise ValueError(" / ".join(errors))
-    hits = occupied_conflicts(rows, merged.get("lodging_code"),
-                              merged.get("check_in"), merged.get("check_out"),
-                              exclude_no=target)
-    if hits:
-        raise ReservationConflict(conflict_message(hits))
-
-    updated = dict(current)
-    updated["lodging_code"] = clean(merged.get("lodging_code"))
-    updated["check_in"] = to_date(merged.get("check_in")).isoformat()
-    updated["check_out"] = to_date(merged.get("check_out")).isoformat()
-    rows[index] = updated
-    proto_store.save_rows(RESERVATIONS, rows)
-    return updated
-
-
-def run_action(request_no, action: str, *, current_user: dict, comment: str = "") -> dict:
-    """저장된 예약에 상태 전이를 적용하고 영속화한다. 실패는 :class:`ValueError`."""
-    rows = load_reservations()
-    target = clean(request_no)
-    index = next((i for i, r in enumerate(rows)
-                  if clean(r.get("request_no")) == target), None)
-    if index is None:
-        raise ValueError("예약을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도하세요.")
-    updated = apply_action(rows[index], action, user=current_user, comment=comment,
-                           reservations=rows)
-    rows[index] = updated
-    proto_store.save_rows(RESERVATIONS, rows)
-    return updated
 
 
 # ===========================================================================

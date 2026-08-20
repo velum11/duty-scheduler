@@ -135,11 +135,13 @@ def test_bulk_chunking() -> None:
             return [{"user_id": u, "email": f"u{u}@x.com", "scope": "ALL"} for u in picked]
         return [{"user_id": u, "capability": "LODGING_OFFICER"} for u in picked]
 
-    saved = (sr._user_maps, sr._select_all, sr.capabilities_ready)
+    saved = (sr._user_maps, sr._select_all, sr.capabilities_ready, sr.capabilities_probe)
     try:
         sr._user_maps = fake_user_maps
         sr._select_all = fake_select_all
         sr.capabilities_ready = lambda: True
+        # 준비 판정은 3-state probe 가 소유한다 — 스텁하지 않으면 실제 client 를 탄다.
+        sr.capabilities_probe = lambda **_k: sr.READINESS_READY
 
         got = sr.get_user_emails_bulk(emps)
         check(f"사번 해석이 {size} 단위로 분할된다",
@@ -169,7 +171,272 @@ def test_bulk_chunking() -> None:
         check("미해석 사번은 빈 값이 아니라 오류(단건과 같은 실패 계약)",
               "GHOST" in raised, raised or "예외 없음(결함)")
     finally:
-        sr._user_maps, sr._select_all, sr.capabilities_ready = saved
+        (sr._user_maps, sr._select_all, sr.capabilities_ready,
+         sr.capabilities_probe) = saved
+
+
+def test_single_read_id_resolution() -> None:
+    """단건 담당·이메일의 사번→id 해석 경로 계약 (supabase 분기, 가짜 client — 무네트워크).
+
+    조회는 캐시된 ``_user_maps`` 로 해석하고(같은 화면에서 사번당 users 왕복이 되살아나지
+    않게), 쓰기는 저장 직전 권위 조회(``_user_id_of``)를 유지한다. 어느 쪽이든 해석되지
+    않는 사번은 빈 값이 아니라 오류다.
+    """
+    from modules import supabase_repository as sr
+
+    calls = {"user_maps": 0, "users_select": 0}
+
+    def fake_user_maps(emp_nos=None):
+        calls["user_maps"] += 1
+        picked = [str(e).strip() for e in (emp_nos or [])]
+        sub = {e: 7 for e in picked if e == "E1"}
+        return sub, {str(v): k for k, v in sub.items()}
+
+    def fake_select_all(table, columns="*", query_builder=None):
+        if table == "users":
+            calls["users_select"] += 1
+            return [{"id": 7, "emp_no": "E1"}]
+        if table == "user_emails":
+            return [{"email": "a@x.com", "scope": "ALL"}]
+        if table == "user_capabilities":
+            return [{"capability": "LODGING_OFFICER"}]
+        return []
+
+    class _Chain:
+        def __getattr__(self, _name):
+            return lambda *_a, **_k: self
+
+    class _Client:
+        def table(self, _name):
+            return _Chain()
+
+    saved = (sr._user_maps, sr._select_all, sr.capabilities_ready, sr._execute, sr.client,
+             sr.capabilities_probe)
+    try:
+        sr._user_maps = fake_user_maps
+        sr._select_all = fake_select_all
+        sr.capabilities_ready = lambda: True
+        sr.capabilities_probe = lambda **_k: sr.READINESS_READY
+        sr._execute = lambda *_a, **_k: type("R", (), {"data": []})()
+        sr.client = _Client
+
+        # 조회 2건: 매핑은 _user_maps 로만 해석하고 users 를 따로 왕복하지 않는다.
+        emails = sr.get_user_emails("E1")
+        caps = sr.get_user_capabilities("E1")
+        check("단건 이메일 조회 값 유지", emails == [{"email": "a@x.com", "scope": "ALL"}], str(emails))
+        check("단건 담당 조회 값 유지", caps == ["LODGING_OFFICER"], str(caps))
+        check("조회 경로는 users 를 따로 조회하지 않는다(매핑 캐시 재사용)",
+              calls["users_select"] == 0, f"users_select={calls['users_select']}")
+        check("조회 경로는 _user_maps 로 해석한다", calls["user_maps"] == 2,
+              f"user_maps={calls['user_maps']}")
+
+        # 미해석 사번: 빈 값으로 위조하지 않고 단건과 같은 실패 계약.
+        for name, fn in (("이메일", sr.get_user_emails), ("담당", sr.get_user_capabilities)):
+            raised = ""
+            try:
+                fn("GHOST")
+            except sr.SupabaseDataError as exc:
+                raised = str(exc)
+            check(f"미해석 사번 단건 {name} 조회는 오류(빈 값 아님)",
+                  "GHOST" in raised, raised or "예외 없음(결함)")
+
+        # 쓰기는 저장 직전 권위 조회를 유지한다(캐시된 매핑으로 남의 행을 건드리지 않음).
+        calls["users_select"] = 0
+        sr.set_user_emails("E1", [{"email": "a@x.com", "scope": "ALL"}])
+        check("이메일 저장은 권위 users 조회로 id 해석", calls["users_select"] == 1,
+              f"users_select={calls['users_select']}")
+        calls["users_select"] = 0
+        sr.set_user_capabilities("E1", ["LODGING_OFFICER"])
+        check("담당 저장은 권위 users 조회로 id 해석", calls["users_select"] == 1,
+              f"users_select={calls['users_select']}")
+    finally:
+        (sr._user_maps, sr._select_all, sr.capabilities_ready,
+         sr._execute, sr.client, sr.capabilities_probe) = saved
+
+
+# ---------------------------------------------------------------------------
+# 담당 권한 저장소 준비 판정 3-state — 순수 mock(가짜 client). 실DB 미접속·쓰기 없음.
+#
+# 왜 3-state 인가: 이 판정이 숙소 예약 승인 인가의 입력이다(승인권자 = 담당자만, role
+# 우회 없음). 종전처럼 **어떤 예외든 False 로 캐시**하면 일시 장애 한 번에 프로세스
+# 수명 동안 전 담당자가 조용히 승인 권한을 잃는다("권한 없음"과 "확인 불가"가
+# 구분되지 않는 fail-silent). 아래가 그 구분을 고정한다.
+# ---------------------------------------------------------------------------
+def _fake_client(error, counter):
+    class _Chain:
+        def select(self, *_a, **_k):
+            return self
+
+        def limit(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            counter["probes"] += 1
+            if error is not None:
+                raise error
+            return type("R", (), {"data": []})()
+
+    class _Client:
+        def table(self, _name):
+            return _Chain()
+
+    return lambda: _Client()
+
+
+def test_capabilities_probe_states() -> None:
+    from modules import supabase_repository as sr
+
+    saved = (sr.client, sr._user_maps, sr._select_all)
+    counter = {"probes": 0}
+    try:
+        sr._user_maps = lambda emp_nos=None: ({"1001": 1}, {"1": "1001"})
+        sr._select_all = lambda *a, **k: []
+
+        # (1) 미준비(undefined table) — 안정적으로 캐시하고, 조회는 빈 값·저장은 오류.
+        sr.reset_capabilities_readiness()
+        sr.client = _fake_client(
+            Exception('relation "public.user_capabilities" does not exist'), counter)
+        check("미준비는 NOT_READY", sr.capabilities_probe() == sr.READINESS_NOT_READY)
+        check("미준비면 ready=False", sr.capabilities_ready() is False)
+        before = counter["probes"]
+        sr.capabilities_probe()
+        check("NOT_READY 는 캐시된다(재프로브 없음)", counter["probes"] == before)
+        check("미준비 조회는 빈 목록", sr.get_user_capabilities("1001") == []
+              and sr.get_user_emails("1001") == [])
+        check("미준비 수신자 계산도 빈 목록", sr.notification_recipients("LODGING_OFFICER") == [])
+        raised = ""
+        try:
+            sr.set_user_capabilities("1001", ["LODGING_OFFICER"])
+        except sr.SupabaseDataError as exc:
+            raised = str(exc)
+        check("미준비 저장은 준비 안내 오류", "준비되지 않아" in raised, raised or "예외 없음(결함)")
+
+        # (2) 확인 불가(일시 장애) — 캐시하지 않고, 조회·저장 모두 오류(빈 값 위조 금지).
+        sr.reset_capabilities_readiness()
+        sr.client = _fake_client(Exception("ConnectionResetError(10054)"), counter)
+        check("일시 장애는 PROBE_ERROR", sr.capabilities_probe() == sr.READINESS_PROBE_ERROR)
+        before = counter["probes"]
+        sr.capabilities_probe()
+        check("PROBE_ERROR 는 캐시하지 않는다(다음 호출에서 재프로브)",
+              counter["probes"] > before)
+        for label, call in (
+            ("담당 조회", lambda: sr.get_user_capabilities("1001")),
+            ("이메일 조회", lambda: sr.get_user_emails("1001")),
+            ("수신자 계산", lambda: sr.notification_recipients("LODGING_OFFICER")),
+            ("담당 저장", lambda: sr.set_user_capabilities("1001", [])),
+        ):
+            raised = ""
+            try:
+                call()
+            except sr.SupabaseDataError as exc:
+                raised = str(exc)
+            check(f"확인 불가 상태의 {label}는 오류(빈 값·성공 위조 금지)",
+                  "확인하지 못했습니다" in raised, raised or "예외 없음(결함)")
+        check("확인 불가에서도 ready=False(권한은 fail-closed)",
+              sr.capabilities_ready() is False)
+
+        # (3) 장애가 풀리면 READY 로 갱신된다(고착 없음).
+        sr.client = _fake_client(None, counter)
+        check("장애 해소 후 READY 로 회복", sr.capabilities_probe() == sr.READINESS_READY)
+        check("회복 후 ready=True", sr.capabilities_ready() is True)
+    finally:
+        sr.client, sr._user_maps, sr._select_all = saved
+        sr.reset_capabilities_readiness()
+
+
+# ---------------------------------------------------------------------------
+# 숙소 예약 저장소 준비 판정도 같은 3-state 계약을 쓴다(쓰기 fail-closed, 조회 허용).
+# ---------------------------------------------------------------------------
+def test_lodging_readiness_states() -> None:
+    from modules import supabase_repository as sr
+
+    saved = (sr.client, sr._select_all)
+    counter = {"probes": 0}
+    try:
+        sr._select_all = lambda *a, **k: []
+        sr.reset_lodging_readiness()
+        sr.client = _fake_client(
+            Exception("Could not find the table 'public.lodgings' in the schema cache"),
+            counter)
+        check("숙소 저장소 미적용은 NOT_READY",
+              sr.lodging_extensions_probe() == sr.READINESS_NOT_READY)
+        check("미준비 조회는 빈 목록(화면은 계속 뜬다)",
+              sr.get_lodgings() == [] and sr.get_lodging_reservations() == [])
+        raised = ""
+        try:
+            sr.require_lodging(for_write=True)
+        except sr.SupabaseDataError as exc:
+            raised = str(exc)
+        check("미준비 쓰기는 차단", "준비되지 않아" in raised, raised or "예외 없음(결함)")
+
+        sr.reset_lodging_readiness()
+        sr.client = _fake_client(Exception("ReadError"), counter)
+        check("확인 불가는 PROBE_ERROR",
+              sr.lodging_extensions_probe() == sr.READINESS_PROBE_ERROR)
+        raised = ""
+        try:
+            sr.get_lodging_reservations()
+        except sr.SupabaseDataError as exc:
+            raised = str(exc)
+        check("확인 불가 조회는 빈 목록으로 위조하지 않는다",
+              "확인하지 못했습니다" in raised, raised or "예외 없음(결함)")
+    finally:
+        sr.client, sr._select_all = saved
+        sr.reset_lodging_readiness()
+
+
+# ---------------------------------------------------------------------------
+# 겹침 배타 제약 위반(23P01)은 채번 충돌(23505)과 **다르게** 다뤄야 한다:
+# 전자는 사용자에게 알릴 도메인 거부(재시도 금지), 후자는 재채번 재시도 대상이다.
+# ---------------------------------------------------------------------------
+def test_violation_classification() -> None:
+    from modules import supabase_repository as sr
+
+    class _Err(Exception):
+        def __init__(self, code):
+            super().__init__(f"저장 실패({code})")
+            self.code = code
+
+    check("23P01 은 겹침 위반으로 분류", sr._is_exclusion_violation(_Err("23P01")) is True)
+    check("23505 는 겹침 위반이 아니다", sr._is_exclusion_violation(_Err("23505")) is False)
+    check("23505 는 unique 위반으로 분류", sr.is_unique_violation(_Err("23505")) is True)
+    check("23P01 은 unique 위반이 아니다", sr.is_unique_violation(_Err("23P01")) is False)
+    chained = Exception("wrapper")
+    chained.__cause__ = _Err("23P01")
+    check("원인 체인에 있어도 찾아낸다", sr._is_exclusion_violation(chained) is True)
+
+
+# ---------------------------------------------------------------------------
+# 채번 규칙은 순수 함수(lodging_data.next_request_no)가 단일 출처다. 저장소는 계산에
+# 필요한 사실(기존 번호)만 최신으로 가져온다 — 두 번째 구현이 생기지 않았는지 고정한다.
+# ---------------------------------------------------------------------------
+def test_request_number_single_source() -> None:
+    import re
+    from datetime import date
+
+    from modules import lodging_data as ld
+    from modules import supabase_repository as sr
+
+    from modules import db
+
+    repo_src = Path(sr.__file__).read_text(encoding="utf-8")
+    facade_src = Path(db.__file__).read_text(encoding="utf-8")
+    check("저장소는 순번 형식을 스스로 만들지 않는다", ":03d" not in repo_src,
+          "저장소에 순번 서식이 생겼다(순수 함수와 이중 구현 위험)")
+    check("파사드도 접두 문자열을 재조립하지 않는다",
+          '"LDG-' not in facade_src and "'LDG-" not in facade_src,
+          "파사드에 채번 문자열이 생겼다")
+    check("파사드는 순수 채번 함수에 위임한다",
+          facade_src.count("ld.next_request_no(") >= 2
+          and "ld.request_no_prefix()" in facade_src)
+    today = date(2026, 8, 20)
+    check("첫 채번은 001", ld.next_request_no([], today=today) == "LDG-202608-001")
+    check("같은 연월 최대값 + 1",
+          ld.next_request_no([{"request_no": "LDG-202608-007"},
+                              {"request_no": "LDG-202607-099"}], today=today)
+          == "LDG-202608-008")
+    check("형식은 LDG-YYYYMM-NNN",
+          bool(re.fullmatch(r"LDG-\d{6}-\d{3}", ld.next_request_no([], today=today))))
 
 
 def main() -> None:
@@ -202,6 +469,11 @@ def main() -> None:
     check("사번 공백·중복·빈값 정규화(요청 사번 키만)",
           o.get("bulk_norm") == ["1001"], str(o.get("bulk_norm")))
     test_bulk_chunking()
+    test_single_read_id_resolution()
+    test_capabilities_probe_states()
+    test_lodging_readiness_states()
+    test_violation_classification()
+    test_request_number_single_source()
 
     print()
     if FAIL:

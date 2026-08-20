@@ -17,6 +17,7 @@ from views import (
     master_users, master_departments, master_teams, master_org, master_work_types,
     near_miss_submit, near_miss_my, near_miss_evaluate, near_miss_improvement,
     near_miss_view, near_miss_stats,
+    lodging_request, lodging_my, lodging_manage, lodging_calendar,
 )
 
 # 업무 화면 라우팅 테이블 (page id → 화면 모듈)
@@ -34,6 +35,10 @@ _PAGES = {
     "near_miss_improvement": near_miss_improvement,
     "near_miss_view": near_miss_view,
     "near_miss_stats": near_miss_stats,
+    "lodging_request": lodging_request,
+    "lodging_my": lodging_my,
+    "lodging_manage": lodging_manage,
+    "lodging_calendar": lodging_calendar,
 }
 
 
@@ -51,6 +56,10 @@ def _caps_for(user: dict) -> set:
         caps.add(nav.CAP_EVALUATE_NEAR_MISS)
     if db.has_near_miss_improvement_access(user):
         caps.add(nav.CAP_ACCESS_NEAR_MISS_IMPROVEMENT)
+    # 숙소 예약 승인은 담당 권한(LODGING_OFFICER)만 — role 로는 판정되지 않는다.
+    # 클레임이 없으면 노출되지 않는다(fail-closed). ui._menu_caps 와 같은 계약이다.
+    if auth.can_approve_lodging(user):
+        caps.add(nav.CAP_APPROVE_LODGING)
     return caps
 
 

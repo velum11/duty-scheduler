@@ -3512,35 +3512,117 @@ def purge_expired_sessions() -> None:
 # 파사드(db)는 emp_no 자연키로 호출한다. 010 미적용 환경에서도 조회가 죽지 않도록
 # capability probe 로 분기한다(009 org_category_ready 와 같은 패턴).
 _CAPS_READY: bool | None = None
+_CAPS_PROBE: str | None = None
 _CAPS_NOT_READY_MESSAGE = (
-    "담당 권한·이메일 스키마가 아직 준비되지 않아 저장할 수 없습니다. "
-    "해당 스키마를 적용한 뒤 다시 시도하세요."
+    "담당 권한·이메일 저장소가 아직 준비되지 않아 저장할 수 없습니다. "
+    "해당 저장소를 준비한 뒤 다시 시도하세요."
+)
+_CAPS_PROBE_ERROR_MESSAGE = (
+    "담당 권한·이메일 저장소 상태를 확인하지 못했습니다(일시 장애). "
+    "권한을 확인할 수 없어 처리를 중단했습니다. 잠시 후 다시 시도하세요."
 )
 
 
-def capabilities_ready() -> bool:
-    """010 스키마(user_capabilities/user_emails) 사용 가능 여부(1회 probe 후 캐시)."""
-    global _CAPS_READY
-    if _CAPS_READY is None:
-        try:
-            client().table("user_capabilities").select("id").limit(1).execute()
-            client().table("user_emails").select("id").limit(1).execute()
-            _CAPS_READY = True
-        except Exception:
+def capabilities_probe(*, force: bool = False) -> str:
+    """담당 권한 저장소(user_capabilities/user_emails) 준비 상태 3-state(read-only).
+
+    반환: ``READINESS_READY`` / ``READINESS_NOT_READY``(미준비) / ``READINESS_PROBE_ERROR``.
+
+    **왜 3-state 인가**: 이 판정은 이제 숙소 예약 승인 인가의 입력이다(담당자만 승인).
+    종전 구현은 어떤 예외든 ``False`` 로 캐시해서, 일시 장애 한 번이면 프로세스 수명
+    동안 전 담당자가 조용히 승인 권한을 잃었다("권한 없음"과 "확인 불가"가 구분되지
+    않는 fail-silent). near_miss 3-state probe 와 같은 관행으로 맞춘다:
+      - NOT_READY(undefined-table/schema-cache)는 안정적으로 캐시한다.
+      - **PROBE_ERROR 는 캐시하지 않는다**(다음 호출에서 재프로브 — 고착 금지).
+      - 인가·조회·저장은 PROBE_ERROR 에서 값을 지어내지 않고 오류를 올린다(fail-closed).
+    """
+    global _CAPS_READY, _CAPS_PROBE
+    if force:
+        _CAPS_PROBE = None
+        _CAPS_READY = None
+    if _CAPS_PROBE is not None:
+        return _CAPS_PROBE
+    try:
+        client().table("user_capabilities").select("id").limit(1).execute()
+        client().table("user_emails").select("id").limit(1).execute()
+        _CAPS_PROBE = READINESS_READY
+        _CAPS_READY = True
+    except Exception as exc:
+        if is_missing_column_error(exc):
+            _CAPS_PROBE = READINESS_NOT_READY
             _CAPS_READY = False
-    return _CAPS_READY
+        else:
+            # PROBE_ERROR 는 캐시하지 않는다(sticky 방지) — 다음 호출에서 재프로브한다.
+            _CAPS_PROBE = None
+            _CAPS_READY = None
+            return READINESS_PROBE_ERROR
+    return _CAPS_PROBE
+
+
+def capabilities_ready() -> bool:
+    """담당 권한 저장소를 **지금 쓸 수 있는지**(READY 만 True).
+
+    PROBE_ERROR 는 False 로 접히므로, "권한 없음"과 "확인 불가"를 구분해야 하는 경로는
+    이 bool 이 아니라 :func:`capabilities_probe` 또는 :func:`require_capabilities`
+    를 써야 한다(화면 배너용 3-state 는 db.capabilities_probe 가 노출한다)."""
+    return capabilities_probe() == READINESS_READY
+
+
+def require_capabilities(*, for_write: bool) -> bool:
+    """담당 권한 저장소 접근 가능 여부를 계약대로 판정한다.
+
+    반환 True=사용 가능. 반환 False=미준비(조회는 빈 값으로 계속 진행해도 되는 상태).
+    PROBE_ERROR 는 **조회·저장 모두 예외**로 올린다 — 확인하지 못한 상태를 빈 값이나
+    권한 없음으로 위장하지 않는다(오류 은폐 금지 계약). 저장은 미준비도 예외다.
+    """
+    probe = capabilities_probe()
+    if probe == READINESS_PROBE_ERROR:
+        raise SupabaseDataError(_CAPS_PROBE_ERROR_MESSAGE)
+    if probe == READINESS_READY:
+        return True
+    if for_write:
+        raise SupabaseDataError(_CAPS_NOT_READY_MESSAGE)
+    return False
 
 
 def reset_capabilities_readiness() -> None:
-    global _CAPS_READY
+    global _CAPS_READY, _CAPS_PROBE
     _CAPS_READY = None
+    _CAPS_PROBE = None
 
 
 def _user_id_of(emp_no: str) -> int:
+    """사번 → user_id — **쓰기 경로 전용**(권위 조회, 캐시 미사용).
+
+    저장 직전에 대상 행을 원본에서 해석한다. 조회 경로는 ``_user_id_for_read`` 를 쓴다
+    (아래 참조) — 쓰기는 잘못된 id 로 남의 행을 건드릴 수 있으므로 매핑 신선도를
+    캐시에 맡기지 않는다.
+    """
     rows = _select_all("users", "id,emp_no", lambda q: q.eq("emp_no", str(emp_no).strip()))
     if not rows:
         raise SupabaseDataError(f"사용자를 찾을 수 없습니다: {emp_no}")
     return int(rows[0]["id"])
+
+
+def _user_id_for_read(emp_no: str) -> int:
+    """사번 → user_id — **조회 경로 전용**. 캐시된 ``_user_maps`` 로 해석한다.
+
+    실패 계약은 ``_user_id_of`` 와 같다: 해석되지 않는 사번은 값을 만들어내지 않고
+    같은 ``SupabaseDataError`` 로 올린다(빈 결과로 위장하지 않는다).
+
+    왜 캐시를 쓰는가: 목록 경로(``_bulk_user_ids``)가 이미 같은 ``_user_maps`` 로
+    사번→id 를 해석한다. 단건 조회만 매번 users 를 따로 왕복하면 같은 화면에서
+    사번당 2회(=id 해석 + 본조회)가 되살아난다 — 상세 편집기는 렌더마다 담당·이메일을
+    각각 부르므로 렌더당 users 왕복 2회가 그대로 붙는다. 매핑(사번↔id)만 캐시하고
+    **본조회(담당·이메일)는 캐시하지 않으므로** "저장 직후 재조회가 항상 최신"이라는
+    기존 계약은 그대로다. 매핑 캐시는 사용자 쓰기에서 db._invalidate_users() 가 비운다.
+    """
+    emp = str(emp_no).strip()
+    by_emp, _ = _user_maps([emp])
+    uid = by_emp.get(emp)
+    if uid is None:
+        raise SupabaseDataError(f"사용자를 찾을 수 없습니다: {emp_no}")
+    return int(uid)
 
 
 def _bulk_user_ids(emp_nos) -> tuple[dict[str, int], dict[str, str]]:
@@ -3572,10 +3654,10 @@ def _bulk_user_ids(emp_nos) -> tuple[dict[str, int], dict[str, str]]:
 
 
 def get_user_capabilities(emp_no: str) -> list[str]:
-    """부여된 capability 코드 목록(정렬). 010 미적용이면 빈 목록."""
-    if not capabilities_ready():
+    """부여된 capability 코드 목록(정렬). 저장소 미준비면 빈 목록, 확인 불가면 오류."""
+    if not require_capabilities(for_write=False):
         return []
-    uid = _user_id_of(emp_no)
+    uid = _user_id_for_read(emp_no)   # 조회 경로 — 매핑은 캐시, 본조회는 매번 최신
     rows = _select_all("user_capabilities", "capability", lambda q: q.eq("user_id", uid))
     return sorted({str(r["capability"]).strip() for r in rows})
 
@@ -3591,7 +3673,7 @@ def get_user_capabilities_bulk(emp_nos) -> dict[str, list[str]]:
     보므로 단건 경로(``get_user_capabilities``)를 쓰는 것이 맞고, 이 함수는 목록 화면이
     담당 열을 갖게 될 때를 위한 이메일 bulk 의 짝이다(계약 테스트로 잠겨 있다).
     """
-    if not capabilities_ready():
+    if not require_capabilities(for_write=False):
         return {}
     by_emp, by_id = _bulk_user_ids(emp_nos)
     out: dict[str, set[str]] = {emp: set() for emp in by_emp}
@@ -3613,8 +3695,7 @@ def get_user_capabilities_bulk(emp_nos) -> dict[str, list[str]]:
 
 def set_user_capabilities(emp_no: str, caps: list[str], *, actor_emp_no: str = "") -> None:
     """capability 부여 목록을 통째로 맞춘다(diff insert/delete — 회수는 행 삭제)."""
-    if not capabilities_ready():
-        raise SupabaseDataError(_CAPS_NOT_READY_MESSAGE)
+    require_capabilities(for_write=True)
     wanted = {str(c).strip() for c in caps if str(c).strip()}
     unknown = wanted - set(config.CAPABILITIES)
     if unknown:
@@ -3642,10 +3723,10 @@ def set_user_capabilities(emp_no: str, caps: list[str], *, actor_emp_no: str = "
 
 
 def get_user_emails(emp_no: str) -> list[dict]:
-    """알림 이메일 목록 [{email, scope}] (scope→email 정렬). 010 미적용이면 빈 목록."""
-    if not capabilities_ready():
+    """알림 이메일 목록 [{email, scope}] (scope→email 정렬). 저장소 미준비면 빈 목록, 확인 불가면 오류."""
+    if not require_capabilities(for_write=False):
         return []
-    uid = _user_id_of(emp_no)
+    uid = _user_id_for_read(emp_no)   # 조회 경로 — 매핑은 캐시, 본조회는 매번 최신
     rows = _select_all("user_emails", "email,scope", lambda q: q.eq("user_id", uid))
     return sorted(
         ({"email": str(r["email"]).strip(), "scope": str(r["scope"]).strip()} for r in rows),
@@ -3660,7 +3741,7 @@ def get_user_emails_bulk(emp_nos) -> dict[str, list[dict]]:
     = 빈 목록). 사번당 2회 왕복 대신 사번→id 해석 1회 + user_emails 조회 1회(청크 단위)
     만 쓴다 — ``notification_recipients`` 의 ``in_("user_id", ids)`` 와 같은 패턴이다.
     """
-    if not capabilities_ready():
+    if not require_capabilities(for_write=False):
         return {}
     by_emp, by_id = _bulk_user_ids(emp_nos)
     out: dict[str, list[dict]] = {emp: [] for emp in by_emp}
@@ -3691,8 +3772,7 @@ def set_user_emails(emp_no: str, rows: list[dict], *, actor_emp_no: str = "") ->
     검증: 형식(간이), scope ∈ {ALL} ∪ CAPABILITIES, 소문자 정규화 후 (scope,email)
     중복 제거. DB 의 lower(email) 유니크 인덱스가 최종 방어선이다.
     """
-    if not capabilities_ready():
-        raise SupabaseDataError(_CAPS_NOT_READY_MESSAGE)
+    require_capabilities(for_write=True)
     valid_scopes = {config.EMAIL_SCOPE_ALL} | set(config.CAPABILITIES)
     cleaned: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -3727,7 +3807,7 @@ def notification_recipients(capability: str) -> list[str]:
     수신자 = capability 보유자들의 user_emails 중 scope ∈ {ALL, capability}.
     비어 있으면 빈 목록 — 발송 계층(mailer)이 secrets fallback 등 후속을 결정한다.
     """
-    if not capabilities_ready():
+    if not require_capabilities(for_write=False):
         return []
     cap = str(capability).strip()
     holders = _select_all("user_capabilities", "user_id", lambda q: q.eq("capability", cap))
@@ -3739,3 +3819,376 @@ def notification_recipients(capability: str) -> list[str]:
         lambda q: q.in_("user_id", ids).in_("scope", [config.EMAIL_SCOPE_ALL, cap]),
     )
     return sorted({str(r["email"]).strip().lower() for r in rows})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 숙소 예약 (lodgings / lodging_reservations)
+# ─────────────────────────────────────────────────────────────────────────────
+# 파사드(db)는 자연키(lodging_code / emp_no / dept_code / request_no)로만 호출한다.
+# 여기서 id/FK 로 해석하고, 돌려줄 때 다시 자연키로 접는다(006 near_miss 관행).
+# 성명은 저장하지 않으므로 이 계층도 돌려주지 않는다 — 파사드가 users 프레임으로 붙인다.
+LODGINGS_TABLE = "lodgings"
+LODGING_RESERVATIONS_TABLE = "lodging_reservations"
+
+_LODGING_READY: bool | None = None
+_LODGING_PROBE: str | None = None
+_LODGING_NOT_READY_MESSAGE = (
+    "숙소 예약 저장소가 아직 준비되지 않아 저장할 수 없습니다. "
+    "저장소를 준비한 뒤 다시 시도하세요."
+)
+_LODGING_PROBE_ERROR_MESSAGE = (
+    "숙소 예약 저장소 상태를 확인하지 못했습니다(일시 장애). "
+    "저장 여부를 보장할 수 없어 중단했습니다. 잠시 후 다시 시도하세요."
+)
+#: request_no 채번 unique 충돌 시 bounded 재시도 상한(무한 루프 금지 — 006 관행).
+LODGING_CREATE_RETRIES = 5
+
+#: PostgreSQL exclusion_violation SQLSTATE. 겹침 배타 제약(lodging_res_no_overlap) 위반이
+#: 이 코드로 온다. unique(23505)와 달리 **재시도 대상이 아니다** — 사용자에게 알려야 할
+#: 도메인 거부(이미 예약된 기간)다.
+_EXCLUSION_VIOLATION_SQLSTATE = "23P01"
+
+
+class ReservationOverlapError(SupabaseDataError):
+    """같은 숙소·겹치는 기간에 살아있는 예약이 있어 DB 가 거부했다(23P01)."""
+
+
+def is_unique_violation(exc: Exception) -> bool:
+    """공개 별칭 — 파사드가 채번 충돌(23505)을 재시도 대상으로 식별할 때 쓴다."""
+    return _is_unique_violation(exc)
+
+
+def _is_exclusion_violation(exc: Exception) -> bool:
+    """예외가 PostgreSQL exclusion_violation(23P01)인지 구조적으로 판정한다.
+
+    판정 방식은 :func:`_is_unique_violation` 과 같다(원 예외 체인의 code/details/message
+    → sanitize 된 문자열 폴백). 로케일 의존 문구가 아니라 SQLSTATE 로 본다.
+    """
+    seen: list[BaseException] = []
+    cursor: BaseException | None = exc
+    while cursor is not None and cursor not in seen and len(seen) < 8:
+        seen.append(cursor)
+        for attr in ("code", "details", "message"):
+            value = getattr(cursor, attr, None)
+            if value is not None and _EXCLUSION_VIOLATION_SQLSTATE in str(value):
+                return True
+        cursor = getattr(cursor, "__cause__", None)
+    return _EXCLUSION_VIOLATION_SQLSTATE in str(exc)
+
+
+def lodging_extensions_probe(*, force: bool = False) -> str:
+    """숙소 예약 저장소 준비 상태 3-state(read-only, 1회 probe 후 캐시).
+
+    반환: ``READINESS_READY`` / ``READINESS_NOT_READY``(미준비) /
+    ``READINESS_PROBE_ERROR``(확인 실패 — 미준비로 단정 불가).
+    near_miss probe 와 같은 관행이며 **PROBE_ERROR 는 캐시하지 않는다**(고착 금지).
+    """
+    global _LODGING_READY, _LODGING_PROBE
+    if force:
+        _LODGING_PROBE = None
+        _LODGING_READY = None
+    if _LODGING_PROBE is not None:
+        return _LODGING_PROBE
+    try:
+        client().table(LODGINGS_TABLE).select("id").limit(1).execute()
+        client().table(LODGING_RESERVATIONS_TABLE).select("id").limit(1).execute()
+        _LODGING_PROBE = READINESS_READY
+        _LODGING_READY = True
+    except Exception as exc:
+        if is_missing_column_error(exc):
+            _LODGING_PROBE = READINESS_NOT_READY
+            _LODGING_READY = False
+        else:
+            _LODGING_PROBE = None
+            _LODGING_READY = None
+            return READINESS_PROBE_ERROR
+    return _LODGING_PROBE
+
+
+def lodging_extensions_ready() -> bool:
+    """숙소 예약 저장소를 지금 쓸 수 있는지(READY 만 True)."""
+    return lodging_extensions_probe() == READINESS_READY
+
+
+def reset_lodging_readiness() -> None:
+    """숙소 readiness 캐시를 비운다(다음 확인에서 재프로브)."""
+    global _LODGING_READY, _LODGING_PROBE
+    _LODGING_READY = None
+    _LODGING_PROBE = None
+
+
+def require_lodging(*, for_write: bool) -> bool:
+    """숙소 저장소 접근 가능 여부. 조회는 미준비=False(빈 결과), 저장은 미준비=예외.
+
+    PROBE_ERROR 는 조회·저장 모두 예외다 — 확인하지 못한 상태를 빈 결과로 위장하지
+    않는다(오류 은폐 금지).
+    """
+    probe = lodging_extensions_probe()
+    if probe == READINESS_PROBE_ERROR:
+        raise SupabaseDataError(_LODGING_PROBE_ERROR_MESSAGE)
+    if probe == READINESS_READY:
+        return True
+    if for_write:
+        raise SupabaseDataError(_LODGING_NOT_READY_MESSAGE)
+    return False
+
+
+@st.cache_data(ttl=_MAP_CACHE_TTL, show_spinner=False)
+def _lodging_maps() -> tuple[dict[str, int], dict[str, str]]:
+    """({숙소코드: id}, {"id": 숙소코드}) — 조회 경로용 매핑 캐시."""
+    rows = _select_all(LODGINGS_TABLE, "id,lodging_code", lambda q: q.order("lodging_code"))
+    by_code = {
+        str(_required(row, LODGINGS_TABLE, "lodging_code")):
+            _required(row, LODGINGS_TABLE, "id")
+        for row in rows
+    }
+    return by_code, {str(value): key for key, value in by_code.items()}
+
+
+def _lodging_id_of(lodging_code: str) -> int:
+    """숙소코드 → id — **쓰기 경로 전용**(권위 조회, 캐시 미사용)."""
+    code = str(lodging_code).strip()
+    if not code:
+        raise SupabaseDataError("숙소 코드가 필요합니다.")
+    rows = _select_all(
+        LODGINGS_TABLE, "id,lodging_code", lambda q: q.eq("lodging_code", code)
+    )
+    if not rows:
+        raise SupabaseDataError(f"숙소를 찾을 수 없습니다: {lodging_code}")
+    return int(rows[0]["id"])
+
+
+def get_lodgings() -> list[dict]:
+    """숙소 마스터 자연키 목록. 저장소 미준비면 빈 목록(확인 불가는 예외)."""
+    if not require_lodging(for_write=False):
+        return []
+    rows = _select_all(
+        LODGINGS_TABLE, "lodging_code,lodging_name,location,sort_order,is_active",
+        lambda q: q.order("sort_order").order("lodging_code"),
+    )
+    return [
+        {
+            "lodging_code": str(row.get("lodging_code") or ""),
+            "lodging_name": str(row.get("lodging_name") or ""),
+            "location": str(row.get("location") or ""),
+            "sort_order": int(row.get("sort_order") or 0),
+            "is_active": _clean_bool(row.get("is_active")),
+        }
+        for row in rows
+    ]
+
+
+def _lodging_reservation_natural(rows: list[dict]) -> list[dict]:
+    """예약 행(ID/FK)을 화면 자연키 계약으로 변환한다(성명은 파사드가 붙인다)."""
+    _, emp_by_id = _user_maps()
+    _, dept_by_id = _department_maps()
+    _, lodging_by_id = _lodging_maps()
+    out: list[dict] = []
+    for row in rows:
+        applicant_id = row.get("applicant_user_id")
+        decided_id = row.get("decided_by_user_id")
+        dept_id = row.get("department_id")
+        lodging_id = row.get("lodging_id")
+        out.append({
+            "request_no": str(row.get("request_no") or ""),
+            "lodging_code": lodging_by_id.get(str(lodging_id), "") if lodging_id is not None else "",
+            "applicant_emp_no": emp_by_id.get(str(applicant_id), "") if applicant_id is not None else "",
+            "dept_code": dept_by_id.get(str(dept_id), "") if dept_id is not None else "",
+            "check_in": str(row.get("check_in") or "")[:10],
+            "check_out": str(row.get("check_out") or "")[:10],
+            "status": str(row.get("status") or ""),
+            "decided_by": emp_by_id.get(str(decided_id), "") if decided_id is not None else "",
+            "decided_at": str(row.get("decided_at") or ""),
+            "decision_comment": str(row.get("decision_comment") or ""),
+            "created_at": str(row.get("created_at") or ""),
+            "updated_at": str(row.get("updated_at") or ""),
+        })
+    return out
+
+
+def get_lodging_reservations(filters: dict | None = None) -> list[dict]:
+    """예약 목록(자연키 dict). 저장소 미준비면 빈 목록(확인 불가는 예외).
+
+    filters(선택): status/statuses, lodging_code, applicant_emp_no, date_from/date_to.
+    기간 조건은 숙박 구간과 조회 구간의 **겹침**이다 — 반개구간이라 종료일 당일
+    체크인은 포함하고(``check_in <= date_to``), 시작일 당일 체크아웃은 제외한다
+    (``check_out > date_from``). 나머지 조건은 파사드가 프레임에서 좁힌다.
+    """
+    if not require_lodging(for_write=False):
+        return []
+    filters = dict(filters or {})
+    lodging_by_code, _ = _lodging_maps()
+    user_by_emp, _ = _user_maps()
+
+    def builder(query):
+        statuses = filters.get("statuses")
+        if isinstance(statuses, (list, tuple, set)) and statuses:
+            query = query.in_("status", [str(s).strip() for s in statuses])
+        elif filters.get("status"):
+            query = query.eq("status", str(filters["status"]).strip())
+        code = str(filters.get("lodging_code") or "").strip()
+        if code and code in lodging_by_code:
+            query = query.eq("lodging_id", lodging_by_code[code])
+        emp = str(filters.get("applicant_emp_no") or "").strip()
+        if emp and emp in user_by_emp:
+            query = query.eq("applicant_user_id", user_by_emp[emp])
+        if filters.get("date_from"):
+            query = query.gt("check_out", str(filters["date_from"]).strip())
+        if filters.get("date_to"):
+            query = query.lte("check_in", str(filters["date_to"]).strip())
+        # order 필수 — _select_all 은 range() 페이지네이션이라 정렬 없이는 페이지 경계에서
+        # 행 순서가 보장되지 않는다.
+        return query.order("check_in", desc=True).order("request_no", desc=True)
+
+    rows = _select_all(LODGING_RESERVATIONS_TABLE, "*", builder)
+    return _lodging_reservation_natural(rows)
+
+
+def get_lodging_reservation(request_no: str) -> dict | None:
+    """단일 예약(자연키 dict) 또는 None."""
+    if not require_lodging(for_write=False):
+        return None
+    rows = _select_all(
+        LODGING_RESERVATIONS_TABLE, "*",
+        lambda q: q.eq("request_no", str(request_no).strip()).limit(1),
+    )
+    natural = _lodging_reservation_natural(rows)
+    return natural[0] if natural else None
+
+
+def lodging_request_numbers(prefix: str) -> list[str]:
+    """해당 접두(예: LDG-202608-)의 기존 예약번호 목록 — **캐시 없는 권위 조회**.
+
+    다음 번호 계산 규칙 자체는 순수 함수(``lodging_data.next_request_no``)가 소유한다.
+    여기서는 계산에 필요한 사실만 최신으로 가져온다(파사드가 그 함수에 넘긴다) —
+    채번 규칙을 저장소가 두 번째로 구현하지 않게 하기 위함이다.
+    """
+    require_lodging(for_write=True)
+    rows = _select_all(
+        LODGING_RESERVATIONS_TABLE, "request_no",
+        lambda q: q.like("request_no", str(prefix).strip() + "%"),
+    )
+    return [str(row.get("request_no") or "") for row in rows]
+
+
+def _lodging_write_payload(record: dict) -> dict:
+    """자연키 입력을 저장 컬럼(ID/FK)으로 해석한다. 해석 실패는 저장 중단(fail-closed).
+
+    dept_code 는 **빈 값이면 NULL**(신청 시점 소속 미상)이지만, 값이 있는데 해석되지
+    않으면 오류다 — 있지도 않은 부서로 귀속시키거나 조용히 NULL 로 떨어뜨리지 않는다.
+    """
+    emp_no = _clean_text(record.get("applicant_emp_no"))
+    if not emp_no:
+        raise SupabaseDataError("신청자 사번이 필요합니다.")
+    dept_code = _clean_text(record.get("dept_code"))
+    department_id = None
+    if dept_code:
+        dept_by_code, _ = _department_maps()
+        if dept_code not in dept_by_code:
+            raise SupabaseDataError("숙소 예약 부서코드를 찾을 수 없습니다: " + dept_code)
+        department_id = dept_by_code[dept_code]
+    return {
+        "lodging_id": _lodging_id_of(_clean_text(record.get("lodging_code"))),
+        "applicant_user_id": _user_id_of(emp_no),
+        "department_id": department_id,
+        "check_in": _clean_text(record.get("check_in")),
+        "check_out": _clean_text(record.get("check_out")),
+        "status": "REQUESTED",
+        "decision_comment": "",
+        "created_by": emp_no,
+        "updated_by": emp_no,
+    }
+
+
+def create_lodging_reservation(record: dict, *, request_no: str) -> dict:
+    """예약을 생성한다(status=REQUESTED). 생성된 자연키 dict 반환.
+
+    ``request_no`` 는 파사드가 순수 채번 함수로 계산해 넘긴다. **unique 충돌(23505)은
+    호출부가 재채번·재시도**할 수 있도록 그대로 올리고, **겹침 배타 제약 위반(23P01)은
+    :class:`ReservationOverlapError`** 로 번역해 재시도 대상이 아님을 분명히 한다.
+
+    비멱등 INSERT 이므로 일시 통신 오류는 재시도하지 않는다 — 서버 반영 여부가 불명이라
+    맹목 재시도가 이중 예약을 만들 수 있다(fail-closed: 재조회 요구).
+    """
+    require_lodging(for_write=True)
+    payload = dict(_lodging_write_payload(record))
+    payload["request_no"] = str(request_no).strip()
+    try:
+        response = _execute(
+            client().table(LODGING_RESERVATIONS_TABLE).insert(payload),
+            "생성", LODGING_RESERVATIONS_TABLE, retry_transient=False,
+        )
+    except SupabaseTransientError as exc:
+        raise SupabaseDataError(
+            "숙소 예약 저장 결과가 불명확합니다(일시적 통신 오류). 중복 예약을 막기 위해 "
+            "재시도하지 않았습니다. 목록을 재조회해 저장 여부를 확인한 뒤 다시 시도하세요."
+        ) from exc
+    except SupabaseDataError as exc:
+        if _is_exclusion_violation(exc):
+            raise ReservationOverlapError(str(exc)) from exc
+        raise
+    saved = (response.data or [None])[0]
+    if saved is None:
+        raise SupabaseDataError("숙소 예약 생성 결과가 비어 있습니다.")
+    return _lodging_reservation_natural([saved])[0]
+
+
+def _lodging_conditional_update(request_no: str, changes: dict, *, expected_status: str,
+                                action: str) -> dict | None:
+    """조건부 UPDATE(CAS) — where request_no=? and status=<읽은 상태>.
+
+    0행이면 그 사이 다른 사용자가 상태를 바꿨거나 예약이 사라진 것이므로 **덮어쓰지 않고**
+    None 을 돌려준다(호출부가 stale 오류로 표면화 — lost update/TOCTOU 방지).
+    """
+    require_lodging(for_write=True)
+    query = (
+        client().table(LODGING_RESERVATIONS_TABLE)
+        .update(changes)
+        .eq("request_no", str(request_no).strip())
+        .eq("status", str(expected_status).strip())
+    )
+    try:
+        response = _execute(query, action, LODGING_RESERVATIONS_TABLE)
+    except SupabaseDataError as exc:
+        if _is_exclusion_violation(exc):
+            raise ReservationOverlapError(str(exc)) from exc
+        raise
+    saved = (response.data or [None])[0]
+    return _lodging_reservation_natural([saved])[0] if saved else None
+
+
+def update_lodging_reservation(request_no: str, changes: dict, *,
+                               expected_status: str, actor_emp_no: str = "") -> dict | None:
+    """신청 상태 예약의 숙소·기간을 조건부 UPDATE 한다(상태·신원은 건드리지 않는다)."""
+    body = {
+        "lodging_id": _lodging_id_of(_clean_text(changes.get("lodging_code"))),
+        "check_in": _clean_text(changes.get("check_in")),
+        "check_out": _clean_text(changes.get("check_out")),
+        "updated_by": _clean_text(actor_emp_no, nullable=True),
+    }
+    return _lodging_conditional_update(
+        request_no, body, expected_status=expected_status, action="수정"
+    )
+
+
+def transition_lodging_reservation(request_no: str, *, status: str, decided_by_emp_no: str,
+                                   decided_at: str, decision_comment: str,
+                                   expected_status: str) -> dict | None:
+    """상태 전이를 조건부 UPDATE 로 적용한다(처리자·시각·의견을 같은 UPDATE 에 기록).
+
+    처리 흔적 3종을 한 번에 써야 DB 의 처리 흔적 정합 제약(신청=흔적 없음 / 처리됨=
+    처리자·시각 모두 존재)을 만족한다.
+    """
+    decider = _clean_text(decided_by_emp_no)
+    if not decider:
+        raise SupabaseDataError("처리자 사번이 필요합니다.")
+    body = {
+        "status": str(status).strip(),
+        "decided_by_user_id": _user_id_of(decider),
+        "decided_at": _clean_text(decided_at) or _utc_now_iso(),
+        "decision_comment": _clean_text(decision_comment),
+        "updated_by": decider,
+    }
+    return _lodging_conditional_update(
+        request_no, body, expected_status=expected_status, action="처리"
+    )

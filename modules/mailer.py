@@ -75,11 +75,22 @@ def is_enabled() -> bool:
     return _smtp_config() is not None
 
 
-def send(subject: str, body: str) -> bool | None:
-    """설정된 수신자에게 발송한다. True 발송/False 실패/None 미설정·비활성."""
+def send(subject: str, body: str, *, recipients=None) -> bool | None:
+    """수신자에게 발송한다. True 발송/False 실패/None 미설정·비활성.
+
+    ``recipients`` 를 주면 그 주소로만 보낸다(업무 담당자 기반 수신자 — 담당 권한과
+    같은 축). 주지 않으면 종전대로 설정(``[notify].to``)의 고정 수신자를 쓴다.
+    **빈 목록을 명시로 넘기면 발송하지 않는다**(None) — 호출부가 "받을 사람이 없다"를
+    사용자에게 알릴 책임을 진다(조용한 미발송 금지).
+    """
     cfg = _smtp_config()
     if cfg is None:
         return None
+    if recipients is not None:
+        picked = [str(r).strip() for r in recipients if str(r).strip()]
+        if not picked:
+            return None
+        cfg = {**cfg, "to": picked}
     try:
         msg = EmailMessage()
         msg["Subject"] = subject
@@ -163,7 +174,8 @@ def notify_work_request_created(record: dict, *, target_dept_label: str = "",
 
 
 def notify_lodging_requested(record: dict, *, lodging_label: str = "",
-                             period_label: str = "") -> bool | None:
+                             period_label: str = "", recipients=None) -> bool | None:
+    """숙소 예약 접수 알림. ``recipients`` 는 숙소관리 담당자 이메일 목록이다."""
     subject, body = lodging_requested_mail(
         record, lodging_label=lodging_label, period_label=period_label)
-    return send(subject, body)
+    return send(subject, body, recipients=recipients)

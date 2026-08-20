@@ -806,14 +806,25 @@ def test_email_map_bulk_contract():
 
 
 def test_email_map_not_ready():
-    """010 미준비면 값을 만들지 않고 사유를 돌려준다(조회 전용 전환 근거)."""
-    orig = mu.db.capabilities_ready
+    """담당 저장소가 미준비/확인 불가면 값을 만들지 않고 **서로 다른 사유**를 돌려준다.
+
+    준비 판정이 3-state 로 바뀐 뒤의 계약이다(2026-08-20): "아직 준비되지 않았다"와
+    "지금 확인하지 못했다"는 사용자가 취할 행동이 다르므로 한 문구로 뭉뚱그리지 않는다.
+    어느 쪽이든 값을 지어내지 않는 것은 종전과 같다(조회 전용 전환 근거).
+    """
+    orig = mu.db.capabilities_probe
     try:
-        mu.db.capabilities_ready = lambda: False
+        mu.db.capabilities_probe = lambda **_k: mu.db.READINESS_NOT_READY
         primary, extra, err = mu._email_map(["1001"])
         check("미준비 시 사유 반환", bool(err) and primary == {} and extra == {})
+        check("미준비 사유는 '준비되지 않았습니다'", "준비되지 않았습니다" in err, err)
+
+        mu.db.capabilities_probe = lambda **_k: mu.db.READINESS_PROBE_ERROR
+        primary, extra, err = mu._email_map(["1001"])
+        check("확인 불가도 값을 만들지 않는다", primary == {} and extra == {})
+        check("확인 불가 사유는 미준비와 구분된다", "확인하지 못했습니다" in err, err)
     finally:
-        mu.db.capabilities_ready = orig
+        mu.db.capabilities_probe = orig
     check("빈 목록은 조회하지 않음", mu._email_map([]) == ({}, {}, ""))
 
 

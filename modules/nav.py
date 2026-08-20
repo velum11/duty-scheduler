@@ -30,6 +30,11 @@ CAP_EVALUATE_NEAR_MISS = "evaluate_near_miss"
 #: 재검증한다(nav 는 DEPENDENCY-FREE — 판정은 호출부가 하고 이 토큰으로 caps 에 담아 넘긴다).
 CAP_ACCESS_NEAR_MISS_IMPROVEMENT = "access_near_miss_improvement"
 
+#: 숙소 예약 승인 능력(호출부가 auth.can_approve_lodging(user) 결과를 이 토큰으로 담아 넘긴다).
+#: 승인권자는 **숙소관리 담당자만**이라 role 로는 판정되지 않는다 — 그래서 '승인 관리'는
+#: roles 하드코딩 없이 이 토큰으로만 노출된다(평가 관리와 같은 능력 게이트 방식).
+CAP_APPROVE_LODGING = "approve_lodging"
+
 _MY_SCHEDULE = {
     "id": "my_schedule",
     "label": "내 근무표",
@@ -51,6 +56,11 @@ USER_MENU = [
      "capability": CAP_ACCESS_NEAR_MISS_IMPROVEMENT},
     {"id": "near_miss_view", "label": "아차사고 조회", "icon": ":material/search:"},
     {"id": "near_miss_stats", "label": "아차사고 분석", "icon": ":material/analytics:"},
+    {"id": "lodging_request", "label": "숙소 예약 신청", "icon": ":material/hotel:"},
+    {"id": "lodging_my", "label": "내 숙소 예약", "icon": ":material/event_available:"},
+    {"id": "lodging_manage", "label": "숙소 승인 관리", "icon": ":material/how_to_reg:",
+     "capability": CAP_APPROVE_LODGING},
+    {"id": "lodging_calendar", "label": "예약 캘린더", "icon": ":material/calendar_month:"},
 ]
 
 # 아차사고 6개 항목은 근무표·기준정보처럼 **그룹**('아차사고 관리') 아래 자식으로 묶는다
@@ -103,6 +113,40 @@ _NEAR_MISS_GROUP = {
     ],
 }
 
+# 숙소 예약 4화면. 아차사고와 같은 그룹 패턴이며 노출은 **자식 단위**다 — 신청·내 예약·
+# 캘린더는 전 역할, 승인 관리만 담당 권한(CAP_APPROVE_LODGING) 게이트다.
+_LODGING_GROUP = {
+    "id": "lodging",
+    "label": "숙소 예약",
+    "icon": ":material/hotel:",
+    # 그룹 roles 는 자식 union(전 역할) — 실제 노출은 자식 규칙이 정한다.
+    "roles": _ALL_ROLES,
+    "children": [
+        {
+            "id": "lodging_request", "label": "예약 신청",
+            "desc": "숙소와 기간을 선택해 예약을 신청합니다.",
+            "roles": _ALL_ROLES,
+        },
+        {
+            "id": "lodging_my", "label": "내 숙소 예약",
+            "desc": "본인이 신청한 예약을 확인하고 수정·취소합니다.",
+            "roles": _ALL_ROLES,
+        },
+        {
+            # 승인 관리 — 능력 게이트(숙소관리 담당자만). role 하드코딩을 두지 않는다:
+            # ADMIN·MANAGER 도 담당 지정 없이는 승인할 수 없다(2026-08-20 결정).
+            "id": "lodging_manage", "label": "승인 관리",
+            "desc": "신청된 예약을 검토해 승인·반려합니다.",
+            "roles": (), "capability": CAP_APPROVE_LODGING,
+        },
+        {
+            "id": "lodging_calendar", "label": "예약 캘린더",
+            "desc": "월별 예약 현황을 캘린더로 확인합니다.",
+            "roles": _ALL_ROLES,
+        },
+    ],
+}
+
 MENU_GROUPS = [
     {
         "id": "home",
@@ -137,6 +181,7 @@ MENU_GROUPS = [
         ],
     },
     _NEAR_MISS_GROUP,
+    _LODGING_GROUP,
     {
         "id": "master",
         "label": "기준정보",
