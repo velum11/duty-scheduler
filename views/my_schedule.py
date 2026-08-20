@@ -437,7 +437,8 @@ def render(user: dict) -> None:
         rows = db.get_month_schedules(str(user["emp_no"]).strip(), year, month).copy()
         work_type_df = db.get_work_types()
         work_types = db.work_types_map()
-        display_of, color_of = work_type_display()
+        # 조회 전용 달력 — 중복 약칭도 근무조건표의 약칭 그대로(코드 원문 노출 금지).
+        display_of, color_of = work_type_display(unique_labels=False)
         rows["d"] = pd.to_datetime(rows["duty_date"], errors="coerce").dt.date
     except db.DATA_SOURCE_ERRORS as exc:
         st.error(

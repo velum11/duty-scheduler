@@ -889,8 +889,15 @@ def _my_duty_block(user: dict) -> None:
         st.error("내 근무 정보를 불러오지 못했습니다. 잠시 후 다시 확인하세요.")
         return
 
+    def _duty_label(code: str) -> str:
+        """근무조건표(근무형태 관리) 약칭 표시 — 미등록 코드만 원문 폴백.
+        조회 전용 값이라 약칭 중복(주/야 다수 코드)이어도 역해석 걱정이 없다
+        (내 근무표와 같은 규칙 — 2026-08-20 DAY/NIGHT 코드 원문 노출 정정)."""
+        short = str((work_types.get(str(code)) or {}).get("short_label") or "").strip()
+        return short or str(code)
+
     today_rows = rows[rows["date"] == today] if not rows.empty else rows
-    today_code = "미등록" if today_rows.empty else str(today_rows.iloc[0]["work_type_code"])
+    today_code = "미등록" if today_rows.empty else _duty_label(today_rows.iloc[0]["work_type_code"])
 
     future = rows[rows["date"] > today].sort_values("date") if not rows.empty else rows
     if future.empty:
@@ -899,7 +906,7 @@ def _my_duty_block(user: dict) -> None:
         next_row = future.iloc[0]
         next_date = next_row["date"]
         next_label = "내일 근무" if (next_date - today).days == 1 else f"다음 근무 ({next_date.month}/{next_date.day})"
-        next_value = str(next_row["work_type_code"])
+        next_value = _duty_label(next_row["work_type_code"])
 
     counts = {"주간": 0, "야간": 0, "OFF": 0}
     for code, count in month_rows["work_type_code"].value_counts().items():

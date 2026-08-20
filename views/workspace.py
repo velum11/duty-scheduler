@@ -273,11 +273,16 @@ def duty_legend_html(items, *, label: str = "근무형태") -> str:
             + "".join(chips) + "</div>")
 
 
-def work_type_display(wt_df: pd.DataFrame | None = None) -> tuple[dict, dict]:
+def work_type_display(wt_df: pd.DataFrame | None = None, *,
+                      unique_labels: bool = True) -> tuple[dict, dict]:
     """근무형태 표시 계약 — (display_of, color_of).
 
     - display_of: 내부 코드 -> 화면 표시값(약칭). 약칭이 비었거나 같은 약칭이 여러
       코드에 걸리면(왕복 모호) 코드를 그대로 표시한다.
+    - unique_labels=False: 중복 약칭도 **약칭 그대로** 표시한다(빈 약칭만 코드 폴백).
+      역해석이 없는 조회 전용 화면(내 근무표·대시보드 내 근무)용 — 실DB 는 약칭
+      '주'/'야' 가 수십 코드에 걸려 있어 유일성 규칙이 DAY/NIGHT 코드 원문을
+      노출시켰다(2026-08-20 사용자 신고). 명칭 전문은 명칭 모드·tooltip 이 담당한다.
     - color_of: 표시값과 코드 양쪽을 색상(#RRGGBB)에 매핑 — 셀이 약칭으로 바뀌어도
       같은 코드는 같은 색을 유지한다(색은 코드에 귀속).
     조회 화면(월간·개인)이 셀을 약칭·색상으로 일관 표시하도록 공통으로 쓴다.
@@ -299,7 +304,8 @@ def work_type_display(wt_df: pd.DataFrame | None = None) -> tuple[dict, dict]:
         code = str(r["code"]).strip()
         label = str(r["short_label"]).strip()
         color = str(r["color"] or "").strip()
-        disp = label if label and len(label_codes.get(label, set())) == 1 else code
+        unique = len(label_codes.get(label, set())) == 1
+        disp = label if label and (unique or not unique_labels) else code
         if code:
             display_of[code] = disp
             if color.startswith("#"):
