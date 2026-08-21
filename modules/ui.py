@@ -63,7 +63,11 @@ html, body, .stApp,
    검수 실측: 평가 관리 "첨부된 사진이 없습니다" 등). 화면들이 개별 우회하던 것을 여기서 닫는다. */
 .stApp [data-testid="stCaptionContainer"],
 .stApp [data-testid="stCaptionContainer"] *,
-.stApp [data-baseweb="select"], .stApp [data-baseweb="input"] {
+/* Streamlit 1.59 는 selectbox·text_input 을 BaseWeb → react-aria 로 옮겼다(실측 2026-08-21).
+   date_input·multiselect 는 **아직 BaseWeb** 이라 두 계열을 함께 지정한다 — 한쪽만 남기면
+   그 위젯의 서체가 조용히 폴백한다. */
+.stApp [data-baseweb="select"], .stApp [data-baseweb="input"],
+.stApp .react-aria-ComboBox, .stApp .react-aria-TextField {
   font-family: var(--cd-sans);
 }
 /* 아이콘 글리프 폰트 보존(위 규칙이 상속으로 새어도 재확정) */
@@ -176,7 +180,16 @@ section[data-testid="stMain"] div[data-testid="stNumberInput"] label {
   font-size: 14px; font-weight: 400; color: var(--cd-ink-2);
   margin-bottom: 0.15rem; padding: 0;
 }
+/* 1.59 실측 — 테두리를 그리는 상자가 위젯마다 다르다:
+     selectbox   react-aria  [data-testid="stSelectbox"] div[role="group"]
+     text_input  react-aria  div[data-testid="stTextInputRootElement"]
+     multiselect BaseWeb     div[data-baseweb="select"] > div     (아직 유효)
+   종전에는 baseweb select 와 text_input **안쪽 input** 만 잡아, selectbox 와 text_input 의
+   실제 테두리 상자가 Streamlit 기본값(35px·radius 7px·테두리 #fbfaf8=배경과 동색이라
+   사실상 무테)으로 남아 있었다 — 같은 줄의 버튼(34px·6px·#cfc8bd)과 눈에 띄게 갈렸다. */
 section[data-testid="stMain"] div[data-baseweb="select"] > div,
+section[data-testid="stMain"] [data-testid="stSelectbox"] div[role="group"],
+section[data-testid="stMain"] div[data-testid="stTextInputRootElement"],
 section[data-testid="stMain"] div[data-testid="stTextInput"] input,
 section[data-testid="stMain"] div[data-testid="stNumberInput"] input {
   /* §1.4 compact 하한 34px — 종전 2.15rem(=30.1px@root14)은 미달이었고 화면들이
@@ -184,7 +197,8 @@ section[data-testid="stMain"] div[data-testid="stNumberInput"] input {
   min-height: 34px; border-radius: 6px; border-color: var(--cd-line-strong);
   background: var(--cd-surface); font-size: 14px;
 }
-section[data-testid="stMain"] div[data-baseweb="select"] div[data-baseweb="select"] { font-size: 14px; }
+/* selectbox 의 값 텍스트는 1.59 에서 중첩 baseweb select 가 아니라 ComboBox 안쪽 input 이다. */
+section[data-testid="stMain"] [data-testid="stSelectbox"] input { font-size: 14px; }
 /* focus 링 — 오렌지 액센트 (입력 식별 보조, WCAG 1.4.11) */
 section[data-testid="stMain"] div[data-testid="stTextInput"] input:focus,
 section[data-testid="stMain"] div[data-testid="stNumberInput"] input:focus {
@@ -410,8 +424,10 @@ section[data-testid="stSidebar"] div.stButton > button:hover {
   padding: 7px 10px;
 }
 .st-key-sb_search div[data-testid="stTextInput"] > div { border: none !important; }
-.st-key-sb_search div[data-baseweb="input"],
-.st-key-sb_search div[data-baseweb="base-input"] { background: transparent !important; }
+/* 사이드바 검색은 text_input 이므로 1.59 에서 react-aria 다 — baseweb input/base-input 은
+   이 위젯에 더 이상 존재하지 않는다(실측). */
+.st-key-sb_search .react-aria-TextField,
+.st-key-sb_search div[data-testid="stTextInputRootElement"] { background: transparent !important; }
 .st-key-sb_search div[data-testid="stTextInput"] input {
   height: 32px; min-height: 32px; border-radius: var(--sb-radius);
   border: 1px solid var(--sb-border) !important; background: #24221e !important;

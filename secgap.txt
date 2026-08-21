@@ -1,0 +1,154 @@
+Title: Karpathy's LLM Wiki Pattern on OpenClaw
+
+URL Source: https://www.clawctl.com/blog/karpathy-llm-wiki-openclaw-production
+
+Published Time: 2026-04-06
+
+Markdown Content:
+Karpathy's LLM Wiki builds a knowledge base that compounds over time. Run it on OpenClaw securely with encrypted storage and audit logging.
+
+## Karpathy's LLM Wiki on OpenClaw. Your Brain Deserves a Vault, Not a VPS.
+
+Andrej Karpathy just published [the best idea for personal AI agents](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) anyone has written this year.
+
+The idea: stop using LLMs like search engines. Start using them to build a wiki.
+
+Not a chatbot. Not RAG. A living, growing knowledge base that the LLM writes and maintains for you. You feed it articles, papers, notes, transcripts. It reads them, extracts the key information, cross-references everything, and keeps the whole thing current.
+
+Within 48 hours, the post hit the top of r/Rag, r/LocalLLaMA, and r/ClaudeAI. People are already building implementations.
+
+What nobody in those threads is talking about: security.
+
+Your wiki has your whole brain in it. And most people are running it on servers with no lock on the door.
+
+## How the Pattern Works
+
+Three layers. That's it.
+
+**Layer 1: Raw sources.** Articles, papers, notes, images. You collect them. The LLM reads them but never touches the originals.
+
+**Layer 2: The wiki.** Markdown files the LLM creates and maintains. Summaries. Entity pages. Concept maps. Cross-references. The LLM owns this layer. You read it.
+
+**Layer 3: The schema.** A config file that tells the LLM how to organize everything. What conventions to follow. What to do when new sources arrive.
+
+Karpathy's key insight: "Humans abandon wikis because the maintenance burden grows faster than the value. LLMs don't get bored."
+
+The LLM does all the bookkeeping. You do the thinking.
+
+## Why OpenClaw Is the Right Runtime
+
+Here's what makes this click.
+
+OpenClaw gives your LLM a persistent workspace, shell access, file system read/write, and tool use. That maps to Karpathy's three layers perfectly:
+
+**Raw sources = Document Library.** Clawctl's [library feature](https://www.clawctl.com/docs/getting-started) lets you upload files that persist across sessions. PDFs, markdown, text. Drop them in. The agent can read them. The originals stay untouched.
+
+**The wiki = Workspace directory.** OpenClaw gives each agent a persistent workspace directory. The LLM reads, writes, and maintains markdown files here. They survive restarts, updates, model switches. Your wiki doesn't disappear when the container restarts.
+
+**The schema = SOUL.md.** OpenClaw's agent personality file. You define wiki conventions, page formats, cross-reference rules, ingestion workflows. The LLM follows them every session.
+
+Now add a channel. Telegram. Discord. Slack.
+
+You're on the train. You read an article. You forward the link to your agent on Telegram. The agent reads it, extracts what matters, updates your wiki. You check the results when you get home.
+
+That's Vannevar Bush's Memex from 1945. Running on your phone. Karpathy says it himself: "The part Bush couldn't solve was who does the maintenance. The LLM handles that."
+
+## The Part Nobody's Talking About
+
+Your wiki is your brain.
+
+Research notes. Business strategy. Competitive analysis. Personal goals. Health data. Karpathy lists all of these as use cases.
+
+Now imagine that brain sitting on a server with:
+
+No authentication. Anyone who finds your IP reads everything.
+
+No encryption. Your API keys, your LLM credentials, your source documents. Plaintext.
+
+No audit trail. If someone reads your wiki, you never know.
+
+No egress controls. One [malicious skill](https://www.clawctl.com/blog/openclaw-clawhub-malicious-skills-2026) and your entire knowledge base lands on someone else's server.
+
+This is not a hypothetical.
+
+A [Shodan scan found 42,665 exposed OpenClaw instances](https://www.clawctl.com/blog/42665-exposed-openclaw-instances). Most had no authentication. Full shell access for anyone who cared to look.
+
+Your personal wiki. Your research. Your strategy. Your health notes.
+
+On the open internet.
+
+## What "Production-Ready" Actually Means
+
+Running this on a laptop is fine for playing around.
+
+Running it in production, always on, accessible from your phone, fed by multiple channels, that's different. That needs real infrastructure.
+
+**Encrypted storage.** Your wiki files need to survive restarts AND be encrypted at rest. Not "I'll add encryption later." From the first file.
+
+**Token-based auth.** Not "I'll put Nginx in front of it eventually." Real gateway authentication that works out of the box.
+
+**Audit logging.** Every query. Every source ingestion. Every wiki edit. Timestamped. Searchable. When your wiki contains your competitive analysis, you need to know who accessed what and when. Here's the [full guide](https://www.clawctl.com/blog/ai-agent-audit-logging-guide).
+
+**Egress controls.** Your agent can read your wiki. Your agent has network access. Without egress controls, one bad prompt injection and your entire knowledge base goes somewhere you didn't choose.
+
+**A kill switch.** Your always-on agent starts behaving unexpectedly at 3 AM (and it will). You need a [one-click kill](https://www.clawctl.com/blog/ai-agent-kill-switch) that works even when the server is unresponsive.
+
+**Automatic patching.** OpenClaw shipped [9 CVEs in 4 days](https://www.clawctl.com/blog/openclaw-security-risks) in early 2026. Your wiki agent needs those patches. Without you SSHing into a VPS every week.
+
+## Setting It Up on Clawctl
+
+[Clawctl](https://www.clawctl.com/docs) handles all of the above. Here's the setup:
+
+**1. Deploy.** Pick your LLM provider. Pick your channel. Deploy. 60 seconds. Your instance is live with encrypted storage, gateway auth, audit logging, and egress controls. No Docker. No reverse proxy. No TLS certs.
+
+**2. Upload your schema.** Use the Document Library to upload your wiki schema file. This is Karpathy's "CLAUDE.md" or "AGENTS.md." The config that tells your LLM how to structure the wiki.
+
+**3. Feed it sources.** Send links, documents, and notes through Telegram, Discord, or Slack. The agent reads them, extracts key information, integrates it into your wiki. The workspace persists.
+
+**4. Query it.** Ask questions. The agent searches the wiki, synthesizes answers, and files valuable responses back in. Knowledge compounds.
+
+**5. Monitor it.** The [audit log](https://www.clawctl.com/blog/ai-agent-audit-logging-guide) shows every action. What it read. What it wrote. What tools it called.
+
+The difference: you spend time curating sources and asking questions. Not maintaining infrastructure.
+
+## The Compounding Effect
+
+Every source you add makes the wiki more valuable.
+
+Every question you ask that gets filed back creates new connections.
+
+Every week, the wiki knows more than it did last week.
+
+But compounding only works if the wiki survives. If it's secure. If it's always available. If it doesn't get wiped by a failed Docker update or exfiltrated by a malicious skill.
+
+The infrastructure is not the interesting part. The knowledge is.
+
+Spend your time on the knowledge.
+
+## What Is Karpathy's LLM Wiki?
+
+Karpathy's LLM Wiki is a pattern where an LLM incrementally builds and maintains a persistent knowledge base of interlinked markdown files. Instead of re-deriving knowledge on every query (like RAG), the LLM compiles sources once into a structured wiki and keeps it current as new sources arrive. The wiki is a compounding artifact that gets richer over time.
+
+## FAQ
+
+### Can I use any LLM with the wiki pattern?
+
+Yes. The pattern is model-agnostic. Karpathy's description works with Claude, GPT, Gemini, Grok, or local models via Ollama. On Clawctl, you pick your provider at checkout and can switch later.
+
+### How big can the wiki get?
+
+Clawctl's Starter plan gives you 5GB of encrypted storage. That holds tens of thousands of markdown files. Most personal wikis stay under 1GB even after months of use.
+
+### Does the wiki survive restarts and updates?
+
+On Clawctl, yes. The workspace lives on encrypted persistent volumes. Survives container restarts, updates, and model changes. On a self-hosted VPS, you need to configure this yourself. Most people don't. See the [full comparison](https://www.clawctl.com/blog/best-managed-openclaw-platform-comparison).
+
+## Start Building
+
+Deploy a secure OpenClaw instance and start building your LLM Wiki.
+
+[Deploy Securely — $49/mo →](https://www.clawctl.com/checkout?plan=starter&utm_source=organic&utm_medium=seo&utm_campaign=blog-karpathy-llm-wiki-openclaw-production&utm_content=cta-bottom)
+
+Your brain deserves a vault, not a VPS.
+
+This content is for informational purposes only and does not constitute financial, legal, medical, tax, or other professional advice. Individual results vary. See our [Terms of Service](https://www.clawctl.com/terms#19) for important disclaimers.

@@ -54,7 +54,9 @@ _WRM_CSS = """
   font-size:12px !important; font-weight:600 !important; }
 /* 히트영역 §1.4 compact(34~38) — 조건 select 가 실측 33px 로 1px 미달이었다. */
 [class*="st-key-work_request_my_"] div[data-baseweb="select"] > div,
+[class*="st-key-work_request_my_"] [data-testid="stSelectbox"] div[role="group"],
 [class*="st-key-work_request_my_"] input,
+[class*="st-key-wrm_"] [data-testid="stSelectbox"] div[role="group"],
 [class*="st-key-wrm_"] input { min-height:34px !important; }
 </style>
 """

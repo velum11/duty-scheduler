@@ -1,0 +1,49 @@
+assignee: OK:Ï°∞Ïπò Îã¥ÎãπÏûê
+Traceback (most recent call last):
+  File "C:\dev\duty-scheduler\.orca\temp\qa_s4.py", line 73, in <module>
+    P("confirmer:", sel_capa(pg, L["sel_confirmer"], "1003"))
+                    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\dev\duty-scheduler\.orca\temp\qa_s4.py", line 43, in sel_capa
+    cb.click(); pg.wait_for_timeout(1200)
+    ~~~~~~~~^^
+  File "C:\dev\duty-scheduler\.venv\Lib\site-packages\playwright\sync_api\_generated.py", line 2343, in click
+    self._sync(
+    ~~~~~~~~~~^
+        self._impl_obj.click(
+        ^^^^^^^^^^^^^^^^^^^^^
+    ...<10 lines>...
+        )
+        ^
+    )
+    ^
+  File "C:\dev\duty-scheduler\.venv\Lib\site-packages\playwright\_impl\_sync_base.py", line 115, in _sync
+    return task.result()
+           ~~~~~~~~~~~^^
+  File "C:\dev\duty-scheduler\.venv\Lib\site-packages\playwright\_impl\_element_handle.py", line 143, in click
+    await self._channel.send(
+        "click", self._frame._timeout, locals_to_params(locals())
+    )
+  File "C:\dev\duty-scheduler\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 69, in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\dev\duty-scheduler\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 563, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.TimeoutError: ElementHandle.click: Timeout 15000ms exceeded.
+Call log:
+  - attempting click action
+    2 °ø waiting for element to be visible, enabled and stable
+      - element is not enabled
+    - retrying click action
+    - waiting 20ms
+    2 °ø waiting for element to be visible, enabled and stable
+      - element is not enabled
+    - retrying click action
+      - waiting 100ms
+    28 °ø waiting for element to be visible, enabled and stable
+       - element is not enabled
+     - retrying click action
+       - waiting 500ms
+

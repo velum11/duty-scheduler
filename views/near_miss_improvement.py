@@ -180,10 +180,13 @@ _IMPR_CSS = f"""
 }}
 [class*="st-key-nm_impr_flt_"] div[data-baseweb="select"] > div,
 [class*="st-key-nm_impr_flt_"] .react-aria-ComboBox input,
+[class*="st-key-nm_impr_flt_"] .react-aria-ComboBox div[role="group"],
 [class*="st-key-nm_impr_assignee_"] div[data-baseweb="select"] > div,
 [class*="st-key-nm_impr_assignee_"] .react-aria-ComboBox input,
+[class*="st-key-nm_impr_assignee_"] .react-aria-ComboBox div[role="group"],
 [class*="st-key-nm_impr_confirmer_"] div[data-baseweb="select"] > div,
 [class*="st-key-nm_impr_confirmer_"] .react-aria-ComboBox input,
+[class*="st-key-nm_impr_confirmer_"] .react-aria-ComboBox div[role="group"],
 [class*="st-key-nm_impr_due_"] input {{ min-height:34px !important; }}
 /* 비활성 라벨은 Streamlit 기본 #9e9c98(2.46:1, §1.3 팔레트 밖)이다. WCAG 는 비활성을
    예외로 두지만 같은 화면에서 5.04:1 과 2.46:1 이 섞이는 것은 결함이다 — ink-3 로 통일. */

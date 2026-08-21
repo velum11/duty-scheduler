@@ -1,0 +1,7 @@
+ag frame: True
+single-click cycle check: before='주' after='?' same=False
+Traceback (most recent call last):
+  File "C:\dev\duty-scheduler\.orca\temp\qa_s7.py", line 54, in <module>
+    c2.dblclick(); pg.wait_for_timeout(1000)
+    ^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'dblclick'

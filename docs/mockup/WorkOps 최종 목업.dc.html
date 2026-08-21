@@ -1,0 +1,1445 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style data-omelette-injected>html,body{background:transparent}</style><script data-omelette-injected>(()=>{{const n=new URLSearchParams(location.search).get("theme");if(n==="light"||n==="dark"){document.documentElement.dataset.theme=n}}{if(new URLSearchParams(location.search).get("_omthumb")==="1"){const n=(f)=>{const g=f.focus;if(!g)return;f.focus=function(h){g.call(this,{...h,preventScroll:true})}};n(HTMLElement.prototype);n(SVGElement.prototype);if(typeof MathMLElement!=="undefined"){n(MathMLElement.prototype)}const d=(f)=>{f.removeAttribute("autofocus");f.inert=true;if(!(f instanceof HTMLElement))f.removeAttribute("tabindex")};const p=(f)=>{if(f.hasAttribute("autofocus"))d(f);for(const g of f.querySelectorAll("[autofocus]")){d(g)}};p(document.documentElement);new MutationObserver((f)=>{for(const g of f){for(const h of g.addedNodes){if(h.nodeType===1)p(h)}}}).observe(document,{childList:true,subtree:true})}}{const n=()=>{try{if(document.querySelector('meta[name="color-scheme"]'))return;const d=getComputedStyle(document.documentElement).getPropertyValue("color-scheme").trim();if(d&&d!=="normal")return;const p=(y)=>{if(!y)return null;const m=getComputedStyle(y).backgroundColor.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+%?))?\s*\)$/);if(!m)return null;const w=m[4]==null?1:parseFloat(m[4])/(m[4].endsWith("%")?100:1);if(w<0.99)return null;return[+m[1],+m[2],+m[3]]};const f=p(document.body)||p(document.documentElement);if(!f)return;const g=(y)=>{const m=y/255;return m<=0.04045?m/12.92:((m+0.055)/1.055)**2.4};const h=0.2126*g(f[0])+0.7152*g(f[1])+0.0722*g(f[2]);document.documentElement.style.setProperty("color-scheme",h<0.4?"dark":"light")}catch{}};if(document.readyState==="complete")n();else window.addEventListener("load",n)}var I=[];var B=false;var K=false;var C=()=>{};if(K===true){try{const n=setTimeout.bind(window);const d=1e4;const p=15;const f=1e4;const g=120000;const h=200;const y=(o)=>{try{let r;if(typeof o==="string")r=o;else if(o instanceof URL)r=o.href;else if(typeof Request!=="undefined"&&o instanceof Request)r=o.url;else return null;if(!r)return null;const l=document.baseURI;const i=new URL(r,l);if(i.protocol!=="http:"&&i.protocol!=="https:")return null;if(i.origin!==new URL(l).origin)return null;return i.origin+i.pathname}catch{return null}};const m=new Map;const w=(o)=>{let r=m.get(o);if(!r){if(m.size>=h){const l=m.keys().next().value;if(l!==undefined)m.delete(l)}r={fails:[],until:0,cooldown:f,hard:false};m.set(o,r)}return r};const R=(o)=>{const r=m.get(o);return r!==undefined&&r.until>Date.now()};const O=(o,r)=>{const l=Date.now();const i=w(o);if(r)i.hard=true;if(i.until>l)return;i.fails.push(l);while(i.fails.length>0&&i.fails[0]<=l-d)i.fails.shift();if(i.fails.length>=p){i.until=l+i.cooldown;if(i.hard)i.cooldown=Math.min(i.cooldown*2,g);i.fails.length=0;try{n(()=>{try{S(true)}catch{}},i.until-l+100)}catch{}console.warn("[omelette] asset circuit breaker: pausing requests to "+o+" for "+Math.round((i.until-l)/1000)+"s after "+p+" failures in "+d/1000+"s")}};const e=(o)=>{m.delete(o)};const t=100;const a=new WeakMap;const u=new Set;let s=null;const S=(o)=>{for(const r of Array.from(u)){try{const l=a.get(r);if(l===undefined){u.delete(r);continue}if(o){const i=y(l);if(i!==null&&R(i))continue}a.delete(r);u.delete(r);if(s!==null)s.call(r,l)}catch{}}};C=()=>{try{m.clear();S(false)}catch{}};document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")C()});const _=window.fetch;if(typeof _==="function"){const o=function(...r){let l=null;try{l=y(r[0])}catch{}if(l!==null&&R(l)){let c;try{if(r[1]&&r[1].signal!==undefined){c=r[1].signal||undefined}else if(typeof Request!=="undefined"&&r[0]instanceof Request){c=r[0].signal||undefined}}catch{c=undefined}return new Promise((k,b)=>{const E=()=>{try{return c.reason!==undefined?c.reason:new DOMException("The operation was aborted.","AbortError")}catch{return new DOMException("The operation was aborted.","AbortError")}};try{if(c&&c.aborted){b(E());return}}catch{}let T=false;const j=()=>{if(T)return;T=true;b(E())};try{if(c)c.addEventListener("abort",j,{once:true})}catch{}n(()=>{if(T)return;T=true;try{if(c)c.removeEventListener("abort",j)}catch{}let L;try{L=new Response(null,{status:429,statusText:"Too Many Requests",headers:{"Retry-After":"10"}})}catch{L={ok:false,status:429}}k(L)},250)})}const i=_.apply(window,r);if(l!==null){const c=l;i.then((k)=>{try{if(k.ok)e(c);else if(k.status===401||k.status===403||k.status===404||k.status===429){O(c,k.status!==404)}}catch{}},()=>{})}return i};window.fetch=o}const v=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,"src");if(v!==undefined&&v.set!==undefined&&v.get!==undefined){const o=v.set;s=o;Object.defineProperty(HTMLImageElement.prototype,"src",{configurable:true,enumerable:v.enumerable,get:v.get,set(r){const l=`${r}`;try{const i=y(l);if(i!==null&&R(i)){a.set(this,l);if(u.size<t)u.add(this);return}}catch{}try{a.delete(this);u.delete(this)}catch{}o.call(this,l)}})}try{const o=HTMLImageElement.prototype.setAttribute;HTMLImageElement.prototype.setAttribute=function(r,l){if(arguments.length<2){o.apply(this,arguments);return}if(typeof r==="string"&&r.toLowerCase()==="src"){const i=`${l}`;try{const c=y(i);if(c!==null&&R(c)){a.set(this,i);if(u.size<t)u.add(this);return}a.delete(this);u.delete(this)}catch{}o.call(this,r,i);return}o.call(this,r,l)}}catch{}window.addEventListener("error",(o)=>{try{const r=o.target;if(r instanceof HTMLImageElement){const l=y(r.currentSrc||r.src||"");if(l!==null)O(l,true)}}catch{}},true);window.addEventListener("load",(o)=>{try{const r=o.target;if(r instanceof HTMLImageElement){const l=y(r.currentSrc||r.src||"");if(l!==null)e(l);const i=a.get(r);if(i!==undefined){let c=false;try{c=new URL(i,document.baseURI).href===new URL(r.currentSrc||r.src||"",document.baseURI).href}catch{c=false}if(c){a.delete(r);u.delete(r)}}}}catch{}},true)}catch{}}var J=30000;var G=3000;document.addEventListener("DOMContentLoaded",()=>{const n=window.Babel;const d="om-src-id";if(n&&n.registerPlugin&&!(n.availablePlugins&&n.availablePlugins[d])){n.registerPlugin(d,({types:h})=>({visitor:{JSXOpeningElement(y,m){const w=y.node;if(w.name&&w.name.type==="JSXMemberExpression")return;for(let t=0;t<w.attributes.length;t++){const a=w.attributes[t];if(a.type==="JSXAttribute"&&a.name&&a.name.name==="data-om-id")return}const R=m.file&&m.file.opts&&m.file.opts.filename||"?";const O=w.loc&&w.loc.start;const e=`jsx:${R}:${w.start??0}:${O?O.line:0}:${O?O.column+1:0}`;w.attributes.push(h.jsxAttribute(h.jsxIdentifier("data-om-id"),h.stringLiteral(e)))}}}))}const p="om-text-extract";let f=false;if(B&&n&&n.registerPlugin&&!(n.availablePlugins&&n.availablePlugins[p])){const h=window.React;if(h&&h.useSyncExternalStore&&h.createElement){f=true;const y={};const m=new Set;let w=0;window.__omTextO=y;window.__omTextSet=(e)=>{for(const t in e){const a=e[t];if(a==null)delete y[t];else y[t]=a}w++;m.forEach((t)=>t())};const R=(e)=>{m.add(e);return()=>m.delete(e)};const O=()=>w;window.__OmT=function e(t){h.useSyncExternalStore(R,O,O);return h.createElement("span",{"data-om-text":t.i,className:"__om-t"},t.i in y?y[t.i]:t.children)};n.registerPlugin(p,({types:e})=>{const t={style:1,script:1,noscript:1,textarea:1,title:1,option:1,text:1,tspan:1,textPath:1};const a={placeholder:1,alt:1,title:1,label:1,"aria-label":1,"aria-description":1,"aria-placeholder":1};const u=(o,r)=>e.logicalExpression("??",e.memberExpression(e.logicalExpression("||",e.memberExpression(e.identifier("window"),e.identifier("__omTextO")),e.objectExpression([])),e.stringLiteral(o),true),r);const s=(o)=>o.file&&o.file.opts&&o.file.opts.filename||"?";const S=(o)=>o.file&&o.file.code||"";const _=(o,r)=>{const l=(c)=>c&&c.start!=null&&c.end!=null&&(c.type==="StringLiteral"||c.type==="TemplateLiteral"&&c.expressions.length===0)?[c.start,c.end]:null;const i=l(r);if(i)return i;if(r&&r.type==="Identifier"){const c=o.scope.getBinding(r.name);if(c&&c.constant&&c.path.node.type==="VariableDeclarator"){return l(c.path.node.init)}}return null};const v=(o,r,l)=>{const i=o.node;let c=false;const k=(E,T)=>{c=true;return e.jsxElement(e.jsxOpeningElement(e.jsxIdentifier("__OmT"),[e.jsxAttribute(e.jsxIdentifier("i"),e.stringLiteral(E))],false),e.jsxClosingElement(e.jsxIdentifier("__OmT")),[T],false)};const b=i.children.map((E)=>{if(E.type==="JSXText"){if(E.start==null||E.end==null)return E;const T=l.slice(E.start,E.end);const j=T.length-T.trimStart().length;const L=T.length-T.trimEnd().length;if(j+L>=T.length)return E;return k(`txt:${r}:${E.start+j}:${E.end-L}`,E)}if(E.type==="JSXExpressionContainer"){const T=_(o,E.expression);if(T)return k(`str:${r}:${T[0]}:${T[1]}`,E)}return E});if(c)i.children=b};return{visitor:{JSXOpeningElement(o,r){const l=o.node;const i=s(r);const c={};for(let k=0;k<l.attributes.length;k++){const b=l.attributes[k];if(b.type!=="JSXAttribute"||!b.name)continue;const E=b.name.name;if(!a[E])continue;if(!b.value||b.value.type!=="StringLiteral")continue;if(b.value.start==null||b.value.end==null)continue;const T=`txt:${i}:${b.value.start}:${b.value.end}`;c[E]=T;b.value=e.jsxExpressionContainer(u(T,e.stringLiteral(b.value.value)))}if(Object.keys(c).length){l.attributes.push(e.jsxAttribute(e.jsxIdentifier("data-om-text-attrs"),e.stringLiteral(JSON.stringify(c))))}},JSXElement(o,r){const l=o.node.openingElement;const i=l&&l.name&&l.name.name;if(i==="__OmT")return;if(typeof i==="string"&&t[i])return;v(o,s(r),S(r))},JSXFragment(o,r){v(o,s(r),S(r))}}}})}}const g=f?["transform-react-jsx-source",d,p]:["transform-react-jsx-source",d];document.querySelectorAll('script[type="text/babel"],script[type="text/jsx"]').forEach((h,y)=>{const m=h.getAttribute("data-plugins")||"";const w=g.filter((R)=>m.indexOf(R)<0);if(w.length){h.setAttribute("data-plugins",m?`${m},${w.join(",")}`:w.join(","))}if(!h.hasAttribute("data-filename")){h.setAttribute("data-filename",h.getAttribute("src")||`inline-${y}`)}})});var A=window.parent;var U="not editable here — open the project in the Claude Design editor to save";var W=()=>Promise.resolve({persisted:false,noHost:true,reason:U});var H=W;var M="data/storage.json";var z=()=>{try{const n=new URL(document.baseURI);const d=n.pathname.match(/\/projects\/([^/]+)\/serve\//);if(d)return d[1];return n.hostname.split(".")[0]||""}catch{return location.hostname.split(".")[0]||""}};var Z=()=>{try{const n=new URL(document.baseURI);const d=n.pathname.indexOf("/serve/");if(d>=0)return n.origin+n.pathname.slice(0,d+"/serve/".length)+M}catch{}return"./"+M};var x=null;var N=()=>{if(!x){x=fetch(Z(),{cache:"no-store"}).then((n)=>{if(n.ok)return n.text();return n.status===404?"":null}).catch(()=>null).then((n)=>{if(n===null){x=null;return null}const d=new Map;if(!n)return d;let p;try{p=JSON.parse(n)}catch{console.warn("[omelette.storage] "+M+" is not valid JSON; treating the store as unreadable so a save cannot overwrite the "+"hand-edited bytes. Fix the JSON (or delete the file) to re-enable persistence.");x=null;return null}if(p===null||typeof p!=="object"||Array.isArray(p)){console.warn("[omelette.storage] "+M+" doesn't hold a JSON object; treating the store as unreadable so a save cannot "+"overwrite the hand-edited bytes. Make the top level a JSON object to re-enable persistence.");x=null;return null}const f=p;if("data"in f){const g=f.data;if(g===null||typeof g!=="object"||Array.isArray(g)){console.warn("[omelette.storage] "+M+' has a "data" field that is not a JSON object; treating the store as unreadable so a '+'save cannot overwrite the hand-edited bytes. Make "data" a JSON object to re-enable persistence.');x=null;return null}const h=f._meta;const y=h!==null&&typeof h==="object"?h.project:undefined;if(typeof y==="string"&&y!==""&&y!==z())return d;for(const m of Object.keys(g))d.set(m,g[m]);return d}for(const g of Object.keys(f)){if(g!=="_meta")d.set(g,f[g])}return d})}return x};var F=(n)=>H(M,JSON.stringify({_meta:{project:z(),version:1},data:Object.fromEntries(n)},null,2));var D=Promise.resolve();var $=(n)=>{const d=D.then(n);D=d.then(()=>{return},()=>{return});return d};var V=/sk-(?:ant-)?[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[a-z]-[A-Za-z0-9][A-Za-z0-9-]{9,}|AIza[0-9A-Za-z_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/;var Y=/password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token|credential/i;var Q=(n,d,p)=>{if(V.test(d)||Y.test(n)&&typeof p==="string"&&p.length>=8){console.warn('[omelette.storage] the value for "'+n+'" looks like a credential. The storage file is a plaintext project file — visible to '+"everyone with project access and copied when the project is duplicated. Do not store secrets here.")}};var q={persisted:false,reason:"could not load the existing store — not overwriting it"};var X={persisted:false,reason:"stored value changed since a failed read — re-read this key before saving"};var P=new Set;var ee={get:(n)=>{if(typeof n!=="string"){return Promise.reject(new TypeError("storage.get: key must be a string"))}return $(N).then((d)=>{if(d===null){P.add(n);return null}P.delete(n);if(!d.has(n))return null;const p=d.get(n);return p==null?null:JSON.parse(JSON.stringify(p))})},set:(n,d)=>{if(typeof n!=="string"){return Promise.reject(new TypeError("storage.set: key must be a string"))}let p;try{p=JSON.stringify(d)}catch(g){return Promise.reject(new TypeError("storage.set: value must be JSON-serializable ("+String(g)+")"))}if(p===undefined){return Promise.reject(new TypeError("storage.set: value must be JSON-serializable"))}Q(n,p,d);const f=JSON.parse(p);return $(()=>N().then((g)=>{if(g===null)return q;if(P.has(n)){if(g.has(n))return X;P.delete(n)}g.set(n,f);return F(g)}))},delete:(n)=>{if(typeof n!=="string"){return Promise.reject(new TypeError("storage.delete: key must be a string"))}return $(()=>N().then((d)=>{if(d===null)return q;if(P.has(n)){if(d.has(n))return X;P.delete(n)}d.delete(n);return F(d)}))},keys:()=>$(N).then((n)=>n===null?[]:Array.from(n.keys()))};window.omelette={writeFile:(n,d)=>H(n,d).then((p)=>{if(!p.persisted&&!p.noHost){throw new Error(p.reason||"write failed")}}),storage:ee};if(A&&A!==window){const n=(e,t)=>{try{A.postMessage({__omelette_log:true,type:e,data:t},"*")}catch{}};["log","warn","error"].forEach((e)=>{const t=console[e];console[e]=(...a)=>{const u=a.map((s)=>{try{return typeof s==="object"?JSON.stringify(s):String(s)}catch{try{return String(s)}catch{return"[unstringifiable]"}}}).join(" ");n(e,u);t.apply(console,a)}});window.addEventListener("error",(e)=>{const t=e.target;if(t&&t!==window&&t.tagName){const a=t.src||t.href||"";n("resource_error",`${t.tagName} failed to load: ${a}`)}else{n("error",`${e.message||"Unknown error"} at ${e.filename||"?"}:${e.lineno||0}:${e.colno||0}`)}},true);window.addEventListener("unhandledrejection",(e)=>{const t=e.reason;const a=t instanceof Error?`${t.message} ${t.stack}`:String(t);n("error",`Unhandled rejection: ${a}`)});window.addEventListener("click",(e)=>{if(e.defaultPrevented||e.button!==0)return;if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;const t=e.composedPath?e.composedPath():[];const a=["button","input","select","textarea","summary","label"];let u=null;for(const v of t){if(!(v instanceof Element))continue;if(v.localName==="a"){if(!(v instanceof HTMLAnchorElement))return;u=v;break}if(a.indexOf(v.localName)!==-1)return}if(!u)return;if(u.isContentEditable)return;const s=u.closest("[contenteditable]");if(s&&s.getAttribute("contenteditable")!=="false")return;const S=(u.getAttribute("target")||"_self").toLowerCase();if(S!=="_self"&&S!=="_top"&&S!=="_parent")return;let _;try{_=new URL(u.href)}catch{return}if(_.protocol!=="http:"&&_.protocol!=="https:")return;if(location.origin==="null")return;if(_.origin===location.origin)return;e.preventDefault();window.open(_.href,"_blank","noopener,noreferrer")});const d=()=>{try{A.postMessage({type:"omelette:height",height:document.documentElement.scrollHeight},"*")}catch{}};if(window.ResizeObserver)new ResizeObserver(d).observe(document.documentElement);const p=()=>{d();if(!document.querySelector('script[type="text/babel"],script[type="text/jsx"]'))return;const e=()=>document.getElementById("root")||document.querySelector("body > div[id]");const t=e()?.firstElementChild??null;let a=0;const u=()=>{const s=e();if(s&&s.firstElementChild!==t||++a>30){d();return}setTimeout(u,100)};setTimeout(u,100)};if(document.readyState==="complete")p();else window.addEventListener("load",p);const f={};let g=0;const h=(e)=>new Promise((t,a)=>{if(!I.length){a(new Error("claude.complete: no parent origin"));return}const u=`c${++g}`;const s=()=>setTimeout(()=>{delete f[u];a(new Error(`claude.complete: no data for ${J/1000}s`))},J);const S=s();f[u]={resolve:t,reject:a,text:"",t:S,arm:s};try{for(const _ of I){A.postMessage({__om_api:true,id:u,body:e},_)}}catch(_){clearTimeout(S);delete f[u];a(_)}});const y=8;const m=async(e,t)=>{if(!Array.isArray(e.messages)){throw new Error("claude.complete: tools require a messages array")}const a=e.messages.slice();const u={...e,tools:e.tools.map((_)=>{if(_===null||typeof _!=="object")return _;const v={};for(const o of Object.keys(_)){if(typeof _[o]!=="function")v[o]=_[o]}return v})};const s=u.tool_choice;const S=s!=null&&(s.type==="any"||s.type==="tool")?{...u,tool_choice:s.disable_parallel_tool_use!==undefined?{type:"auto",disable_parallel_tool_use:s.disable_parallel_tool_use}:{type:"auto"}}:u;for(let _=0;_<y;_++){const v=await h({..._===0?u:S,messages:a});const o=v.message;const r=o&&Array.isArray(o.content)?o.content:null;const l=r?r.filter((c)=>c?.type==="tool_use"):[];if(o?.stop_reason!=="tool_use"||l.length===0){return v.text}const i=[];for(const c of l){const k=t.get(c.name);if(!k){i.push({type:"tool_result",tool_use_id:c.id,content:`no handler for tool "${c.name}"`,is_error:true});continue}try{const b=await k(c.input);const E=typeof b==="string"?b:O(b)??"";i.push({type:"tool_result",tool_use_id:c.id,content:E})}catch(b){i.push({type:"tool_result",tool_use_id:c.id,content:String(b?.message??b??"tool handler failed"),is_error:true})}}a.push({role:"assistant",content:r},{role:"user",content:i})}throw new Error(`claude.complete: exceeded ${y} tool turns`)};window.claude={complete(e){const t=e;if(t!==null&&typeof t==="object"&&Array.isArray(t.tools)&&t.tools.some((a)=>a!==null&&typeof a==="object"&&typeof a.run==="function")){const a=new Map;for(const u of t.tools){if(u!==null&&typeof u==="object"&&typeof u.run==="function"){a.set(String(u.name),u.run)}}return m(t,a)}return h(e).then((a)=>a.text)}};const w={};let R=0;H=(e,t)=>new Promise((a)=>{if(!I.length){a({persisted:false,noHost:true,reason:U});return}const u=`f${++R}`;const s=setTimeout(()=>{delete w[u];a({persisted:false,noHost:true,reason:U})},G);w[u]={settle:a,t:s};try{for(const S of I){A.postMessage({__om_file:true,id:u,op:"write",path:e,content:t},S)}}catch{clearTimeout(s);delete w[u];a({persisted:false,noHost:true,reason:U})}});const O=(e)=>{try{return JSON.stringify(e)}catch{return JSON.stringify(String(e))}};window.addEventListener("message",(e)=>{if(I.indexOf(e.origin)<0)return;if(e.source!==A)return;const t=e.data;if(!t)return;if(t.type==="omelette-preview-refresh"){if(typeof t.token!=="string"||!/^[0-9a-f.-]+(\.(rc|pr-[0-9]+))?(\.[0-9]+\.[0-9a-f]{16})?$/.test(t.token))return;const s=Math.max(1,Math.floor((t.expiresAt||0)-Date.now()/1000));document.cookie="__Host-omelette-preview="+t.token+"; Path=/; Secure; SameSite=None; Partitioned; Max-Age="+s;C();return}if(t.__om_file_r){const s=w[t.id];if(!s)return;clearTimeout(s.t);delete w[t.id];s.settle(t.ok?{persisted:true}:{persisted:false,reason:t.error||"write failed"});return}if(t.__om_api_r){const s=f[t.id];if(!s)return;if(t.error!=null){clearTimeout(s.t);delete f[t.id];s.reject(new Error(t.error));return}if(t.chunk!=null){clearTimeout(s.t);s.t=s.arm();s.text+=t.chunk;return}if(t.done){clearTimeout(s.t);delete f[t.id];s.resolve({text:t.text!=null?t.text:s.text,message:t.message});return}return}if(!t.__om_eval)return;const a=t;const u=(s)=>{e.source.postMessage({...s,__om_eval_r:1,id:a.id},e.origin)};try{const s=(0,eval)(a.code);if(s&&typeof s.then==="function"){s.then((S)=>u({ok:1,v:O(S)}),(S)=>u({ok:0,e:String(S)}))}else{u({ok:1,v:O(s)})}}catch(s){u({ok:0,e:String(s)})}})}})();
+</script>
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" rel="stylesheet"><style>body{margin:0;background:#fff;font-family:'Pretendard Variable',Pretendard,'Malgun Gothic',system-ui,sans-serif;color:#222;font-size:12px;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}table{border-collapse:collapse}td,th{font-variant-numeric:tabular-nums}a{color:#b8460d;text-decoration:none}a:hover{color:#963a0a}button{font-family:inherit}</style></helmet>
+<div style="display:flex;flex-direction:column;height:100vh;min-height:0;background:#fff">
+
+
+
+
+
+
+
+
+<sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}">
+<div style="flex:none;height:52px;display:flex;align-items:center;gap:10px;padding:0 12px;background:#b8460d">
+<span onClick="{{ toggleDrawer }}" style="width:44px;height:44px;margin-left:-8px;display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="21" height="21" viewBox="0 0 20 20" fill="none"><path d="M3 5.5h14M3 10h14M3 14.5h14" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+<span style="font-size:16px;font-weight:700;color:#fff;white-space:nowrap">{{ mobTitle }}</span>
+<span style="margin-left:auto;width:32px;height:32px;border-radius:999px;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:#fff">이</span>
+</div>
+<div style="display:{{ drawerDisp }};flex-direction:column;background:#faf9f6;border-bottom:1px solid #ddd8d0;padding:8px 0">
+<div onClick="{{ mgMycal }}" style="height:46px;display:flex;align-items:center;padding:0 16px;font-size:14.5px;cursor:pointer;color:{{ side.mycal.fg }};font-weight:{{ side.mycal.fw }};background:{{ side.mycal.bg }}">내 근무표</div>
+<div onClick="{{ mgPlan }}" style="height:46px;display:flex;align-items:center;padding:0 16px;font-size:14.5px;cursor:pointer;color:{{ side.plan.fg }};font-weight:{{ side.plan.fw }};background:{{ side.plan.bg }}">근무표 편성</div>
+<div onClick="{{ mgNearReg }}" style="height:46px;display:flex;align-items:center;padding:0 16px;font-size:14.5px;cursor:pointer;color:{{ side.nearReg.fg }};font-weight:{{ side.nearReg.fw }};background:{{ side.nearReg.bg }}">아차사고 등록</div>
+<div onClick="{{ mgReqReg }}" style="height:46px;display:flex;align-items:center;padding:0 16px;font-size:14.5px;cursor:pointer;color:{{ side.reqReg.fg }};font-weight:{{ side.reqReg.fw }};background:{{ side.reqReg.bg }}">업무요청 등록</div>
+<div onClick="{{ mgStayReq }}" style="height:46px;display:flex;align-items:center;padding:0 16px;font-size:14.5px;cursor:pointer;color:{{ side.stayReq.fg }};font-weight:{{ side.stayReq.fw }};background:{{ side.stayReq.bg }}">숙소 예약 신청</div>
+<div onClick="{{ mgStayAppr }}" style="height:46px;display:flex;align-items:center;padding:0 16px;font-size:14.5px;cursor:pointer;color:{{ side.stayAppr.fg }};font-weight:{{ side.stayAppr.fw }};background:{{ side.stayAppr.bg }}">숙소 예약 승인</div>
+<div onClick="{{ mgDash }}" style="height:46px;display:flex;align-items:center;padding:0 16px;font-size:14.5px;cursor:pointer;color:{{ side.dash.fg }};font-weight:{{ side.dash.fw }};background:{{ side.dash.bg }}">근무 현황</div>
+</div>
+</sc-if>
+<sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ true }}">
+<div style="flex:none;display:flex;align-items:center;gap:12px;height:56px;padding:0 16px 0 0;background:#fff;border-bottom:1px solid #d9d5ce">
+<div style="flex:none;width:{{ sbwPx }};display:flex;align-items:center;gap:9px;padding-left:16px;white-space:nowrap"><span style="width:30px;height:30px;border-radius:6px;background:#b8460d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800">W</span><span style="font-size:21px;font-weight:800;color:#1c1a17;letter-spacing:-0.03em">Work<span style="color:#b8460d">Ops</span></span></div>
+<span style="height:34px;display:flex;align-items:center;gap:8px;padding:0 10px 0 13px;border:1px solid #b8460d;border-radius:6px;background:#fff;font-size:13px;font-weight:600;color:#b8460d;white-space:nowrap"><span style="font-size:10px;color:#d18a5e">⧉</span>{{ title }}<span style="width:15px;height:15px;margin-left:1px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#c07a51;cursor:pointer" style-hover="background:#f6dcca;color:#8f350a">✕</span></span>
+<div style="margin-left:auto;display:flex;align-items:center;gap:14px">
+<span style="display:flex;align-items:center;gap:6px;height:24px;padding:0 10px;border:1px solid #cfe0d3;border-radius:4px;background:#f2f8f3;font-size:11.5px;color:#2f6b4f;white-space:nowrap">DB 연결됨</span>
+<svg width="22" height="22" viewBox="0 0 20 20" fill="none" style="cursor:pointer"><rect x="2" y="2.6" width="16" height="12.6" rx="1.6" stroke="#4a4640" stroke-width="1.5"/><path d="M8.3 7.2c0-1 .76-1.7 1.7-1.7s1.7.66 1.7 1.55c0 1.5-1.7 1.45-1.7 2.75" stroke="#4a4640" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="12.1" r=".95" fill="#4a4640"/><path d="M6.5 18h7" stroke="#4a4640" stroke-width="1.5" stroke-linecap="round"/></svg>
+<span style="position:relative;display:flex;cursor:pointer"><svg width="22" height="22" viewBox="0 0 20 20" fill="none"><path d="M10 2.4a5 5 0 015 5v3.2l1.5 2.6a.8.8 0 01-.7 1.2H4.2a.8.8 0 01-.7-1.2L5 10.6V7.4a5 5 0 015-5z" stroke="#4a4640" stroke-width="1.5"/><path d="M8.3 16.6a1.8 1.8 0 003.4 0" stroke="#4a4640" stroke-width="1.4" stroke-linecap="round"/></svg><span style="position:absolute;top:-4px;right:-6px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:#d43a2f;color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">1</span></span>
+<div style="position:relative">
+<span onClick="{{ toggleProf }}" style="display:flex;align-items:center;gap:7px;height:32px;padding:0 10px 0 6px;border:1px solid {{ profBd }};border-radius:4px;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1"><span style="width:24px;height:24px;border-radius:50%;background:#efece5;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#6b655d">이</span><span style="font-size:12.5px;font-weight:700;color:#2e2a26">이광호</span><span style="font-size:9px;color:#8a857e">▾</span></span>
+<sc-if value="{{ profOpen }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;top:38px;right:0;width:300px;background:#fff;border:1px solid #b5b1aa;box-shadow:0 6px 18px rgba(40,30,20,.18);z-index:60">
+<div style="height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;background:#eceae5;border-bottom:1px solid #b5b1aa"><span style="font-size:11.5px;font-weight:700;color:#222">내 정보</span><span onClick="{{ toggleProf }}" style="font-size:12px;color:#8a857e;cursor:pointer" style-hover="color:#222">✕</span></div>
+<div style="display:flex;align-items:center;gap:9px;padding:10px;border-bottom:1px solid #e6e4df">
+<span style="width:34px;height:34px;border-radius:50%;background:#efece5;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#6b655d">이</span>
+<div style="display:flex;flex-direction:column;gap:1px"><span style="font-size:12.5px;font-weight:700;color:#2e2a26">이광호 <span style="font-weight:400;color:#8a857e">(2004051202)</span></span><span style="font-size:11px;color:#8a857e">전산팀 · PET1 · 관리자 권한</span></div>
+</div>
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:86px;display:flex;align-items:center;padding:7px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">이메일</span><div style="flex:1;display:flex;align-items:center;padding:5px 8px"><div style="flex:1;height:25px;display:flex;align-items:center;padding:0 8px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#222">kwlee@kptc.co.kr</span></div></div></div>
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:86px;display:flex;align-items:center;padding:7px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">휴대전화</span><div style="flex:1;display:flex;align-items:center;padding:5px 8px"><div style="flex:1;height:25px;display:flex;align-items:center;padding:0 8px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#222">010-1234-5678</span></div></div></div>
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:86px;display:flex;align-items:center;padding:7px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">현재 비밀번호</span><div style="flex:1;display:flex;align-items:center;padding:5px 8px"><div style="flex:1;height:25px;display:flex;align-items:center;padding:0 8px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#b3ada6">••••••••</span></div></div></div>
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:86px;display:flex;align-items:center;padding:7px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">새 비밀번호</span><div style="flex:1;display:flex;align-items:center;padding:5px 8px"><div style="flex:1;height:25px;display:flex;align-items:center;padding:0 8px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#b3ada6">8자 이상 · 영문+숫자</span></div></div></div>
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:86px;display:flex;align-items:center;padding:7px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">비밀번호 확인</span><div style="flex:1;display:flex;align-items:center;padding:5px 8px"><div style="flex:1;height:25px;display:flex;align-items:center;padding:0 8px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#b3ada6"></span></div></div></div>
+<div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;padding:8px 10px;background:#faf9f6">
+<button onClick="{{ toggleProf }}" style="height:28px;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:11.5px;color:#333;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1">닫기</button>
+<button style="height:28px;padding:0 13px;border:1px solid #b8460d;border-radius:2px;background:#b8460d;font-size:11.5px;font-weight:600;color:#fff;cursor:pointer;white-space:nowrap" style-hover="background:#963a0a">저장</button>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+</div>
+<div style="flex:none;display:flex;align-items:stretch;height:40px;background:#b8460d">
+<div style="flex:none;width:{{ sbwPx }};display:flex;align-items:center;padding:0 12px 0 16px;border-right:1px solid #963a0a"><div style="flex:1;height:28px;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:0 9px 0 11px;border:1px solid #e6a684;border-radius:2px;background:#fff;box-shadow:inset 0 1px 2px rgba(90,40,10,.14)"><span style="font-size:11.5px;font-weight:600;color:#4a463f;white-space:nowrap">메뉴 검색</span><span style="display:flex;align-items:center;gap:1px;font-size:11px;color:#8a857e"><span style="font-size:9px">☰</span>⌕</span></div></div>
+<div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;padding:0 14px">
+<div style="display:flex;align-items:center;gap:8px"><span style="display:flex;align-items:center;justify-content:center;width:19px;height:19px;border-radius:3px;background:rgba(255,255,255,.22);font-size:11px;color:#fff">▦</span><span style="font-size:15px;font-weight:700;color:#fff;letter-spacing:-0.01em;white-space:nowrap">{{ title }}</span></div>
+<div style="display:flex;align-items:center;gap:3px"><span title="정보" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer" style-hover="background:rgba(255,255,255,.2)"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8.5" fill="#fff"/><rect x="9" y="8.6" width="2" height="5.9" rx="1" fill="#b8460d"/><circle cx="10" cy="6" r="1.2" fill="#b8460d"/></svg></span><span title="언어" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer" style-hover="background:rgba(255,255,255,.2)"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8.5" fill="#fff"/><g stroke="#b8460d" stroke-width="1.1" fill="none"><path d="M10 1.5v17M1.5 10h17"/><ellipse cx="10" cy="10" rx="4.2" ry="8.5"/><path d="M2.9 5.5h14.2M2.9 14.5h14.2"/></g></svg></span><span title="추가" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer" style-hover="background:rgba(255,255,255,.2)"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2.4" y="2.4" width="15.2" height="15.2" rx="1.2" stroke="#fff" stroke-width="1.5"/><path d="M10 6.2v7.6M6.2 10h7.6" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg></span><span title="조회" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer" style-hover="background:rgba(255,255,255,.2)"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2.2" y="2.6" width="12.8" height="14.8" rx="1.2" stroke="#fff" stroke-width="1.5"/><circle cx="12.8" cy="10.2" r="4.7" fill="#b8460d"/><circle cx="12.8" cy="10.2" r="3.2" stroke="#fff" stroke-width="1.5"/><path d="M15.2 12.7l2.4 2.5" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg></span><span title="삭제" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer" style-hover="background:rgba(255,255,255,.2)"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3.6 5.6h12.8" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/><path d="M7.8 5.4V4.2a1 1 0 011-1h2.4a1 1 0 011 1v1.2" stroke="#fff" stroke-width="1.4"/><path d="M5.5 8h9l-.62 8.6a1.5 1.5 0 01-1.5 1.4H7.62a1.5 1.5 0 01-1.5-1.4L5.5 8z" stroke="#fff" stroke-width="1.5"/></svg></span><span title="저장" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer" style-hover="background:rgba(255,255,255,.2)"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3.4 2.8h10.4l3.4 3.4v10.4a0.6 0.6 0 01-.6.6H3.4a0.6 0.6 0 01-.6-.6V3.4a0.6 0.6 0 01.6-.6z" stroke="#fff" stroke-width="1.5"/><path d="M6.6 2.8v4.4h6.8V2.8" stroke="#fff" stroke-width="1.4"/><rect x="10.9" y="3.6" width="1.7" height="2.6" fill="#fff"/><rect x="6" y="10.8" width="8" height="6.4" stroke="#fff" stroke-width="1.4"/></svg></svg></span><span title="즐겨찾기" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:3px;cursor:pointer" style-hover="background:rgba(255,255,255,.2)"><svg width="22" height="22" viewBox="0 0 20 20" fill="none"><path d="M10 1.4l2.6 5.5 6 .8-4.4 4.15 1.1 5.95L10 14.9l-5.3 2.9 1.1-5.95L1.4 7.7l6-.8L10 1.4z" fill="#ffd24a"/></svg></span></div>
+</div>
+</div>
+</sc-if>
+<div style="flex:1;min-height:0;display:flex;align-items:stretch">
+<sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ true }}">
+<div style="flex:none;width:{{ sbwPx }};background:#faf9f6;display:flex;flex-direction:column">
+
+
+<div style="flex:1;min-height:0;overflow:auto;padding:2px 0 10px">
+<div onClick="{{ goDash }}" style="display:flex;align-items:center;gap:8px;height:31px;padding:0 12px;font-size:12.5px;cursor:pointer;white-space:nowrap;color:{{ side.dash.fg }};font-weight:{{ side.dash.fw }};background:{{ side.dash.bg }};box-shadow:{{ side.dash.mark }}" style-hover="background:#f0ede7"><span style="width:5px;height:5px;border-radius:50%;background:{{ side.dash.dot }}"></span>근무 현황</div>
+<div onClick="{{ grp.ws.tg }}" style="display:flex;align-items:center;gap:8px;height:31px;padding:0 12px;font-size:12.5px;cursor:pointer;white-space:nowrap;font-weight:{{ grp.ws.fw }};color:{{ grp.ws.fg }};background:{{ grp.ws.bg }}" style-hover="background:#f0ede7"><span style="width:5px;height:5px;border-radius:50%;background:{{ grp.ws.dot }}"></span>근무표<span style="margin-left:auto;font-size:9px;color:#8a857e">{{ grp.ws.ar }}</span></div>
+<div style="display:{{ grp.ws.disp }}">
+<div onClick="{{ goPlan }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.plan.fg }};font-weight:{{ side.plan.fw }};background:{{ side.plan.bg }};box-shadow:{{ side.plan.mark }}" style-hover="background:#f0ede7">근무표 편성</div>
+<div onClick="{{ goRoster }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.roster.fg }};font-weight:{{ side.roster.fw }};background:{{ side.roster.bg }};box-shadow:{{ side.roster.mark }}" style-hover="background:#f0ede7">월간 근무표</div>
+<div onClick="{{ goMycal }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.mycal.fg }};font-weight:{{ side.mycal.fw }};background:{{ side.mycal.bg }};box-shadow:{{ side.mycal.mark }}" style-hover="background:#f0ede7">내 근무표</div>
+</div>
+<div onClick="{{ grp.near.tg }}" style="display:flex;align-items:center;gap:8px;height:31px;padding:0 12px;font-size:12.5px;cursor:pointer;white-space:nowrap;font-weight:{{ grp.near.fw }};color:{{ grp.near.fg }};background:{{ grp.near.bg }}" style-hover="background:#f0ede7"><span style="width:5px;height:5px;border-radius:50%;background:{{ grp.near.dot }}"></span>아차사고 관리<span style="margin-left:auto;font-size:9px;color:#8a857e">{{ grp.near.ar }}</span></div>
+<div style="display:{{ grp.near.disp }}"><div onClick="{{ goNearReg }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.nearReg.fg }};font-weight:{{ side.nearReg.fw }};background:{{ side.nearReg.bg }};box-shadow:{{ side.nearReg.mark }}" style-hover="background:#f0ede7">아차사고 등록</div><div onClick="{{ goMyNear }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.myNear.fg }};font-weight:{{ side.myNear.fw }};background:{{ side.myNear.bg }};box-shadow:{{ side.myNear.mark }}" style-hover="background:#f0ede7">내 아차사고</div><div onClick="{{ goNear }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.near.fg }};font-weight:{{ side.near.fw }};background:{{ side.near.bg }};box-shadow:{{ side.near.mark }}" style-hover="background:#f0ede7">아차사고 조회</div><div style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;color:#4a463f;cursor:pointer;white-space:nowrap" style-hover="background:#f0ede7">아차사고 분석</div>
+</div>
+<div onClick="{{ grp.req.tg }}" style="display:flex;align-items:center;gap:8px;height:31px;padding:0 12px;font-size:12.5px;cursor:pointer;white-space:nowrap;font-weight:{{ grp.req.fw }};color:{{ grp.req.fg }};background:{{ grp.req.bg }}" style-hover="background:#f0ede7"><span style="width:5px;height:5px;border-radius:50%;background:{{ grp.req.dot }}"></span>업무요청<span style="margin-left:auto;font-size:9px;color:#8a857e">{{ grp.req.ar }}</span></div>
+<div style="display:{{ grp.req.disp }}"><div onClick="{{ goReqReg }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.reqReg.fg }};font-weight:{{ side.reqReg.fw }};background:{{ side.reqReg.bg }};box-shadow:{{ side.reqReg.mark }}" style-hover="background:#f0ede7">업무요청 등록</div><div onClick="{{ goMyreq }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.myreq.fg }};font-weight:{{ side.myreq.fw }};background:{{ side.myreq.bg }};box-shadow:{{ side.myreq.mark }}" style-hover="background:#f0ede7">내 업무요청</div><div onClick="{{ goReqProc }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.reqProc.fg }};font-weight:{{ side.reqProc.fw }};background:{{ side.reqProc.bg }};box-shadow:{{ side.reqProc.mark }}" style-hover="background:#f0ede7">업무요청 현황</div><div onClick="{{ goReqWork }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.reqWork.fg }};font-weight:{{ side.reqWork.fw }};background:{{ side.reqWork.bg }};box-shadow:{{ side.reqWork.mark }}" style-hover="background:#f0ede7">업무요청 처리 등록</div>
+</div>
+<div onClick="{{ grp.stay.tg }}" style="display:flex;align-items:center;gap:8px;height:31px;padding:0 12px;font-size:12.5px;cursor:pointer;white-space:nowrap;font-weight:{{ grp.stay.fw }};color:{{ grp.stay.fg }};background:{{ grp.stay.bg }}" style-hover="background:#f0ede7"><span style="width:5px;height:5px;border-radius:50%;background:{{ grp.stay.dot }}"></span>숙소 예약<span style="margin-left:auto;font-size:9px;color:#8a857e">{{ grp.stay.ar }}</span></div>
+<div style="display:{{ grp.stay.disp }}">
+<div onClick="{{ goStayReq }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.stayReq.fg }};font-weight:{{ side.stayReq.fw }};background:{{ side.stayReq.bg }};box-shadow:{{ side.stayReq.mark }}" style-hover="background:#f0ede7">숙소 예약 신청</div>
+<div onClick="{{ goMyStay }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.myStay.fg }};font-weight:{{ side.myStay.fw }};background:{{ side.myStay.bg }};box-shadow:{{ side.myStay.mark }}" style-hover="background:#f0ede7">내 숙소 예약</div>
+<div onClick="{{ goStayAppr }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.stayAppr.fg }};font-weight:{{ side.stayAppr.fw }};background:{{ side.stayAppr.bg }};box-shadow:{{ side.stayAppr.mark }}" style-hover="background:#f0ede7">숙소 예약 승인</div>
+<div onClick="{{ goCal }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.cal.fg }};font-weight:{{ side.cal.fw }};background:{{ side.cal.bg }};box-shadow:{{ side.cal.mark }}" style-hover="background:#f0ede7">예약 캘린더</div>
+</div>
+<div onClick="{{ grp.base.tg }}" style="display:flex;align-items:center;gap:8px;height:31px;padding:0 12px;font-size:12.5px;cursor:pointer;white-space:nowrap;font-weight:{{ grp.base.fw }};color:{{ grp.base.fg }};background:{{ grp.base.bg }}" style-hover="background:#f0ede7"><span style="width:5px;height:5px;border-radius:50%;background:{{ grp.base.dot }}"></span>기준정보<span style="margin-left:auto;font-size:9px;color:#8a857e">{{ grp.base.ar }}</span></div>
+<div style="display:{{ grp.base.disp }}">
+<div onClick="{{ goUser }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.user.fg }};font-weight:{{ side.user.fw }};background:{{ side.user.bg }};box-shadow:{{ side.user.mark }}" style-hover="background:#f0ede7">사용자 관리</div>
+<div onClick="{{ goOrg }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.org.fg }};font-weight:{{ side.org.fw }};background:{{ side.org.bg }};box-shadow:{{ side.org.mark }}" style-hover="background:#f0ede7">조직 관리</div>
+<div onClick="{{ goWtm }}" style="display:flex;align-items:center;height:28px;padding:0 12px 0 27px;font-size:12px;cursor:pointer;white-space:nowrap;color:{{ side.wtm.fg }};font-weight:{{ side.wtm.fw }};background:{{ side.wtm.bg }};box-shadow:{{ side.wtm.mark }}" style-hover="background:#f0ede7">근무형태 관리</div>
+</div>
+</div>
+<div style="flex:none;display:flex;align-items:center;gap:7px;padding:9px 12px;border-top:1px solid #ddd8d0">
+<span style="width:22px;height:22px;border-radius:50%;background:#e5e1d8;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:600;color:#4a463f">이</span>
+<div style="display:flex;flex-direction:column;gap:1px;min-width:0">
+<span style="font-size:11.5px;font-weight:600;color:#2e2a26;white-space:nowrap">이광호</span>
+<span style="font-size:10.5px;color:#8a857e;white-space:nowrap">전산팀 · PET1</span>
+</div>
+</div>
+</div>
+
+<div onMouseDown="{{ sbDown }}" title="드래그로 폭 조절" style="flex:none;width:5px;cursor:col-resize;background:transparent;border-left:1px solid #b5b1aa" style-hover="background:#d9702a;border-left:1px solid #d9702a"></div>
+</sc-if>
+<div style="flex:1;min-width:0;overflow:auto;background:#fff">
+
+<sc-if value="{{ mobMycal }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%;background:#fff">
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #e3e1dc">
+<span style="width:46px;height:46px;display:flex;align-items:center;justify-content:center;border:1px solid #ddd8d0;border-radius:999px;background:#f7f5f1;font-size:16px;color:#5a554e;cursor:pointer">‹</span>
+<span style="font-size:17px;font-weight:700;color:#1c1a17">2026-08</span>
+<span style="width:46px;height:46px;display:flex;align-items:center;justify-content:center;border:1px solid #ddd8d0;border-radius:999px;background:#f7f5f1;font-size:16px;color:#5a554e;cursor:pointer">›</span>
+</div>
+<div style="flex:none;display:flex;gap:6px;padding:10px 14px;overflow-x:auto;border-bottom:1px solid #e3e1dc">
+<sc-for list="{{ myLegend }}" as="l" hint-placeholder-count="4">
+<span style="flex:none;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 13px;border:1px solid #e3e1dc;border-radius:999px;font-size:12.5px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:{{ l.sq }}"></span>{{ l.t }} <b style="color:#1c1a17">{{ l.n }}</b></span>
+</sc-for>
+</div>
+<div style="flex:none;display:grid;grid-template-columns:repeat(7,1fr);padding:8px 6px 0">
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#a3282a">일</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">월</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">화</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">수</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">목</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">금</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#17457f">토</span>
+</div>
+<div style="flex:none;padding:0 6px 8px">
+<sc-for list="{{ mobWeeks }}" as="w" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:repeat(7,1fr)">
+<sc-for list="{{ w }}" as="c" hint-placeholder-count="7">
+<div style="padding:3px">
+<div style="height:56px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:{{ c.tint }};box-shadow:{{ c.bs }}">
+<span style="font-size:12px;font-weight:600;color:{{ c.dfg }}">{{ c.d }}</span>
+<span style="font-size:12.5px;font-weight:800;color:{{ c.fg }}">{{ c.t }}</span>
+</div>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 14px;border-top:1px solid #e3e1dc;background:#faf9f6">
+<span style="font-size:12.5px;color:#5a554e">오늘 2026-08-21 (금)</span>
+<span style="font-size:13.5px;font-weight:700;color:{{ myToday.fg }}">{{ myToday.txt }}</span>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ mobPlan }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%;background:#fff">
+<div style="flex:none;display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #e3e1dc">
+<span style="width:42px;height:42px;border-radius:999px;background:#f2efe9;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#8a5b12">고</span>
+<div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+<span style="font-size:15px;font-weight:700;color:#1c1a17">고중수</span>
+<span style="font-size:12.5px;color:#5a554e">PET생산1팀 · A조</span>
+</div>
+<span style="flex:none;margin-left:auto;height:44px;display:inline-flex;align-items:center;padding:0 18px;border:1px solid #c9c5be;border-radius:999px;background:#fff;font-size:13.5px;color:#4a463f;white-space:nowrap;cursor:pointer">변경</span>
+</div>
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:10px 14px 4px">
+<span style="width:46px;height:46px;display:flex;align-items:center;justify-content:center;border:1px solid #ddd8d0;border-radius:999px;background:#f7f5f1;font-size:16px;color:#5a554e;cursor:pointer">‹</span>
+<span style="font-size:17px;font-weight:700;color:#1c1a17">2026-08</span>
+<span style="width:46px;height:46px;display:flex;align-items:center;justify-content:center;border:1px solid #ddd8d0;border-radius:999px;background:#f7f5f1;font-size:16px;color:#5a554e;cursor:pointer">›</span>
+</div>
+<div style="flex:none;display:grid;grid-template-columns:repeat(7,1fr);padding:4px 6px 0">
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#a3282a">일</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">월</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">화</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">수</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">목</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">금</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#17457f">토</span>
+</div>
+<div style="flex:none;padding:0 6px 4px">
+<sc-for list="{{ mobPlanWeeks }}" as="w" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:repeat(7,1fr)">
+<sc-for list="{{ w }}" as="c" hint-placeholder-count="7">
+<div style="padding:3px">
+<div style="position:relative;height:50px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:{{ c.tint }};box-shadow:{{ c.bs }};cursor:pointer">
+<span style="font-size:11.5px;font-weight:600;color:{{ c.dfg }}">{{ c.d }}</span>
+<span style="font-size:12px;font-weight:800;color:{{ c.fg }}">{{ c.t }}</span>
+<span style="display:{{ c.cdp }};position:absolute;top:4px;right:5px;width:6px;height:6px;border-radius:999px;background:#b8460d"></span>
+</div>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<div style="flex:none;background:#fff;border-top:1px solid #ddd8d0;border-radius:18px 18px 0 0;box-shadow:0 -8px 20px rgba(60,45,30,.12);padding:12px 14px 16px;display:flex;flex-direction:column;gap:11px">
+<div style="display:flex;align-items:center;justify-content:center"><span style="width:44px;height:4px;border-radius:999px;background:#ddd8d0"></span></div>
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">
+<span style="font-size:15px;font-weight:700;color:#1c1a17">08-24 (월)</span>
+<span style="font-size:12.5px;color:#5a554e">현재 <b style="color:#a3282a">야간</b></span>
+</div>
+<div style="display:flex;gap:7px;flex-wrap:wrap">
+<span style="height:44px;display:inline-flex;align-items:center;padding:0 17px;border-radius:999px;border:1px solid #b8460d;background:#fdf0e8;font-size:13.5px;font-weight:700;color:#b8460d;cursor:pointer">주간</span>
+<span style="height:44px;display:inline-flex;align-items:center;padding:0 17px;border-radius:999px;border:1px solid #c9c5be;background:#fff;font-size:13.5px;color:#4a463f;cursor:pointer">야간</span>
+<span style="height:44px;display:inline-flex;align-items:center;padding:0 17px;border-radius:999px;border:1px solid #c9c5be;background:#fff;font-size:13.5px;color:#4a463f;cursor:pointer">휴무</span>
+<span style="height:44px;display:inline-flex;align-items:center;padding:0 17px;border-radius:999px;border:1px solid #c9c5be;background:#fff;font-size:13.5px;color:#4a463f;cursor:pointer">연차</span>
+</div>
+<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:12px;background:#faf9f6"><span style="width:7px;height:7px;border-radius:999px;background:#b8460d"></span><span style="font-size:12.5px;color:#4a463f">미저장 변경 <b style="color:#1c1a17">2건</b> · 08-22, 08-25</span></div>
+<div style="display:flex;gap:8px">
+<button style="width:104px;height:50px;border-radius:14px;border:1px solid #c9c5be;background:#fff;font-size:14px;color:#5a554e;cursor:pointer">되돌리기</button>
+<button style="flex:1;height:50px;border-radius:14px;border:1px solid #b8460d;background:#b8460d;font-size:15px;font-weight:700;color:#fff;cursor:pointer">저장</button>
+</div>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ isRoster }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;flex-direction:column;min-height:100%">
+<div style="flex:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:7px 22px;padding:11px 14px;border-bottom:1px solid #e3e1dc">
+<div style="display:flex;align-items:center;gap:8px"><span style="flex:none;width:62px;text-align:right;font-size:12px;font-weight:700;color:#333;white-space:nowrap">기간</span><div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px;background:#fdf6f1"><span style="font-size:12px;color:#222">2026-08</span><span style="font-size:9px;color:#8a8680">▼</span></div></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="flex:none;width:62px;text-align:right;font-size:12px;font-weight:700;color:#333;white-space:nowrap">부서</span><div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#222">전체 부서</span><span style="font-size:9px;color:#8a8680">▼</span></div></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="flex:none;width:62px;text-align:right;font-size:12px;font-weight:700;color:#333;white-space:nowrap">조</span><div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#222">전체 조</span><span style="font-size:9px;color:#8a8680">▼</span></div></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="flex:none;width:62px;text-align:right;font-size:12px;font-weight:700;color:#333;white-space:nowrap">사번·성명</span><div style="flex:1;height:28px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px;display:flex;align-items:center"></div></div>
+</div>
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 14px 0">
+<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">■ {{ rosterTitle }}</span>
+
+</div>
+<div style="display:flex;align-items:center;gap:5px"><sc-for list="{{ gActs }}" as="a" hint-placeholder-count="0"><button style="height:28px;padding:0 13px;border:1px solid {{ a.bd }};border-radius:2px;background:{{ a.bg }};font-size:11.5px;font-weight:{{ a.fw }};color:{{ a.fg }};cursor:pointer;white-space:nowrap" style-hover="background:{{ a.hbg }};color:{{ a.hfg }}">{{ a.t }}</button></sc-for></div>
+</div>
+<div style="flex:none;margin:6px 14px 0;border:1px solid #b5b1aa;overflow:auto;max-height:520px">
+<table style="width:100%">
+<thead><tr>
+<th style="position:sticky;left:0;top:0;z-index:3;width:30px;height:29px;padding:0 5px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center">No</th>
+<th style="position:sticky;left:30px;top:0;z-index:3;width:{{ cwIdPx }};height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">사번<span onMouseDown="{{ rzId }}" style="position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:6"></span></th>
+<th style="position:sticky;left:{{ leftNamePx }};top:0;z-index:3;width:{{ cwNamePx }};height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">성명<span onMouseDown="{{ rzName }}" style="position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:6"></span></th>
+<th style="position:sticky;top:0;z-index:2;width:{{ cwDeptPx }};height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">부서<span onMouseDown="{{ rzDept }}" style="position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:6"></span></th>
+<th style="position:sticky;top:0;z-index:2;width:{{ cwTeamPx }};height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #b5b1aa;text-align:center;white-space:nowrap">조<span onMouseDown="{{ rzTeam }}" style="position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:6"></span></th>
+<sc-for list="{{ days }}" as="d" hint-placeholder-count="31">
+<th style="position:sticky;top:0;z-index:2;width:34px;height:29px;padding:0 2px;font-size:11px;font-weight:700;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap;background:{{ d.hbg }};color:{{ d.hfg }}">{{ d.n }}<br><span style="font-size:9.5px;font-weight:500">{{ d.w }}</span></th>
+</sc-for>
+</tr></thead>
+<tbody>
+<sc-for list="{{ rows }}" as="r" hint-placeholder-count="16">
+<tr style="box-shadow:{{ r.bar }}">
+<td style="position:sticky;left:0;z-index:1;height:29px;padding:0 5px;text-align:center;font-size:11px;color:#8a8680;background:{{ r.rowbg }};border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">{{ r.no }}</td>
+<td style="position:sticky;left:30px;z-index:1;height:29px;padding:0 8px;font-size:12.5px;color:#222;background:#fff;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ r.id }}</td>
+<td style="position:sticky;left:{{ leftNamePx }};z-index:1;height:29px;padding:0 8px;font-size:12.5px;font-weight:600;color:#222;background:#fff;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ r.name }}</td>
+<td style="height:29px;padding:0 8px;font-size:12.5px;color:#555;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ r.dept }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;color:#555;border-bottom:1px solid #e6e4df;border-right:1px solid #b5b1aa;white-space:nowrap">{{ r.team }}</td>
+<sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="31">
+<td style="height:29px;padding:0 2px;text-align:center;font-size:11.5px;font-weight:600;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap;background:#fff"><span style="display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:18px;padding:0 4px;border:1px solid {{ c.bd }};border-radius:2px;font-size:{{ c.sz }};color:{{ c.fg }}">{{ c.t }}</span></td>
+</sc-for>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 14px 0;padding:7px 10px;border:1px solid #e3e1dc;background:#faf9f6">
+<span style="font-size:11px;font-weight:700;color:#666;white-space:nowrap">근무형태</span>
+<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:#1e6fd9"></span>DAY 주간</span>
+<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:#f50535"></span>NIGHT 야간</span>
+<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:#9aa0a6"></span>OFF 휴무</span>
+<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:#2e9e5b"></span>연차</span>
+<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:#d64596"></span>출산휴가</span>
+<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:#12a5a5"></span>훈련</span>
+<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:#c78a2b"></span>특주</span>
+<span style="font-size:11px;color:#999;white-space:nowrap">외 42종</span>
+</div>
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 14px 14px">
+<span></span>
+<span style="font-size:11.5px;color:#666;white-space:nowrap">총 <b>45</b>명 · 1,395건</span>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDash }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%">
+<div style="flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:11px 14px;border-bottom:1px solid #e3e1dc">
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">기준일</span>
+<div style="display:flex;align-items:center;border:1px solid #c9c5be;border-radius:2px;background:#fff">
+<span style="width:27px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#5a554e;cursor:pointer;background:#f2efe9;border-right:1px solid #ddd8d0" style-hover="background:#e8e4dc">‹</span>
+<span style="padding:0 12px;font-size:12px;font-weight:600;color:#222;white-space:nowrap">2026-08-21 (금)</span>
+<span style="width:27px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#5a554e;cursor:pointer;background:#f2efe9;border-left:1px solid #ddd8d0" style-hover="background:#e8e4dc">›</span>
+</div>
+<button style="height:30px;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:12px;color:#333;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1">오늘</button>
+<span style="width:1px;height:20px;background:#e3e1dc;margin:0 3px"></span>
+<span style="height:30px;display:flex;align-items:center;padding:0 12px;border:1px solid #b8460d;border-radius:2px;background:#fdf0e8;font-size:11.5px;font-weight:600;color:#b8460d;cursor:pointer;white-space:nowrap">전체</span>
+<span style="height:30px;display:flex;align-items:center;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:11.5px;color:#444;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1">데코코팅팀</span>
+<span style="height:30px;display:flex;align-items:center;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:11.5px;color:#444;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1">PET생산부</span>
+<span style="height:30px;display:flex;align-items:center;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:11.5px;color:#444;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1">PVC생산부</span>
+<span style="height:30px;display:flex;align-items:center;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:11.5px;color:#444;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1">미분류</span>
+<div style="margin-left:auto;display:flex;gap:5px">
+</div>
+</div>
+
+<div style="flex:none;padding:9px 14px 0"><span style="font-size:12px;font-weight:700;color:#333">■ 근무 인원 요약 <span style="font-weight:400;color:#888">2026-08-21 (금) · 근태 대상 전체</span></span></div>
+<div style="flex:none;margin:6px 14px 0;border:1px solid #b5b1aa;overflow-x:auto">
+<table style="width:100%">
+<thead><tr>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">부서</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">조</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">정원</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">당일 근무</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#17457f;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">주간</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#a3282a;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">야간</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#71767c;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">휴무</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#1c6b41;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">휴가</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;text-align:center;white-space:nowrap">근무 인원</th>
+</tr></thead>
+<tbody>
+<tr style="background:#fdf6f1">
+<td style="height:29px;padding:0 8px;font-size:12.5px;font-weight:700;color:#222;border-bottom:1px solid #cfccc6;border-right:1px solid #ecebe6;white-space:nowrap">전체 합계</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;color:#888;border-bottom:1px solid #cfccc6;border-right:1px solid #ecebe6">—</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:700;border-bottom:1px solid #cfccc6;border-right:1px solid #ecebe6">45</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:700;color:#b8460d;border-bottom:1px solid #cfccc6;border-right:1px solid #ecebe6">28</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:700;border-bottom:1px solid #cfccc6;border-right:1px solid #ecebe6">21</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:700;border-bottom:1px solid #cfccc6;border-right:1px solid #ecebe6">7</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:700;border-bottom:1px solid #cfccc6;border-right:1px solid #ecebe6">12</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:700;border-bottom:1px solid #cfccc6;border-right:1px solid #ecebe6">5</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:700;border-bottom:1px solid #cfccc6">62%</td>
+</tr>
+<tr>
+<td style="height:29px;padding:0 8px;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">데코코팅생산팀</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;color:#888;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">—</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">8</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:600;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">8</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">8</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;color:#b3ada6;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">0</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;color:#b3ada6;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">0</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;color:#b3ada6;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">0</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df">100%</td>
+</tr>
+<tr>
+<td style="height:29px;padding:0 8px;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">PET생산1팀</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">A조</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">18</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:600;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">12</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">6</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">6</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">6</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">0</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df">67%</td>
+</tr>
+<tr>
+<td style="height:29px;padding:0 8px;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">PET생산2팀</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">B조</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">7</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:600;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">4</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">3</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">1</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">2</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">1</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df">57%</td>
+</tr>
+<tr>
+<td style="height:29px;padding:0 8px;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">원료실</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;color:#888;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">—</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">3</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:600;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">2</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">1</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">1</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">1</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">0</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df">67%</td>
+</tr>
+<tr>
+<td style="height:29px;padding:0 8px;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">PVC생산팀</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">C조</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">9</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;font-weight:600;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">2</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">2</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;color:#b3ada6;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">0</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">4</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">3</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12.5px;border-bottom:1px solid #e6e4df">22%</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:11px 14px 0">
+<span style="font-size:12px;font-weight:700;color:#333">■ 당일 근무자 명단 <span style="font-weight:400;color:#888">28명</span></span>
+<div style="display:flex;gap:5px">
+<button style="height:28px;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:11.5px;color:#333;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1">부서별</button>
+<button style="height:28px;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fdf0e8;font-size:11.5px;font-weight:600;color:#b8460d;cursor:pointer;white-space:nowrap">근무형태별</button>
+</div>
+</div>
+<div style="flex:none;margin:6px 14px 14px;border:1px solid #b5b1aa;overflow-x:auto">
+<table style="width:100%">
+<thead><tr>
+<th style="width:30px;height:29px;padding:0 5px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center">No</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">사번</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">성명</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">부서</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">조</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">근무형태</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">시작</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">종료</th>
+<th style="height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;text-align:center;white-space:nowrap">비고</th>
+</tr></thead>
+<tbody>
+<sc-for list="{{ todayList }}" as="p" hint-placeholder-count="10">
+<tr style="background:{{ p.rowbg }};box-shadow:{{ p.bar }}" style-hover="background:{{ p.hbg }}">
+<td style="height:29px;padding:0 5px;text-align:center;font-size:11px;color:#8a8680;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">{{ p.no }}</td>
+<td style="height:29px;padding:0 8px;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ p.id }}</td>
+<td style="height:29px;padding:0 8px;font-size:12.5px;font-weight:600;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ p.name }}</td>
+<td style="height:29px;padding:0 8px;font-size:12.5px;color:#555;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ p.dept }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;color:#555;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ p.team }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;font-weight:600;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap"><span style="display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:18px;padding:0 5px;border:1px solid {{ p.bd }};border-radius:2px;color:{{ p.fg }}">{{ p.type }}</span></td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ p.st }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ p.en }}</td>
+<td style="height:29px;padding:0 8px;font-size:12.5px;color:#888;border-bottom:1px solid #e6e4df;white-space:nowrap">{{ p.note }}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ isUser }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%">
+<div style="flex:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:7px 22px;padding:11px 14px;border-bottom:1px solid #e3e1dc">
+<div style="display:flex;align-items:center;gap:8px"><span style="flex:none;width:62px;text-align:right;font-size:12px;font-weight:700;color:#333;white-space:nowrap">재직 여부</span><div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px;background:#fdf6f1"><span style="font-size:12px;color:#222">전체</span><span style="font-size:9px;color:#8a8680">▼</span></div></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="flex:none;width:62px;text-align:right;font-size:12px;font-weight:700;color:#333;white-space:nowrap">부서</span><div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#222">전체 부서</span><span style="font-size:9px;color:#8a8680">▼</span></div></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="flex:none;width:62px;text-align:right;font-size:12px;font-weight:700;color:#333;white-space:nowrap">권한</span><div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#222">전체 권한</span><span style="font-size:9px;color:#8a8680">▼</span></div></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="flex:none;width:62px;text-align:right;font-size:12px;font-weight:700;color:#333;white-space:nowrap">검색</span><div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#b3ada6">사번 · 성명</span><span style="font-size:11px;color:#8a8680">⌕</span></div></div>
+</div>
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 14px 0">
+<div style="display:flex;align-items:baseline;gap:10px">
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">■ 사용자</span>
+<span style="font-size:11.5px;color:#666;white-space:nowrap">총 <b>127</b>명 · 재직 126 · 퇴직 1</span>
+</div>
+<div style="display:flex;align-items:center;gap:5px"><sc-for list="{{ gActs }}" as="a" hint-placeholder-count="0"><button style="height:28px;padding:0 13px;border:1px solid {{ a.bd }};border-radius:2px;background:{{ a.bg }};font-size:11.5px;font-weight:{{ a.fw }};color:{{ a.fg }};cursor:pointer;white-space:nowrap" style-hover="background:{{ a.hbg }};color:{{ a.hfg }}">{{ a.t }}</button></sc-for></div>
+</div>
+<div style="flex:none;margin:6px 14px 0;border:1px solid #b5b1aa;overflow:auto;max-height:520px">
+<table style="width:100%">
+<thead><tr>
+<th style="position:sticky;top:0;width:34px;height:29px;padding:0 5px;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center"><span style="display:inline-block;width:15px;height:15px;vertical-align:middle;border:1px solid #9a958d;border-radius:2px;background:#fff"></span></th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">사번</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">성명</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">부서</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">부서코드</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">직급</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">권한</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">이메일</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">입사일</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">퇴사일</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">표시순서</th>
+<th style="position:sticky;top:0;height:29px;padding:0 8px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;text-align:center;white-space:nowrap">재직</th>
+</tr></thead>
+<tbody>
+<sc-for list="{{ users }}" as="u" hint-placeholder-count="12">
+<tr onDoubleClick="{{ openUser }}" style="background:{{ u.rowbg }};box-shadow:{{ u.bar }};cursor:default" style-hover="background:{{ u.hbg }}">
+<td style="height:29px;padding:0 5px;text-align:center;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6"><span style="display:inline-block;width:15px;height:15px;vertical-align:middle;border:1px solid {{ u.chkbd }};border-radius:2px;background:{{ u.chk }}"></span></td>
+<td style="height:29px;padding:0 8px;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ u.id }}</td>
+<td style="height:29px;padding:0 8px;font-size:12.5px;font-weight:600;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ u.name }}</td>
+<td style="height:29px;padding:0 8px;font-size:12.5px;color:#444;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ u.dept }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;color:#777;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ u.code }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;color:#777;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ u.rank }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap;font-weight:{{ u.rolefw }};color:{{ u.rolefg }}">{{ u.role }}</td>
+<td style="height:29px;padding:0 8px;font-size:12.5px;color:#555;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ u.mail }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ u.join }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;color:#a3282a;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap">{{ u.leave }}</td>
+<td style="height:29px;padding:0 8px;text-align:right;font-size:12px;color:#777;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6">{{ u.ord }}</td>
+<td style="height:29px;padding:0 8px;text-align:center;font-size:12.5px;border-bottom:1px solid #e6e4df;white-space:nowrap;color:{{ u.actfg }}">{{ u.act }}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="flex:none;height:14px"></div>
+
+<sc-if value="{{ userModal }}" hint-placeholder-val="{{ false }}">
+<div style="position:fixed;inset:0;z-index:50;background:rgba(34,30,26,.42);display:flex;align-items:flex-start;justify-content:center;padding:56px 20px">
+<div style="width:640px;max-width:100%;background:#fff;border:1px solid #7d766d;box-shadow:0 10px 32px rgba(0,0,0,.28);display:flex;flex-direction:column">
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 12px;background:#3f3934">
+<span style="font-size:12.5px;font-weight:700;color:#fff;white-space:nowrap">사용자 정보 관리</span>
+<span onClick="{{ closeUser }}" style="font-size:13px;color:#c4bbb1;cursor:pointer">✕</span>
+</div>
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-bottom:1px solid #e3e1dc">
+<span></span>
+<div style="display:flex;gap:5px">
+<button style="height:28px;padding:0 13px;border:1px solid #b8460d;border-radius:2px;background:#b8460d;font-size:11.5px;font-weight:600;color:#fff;cursor:pointer;white-space:nowrap" style-hover="background:#963a0a">저장</button>
+<button onClick="{{ closeUser }}" style="height:28px;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:11.5px;color:#333;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1">닫기</button>
+</div>
+</div>
+<div style="flex:1;min-height:0;overflow:auto;padding:12px">
+
+<div style="font-size:11.5px;font-weight:700;color:#8a857e;letter-spacing:0.04em;padding:0 0 5px">기본 정보</div>
+<div style="border:1px solid #b5b1aa;display:grid;grid-template-columns:96px minmax(0,1fr) 96px minmax(0,1fr)">
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;border-bottom:1px solid #d9d5ce;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap">사번</span>
+<div style="height:30px;display:flex;align-items:center;padding:5px 8px;border-right:1px solid #d9d5ce;border-bottom:1px solid #e6e4df"><div style="flex:1;height:100%;display:flex;align-items:center;padding:0 7px;background:#f2f1ee;border:1px solid #d9d5ce;font-size:12px;color:#666">2004051202</div></div>
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;border-bottom:1px solid #d9d5ce;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap"><span style="color:#b8460d;margin-right:3px">*</span>성명</span>
+<div style="height:30px;display:flex;align-items:center;padding:5px 8px;border-bottom:1px solid #e6e4df"><div style="flex:1;height:100%;display:flex;align-items:center;padding:0 7px;background:#fdf6f1;border:1px solid #c9c5be;font-size:12px;color:#222">QA러너</div></div>
+
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;border-bottom:1px solid #d9d5ce;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap"><span style="color:#b8460d;margin-right:3px">*</span>부서</span>
+<div style="height:30px;display:flex;align-items:center;padding:5px 8px;border-right:1px solid #d9d5ce;border-bottom:1px solid #e6e4df"><div style="flex:1;height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 7px;background:#fdf6f1;border:1px solid #c9c5be;font-size:12px;color:#222">전산팀 · 31400000<span style="font-size:9px;color:#8a8680">▼</span></div></div>
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;border-bottom:1px solid #d9d5ce;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap">직급</span>
+<div style="height:30px;display:flex;align-items:center;padding:5px 8px;border-bottom:1px solid #e6e4df"><div style="flex:1;height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 7px;border:1px solid #c9c5be;font-size:12px;color:#222">사원<span style="font-size:9px;color:#8a8680">▼</span></div></div>
+
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;border-bottom:1px solid #d9d5ce;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap">이메일</span>
+<div style="height:30px;display:flex;align-items:center;padding:5px 8px;border-right:1px solid #d9d5ce;border-bottom:1px solid #e6e4df"><div style="flex:1;height:100%;display:flex;align-items:center;padding:0 7px;border:1px solid #c9c5be;font-size:12px;color:#222">qa@kp-tech.co.kr</div></div>
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;border-bottom:1px solid #d9d5ce;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap">표시순서</span>
+<div style="height:30px;display:flex;align-items:center;padding:5px 8px;border-bottom:1px solid #e6e4df"><div style="width:70px;height:100%;display:flex;align-items:center;justify-content:flex-end;padding:0 7px;border:1px solid #c9c5be;font-size:12px;color:#222">12</div></div>
+
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap">입사일</span>
+<div style="height:30px;display:flex;align-items:center;padding:5px 8px;border-right:1px solid #d9d5ce"><div style="flex:1;height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 7px;border:1px solid #c9c5be;font-size:12px;color:#222">2004-05-12<span style="font-size:10px;color:#8a8680">▦</span></div></div>
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap">퇴사일</span>
+<div style="height:30px;display:flex;align-items:center;padding:5px 8px"><div style="flex:1;height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 7px;border:1px solid #c9c5be;font-size:12px;color:#b3ada6">년-월-일<span style="font-size:10px;color:#8a8680">▦</span></div></div>
+</div>
+
+<div style="font-size:11.5px;font-weight:700;color:#8a857e;letter-spacing:0.04em;padding:13px 0 5px">권한</div>
+<div style="border:1px solid #b5b1aa;display:grid;grid-template-columns:96px minmax(0,1fr) 96px minmax(0,1fr)">
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;border-bottom:1px solid #d9d5ce;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap"><span style="color:#b8460d;margin-right:3px">*</span>권한그룹</span>
+<div style="height:30px;display:flex;align-items:center;padding:5px 8px;border-right:1px solid #d9d5ce;border-bottom:1px solid #e6e4df"><div style="flex:1;height:100%;display:flex;align-items:center;justify-content:space-between;padding:0 7px;background:#fdf6f1;border:1px solid #c9c5be;font-size:12px;color:#222">안전담당<span style="font-size:9px;color:#8a8680">▼</span></div></div>
+<span style="height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;border-bottom:1px solid #d9d5ce;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap">재직</span>
+<div style="height:30px;display:flex;align-items:center;gap:14px;padding:0 8px;border-bottom:1px solid #e6e4df">
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#222;white-space:nowrap"><span style="width:12px;height:12px;border:1px solid #b8460d;background:#b8460d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px">✓</span>재직</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#555;white-space:nowrap"><span style="width:12px;height:12px;border:1px solid #c9c5be;background:#fff"></span>퇴직</span>
+</div>
+
+<span style="height:auto;min-height:30px;display:flex;align-items:center;padding:0 9px;background:#eceae5;border-right:1px solid #cfccc6;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap">담당 지정</span>
+<div style="grid-column:2 / 5;display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:7px 9px">
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#222;white-space:nowrap"><span style="width:12px;height:12px;border:1px solid #b8460d;background:#b8460d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px">✓</span>안전담당</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#555;white-space:nowrap"><span style="width:12px;height:12px;border:1px solid #c9c5be;background:#fff"></span>숙소담당</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#555;white-space:nowrap"><span style="width:12px;height:12px;border:1px solid #c9c5be;background:#fff"></span>근무표 편성</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#555;white-space:nowrap"><span style="width:12px;height:12px;border:1px solid #c9c5be;background:#fff"></span>업무요청 처리</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#555;white-space:nowrap"><span style="width:12px;height:12px;border:1px solid #c9c5be;background:#fff"></span>알림 메일 수신</span>
+</div>
+</div>
+
+<div style="font-size:11.5px;font-weight:700;color:#8a857e;letter-spacing:0.04em;padding:13px 0 5px">비밀번호</div>
+<div style="border:1px solid #b5b1aa;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 10px;background:#faf9f6">
+<span style="font-size:12px;color:#444;white-space:nowrap">최종 변경 <b>2026-03-04</b></span>
+<button style="margin-left:auto;height:28px;padding:0 13px;border:1px solid #b8460d;border-radius:2px;background:#fff;font-size:11.5px;font-weight:700;color:#b8460d;cursor:pointer;white-space:nowrap" style-hover="background:#fdf0e8">비밀번호 초기화</button>
+</div>
+
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isCal }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%">
+<div style="flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:11px 14px;border-bottom:1px solid #e3e1dc">
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">기간</span>
+<div style="display:flex;align-items:center;border:1px solid #c9c5be;border-radius:2px;background:#fff">
+<span style="width:27px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#5a554e;cursor:pointer;background:#f2efe9;border-right:1px solid #ddd8d0" style-hover="background:#e8e4dc">‹</span>
+<span style="min-width:96px;text-align:center;padding:0 14px;font-size:13.5px;font-weight:700;color:#1c1a17;white-space:nowrap">2026-08</span>
+<span style="width:27px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#5a554e;cursor:pointer;background:#f2efe9;border-left:1px solid #ddd8d0" style-hover="background:#e8e4dc">›</span>
+</div>
+<button style="height:30px;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:12px;color:#333;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1">이번 달</button>
+<span style="width:1px;height:20px;background:#e3e1dc;margin:0 3px"></span>
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">숙소</span>
+<div style="width:164px;display:flex;align-items:center;justify-content:space-between;height:30px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12.5px;color:#222">전체 · 대관령 · 태안</span><span style="font-size:9px;color:#8a8680">▼</span></div>
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">상태</span>
+<div style="width:130px;display:flex;align-items:center;justify-content:space-between;height:30px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12.5px;color:#222">전체</span><span style="font-size:9px;color:#8a8680">▼</span></div>
+<div style="margin-left:auto;display:flex;gap:5px"><sc-for list="{{ gActs }}" as="a" hint-placeholder-count="0"><button style="height:28px;padding:0 13px;border:1px solid {{ a.bd }};border-radius:2px;background:{{ a.bg }};font-size:11.5px;font-weight:{{ a.fw }};color:{{ a.fg }};cursor:pointer;white-space:nowrap" style-hover="background:{{ a.hbg }};color:{{ a.hfg }}">{{ a.t }}</button></sc-for></div>
+</div>
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 14px 0">
+<div style="display:flex;align-items:baseline;gap:10px">
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">■ 2026년 8월 예약</span>
+
+</div>
+<div style="display:flex;align-items:center;gap:12px">
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#444;white-space:nowrap"><span style="width:16px;height:10px;background:#e6e9ec;border:1px solid #a9b3bc"></span>대관령</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#444;white-space:nowrap"><span style="width:16px;height:10px;background:#eeeadf;border:1px solid #c3b795"></span>태안</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#444;white-space:nowrap"><span style="width:16px;height:10px;background:#b8460d;border:1px solid #963a0a"></span>내 예약</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#444;white-space:nowrap"><span style="width:16px;height:10px;background:#fff;border:1px dashed #a8a29a"></span>승인대기</span>
+</div>
+</div>
+<div style="flex:none;margin:6px 14px 0;border:1px solid #b5b1aa">
+<div style="display:grid;grid-template-columns:repeat(7,1fr);background:#eceae5;border-bottom:1px solid #b5b1aa">
+<span style="height:30px;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:#a3282a;border-right:1px solid #cfccc6">일</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">월</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">화</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">수</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">목</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">금</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#17457f">토</span>
+</div>
+<sc-for list="{{ weeks }}" as="w" hint-placeholder-count="6">
+<div style="position:relative;display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #e6e4df">
+<sc-for list="{{ w.days }}" as="c" hint-placeholder-count="7">
+<div style="min-height:86px;padding:4px 6px;border-right:1px solid #ecebe6;background:{{ c.bg }}"><span style="font-size:11px;font-weight:600;color:{{ c.fg }}">{{ c.label }}</span></div>
+</sc-for>
+<div style="position:absolute;left:0;right:0;top:23px;display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:21px;pointer-events:none">
+<sc-for list="{{ w.bars }}" as="b" hint-placeholder-count="0">
+<span style="grid-column:{{ b.gc }};grid-row:{{ b.lane }};height:19px;display:flex;align-items:center;gap:3px;padding:0 7px;font-size:10.5px;font-weight:600;white-space:nowrap;overflow:hidden;margin-left:{{ b.ml }};margin-right:{{ b.mr }};background:{{ b.bg }};color:{{ b.fg }};border-top:1px {{ b.bd }} {{ b.bc }};border-bottom:1px {{ b.bd }} {{ b.bc }};border-left:{{ b.blw }} {{ b.bd }} {{ b.bc }};border-right:{{ b.brw }} {{ b.bd }} {{ b.bc }}">{{ b.t }}</span>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</div>
+<div style="flex:none;padding:4px 14px 14px"></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ mobStayReq }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%;background:#fff">
+<div style="flex:none;display:flex;gap:8px;padding:14px 14px 10px">
+<span style="flex:1;height:46px;display:flex;align-items:center;justify-content:center;border-radius:999px;border:1px solid #b8460d;background:#fdf0e8;font-size:14.5px;font-weight:700;color:#b8460d;cursor:pointer">대관령</span>
+<span style="flex:1;height:46px;display:flex;align-items:center;justify-content:center;border-radius:999px;border:1px solid #c9c5be;background:#fff;font-size:14.5px;color:#4a463f;cursor:pointer">태안</span>
+</div>
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:2px 14px 10px">
+<span style="width:46px;height:46px;display:flex;align-items:center;justify-content:center;border:1px solid #ddd8d0;border-radius:999px;background:#f7f5f1;font-size:16px;color:#5a554e;cursor:pointer">‹</span>
+<span style="font-size:17px;font-weight:700;color:#1c1a17">2026-08</span>
+<span style="width:46px;height:46px;display:flex;align-items:center;justify-content:center;border:1px solid #ddd8d0;border-radius:999px;background:#f7f5f1;font-size:16px;color:#5a554e;cursor:pointer">›</span>
+</div>
+<div style="flex:none;display:grid;grid-template-columns:repeat(7,1fr);padding:0 6px">
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#a3282a">일</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">월</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">화</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">수</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">목</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#8a857e">금</span>
+<span style="height:26px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#17457f">토</span>
+</div>
+<div style="flex:none;padding:0 6px 6px">
+<sc-for list="{{ stayWeeks }}" as="w" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:repeat(7,1fr)">
+<sc-for list="{{ w }}" as="c" hint-placeholder-count="7">
+<div style="padding:3px">
+<div style="height:52px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:{{ c.bg }};box-shadow:{{ c.bs }};cursor:pointer">
+<span style="font-size:14px;font-weight:{{ c.fw }};color:{{ c.fg }}">{{ c.t }}</span>
+<span style="display:{{ c.ndp }};font-size:10px;font-weight:600;color:{{ c.nfg }};white-space:nowrap">{{ c.note }}</span>
+</div>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<div style="flex:none;display:flex;align-items:center;gap:14px;padding:6px 16px 10px">
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#444"><span style="width:10px;height:10px;border-radius:3px;background:#b8460d"></span>선택</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#444"><span style="width:10px;height:10px;border-radius:3px;background:#f4f2ee;box-shadow:inset 0 -3px 0 #c9c5be"></span>예약됨</span>
+</div>
+<div style="flex:none;display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-top:1px solid #e3e1dc">
+<div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;color:#5a554e">체크인 · 체크아웃</span><span style="font-size:14px;font-weight:700;color:#1c1a17">08-23 (일) → 08-24 (월)</span></div>
+<div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;color:#5a554e">숙박</span><span style="font-size:14px;font-weight:600;color:#1c1a17">1박 2일</span></div>
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><span style="font-size:13px;color:#5a554e;padding-top:12px">비고</span><div style="flex:1;max-width:250px;height:44px;display:flex;align-items:center;padding:0 12px;border:1px solid #c9c5be;border-radius:10px"><span style="font-size:14px;color:#b3ada6">선택 입력</span></div></div>
+</div>
+<div style="flex:none;padding:12px 14px 16px;border-top:1px solid #e3e1dc;background:#faf9f6">
+<button style="width:100%;height:50px;border-radius:14px;border:1px solid #b8460d;background:#b8460d;font-size:15px;font-weight:700;color:#fff;cursor:pointer">예약 신청</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ mobStayAppr }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%;background:#fff">
+<div style="flex:none;display:flex;gap:7px;padding:12px 14px 10px;overflow-x:auto;border-bottom:1px solid #e3e1dc">
+<span style="flex:none;height:38px;display:inline-flex;align-items:center;padding:0 15px;border-radius:999px;border:1px solid #b8460d;background:#fdf0e8;font-size:13px;font-weight:700;color:#b8460d;white-space:nowrap;cursor:pointer">승인대기 2</span>
+<span style="flex:none;height:38px;display:inline-flex;align-items:center;padding:0 15px;border-radius:999px;border:1px solid #c9c5be;background:#fff;font-size:13px;color:#4a463f;white-space:nowrap;cursor:pointer">승인 3</span>
+<span style="flex:none;height:38px;display:inline-flex;align-items:center;padding:0 15px;border-radius:999px;border:1px solid #c9c5be;background:#fff;font-size:13px;color:#4a463f;white-space:nowrap;cursor:pointer">반려</span>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:11px;padding:12px 14px">
+<sc-for list="{{ mobAppr }}" as="a" hint-placeholder-count="2">
+<div style="border:1px solid #ddd8d0;border-radius:14px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:9px;padding:11px 13px;background:#faf9f6;border-bottom:1px solid #eceae5">
+<span style="width:38px;height:38px;border-radius:999px;background:#f2efe9;display:flex;align-items:center;justify-content:center;font-size:13.5px;font-weight:700;color:#8a5b12">{{ a.ini }}</span>
+<div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14.5px;font-weight:700;color:#1c1a17">{{ a.name }}</span><span style="font-size:12px;color:#8a857e">{{ a.dept }} · {{ a.at }} 신청</span></div>
+<span style="flex:none;margin-left:auto;height:26px;display:inline-flex;align-items:center;padding:0 10px;border-radius:999px;background:#fdf0e8;font-size:11.5px;font-weight:700;color:#b8460d;white-space:nowrap">승인대기</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:7px;padding:12px 13px">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:13px;color:#5a554e">숙소</span><span style="font-size:14px;font-weight:700;color:#1c1a17">{{ a.house }}</span></div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:13px;color:#5a554e">기간</span><span style="font-size:14px;font-weight:600;color:#1c1a17">{{ a.span }}</span></div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:13px;color:#5a554e">숙박</span><span style="font-size:14px;color:#1c1a17">{{ a.nights }}</span></div>
+<div style="display:{{ a.wdp }};align-items:center;gap:7px;padding:8px 11px;border-radius:10px;background:#fdf6f1"><span style="flex:none;width:6px;height:6px;border-radius:999px;background:#b8460d"></span><span style="font-size:12.5px;color:#8a4a1e">{{ a.warn }}</span></div>
+</div>
+<div style="display:flex;gap:8px;padding:0 13px 13px">
+<button style="flex:none;width:96px;height:46px;border-radius:12px;border:1px solid #c9c5be;background:#fff;font-size:13.5px;color:#5a554e;cursor:pointer;white-space:nowrap">반려</button>
+<button style="flex:1;height:46px;border-radius:12px;border:1px solid #b8460d;background:#b8460d;font-size:14.5px;font-weight:700;color:#fff;cursor:pointer;white-space:nowrap">승인</button>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ isStayReq }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%">
+<div style="flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:11px 14px;border-bottom:1px solid #e3e1dc">
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">숙소 <span style="color:#b8460d">*</span></span>
+<div style="width:164px;display:flex;align-items:center;justify-content:space-between;height:30px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px;background:#fdf6f1"><span style="font-size:12.5px;color:#222">대관령</span><span style="font-size:9px;color:#8a8680">▼</span></div>
+<span style="width:1px;height:20px;background:#e3e1dc;margin:0 3px"></span>
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">기간</span>
+<div style="display:flex;align-items:center;border:1px solid #c9c5be;border-radius:2px;background:#fff">
+<span style="width:27px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#5a554e;cursor:pointer;background:#f2efe9;border-right:1px solid #ddd8d0" style-hover="background:#e8e4dc">‹</span>
+<span style="min-width:96px;text-align:center;padding:0 14px;font-size:13.5px;font-weight:700;color:#1c1a17;white-space:nowrap">2026-08</span>
+<span style="width:27px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#5a554e;cursor:pointer;background:#f2efe9;border-left:1px solid #ddd8d0" style-hover="background:#e8e4dc">›</span>
+</div>
+<div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:#b8460d"></span>선택 기간</span>
+<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:#f4f2ee;box-shadow:inset 0 -3px 0 #c9c5be"></span>예약됨 (신청자 표시)</span>
+</div>
+</div>
+<div style="flex:none;display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin:10px 14px 14px">
+<div style="flex:1.6;min-width:430px;border:1px solid #b5b1aa">
+<div style="display:grid;grid-template-columns:repeat(7,1fr);background:#eceae5;border-bottom:1px solid #b5b1aa">
+<span style="height:30px;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:#a3282a;border-right:1px solid #cfccc6">일</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">월</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">화</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">수</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">목</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">금</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#17457f">토</span>
+</div>
+<sc-for list="{{ stayWeeks }}" as="w" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #ecebe6">
+<sc-for list="{{ w }}" as="c" hint-placeholder-count="7">
+<div style="height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-right:1px solid #ecebe6;cursor:pointer;background:{{ c.bg }};box-shadow:{{ c.bs }}"><span style="font-size:12.5px;font-weight:{{ c.fw }};color:{{ c.fg }}">{{ c.t }}</span><span style="display:{{ c.ndp }};align-items:center;font-size:9.5px;font-weight:600;color:{{ c.nfg }};white-space:nowrap">{{ c.note }}</span></div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<div style="flex:1;min-width:280px;max-width:420px;border:1px solid #b5b1aa">
+<div style="height:29px;display:flex;align-items:center;padding:0 10px;background:#eceae5;border-bottom:1px solid #b5b1aa"><span style="font-size:11.5px;font-weight:700;color:#222">신청 요약</span></div>
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:92px;display:flex;align-items:center;padding:8px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">숙소</span><span style="flex:1;display:flex;align-items:center;padding:8px 10px;font-size:12.5px;color:#222">대관령</span></div>
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:92px;display:flex;align-items:center;padding:8px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">체크인</span><span style="flex:1;display:flex;align-items:center;padding:8px 10px;font-size:12.5px;font-weight:600;color:#222">2026-08-23 (일)</span></div>
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:92px;display:flex;align-items:center;padding:8px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">체크아웃</span><span style="flex:1;display:flex;align-items:center;padding:8px 10px;font-size:12.5px;font-weight:600;color:#222">2026-08-24 (월)</span></div>
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:92px;display:flex;align-items:center;padding:8px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">숙박</span><span style="flex:1;display:flex;align-items:center;padding:8px 10px;font-size:12.5px;color:#222">1박 2일</span></div>
+
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df"><span style="flex:none;width:92px;display:flex;align-items:center;padding:8px 10px;background:#f7f5f1;border-right:1px solid #e6e4df;font-size:11.5px;font-weight:700;color:#333">비고</span><div style="flex:1;display:flex;align-items:center;padding:5px 8px"><div style="flex:1;height:25px;display:flex;align-items:center;padding:0 8px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#b3ada6"></span></div></div></div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:#faf9f6"><span style="font-size:11.5px;color:#666;white-space:nowrap">필수 <b style="color:#1c6b41">3/3</b></span><span style="font-size:11.5px;color:#888;white-space:nowrap">접수 후 승인권자 승인</span></div>
+</div>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ isGrid }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%">
+<div style="flex:none;display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:11px 14px;border-bottom:1px solid #e3e1dc">
+<sc-for list="{{ gf }}" as="f" hint-placeholder-count="3">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">{{ f.k }}</span><div style="min-width:130px;display:flex;align-items:center;justify-content:space-between;gap:8px;height:28px;padding:0 9px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:#222;white-space:nowrap">{{ f.v }}</span><span style="font-size:9px;color:#8a8680">▼</span></div></div>
+</sc-for>
+</div>
+<div style="flex:none;display:flex;align-items:baseline;gap:10px;padding:8px 14px 0"><span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">■ {{ gTitle }}</span><span style="font-size:11.5px;color:#666;white-space:nowrap">{{ gSub }}</span><div style="margin-left:auto;display:flex;align-items:center;gap:5px"><sc-for list="{{ gActs }}" as="a" hint-placeholder-count="0"><button style="height:28px;padding:0 13px;border:1px solid {{ a.bd }};border-radius:2px;background:{{ a.bg }};font-size:11.5px;font-weight:{{ a.fw }};color:{{ a.fg }};cursor:pointer;white-space:nowrap" style-hover="background:{{ a.hbg }};color:{{ a.hfg }}">{{ a.t }}</button></sc-for></div></div>
+<div style="flex:none;margin:6px 14px 14px;border:1px solid #b5b1aa;overflow-x:auto">
+<table style="width:100%">
+<thead><tr>
+<sc-for list="{{ gc }}" as="h" hint-placeholder-count="6">
+<th style="height:29px;padding:0 10px;font-size:11.5px;font-weight:700;color:#222;background:#eceae5;border-bottom:1px solid #b5b1aa;border-right:1px solid #cfccc6;text-align:center;white-space:nowrap">{{ h }}</th>
+</sc-for>
+</tr></thead>
+<tbody>
+<sc-for list="{{ gr }}" as="r" hint-placeholder-count="6">
+<tr style="background:{{ r.bg }};box-shadow:{{ r.bar }};cursor:default" style-hover="background:{{ r.hbg }}">
+<sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="6">
+<td style="height:29px;padding:0 10px;font-size:12.5px;border-bottom:1px solid #e6e4df;border-right:1px solid #ecebe6;white-space:nowrap;text-align:{{ c.a }};color:{{ c.fg }};font-weight:{{ c.fw }}">{{ c.t }}</td>
+</sc-for>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<sc-if value="{{ isStayAppr }}" hint-placeholder-val="{{ false }}">
+<div style="flex:none;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 14px 0">
+<span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">■ 예약 현황 <span style="font-weight:400;color:#888">2026-08</span></span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#444;white-space:nowrap"><span style="width:16px;height:10px;background:#e6e9ec;border:1px solid #a9b3bc"></span>대관령</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#444;white-space:nowrap"><span style="width:16px;height:10px;background:#eeeadf;border:1px solid #c3b795"></span>태안</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#444;white-space:nowrap"><span style="width:16px;height:10px;background:#fdf0e8;border:1px solid #b8460d"></span>내 예약</span>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#444;white-space:nowrap"><span style="width:16px;height:10px;background:#fff;border:1px dashed #a8a29a"></span>승인대기</span>
+</div>
+<div style="flex:none;margin:6px 14px 14px;border:1px solid #b5b1aa">
+<div style="display:grid;grid-template-columns:repeat(7,1fr);background:#eceae5;border-bottom:1px solid #b5b1aa">
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#a3282a;border-right:1px solid #cfccc6">일</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">월</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">화</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">수</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">목</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">금</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#17457f">토</span>
+</div>
+<sc-for list="{{ weeks }}" as="w" hint-placeholder-count="6">
+<div style="position:relative;display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #e6e4df">
+<sc-for list="{{ w.days }}" as="c" hint-placeholder-count="7">
+<div style="min-height:64px;padding:4px 6px;border-right:1px solid #ecebe6;background:{{ c.bg }}"><span style="font-size:11px;font-weight:600;color:{{ c.fg }}">{{ c.label }}</span></div>
+</sc-for>
+<div style="position:absolute;left:0;right:0;top:22px;display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:21px;pointer-events:none">
+<sc-for list="{{ w.bars }}" as="b" hint-placeholder-count="0">
+<span style="grid-column:{{ b.gc }};grid-row:{{ b.lane }};height:19px;display:flex;align-items:center;gap:3px;padding:0 7px;font-size:10.5px;font-weight:600;white-space:nowrap;overflow:hidden;margin-left:{{ b.ml }};margin-right:{{ b.mr }};background:{{ b.bg }};color:{{ b.fg }};border-top:1px {{ b.bd }} {{ b.bc }};border-bottom:1px {{ b.bd }} {{ b.bc }};border-left:{{ b.blw }} {{ b.bd }} {{ b.bc }};border-right:{{ b.brw }} {{ b.bd }} {{ b.bc }}">{{ b.t }}</span>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ mobForm }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%;background:#fff">
+<div style="flex:1;display:flex;flex-direction:column;gap:14px;padding:16px 14px">
+<sc-for list="{{ gfm }}" as="f" hint-placeholder-count="7">
+<div style="display:flex;flex-direction:column;gap:7px">
+<span style="font-size:12.5px;font-weight:700;color:#4a463f">{{ f.k }} <span style="color:#b8460d">{{ f.req }}</span></span>
+<sc-if value="{{ f.notUp }}" hint-placeholder-val="{{ true }}">
+<div style="min-height:{{ f.mh }};display:flex;align-items:{{ f.al }};padding:{{ f.mp }} 12px;border:1px solid #c9c5be;border-radius:10px"><span style="font-size:14px;color:{{ f.fg }};line-height:1.6">{{ f.v }}</span></div>
+</sc-if>
+<sc-if value="{{ f.isUp }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;gap:8px">
+<button style="flex:1;height:46px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid #b8460d;border-radius:12px;background:#fdf0e8;font-size:13.5px;font-weight:600;color:#b8460d;cursor:pointer"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2.2 5.4c0-.6.5-1.1 1.1-1.1h1.5l.9-1.3h4.6l.9 1.3h1.5c.6 0 1.1.5 1.1 1.1v6.3c0 .6-.5 1.1-1.1 1.1H3.3c-.6 0-1.1-.5-1.1-1.1V5.4z" stroke="#b8460d" stroke-width="1.3"/><circle cx="8" cy="8.7" r="2.4" stroke="#b8460d" stroke-width="1.3"/></svg>사진 촬영</button>
+<button style="flex:1;height:46px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid #c9c5be;border-radius:12px;background:#fff;font-size:13.5px;color:#333;cursor:pointer"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 11V3.5M8 3.5L5.2 6.3M8 3.5l2.8 2.8" stroke="#5a554e" stroke-width="1.4" stroke-linecap="round"/><path d="M2.8 10.5v1.7c0 .6.5 1.1 1.1 1.1h8.2c.6 0 1.1-.5 1.1-1.1v-1.7" stroke="#5a554e" stroke-width="1.4" stroke-linecap="round"/></svg>파일 업로드</button>
+</div>
+<div style="display:flex;gap:8px">
+<div style="width:64px;height:64px;border-radius:10px;border:1px solid #ddd8d0;background:repeating-linear-gradient(135deg,#faf9f6 0 6px,#f2f0ec 6px 12px)"></div>
+<div style="width:64px;height:64px;border-radius:10px;display:flex;align-items:center;justify-content:center;border:1px dashed #c9c5be;font-size:19px;color:#b3ada6;cursor:pointer">＋</div>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<div style="flex:none;display:flex;gap:8px;padding:12px 14px 16px;border-top:1px solid #e3e1dc;background:#faf9f6">
+<button style="width:104px;height:50px;border-radius:14px;border:1px solid #c9c5be;background:#fff;font-size:14px;color:#5a554e;cursor:pointer">임시저장</button>
+<button style="flex:1;height:50px;border-radius:14px;border:1px solid #b8460d;background:#b8460d;font-size:15px;font-weight:700;color:#fff;cursor:pointer">제출</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ isForm }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%">
+<div style="flex:none;display:flex;align-items:baseline;gap:10px;padding:11px 14px 0"><span style="font-size:12px;font-weight:700;color:#333;white-space:nowrap">■ {{ gTitle }}</span><span style="font-size:11.5px;color:#666;white-space:nowrap">{{ gSub }}</span></div>
+<div style="flex:none;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin:8px 14px 14px">
+<div style="flex:1.7;min-width:520px;max-width:860px;border:1px solid #b5b1aa">
+<sc-for list="{{ gfm }}" as="f" hint-placeholder-count="6">
+<div style="display:flex;align-items:stretch;border-bottom:1px solid #e6e4df">
+<span style="flex:none;width:132px;display:flex;align-items:center;padding:8px 10px;background:#eceae5;border-right:1px solid #cfccc6;font-size:11.5px;font-weight:700;color:#333;white-space:nowrap"><span style="color:#b8460d;margin-right:3px">{{ f.req }}</span>{{ f.k }}</span>
+<div style="flex:1;display:flex;align-items:center;padding:5px 8px">
+<sc-if value="{{ f.notUp }}" hint-placeholder-val="{{ true }}">
+<div style="flex:1;min-height:{{ f.h }};display:flex;align-items:{{ f.al }};padding:{{ f.pt }} 8px;border:1px solid #c9c5be;border-radius:2px"><span style="font-size:12px;color:{{ f.fg }}">{{ f.v }}</span></div>
+</sc-if>
+<sc-if value="{{ f.isUp }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+<button style="height:28px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;border:1px solid #c9c5be;border-radius:2px;background:#fff;font-size:11.5px;color:#333;cursor:pointer;white-space:nowrap" style-hover="background:#f7f5f1"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 11V3.5M8 3.5L5.2 6.3M8 3.5l2.8 2.8" stroke="#5a554e" stroke-width="1.4" stroke-linecap="round"/><path d="M2.8 10.5v1.7c0 .6.5 1.1 1.1 1.1h8.2c.6 0 1.1-.5 1.1-1.1v-1.7" stroke="#5a554e" stroke-width="1.4" stroke-linecap="round"/></svg>파일 업로드</button>
+<button style="height:28px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;border:1px solid #b8460d;border-radius:2px;background:#fdf0e8;font-size:11.5px;font-weight:600;color:#b8460d;cursor:pointer;white-space:nowrap" style-hover="background:#f9e2d3"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2.2 5.4c0-.6.5-1.1 1.1-1.1h1.5l.9-1.3h4.6l.9 1.3h1.5c.6 0 1.1.5 1.1 1.1v6.3c0 .6-.5 1.1-1.1 1.1H3.3c-.6 0-1.1-.5-1.1-1.1V5.4z" stroke="#b8460d" stroke-width="1.3"/><circle cx="8" cy="8.7" r="2.4" stroke="#b8460d" stroke-width="1.3"/></svg>사진 촬영</button>
+<span style="display:inline-flex;align-items:center;height:28px;padding:0 10px;border:1px solid #e3e1dc;border-radius:2px;background:#faf9f6;font-size:11.5px;color:#666;white-space:nowrap">촬영_20260821_1.jpg · 1.2MB</span>
+<span style="font-size:11px;color:#8a857e;white-space:nowrap">JPG · PNG · PDF / 10MB 이하 · 최대 5개</span>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-for>
+<div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:8px 10px;background:#faf9f6"><div style="display:flex;align-items:center;gap:5px"><sc-for list="{{ gActs }}" as="a" hint-placeholder-count="0"><button style="height:28px;padding:0 13px;border:1px solid {{ a.bd }};border-radius:2px;background:{{ a.bg }};font-size:11.5px;font-weight:{{ a.fw }};color:{{ a.fg }};cursor:pointer;white-space:nowrap" style-hover="background:{{ a.hbg }};color:{{ a.hfg }}">{{ a.t }}</button></sc-for></div></div>
+</div>
+<div style="flex:1;min-width:300px;border:1px solid #b5b1aa">
+<div style="height:27px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;background:#eceae5;border-bottom:1px solid #b5b1aa"><span style="font-size:11.5px;font-weight:700;color:#222">{{ sideTitle }}</span><span style="font-size:11px;color:#8a857e">최근순</span></div>
+<sc-for list="{{ sideRows }}" as="r" hint-placeholder-count="4">
+<div style="display:flex;flex-direction:column;gap:3px;padding:8px 10px;border-bottom:1px solid #e6e4df;cursor:pointer" style-hover="background:#fdf6f1">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:11px;color:#8a857e;white-space:nowrap">{{ r.no }}</span><span style="font-size:11px;font-weight:700;color:{{ r.fg }};white-space:nowrap">{{ r.st }}</span></div>
+<span style="font-size:12.5px;color:#222">{{ r.t }}</span>
+<span style="font-size:11px;color:#8a857e">{{ r.d }}</span>
+</div>
+</sc-for>
+<div style="display:flex;align-items:center;justify-content:flex-end;padding:8px 10px;background:#faf9f6"><span style="font-size:11.5px;color:#b8460d;cursor:pointer;white-space:nowrap">전체 보기 ›</span></div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isMycal }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;min-height:100%">
+<div style="flex:none;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:11px 14px;border-bottom:1px solid #e3e1dc">
+<div style="display:flex;align-items:center;border:1px solid #c9c5be;border-radius:2px;background:#fff">
+<span style="width:27px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#5a554e;cursor:pointer;background:#f2efe9;border-right:1px solid #ddd8d0" style-hover="background:#e8e4dc">‹</span>
+<span style="min-width:96px;text-align:center;padding:0 14px;font-size:13.5px;font-weight:700;color:#1c1a17;white-space:nowrap">2026-08</span>
+<span style="width:27px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#5a554e;cursor:pointer;background:#f2efe9;border-left:1px solid #ddd8d0" style-hover="background:#e8e4dc">›</span>
+</div>
+<sc-for list="{{ myLegend }}" as="l" hint-placeholder-count="4">
+<span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border:1px solid #e3e1dc;border-radius:2px;background:#fff;font-size:11.5px;color:#444;white-space:nowrap"><span style="width:9px;height:9px;background:{{ l.sq }}"></span>{{ l.t }} <b style="color:#222">{{ l.n }}</b></span>
+</sc-for>
+<span style="margin-left:auto;font-size:11.5px;color:#8a857e;white-space:nowrap">오늘 2026-08-21 (금) · <b style="color:{{ myToday.fg }}">{{ myToday.txt }}</b></span>
+</div>
+<div style="flex:none;margin:10px 14px 14px;border:1px solid #b5b1aa">
+<div style="display:grid;grid-template-columns:repeat(7,1fr);background:#eceae5;border-bottom:1px solid #b5b1aa">
+<span style="height:30px;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:#a3282a;border-right:1px solid #cfccc6">일</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">월</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">화</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">수</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">목</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#222;border-right:1px solid #cfccc6">금</span>
+<span style="height:27px;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#17457f">토</span>
+</div>
+<sc-for list="{{ weeks }}" as="w" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #e6e4df">
+<sc-for list="{{ w.days }}" as="c" hint-placeholder-count="7">
+<div style="min-height:92px;padding:8px 9px;border-right:1px solid #ecebe6;background:{{ c.bg }};box-shadow:{{ c.bs }};display:flex;flex-direction:column;gap:7px">
+<span style="font-size:13px;font-weight:700;color:{{ c.fg }}">{{ c.label }}</span>
+<span style="display:{{ c.mydp }};height:32px;align-items:center;justify-content:center;background:{{ c.mybg }};border-left:4px solid {{ c.myac }};border-radius:2px;font-size:15px;font-weight:700;color:{{ c.myfg }}">{{ c.my }}</span>
+<span style="display:{{ c.offdp }};align-items:center;justify-content:center;height:32px;font-size:13px;font-weight:700;color:{{ c.offfg }};letter-spacing:0.1em">OFF</span>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+
+</div></x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:900},&quot;initialScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dash&quot;,&quot;roster&quot;,&quot;user&quot;,&quot;cal&quot;],&quot;default&quot;:&quot;roster&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const WT = {
+  '주간': { fg: '#17457f', bd: '#9dbae2' },
+  '야간': { fg: '#a3282a', bd: '#e2a7a4' },
+  'OFF':  { fg: '#9a9a94', bd: '#e2e0da' },
+  '연차': { fg: '#1c6b41', bd: '#9dcdae' },
+  '특주': { fg: '#8a5b12', bd: '#e0c084' },
+  '훈련': { fg: '#0f7d7d', bd: '#8ecaca' },
+  '출산': { fg: '#a32a72', bd: '#e0abc9' }
+};
+const PATTERNS = {
+  day:   ['OFF','OFF','연차','주간','주간','주간','주간','OFF','OFF','주간','연차','주간','주간','주간','OFF','OFF','OFF','주간','주간','주간','주간','OFF','OFF','주간','주간','주간','주간','OFF','OFF','주간','주간'],
+  day2:  ['OFF','OFF','주간','주간','주간','주간','주간','OFF','OFF','주간','주간','주간','주간','주간','OFF','OFF','OFF','주간','주간','주간','주간','OFF','OFF','주간','주간','주간','주간','OFF','OFF','주간','주간'],
+  a:     ['OFF','OFF','연차','주간','주간','주간','OFF','OFF','야간','야간','야간','야간','OFF','OFF','주간','주간','주간','주간','OFF','OFF','야간','야간','야간','야간','OFF','OFF','주간','주간','주간','주간','OFF'],
+  b:     ['연차','연차','OFF','OFF','야간','야간','야간','야간','OFF','특주','주간','주간','주간','주간','OFF','OFF','야간','야간','야간','야간','OFF','OFF','주간','주간','주간','주간','OFF','OFF','야간','야간','야간'],
+  c:     ['OFF','OFF','주간','주간','연차','연차','연차','OFF','OFF','주간','주간','주간','주간','주간','OFF','OFF','OFF','주간','주간','주간','주간','OFF','OFF','주간','주간','훈련','훈련','OFF','OFF','주간','주간']
+};
+const PEOPLE = [
+  ['2021110120','김의겸','데코코팅생산팀','',   'day'],
+  ['2023061202','난린텟','데코코팅생산팀','',   'day2'],
+  ['2025070101','김정형','데코코팅생산팀','',   'day'],
+  ['2025102002','진연권','데코코팅생산팀','',   'c'],
+  ['2026050101','나지르','데코코팅생산팀','',   'day2'],
+  ['2026051101','강중규','데코코팅생산팀','',   'day2'],
+  ['2026061501','박순창','데코코팅생산팀','',   'day2'],
+  ['2026072003','윤현수','데코코팅생산팀','',   'day2'],
+  ['2008110301','고중수','PET생산1팀','A조',   'a'],
+  ['2019010102','서경민','PET생산1팀','A조',   'a'],
+  ['2019111101','샤르마','PET생산1팀','A조',   'a'],
+  ['2023110101','아웅모투','PET생산1팀','A조', 'a'],
+  ['2025050102','유재목','PET생산1팀','A조',   'a'],
+  ['2026060101','박시우','PET생산1팀','A조',   'a'],
+  ['2023101301','김재원','PET생산2팀','B조',   'b'],
+  ['2024020801','최민호','PET생산2팀','B조',   'b'],
+  ['2020031101','이하늘','PVC생산팀','C조',    'c'],
+  ['2022071901','정우성','PVC생산팀','C조',    'c']
+];
+class Component extends DCLogic {
+  state = { screen: null, menuOpen: false, userModal: false, sbw: 206, cw: { id: 82, name: 70, dept: 118, team: 44 } };
+  drag(get, set, min, max) {
+    return e => {
+      e.preventDefault();
+      const sx = e.clientX, s0 = get();
+      const mv = ev => set(Math.max(min, Math.min(max, s0 + ev.clientX - sx)));
+      const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+      window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+    };
+  }
+  get screen() { return this.state.screen || this.props.initialScreen || 'roster'; }
+  go(s) { return () => this.setState({ screen: s, menuOpen: false }); }
+  goMob(s) { return () => this.setState({ screen: s, menuOpen: false, drawer: false }); }
+  componentDidMount() {
+    this._onRz = () => this.setState({ vw: window.innerWidth });
+    window.addEventListener('resize', this._onRz);
+    this._onRz();
+  }
+  componentWillUnmount() { window.removeEventListener('resize', this._onRz); }
+  renderVals() {
+    const s = this.screen;
+    const meta = {
+      dash:   ['홈 / 근무 현황', '근무 현황'],
+      roster: ['근무표 / 월간 근무표', '월간 근무표'],
+      user:   ['기준정보 / 사용자 관리', '사용자 관리'],
+      cal:    ['숙소 예약 / 예약 캘린더', '숙소 예약 캘린더'],
+      mycal:  ['근무표 / 내 근무표', '내 근무표'],
+      nearReg:['아차사고 / 등록', '아차사고 등록'],
+      near:   ['아차사고 / 조회', '아차사고 조회'],
+      myreq:  ['업무요청 / 내 업무요청', '내 업무요청'],
+      stayReq:['숙소 예약 / 신청', '숙소 예약 신청'],
+      org:    ['기준정보 / 조직 관리', '조직 관리'],
+      wtm:    ['기준정보 / 근무형태 관리', '근무형태 관리'],
+      plan:   ['근무표 / 근무표 편성', '근무표 편성'],
+      myNear: ['아차사고 / 내 아차사고', '내 아차사고'],
+      reqReg: ['업무요청 / 등록', '업무요청 등록'],
+      reqProc:['업무요청 / 현황', '업무요청 현황'],
+      reqWork:['업무요청 / 처리 등록', '업무요청 처리 등록'],
+      myStay: ['숙소 예약 / 내 숙소 예약', '내 숙소 예약'],
+      stayAppr:['숙소 예약 / 승인', '숙소 예약 승인']
+    };
+    const MOB = { mycal: 1, plan: 1, reqReg: 1, nearReg: 1, stayReq: 1, stayAppr: 1 };
+    const mob = (this.state.vw || 1400) <= 768;
+    const pcOk = !(mob && MOB[s]);
+    const nav = {}, side = {};
+    for (const k of Object.keys(meta)) {
+      const on = k === s;
+      nav[k] = on ? { fg: '#b8460d', fw: 700, bg: '#fdf0e8' } : { fg: '#555', fw: 400, bg: 'transparent' };
+      side[k] = on
+        ? { fg: '#b8460d', fw: 700, bg: '#fdf0e8', mark: 'inset 3px 0 0 #b8460d', dot: '#b8460d' }
+        : { fg: '#4a463f', fw: 400, bg: 'transparent', mark: 'none', dot: '#b3ada6' };
+    }
+
+    // 2026-08: 1일 = 토요일
+    const WK = ['토','일','월','화','수','목','금'];
+    const days = [];
+    for (let i = 0; i < 31; i++) {
+      const w = WK[i % 7], we = w === '토' || w === '일';
+      days.push({ n: i + 1, w, hbg: we ? '#f3efe9' : '#eceae5', hfg: w === '일' ? '#b3352f' : (w === '토' ? '#1c5aa8' : '#222') });
+    }
+    const rows = PEOPLE.map((p, i) => ({
+      no: i + 1, id: p[0], name: p[1], dept: p[2], team: p[3] || '—',
+      rowbg: i === 0 ? '#fdf0e8' : '#fff', bar: i === 0 ? 'inset 3px 0 0 #b8460d' : 'none',
+      cells: PATTERNS[p[4]].map(t => ({
+        t, fg: (WT[t] || WT.OFF).fg,
+        bd: s === 'plan' ? 'transparent' : (WT[t] || WT.OFF).bd,
+        sz: s === 'plan' ? '12px' : '11.5px'
+      }))
+    }));
+
+    const TODAY = [
+      ['2021110120','김의겸','데코코팅생산팀','—','주간','08:00','20:00',''],
+      ['2023061202','난린텟','데코코팅생산팀','—','주간','08:00','20:00',''],
+      ['2025070101','김정형','데코코팅생산팀','—','주간','08:00','20:00',''],
+      ['2026050101','나지르','데코코팅생산팀','—','주간','08:00','20:00',''],
+      ['2008110301','고중수','PET생산1팀','A조','야간','20:00','08:00',''],
+      ['2019010102','서경민','PET생산1팀','A조','야간','20:00','08:00',''],
+      ['2019111101','샤르마','PET생산1팀','A조','야간','20:00','08:00','특근수당'],
+      ['2023101301','김재원','PET생산2팀','B조','특주','08:00','20:00','교대 대체'],
+      ['2020031101','이하늘','PVC생산팀','C조','주간','08:00','20:00',''],
+      ['2022071901','정우성','PVC생산팀','C조','주간','08:00','20:00','']
+    ];
+    const todayList = TODAY.map((p, i) => ({
+      no: i + 1, id: p[0], name: p[1], dept: p[2], team: p[3],
+      rowbg: i === 0 ? '#fdf0e8' : 'transparent',
+      hbg: i === 0 ? '#fdf0e8' : '#fdf6f1',
+      bar: i === 0 ? 'inset 3px 0 0 #b8460d' : 'none',
+      type: p[4], st: p[5], en: p[6], note: p[7] || '',
+      fg: (WT[p[4]] || WT.OFF).fg, bd: (WT[p[4]] || WT.OFF).bd
+    }));
+    const U = [
+      ['2026050701','안진모','비서실 직속','11000000','','조원','j1004s@kp-tech.co.kr','2026-05-07','',1],
+      ['2012050101','백우순','대표이사 직속','20000000','이사','관리자','avantgarde@kp-tech.co.kr','2012-05-01','',2],
+      ['2019060301','최정인','기술연구소담당 직속','21000000','','조원','jichoi@kp-tech.co.kr','2019-06-03','',3],
+      ['2020062901','권석일','기술연구소','21100000','','조원','jdksi0115@kp-tech.co.kr','2020-06-29','',4],
+      ['2021020101','김정은','기술연구소','21100000','','조원','kimje@kp-tech.co.kr','2021-02-01','',5],
+      ['2021021701','이주원','기술연구소','21100000','','조원','jwlee@kp-tech.co.kr','2021-02-17','',6],
+      ['2025041401','홍청유','기술연구소','21100000','','조원','stopper@kp-tech.co.kr','2025-04-14','',7],
+      ['2025101301','윤준웅','기술연구소','21100000','','조원','jwyoon2@kp-tech.co.kr','2025-10-13','',8],
+      ['2026031601','강미진','기술연구소','21100000','','조원','mjkang@kp-tech.co.kr','2026-03-16','',9],
+      ['2026072001','권민수','기술연구소','21100000','','조원','minsu9366@kp-tech.co.kr','2026-07-20','',10],
+      ['2004051201','한매니저','전산팀','31400000','과장','매니저','manager@kp-tech.co.kr','2004-05-12','',11],
+      ['2004051202','이광호','전산팀','31400000','','안전담당','kwlee@kp-tech.co.kr','2004-05-12','',12],
+      ['2016030101','조퇴직','PVC생산팀','33200000','','조원','ret@kp-tech.co.kr','2016-03-01','2026-06-30',13]
+    ];
+    const ROLE = { '관리자': ['#a3282a', 700], '매니저': ['#b8460d', 700], '안전담당': ['#1c6b41', 700], '조원': ['#555', 400] };
+    const users = U.map((u, ui) => {
+      const r = ROLE[u[5]] || ROLE['조원'], out = !!u[8], sel = ui === 0;
+      return { id: u[0], name: u[1], dept: u[2], code: u[3], rank: u[4] || '—', role: u[5],
+        rolefg: r[0], rolefw: r[1], mail: u[6], join: u[7], leave: u[8] || '—', ord: u[9],
+        act: out ? '퇴직' : '재직', actfg: out ? '#a3282a' : '#1c6b41',
+        rowbg: sel ? '#fdf0e8' : (out ? '#faf7f5' : '#fff'),
+        hbg: sel ? '#fdf0e8' : '#fdf6f1',
+        bar: sel ? 'inset 3px 0 0 #b8460d' : 'none',
+        chk: sel ? '#b8460d' : '#fff', chkbd: sel ? '#b8460d' : '#b5b1aa' };
+    });
+
+    // 2026-08 캘린더 (8/1 = 토, 일요일 시작 6주) — 예약 1건 = 이어진 막대 1개
+// 숙소별 고정 줄 · 고정 색 (대관령 = 1줄, 태안 = 2줄) — 본문 뉴트럴과 같은 계열
+    const HOUSE = {
+      대관령: { lane: 1, bg: '#e6e9ec', fg: '#3b4650', bc: '#a9b3bc', waitBg: '#f4f6f7', waitFg: '#5d6a75' },
+      태안:   { lane: 2, bg: '#eeeadf', fg: '#5c5232', bc: '#c3b795', waitBg: '#f8f6f0', waitFg: '#7b6f49' }
+    };
+    const MINE = { bg: '#b8460d', fg: '#fff', bc: '#963a0a', waitBg: '#fdf0e8', waitFg: '#b8460d' };
+    // [숙소, 시작일, 종료일, 신청자, 상태, 본인여부] — 32 이상은 다음 달로 이어짐
+    const RES = [
+      ['대관령', 5, 7, '김샘플', '승인', false],
+      ['태안', 12, 13, '이광호', '승인대기', true],
+      ['대관령', 18, 20, '한매니저', '승인', false],
+      ['태안', 25, 26, '박순창', '승인', false],
+      ['대관령', 29, 33, '이광호', '승인', true]
+    ];
+    const weeks = [];
+    for (let wi = 0; wi < 6; wi++) {
+      const days = [], base = wi * 7 - 5; // 8/1 = index 6
+      for (let dow = 0; dow < 7; dow++) {
+        const dn = base + dow, inMonth = dn >= 1 && dn <= 31;
+        let label;
+        if (dn < 1) label = (31 + dn) + '';
+        else if (dn > 31) label = (dn - 31) + '';
+        else label = dn === 1 ? '8월 1일' : dn + '';
+        const MYTINT = { '주간': '#eaf1fa', '야간': '#fbeeee', '연차': '#ecf6ef', '특주': '#f9f1e2', '훈련': '#e8f4f4' };
+        const myT = inMonth ? PATTERNS.a[dn - 1]
+          : (dn < 1 ? PATTERNS.c[30 + dn] : PATTERNS.b[(dn - 32) % 31]);
+        const myW = myT && myT !== 'OFF' ? WT[myT] : null;
+        days.push({
+          label,
+          fg: !inMonth ? '#c3beb6' : (dow === 0 ? '#a3282a' : (dow === 6 ? '#17457f' : '#222')),
+          bg: !inMonth ? '#fafaf8' : ((dow === 0 || dow === 6) ? '#fbfaf7' : '#fff'),
+          bs: dn === 21 ? 'inset 0 0 0 2px #b8460d' : 'none',
+          my: myW ? myT : '',
+          myfg: myW ? (inMonth ? myW.fg : '#b3ada6') : 'transparent',
+          mybg: myW ? (inMonth ? MYTINT[myT] : '#f4f2ee') : 'transparent',
+          myac: myW ? (inMonth ? myW.fg : '#d9d5ce') : 'transparent',
+          mydp: myW ? 'flex' : 'none',
+          offdp: myT === 'OFF' ? 'flex' : 'none',
+          offfg: inMonth ? '#c3beb6' : '#dcd8d1',
+          mybd: 'transparent'
+        });
+      }
+      const wStart = base, wEnd = base + 6, bars = [];
+      for (const [house, from, to, who, st, mine] of RES) {
+        if (to < wStart || from > wEnd) continue;
+        const h = HOUSE[house], c = mine ? MINE : h;
+        const a = Math.max(from, wStart), b = Math.min(to, wEnd);
+        const col = a - wStart + 1, span = b - a + 1;
+        const openL = from < wStart, openR = to > wEnd;
+        const wait = st === '승인대기';
+        bars.push({
+          gc: col + ' / span ' + span, lane: h.lane,
+          t: (openL ? '◀ ' : '') + house + ' · ' + (mine ? '내 예약' : who) + ' · ' + st + (openR ? ' ▶' : ''),
+          ml: openL ? '0' : '3px', mr: openR ? '0' : '3px',
+          blw: openL ? '0' : '1px', brw: openR ? '0' : '1px',
+          bg: wait ? c.waitBg : c.bg,
+          fg: wait ? c.waitFg : c.fg,
+          bc: c.bc,
+          bd: wait ? 'dashed' : 'solid'
+        });
+      }
+      weeks.push({ days, bars });
+    }
+    const SF = { '평가완료': '#1c6b41', '반려': '#a3282a', '평가중': '#b8460d', '제출됨': '#555', '처리중': '#b8460d', '완료': '#1c6b41', '접수': '#555', '긴급': '#a3282a', '✓': '#1c6b41' };
+    const GRID = {
+      near: { t: '아차사고 조회', sub: '총 8건 · 미평가 3 · 평가완료 4 · 반려 1',
+        f: [['기간','최근 90일'],['부서','(전체)'],['상태','(전체)'],['평가 등급','(전체)']],
+        c: ['No','보고번호','발생일','원인','작업명','사고내용','소속','신고자','등급','상태'],
+        r: [
+          ['1','202608-0005','2026-08-14','끼임','컨베이어 이물 제거','벨트 재기동, 손이 롤러 30cm 옆','전산팀','관리자','C','평가완료'],
+          ['2','202608-0003','2026-08-10','기타','그라인딩 작업','불꽃이 인접 가연물 방향으로 비산','공무팀','관리자','—','반려'],
+          ['3','202608-0002','2026-08-07','미끄러짐','원료 이송','계단에 쌓인 분체 잔분을 밟고 미끄러짐','원료2파트','관리자','—','제출됨'],
+          ['4','202608-0001','2026-08-04','낙하물','파렛트랙 하역','랩핑 풀린 상자가 3m 높이에서 낙하','PET생산2팀','관리자','—','제출됨'],
+          ['5','202607-0004','2026-07-23','추락','집진기 필터 교체','A형 사다리 3단에서 균형을 잃음','PET생산1팀','관리자','—','제출됨'],
+          ['6','202607-0003','2026-07-16','협착','권취 롤러 청소','장갑 끝이 롤러 사이로 딸려 들어갈 뻔함','PVC생산팀','관리자','—','평가중'],
+          ['7','202606-0003','2026-06-24','부딪힘','제품 적재','팔레트 모서리가 선반 기둥에 충돌','PET생산2팀','관리자','B','평가완료'],
+          ['8','202606-0001','2026-06-03','낙하물','원료 투입','호이스트 인양 중 결속이 풀려 낙하','PET생산1팀','관리자','A','평가완료']
+        ] },
+      myreq: { t: '내 업무요청', sub: '총 4건 · 처리중 2 · 완료 1 · 접수 1',
+        f: [['기간','최근 90일'],['상태','(전체)'],['유형','(전체)']],
+        c: ['No','요청번호','제목','유형','처리 부서','희망 완료일','상태','담당자'],
+        r: [
+          ['1','WR-202608-007','포장기 라벨 인쇄 불량 조치','설비','PET생산부','2026-08-05','처리중','한매니저'],
+          ['2','WR-202608-004','안전화 40켤레 추가 구매','구매','총무팀','2026-08-20','접수','—'],
+          ['3','WR-202608-002','3라인 컨베이어 이상 소음 점검','설비','공무팀','2026-08-12','처리중','김공무'],
+          ['4','WR-202607-011','생산관리 PC 3대 교체 요청','전산','전산팀','2026-07-30','완료','이광호']
+        ] },
+      org: { t: '조직 관리', sub: '부서 43개 · 사용 중 43 · 근태 등록 대상 5',
+        f: [['사용 여부','사용 중'],['검색','코드·명칭']],
+        c: ['No','코드','코드명','근태 등록 대상','순서','사용'],
+        r: [
+          ['1','11000000D','비서실 직속','','1','✓'],
+          ['2','20000000D','대표이사 직속','','2','✓'],
+          ['3','21100000','기술연구소','','4','✓'],
+          ['4','31400000','전산팀','✓','12','✓'],
+          ['5','31500000','인사총무팀','','13','✓'],
+          ['6','33101000','데코코팅생산팀','✓','21','✓'],
+          ['7','33102000','PET생산1팀','✓','22','✓'],
+          ['8','33103010','원료2파트','✓','24','✓']
+        ] },
+      wtm: { t: '근무형태 관리', sub: '근무형태 49 · 사용 중 49',
+        f: [['사용 여부','사용 중'],['검색','코드·명칭·약칭']],
+        c: ['No','코드','명칭','분류','약칭','시작','종료','색상','실근무','표시순서','사용'],
+        r: [
+          ['1','DAY','주간','주간','주','08:00','20:00','■ #1e6fd9','✓','10','✓'],
+          ['2','NIGHT','야간','야간','야','20:00','08:00','■ #f50535','✓','20','✓'],
+          ['3','OFF','OFF','OFF','OFF','','','■ #9aa0a6','','30','✓'],
+          ['4','ANNUAL','연차','휴가','연차','','','■ #2e9e5b','','40','✓'],
+          ['5','MATERNITY','출산휴가','휴가','출산','','','■ #d64596','','50','✓'],
+          ['6','TRAINING','훈련','교육','훈련','','','■ #12a5a5','','60','✓'],
+          ['7','특주','특주','특근','특주','08:00','20:00','■ #c78a2b','✓','66','✓']
+        ] },
+      reqProc: { t: '업무요청 현황', sub: '미착수 2 · 처리중 2 · 긴급 미처리 2 · 기한 초과 3 · 확인 대기 2',
+        f: [['처리 부서','전체'],['우선순위','전체'],['요청 유형','전체']],
+        c: ['No','요청번호','제목','유형','요청자','요청 부서','희망 완료일','우선순위','상태','담당자'],
+        r: [
+          ['1','WR-202608-007','포장기 라벨 인쇄 불량 조치','설비','김샘플','PET생산부','2026-08-05','긴급','처리중','한매니저'],
+          ['2','WR-202608-002','3라인 컨베이어 이상 소음 점검','설비','박순창','PET생산부','2026-08-12','긴급','접수','—'],
+          ['3','WR-202608-001','생산관리 PC 3대 교체 요청','전산','서경민','PET생산1팀','2026-08-15','보통','처리중','이광호'],
+          ['4','WR-202608-004','안전화 40켤레 추가 구매','구매','고중수','PET생산1팀','2026-08-20','보통','접수','—'],
+          ['5','WR-202607-009','원료동 2층 계단 미끄럼 방지 보강','시설','관리자','원료2파트','2026-07-28','보통','완료','김공무'],
+          ['6','WR-202608-016','권취기 유압호스 누유 교체','설비','고중수','PET생산1팀','2026-08-24','긴급','접수','—'],
+          ['7','WR-202608-018','사무동 복합기 토너 교체','구매','한매니저','전산팀','2026-08-26','낮음','처리중','총무팀'],
+          ['8','WR-202608-021','원료 사일로 상부 조명 교체','시설','박순창','원료2파트','2026-08-28','보통','접수','—']
+        ] },
+      myNear: { t: '내 아차사고', sub: '총 2건 · 평가완료 1 · 평가중 1',
+        f: [['상태','(전체)'],['기간','전체']],
+        c: ['No','보고번호','발생일','작업명','원인','등급','상태','개선조치'],
+        r: [
+          ['1','202608-0005','2026-08-14','컨베이어 이물 제거','끼임','C','평가완료','작성중'],
+          ['2','202607-0003','2026-07-16','권취 롤러 청소','협착','—','평가중','—']
+        ] },
+      stayAppr: { t: '숙소 예약 승인', sub: '총 5건 · 승인대기 2 · 승인 3 · 반려 0',
+        f: [['기간','2026-08'],['숙소','(전체)'],['상태','승인대기']],
+        c: ['No','신청번호','숙소','기간','숙박','신청자','부서','신청일','상태'],
+        r: [
+          ['1','SR-202608-011','태안','2026-08-12 ~ 2026-08-13','1박','이광호','전산팀','2026-08-05','승인대기'],
+          ['2','SR-202608-014','대관령','2026-08-22 ~ 2026-08-24','2박','박순창','PET생산1팀','2026-08-11','승인대기'],
+          ['3','SR-202608-006','대관령','2026-08-05 ~ 2026-08-07','2박','김샘플','PET생산부','2026-07-29','승인'],
+          ['4','SR-202608-009','대관령','2026-08-18 ~ 2026-08-20','2박','한매니저','전산팀','2026-08-03','승인'],
+          ['5','SR-202608-013','태안','2026-08-25 ~ 2026-08-26','1박','고중수','PET생산1팀','2026-08-10','승인']
+        ] },
+      myStay: { t: '내 숙소 예약', sub: '총 2건 · 승인 1 · 승인대기 1',
+        f: [['상태','(전체)'],['기간','올해']],
+        c: ['No','숙소','기간','상태','신청일','비고'],
+        r: [
+          ['1','태안','2026-08-12 ~ 2026-08-13 (1박)','승인대기','2026-08-05','수정·취소 가능'],
+          ['2','대관령','2026-08-29 ~ 2026-09-01 (3박)','승인','2026-08-10','—']
+        ] }
+    };
+    const FORM = {
+      nearReg: { t: '아차사고 등록', sub: '',
+        f: [
+          ['작업명','예: 3라인 컨베이어 벨트 점검',1,1],
+          ['발생일','2026-08-21',1,0],
+          ['사고내용','무슨 일이 있었는지(아차사고 상황)를 구체적으로',1,1],
+          ['작업내용','어떤 작업을 하고 있었는지',1,1],
+          ['작업현장 상황설명','현장 상황 · 주변 환경',1,1],
+          ['발생원인','— 선택 —',1,1],
+          ['발생원인 상세','원인을 구체적으로',1,1],
+          ['예방대책','재발을 막기 위한 대책',1,1],
+          ['첨부 사진','이미지 파일 첨부 (선택)',0,1]
+        ] },
+      stayReq: { t: '숙소 예약 신청', sub: '',
+        f: [
+          ['숙소','대관령 · 태안 중 선택',1,1],
+          ['기간','2026-09-04 ~ 2026-09-06 (2박)',1,0],
+          ['사유','가족 동반 휴양',0,0],
+          ['비고','',0,0]
+        ] },
+      reqWork: { t: '업무요청 처리 등록', sub: '',
+        f: [
+          ['요청번호','WR-202608-007',1,0],
+          ['요청 제목','포장기 라벨 인쇄 불량 조치',0,0],
+          ['처리 부서','공무팀',1,0],
+          ['담당자','한매니저',1,0],
+          ['처리 상태','접수 · 처리중 · 보류 · 완료 · 반려 중 선택',1,1],
+          ['조치 내용','점검·교체·조정 내용과 결과',1,1,2],
+          ['소요 시간','예: 1.5 시간',0,1],
+          ['완료 예정일','2026-08-05',1,0],
+          ['첨부','조치 전·후 사진',0,1]
+        ] },
+      reqReg: { t: '업무요청 등록', sub: '',
+        f: [
+          ['제목','예: 포장기 라벨 인쇄 불량 조치',1,1],
+          ['요청 유형','설비 · 전산 · 구매 · 시설 중 선택',1,1],
+          ['처리 부서','— 선택 —',1,1],
+          ['희망 완료일','2026-09-05',1,0],
+          ['우선순위','보통',1,0],
+          ['요청 내용','무엇을 · 왜 · 언제까지',1,1,2],
+          ['참고 사항','',0,0,1],
+          ['첨부','파일 첨부 (선택)',0,1]
+        ] }
+    };
+    return {
+      grp: (() => {
+        const og = this.state.og || {};
+        const mk = (key, on) => {
+          const open = og[key] !== undefined ? og[key] : on;
+          const st = on
+            ? { fw: 700, fg: '#2e2a26', bg: '#f0ede7', dot: '#b8460d' }
+            : { fw: 600, fg: '#4a463f', bg: 'transparent', dot: '#b3ada6' };
+          return Object.assign(st, {
+            ar: open ? '▾' : '▸', disp: open ? 'block' : 'none',
+            tg: () => this.setState(v => ({ og: Object.assign({}, v.og, { [key]: !open }) }))
+          });
+        };
+        return {
+          ws: mk('ws', s === 'roster' || s === 'mycal' || s === 'plan'),
+          near: mk('near', s === 'nearReg' || s === 'near' || s === 'myNear'),
+          req: mk('req', s === 'myreq' || s === 'reqReg' || s === 'reqProc' || s === 'reqWork'),
+          stay: mk('stay', s === 'cal' || s === 'stayReq' || s === 'myStay' || s === 'stayAppr'),
+          base: mk('base', s === 'user' || s === 'org' || s === 'wtm')
+        };
+      })(),
+      sbwPx: this.state.sbw + 'px',
+      cwIdPx: this.state.cw.id + 'px', cwNamePx: this.state.cw.name + 'px',
+      cwDeptPx: this.state.cw.dept + 'px', cwTeamPx: this.state.cw.team + 'px',
+      leftNamePx: (30 + this.state.cw.id) + 'px',
+      sbDown: this.drag(() => this.state.sbw, v => this.setState({ sbw: v }), 150, 340),
+      rzId: this.drag(() => this.state.cw.id, v => this.setState(x => ({ cw: { ...x.cw, id: v } })), 54, 220),
+      rzName: this.drag(() => this.state.cw.name, v => this.setState(x => ({ cw: { ...x.cw, name: v } })), 50, 200),
+      rzDept: this.drag(() => this.state.cw.dept, v => this.setState(x => ({ cw: { ...x.cw, dept: v } })), 60, 280),
+      rzTeam: this.drag(() => this.state.cw.team, v => this.setState(x => ({ cw: { ...x.cw, team: v } })), 36, 140),
+      userModal: this.state.userModal,
+      openUser: () => this.setState({ userModal: true }),
+      closeUser: () => this.setState({ userModal: false }),
+      nav, side, crumb: meta[s][0], title: meta[s][1], days, rows, todayList, users, weeks,
+      myToday: (() => {
+        const t = PATTERNS.a[20], w = t !== 'OFF' ? WT[t] : null;
+        return {
+          fg: w ? w.fg : '#8a857e',
+          txt: t === 'OFF' ? '휴무' : t + (t === '야간' ? ' 20:00 - 08:00' : ' 08:00 - 20:00')
+        };
+      })(),
+      myLegend: (() => {
+        const n = {};
+        PATTERNS.a.forEach(t => { n[t] = (n[t] || 0) + 1; });
+        return ['주간', '야간', '연차', '특주', 'OFF'].filter(t => n[t]).map(t => ({
+          t, n: n[t], sq: t === 'OFF' ? '#c9c5be' : WT[t].fg
+        }));
+      })(),
+      menuOpen: this.state.menuOpen,
+      toggleMenu: () => this.setState(v => ({ menuOpen: !v.menuOpen })),
+      profOpen: !!this.state.profOpen,
+      profBd: this.state.profOpen ? '#b8460d' : '#d9d5ce',
+      toggleProf: () => this.setState(v => ({ profOpen: !v.profOpen })),
+      goDash: this.go('dash'), goRoster: this.go('roster'), goUser: this.go('user'), goCal: this.go('cal'),
+      goMycal: this.go('mycal'), goNearReg: this.go('nearReg'), goNear: this.go('near'),
+      goMyreq: this.go('myreq'), goStayReq: this.go('stayReq'), goOrg: this.go('org'), goWtm: this.go('wtm'),
+      goPlan: this.go('plan'), goMyNear: this.go('myNear'), goReqReg: this.go('reqReg'),
+      goReqProc: this.go('reqProc'), goReqWork: this.go('reqWork'), goMyStay: this.go('myStay'), goStayAppr: this.go('stayAppr'),
+      rosterTitle: s === 'plan' ? '2026-08 근무표 편성' : '2026-08 근무표',
+      isDash: s === 'dash' && pcOk, isRoster: (s === 'roster' || (s === 'plan' && pcOk)), isUser: s === 'user' && pcOk, isCal: s === 'cal' && pcOk,
+      isMycal: s === 'mycal' && pcOk, isStayAppr: s === 'stayAppr' && pcOk,
+      isGrid: !!GRID[s] && pcOk, isForm: !!FORM[s] && s !== 'stayReq' && pcOk, isStayReq: s === 'stayReq' && pcOk,
+      isMobile: mob, isDesktop: !mob,
+      mobMycal: mob && s === 'mycal', mobPlan: mob && s === 'plan',
+      mobForm: mob && (s === 'reqReg' || s === 'nearReg'), mobStayReq: mob && s === 'stayReq',
+      mobStayAppr: mob && s === 'stayAppr', mobPcFallback: mob && !MOB[s],
+      drawerOpen: !!this.state.drawer,
+      drawerDisp: this.state.drawer ? 'flex' : 'none',
+      toggleDrawer: () => this.setState(v => ({ drawer: !v.drawer })),
+      mobTitle: meta[s][1],
+      mgMycal: this.goMob('mycal'), mgPlan: this.goMob('plan'), mgNearReg: this.goMob('nearReg'),
+      mgReqReg: this.goMob('reqReg'), mgStayReq: this.goMob('stayReq'),
+      mgStayAppr: this.goMob('stayAppr'), mgDash: this.goMob('dash'),
+      mobWeeks: weeks.map(w => w.days.map(c => ({
+        d: c.label, t: c.my || (c.offdp === 'flex' ? '휴무' : ''),
+        dfg: c.fg, tint: c.mybg === 'transparent' ? '#f2f0ec' : c.mybg,
+        fg: c.myfg === 'transparent' ? '#a8a29a' : c.myfg, bs: c.bs
+      }))),
+      mobPlanWeeks: weeks.map(w => w.days.map(c => {
+        const dn = parseInt(String(c.label).replace(/[^0-9]/g, ''), 10);
+        const inM = c.my !== '' || c.offdp === 'flex';
+        const CH = { 22: '주간', 25: '연차' };
+        const ch = inM && CH[dn] ? CH[dn] : '';
+        const w2 = ch ? WT[ch] : null;
+        const TINT = { '주간': '#eaf1fa', '야간': '#fbeeee', '연차': '#ecf6ef', '특주': '#f9f1e2', '훈련': '#e8f4f4' };
+        return {
+          d: c.label,
+          t: ch || c.my || (c.offdp === 'flex' ? '휴무' : ''),
+          dfg: c.fg,
+          tint: ch ? TINT[ch] : (c.mybg === 'transparent' ? '#f2f0ec' : c.mybg),
+          fg: ch ? w2.fg : (c.myfg === 'transparent' ? '#a8a29a' : c.myfg),
+          bs: inM && dn === 24 ? 'inset 0 0 0 2px #b8460d' : 'none',
+          cdp: ch ? 'block' : 'none'
+        };
+      })),
+      mobAppr: [
+        { ini: '박', name: '박순창', dept: 'PET생산1팀', at: '2026-08-11', house: '대관령', span: '08-22 (토) → 08-24 (월)', nights: '2박 3일', warn: '같은 기간 대관령 예약 1건 있음', wdp: 'flex' },
+        { ini: '이', name: '이광호', dept: '전산팀', at: '2026-08-05', house: '태안', span: '08-12 (수) → 08-13 (목)', nights: '1박 2일', warn: '', wdp: 'none' }
+      ],
+
+      stayWeeks: (() => {
+        const dc = (t, k) => Object.assign({ t, bg: '#fff', fg: '#222', fw: 400, bs: 'none', note: '', ndp: 'none', nfg: '#8a857e' }, k);
+        const BOOKED = RES.filter(r => r[0] === '대관령').reduce((m, r) => {
+          for (let d = r[1]; d <= Math.min(r[2], 31); d++) m[d] = r[3];
+          return m;
+        }, {});
+        const day = d => {
+          if (d === 23 || d === 24) return dc(d, { bg: '#b8460d', fg: '#fff', fw: 700, note: '선택', ndp: 'flex', nfg: '#f7d8c6' });
+          if (BOOKED[d]) return dc(d, { bg: '#f4f2ee', fg: '#8a857e', bs: 'inset 0 -3px 0 #c9c5be', note: BOOKED[d], ndp: 'flex' });
+          if (d === 21) return dc(d, { bs: 'inset 0 0 0 2px #b8460d', fg: '#b8460d', fw: 700 });
+          return dc(d, d < 21 ? { fg: '#b3ada6' } : {});
+        };
+        const cells = [];
+        [26, 27, 28, 29, 30, 31].forEach(d => cells.push(dc(d, { fg: '#c3beb8', bg: '#fafaf8' })));
+        for (let d = 1; d <= 31; d++) cells.push(day(d));
+        [1, 2, 3, 4, 5].forEach(d => cells.push(dc(d, { fg: '#c3beb8', bg: '#fafaf8' })));
+        const w = []; while (cells.length) w.push(cells.splice(0, 7));
+        return w;
+      })(),
+      gTitle: (GRID[s] || FORM[s] || {}).t || '',
+      gSub: (GRID[s] || FORM[s] || {}).sub || '',
+      gf: GRID[s] ? GRID[s].f.map(x => ({ k: x[0], v: x[1] })) : [],
+      gc: GRID[s] ? GRID[s].c : [],
+      gr: GRID[s] ? GRID[s].r.map((row, ri) => {
+        const sel = ri === 0;
+        return {
+          bg: sel ? '#fdf0e8' : 'transparent',
+          hbg: sel ? '#fdf0e8' : '#fdf6f1',
+          bar: sel ? 'inset 3px 0 0 #b8460d' : 'none',
+          cells: row.map((t, i) => {
+            const sf = SF[t];
+            const swatch = typeof t === 'string' && t.charAt(0) === '■';
+            return {
+              t, a: i === 0 ? 'center' : 'left',
+              fg: swatch ? t.slice(2) : (sf || (sel ? '#1c1a17' : '#222')),
+              fw: sf || (sel && i === 1) ? 600 : 400
+            };
+          })
+        };
+      }) : [],
+      gfm: FORM[s] ? FORM[s].f.map(x => {
+        const up = x[0].indexOf('첨부') >= 0;
+        return { k: x[0], v: x[1], req: x[2] ? '*' : '', fg: x[3] ? '#b3ada6' : '#222', isUp: up, notUp: !up,
+          h: x[4] === 2 ? '150px' : (x[4] ? '76px' : '26px'),
+          mh: x[4] === 2 ? '118px' : (x[4] ? '66px' : '46px'),
+          mp: x[4] ? '12px' : '0',
+          al: x[4] ? 'flex-start' : 'center', pt: x[4] ? '7px' : '3px' };
+      }) : [],
+      isReqProc: s === 'reqProc',
+      sideTitle: s === 'reqWork' ? '이 요청의 처리 이력' : (s === 'reqReg' ? '내 최근 업무요청' : '내 최근 아차사고'),
+      sideRows: s === 'reqWork' ? [
+        { no: '08-04 08:05', t: '부품 입고 대기 (2일)', d: '한매니저', st: '보류', fg: '#555' },
+        { no: '08-03 14:40', t: '헤드 정렬 점검 · 부품 발주', d: '한매니저', st: '처리중', fg: '#b8460d' },
+        { no: '08-03 09:12', t: '공무팀 배정', d: '전산팀', st: '접수', fg: '#555' }
+      ] : (s === 'reqReg' ? [
+        { no: 'WR-202608-007', t: '포장기 라벨 인쇄 불량 조치', d: '2026-08-03', st: '처리중', fg: '#b8460d' },
+        { no: 'WR-202608-004', t: '안전화 40켤레 추가 구매', d: '2026-08-01', st: '접수', fg: '#555' },
+        { no: 'WR-202607-011', t: '생산관리 PC 3대 교체 요청', d: '2026-07-22', st: '완료', fg: '#1c6b41' },
+        { no: 'WR-202607-004', t: '3라인 컨베이어 소음 점검', d: '2026-07-09', st: '완료', fg: '#1c6b41' }
+      ] : [
+        { no: '202608-0005', t: '컨베이어 이물 제거 · 끼임', d: '2026-08-14', st: '평가완료', fg: '#1c6b41' },
+        { no: '202607-0003', t: '권취 롤러 청소 · 협착', d: '2026-07-16', st: '평가중', fg: '#b8460d' }
+      ]),
+      gActs: (({
+        roster: [],
+        plan: [['편성 확정', 1], ['임시저장', 0], ['되돌리기', 0]],
+        user: [['비밀번호 초기화', 0], ['퇴직 처리', 0]],
+        cal: [['예약 신청', 1]],
+        stayReq: [['제출', 1], ['임시저장', 0], ['초기화', 0]],
+        stayAppr: [['승인', 1], ['반려', 0], ['보완요청', 0]],
+        myStay: [['수정', 1], ['취소', 0]],
+        myreq: [['수정', 1], ['취소', 0]],
+        reqProc: [['처리 등록', 1]],
+        reqWork: [['저장', 1], ['완료 처리', 0], ['반려', 0], ['보류', 0]],
+        near: [['평가 완료', 1], ['보완요청', 0], ['반려', 0]],
+        myNear: [['재제출', 1], ['수정', 0], ['취소', 0]],
+        nearReg: [['제출', 1], ['임시저장', 0], ['초기화', 0]],
+        reqReg: [['제출', 1], ['임시저장', 0], ['초기화', 0]]
+      })[s] || []).map(a => a[1]
+        ? { t: a[0], bg: '#b8460d', fg: '#fff', bd: '#b8460d', fw: 600, hbg: '#963a0a', hfg: '#fff' }
+        : { t: a[0], bg: '#fff', fg: '#333', bd: '#c9c5be', fw: 400, hbg: '#f7f5f1', hfg: '#333' })
+    };
+  }
+}
+</script>
+</body>
+</html>

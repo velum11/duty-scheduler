@@ -64,8 +64,10 @@ _WRH_CSS = """
 /* 히트영역 §1.4 compact(34~38) — 조건 select·검색창·액션 바 select/text 가 실측 33px 로
    1px 미달이었다. 개선조치 관리(:186)가 자기 위젯 key 에 거는 규칙과 같은 형태다. */
 [class*="st-key-work_request_handle_"] div[data-baseweb="select"] > div,
+[class*="st-key-work_request_handle_"] [data-testid="stSelectbox"] div[role="group"],
 [class*="st-key-work_request_handle_"] input,
 [class*="st-key-wrh_"] div[data-baseweb="select"] > div,
+[class*="st-key-wrh_"] [data-testid="stSelectbox"] div[role="group"],
 [class*="st-key-wrh_"] input { min-height:34px !important; }
 </style>
 """

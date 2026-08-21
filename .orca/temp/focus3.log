@@ -1,0 +1,45 @@
+[PASS] login -- 1001
+[PASS] f_submit -- seed report
+[PASS] s5_grid -- ag frame=True
+[OBS] s5_print_icon -- print=off
+[PASS] s5_pdf -- hd=b'%PDF-'
+[PASS] s6_kpi -- cum/month KPI present
+[PASS] s3_review -- IN_REVIEW
+[PASS] s3_gradeB -- B
+[PASS] s3_confirm -- done
+[OBS] s4_queue -- body has assignee sel=True
+[FAIL] s4_assign -- opt 1002 cur=조치 담당자
+[PASS] s4_save -- 저장
+[PASS] s4_submit -- 제출
+[FAIL] s4_confirm -- ElementHandle.click: Timeout 15000ms exceeded.
+Call log:
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is not enabled
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is not enabled
+    - retrying click action
+      - waiting 100ms
+    27 × waiting for element to be visible, enabled and stable
+       - element is not enabled
+     - retrying click action
+       - waiting 500ms
+
+[FAIL] s4_close -- ElementHandle.click: Timeout 15000ms exceeded.
+Call log:
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is not enabled
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is not enabled
+    - retrying click action
+      - waiting 100ms
+    27 × waiting for element to be visible, enabled and stable
+       - element is not enabled
+     - retrying click action
+       - waiting 500ms
+

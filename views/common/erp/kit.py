@@ -157,7 +157,11 @@ _KIT_CSS = f"""
 [class*="st-key-erpcond_"] [data-testid="stVerticalBlock"] {{ gap: 8px !important; }}
 [class*="st-key-erpcond_"] [data-testid="stHorizontalBlock"] {{ gap: .6rem !important; }}
 /* §1-E 입력 14.5 (dc): 필터 입력 폰트 통일 */
-[class*="st-key-erpcond_"] input, [class*="st-key-erpcond_"] [data-baseweb="select"] div {{
+/* input 은 selectbox(react-aria) 의 값 칸까지 덮는다. baseweb select 는 1.59 기준 multiselect
+   전용으로 남았고, selectbox 의 값 상자는 role="group" 이다(실측 2026-08-21). */
+[class*="st-key-erpcond_"] input,
+[class*="st-key-erpcond_"] [data-baseweb="select"] div,
+[class*="st-key-erpcond_"] [data-testid="stSelectbox"] div[role="group"] {{
   font-size: 14px;
 }}
 /* help(툴팁) 래퍼가 씌워진 버튼도 앱 기본 버튼 크기를 따르게 — modules/ui.py 의 직계자식
