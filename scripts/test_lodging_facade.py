@@ -346,24 +346,31 @@ def main() -> None:
     print("(i) 메뉴·라우팅 게이트 · 능력 토큰 하나로 노출과 접근이 함께 결정된다")
     from modules import nav
 
-    caps = {nav.CAP_APPROVE_LODGING}
+    ready = {nav.CAP_ACCESS_LODGING}                       # 저장소 준비됨(migration 적용)
+    caps = {nav.CAP_ACCESS_LODGING, nav.CAP_APPROVE_LODGING}  # 준비됨 + 담당자
+    base = ("lodging_request", "lodging_my", "lodging_calendar")
     for role in ("USER", "MANAGER", "ADMIN"):
-        check(f"{role}: 신청·내 예약·캘린더는 전 역할 접근",
-              all(nav.allowed(page, role) for page in
-                  ("lodging_request", "lodging_my", "lodging_calendar")))
-        check(f"{role}: 승인 관리는 담당 능력 없이는 접근 불가",
-              not nav.allowed("lodging_manage", role))
-        check(f"{role}: 담당 능력이 있으면 승인 관리 접근",
+        # 저장소 미준비(migration 미적용) 배포 — 메뉴도 라우팅도 열리지 않는다.
+        check(f"{role}: 저장소 미준비면 숙소 4화면 전부 접근 불가",
+              not any(nav.allowed(page, role) for page in base + ("lodging_manage",)))
+        check(f"{role}: 저장소 준비되면 신청·내 예약·캘린더는 전 역할 접근",
+              all(nav.allowed(page, role, ready) for page in base))
+        check(f"{role}: 준비돼도 승인 관리는 담당 능력 없이는 접근 불가",
+              not nav.allowed("lodging_manage", role, ready))
+        check(f"{role}: 준비 + 담당 능력이면 승인 관리 접근",
               nav.allowed("lodging_manage", role, caps))
-    user_menu_ids = [item["id"] for item in nav.user_menu()]
-    check("USER 메뉴에 숙소 3개가 노출된다",
-          all(pid in user_menu_ids for pid in
-              ("lodging_request", "lodging_my", "lodging_calendar")))
+    check("저장소 미준비면 USER 메뉴에 숙소 항목이 없다",
+          not any(i["id"].startswith("lodging") for i in nav.user_menu()))
+    user_menu_ids = [item["id"] for item in nav.user_menu(ready)]
+    check("준비되면 USER 메뉴에 숙소 3개가 노출된다",
+          all(pid in user_menu_ids for pid in base))
     check("USER 메뉴의 승인 관리는 담당 능력에만 노출",
           "lodging_manage" not in user_menu_ids
           and "lodging_manage" in [i["id"] for i in nav.user_menu(caps)])
-    group_ids = [g["id"] for g in nav.visible_groups("USER")]
-    check("숙소 그룹이 메뉴에 등록됐다", "lodging" in group_ids, str(group_ids))
+    check("저장소 미준비면 숙소 그룹이 통째로 감춰진다",
+          "lodging" not in [g["id"] for g in nav.visible_groups("USER")])
+    group_ids = [g["id"] for g in nav.visible_groups("USER", ready)]
+    check("준비되면 숙소 그룹이 메뉴에 등록된다", "lodging" in group_ids, str(group_ids))
 
     app_src = (ROOT / "app.py").read_text(encoding="utf-8")
     ui_src = (ROOT / "modules" / "ui.py").read_text(encoding="utf-8")
@@ -375,6 +382,11 @@ def main() -> None:
           and "auth.can_approve_lodging(user)" in ui_src
           and "nav.CAP_APPROVE_LODGING" in app_src
           and "nav.CAP_APPROVE_LODGING" in ui_src)
+    check("숙소 메뉴가 저장소 준비 상태에 연동된다(app·ui 양쪽)",
+          "db.lodging_schema_ready()" in app_src
+          and "db.lodging_schema_ready()" in ui_src
+          and "nav.CAP_ACCESS_LODGING" in app_src
+          and "nav.CAP_ACCESS_LODGING" in ui_src)
 
     print()
     if FAIL:

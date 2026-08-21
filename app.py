@@ -56,10 +56,13 @@ def _caps_for(user: dict) -> set:
         caps.add(nav.CAP_EVALUATE_NEAR_MISS)
     if db.has_near_miss_improvement_access(user):
         caps.add(nav.CAP_ACCESS_NEAR_MISS_IMPROVEMENT)
-    # 숙소 예약 승인은 담당 권한(LODGING_OFFICER)만 — role 로는 판정되지 않는다.
-    # 클레임이 없으면 노출되지 않는다(fail-closed). ui._menu_caps 와 같은 계약이다.
-    if auth.can_approve_lodging(user):
-        caps.add(nav.CAP_APPROVE_LODGING)
+    # 숙소 예약: 저장소가 준비된 배포에서만 메뉴·라우팅을 연다(migration 미적용 배포에서
+    # "메뉴는 뜨는데 들어가면 준비 안 됨"을 만들지 않는다). 승인은 그 위에 담당 권한을
+    # **함께** 요구한다 — nav 의 admit 은 OR 이므로 AND 는 여기서 계산해 caps 로 넘긴다.
+    if db.lodging_schema_ready():
+        caps.add(nav.CAP_ACCESS_LODGING)
+        if auth.can_approve_lodging(user):
+            caps.add(nav.CAP_APPROVE_LODGING)
     return caps
 
 

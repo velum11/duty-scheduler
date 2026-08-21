@@ -33,6 +33,9 @@ CAP_ACCESS_NEAR_MISS_IMPROVEMENT = "access_near_miss_improvement"
 #: 숙소 예약 승인 능력(호출부가 auth.can_approve_lodging(user) 결과를 이 토큰으로 담아 넘긴다).
 #: 승인권자는 **숙소관리 담당자만**이라 role 로는 판정되지 않는다 — 그래서 '승인 관리'는
 #: roles 하드코딩 없이 이 토큰으로만 노출된다(평가 관리와 같은 능력 게이트 방식).
+#: 숙소 예약 화면 접근(=저장소 준비됨). 호출부가 db.lodging_schema_ready() 결과를 담아 넘긴다.
+#: 스키마 미적용 배포에서 "메뉴는 뜨는데 들어가면 준비 안 됨"을 만들지 않기 위한 게이트다.
+CAP_ACCESS_LODGING = "access_lodging"
 CAP_APPROVE_LODGING = "approve_lodging"
 
 _MY_SCHEDULE = {
@@ -56,11 +59,14 @@ USER_MENU = [
      "capability": CAP_ACCESS_NEAR_MISS_IMPROVEMENT},
     {"id": "near_miss_view", "label": "아차사고 조회", "icon": ":material/search:"},
     {"id": "near_miss_stats", "label": "아차사고 분석", "icon": ":material/analytics:"},
-    {"id": "lodging_request", "label": "숙소 예약 신청", "icon": ":material/hotel:"},
-    {"id": "lodging_my", "label": "내 숙소 예약", "icon": ":material/event_available:"},
+    {"id": "lodging_request", "label": "숙소 예약 신청", "icon": ":material/hotel:",
+     "capability": CAP_ACCESS_LODGING},
+    {"id": "lodging_my", "label": "내 숙소 예약", "icon": ":material/event_available:",
+     "capability": CAP_ACCESS_LODGING},
     {"id": "lodging_manage", "label": "숙소 승인 관리", "icon": ":material/how_to_reg:",
      "capability": CAP_APPROVE_LODGING},
-    {"id": "lodging_calendar", "label": "예약 캘린더", "icon": ":material/calendar_month:"},
+    {"id": "lodging_calendar", "label": "예약 캘린더", "icon": ":material/calendar_month:",
+     "capability": CAP_ACCESS_LODGING},
 ]
 
 # 아차사고 6개 항목은 근무표·기준정보처럼 **그룹**('아차사고 관리') 아래 자식으로 묶는다
@@ -120,17 +126,19 @@ _LODGING_GROUP = {
     "label": "숙소 예약",
     "icon": ":material/hotel:",
     # 그룹 roles 는 자식 union(전 역할) — 실제 노출은 자식 규칙이 정한다.
+    # 자식 전부가 능력 게이트다: 저장소가 준비되기 전(migration 미적용)에는
+    # 능력이 붙지 않아 그룹째 보이지 않는다 — "메뉴는 뜨는데 안 되는" 상태 방지.
     "roles": _ALL_ROLES,
     "children": [
         {
             "id": "lodging_request", "label": "예약 신청",
             "desc": "숙소와 기간을 선택해 예약을 신청합니다.",
-            "roles": _ALL_ROLES,
+            "roles": (), "capability": CAP_ACCESS_LODGING,
         },
         {
             "id": "lodging_my", "label": "내 숙소 예약",
             "desc": "본인이 신청한 예약을 확인하고 수정·취소합니다.",
-            "roles": _ALL_ROLES,
+            "roles": (), "capability": CAP_ACCESS_LODGING,
         },
         {
             # 승인 관리 — 능력 게이트(숙소관리 담당자만). role 하드코딩을 두지 않는다:
@@ -142,7 +150,7 @@ _LODGING_GROUP = {
         {
             "id": "lodging_calendar", "label": "예약 캘린더",
             "desc": "월별 예약 현황을 캘린더로 확인합니다.",
-            "roles": _ALL_ROLES,
+            "roles": (), "capability": CAP_ACCESS_LODGING,
         },
     ],
 }
